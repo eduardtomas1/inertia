@@ -1,5 +1,6 @@
 import { forkLineageSchema } from "../../shared/orchestration-forks";
 import { mergeBackSchema, type MergeBack, type MergeBackEvent } from "../../shared/orchestration-merge-back";
+import { orchestrationRunSchema } from "../../shared/orchestration-v2";
 import { OrchestrationConflict, type OrchestrationEvent, type ProjectionReader, type ProjectionWrite } from "./types";
 
 const transitions: Record<MergeBack["state"], readonly MergeBack["state"][]> = {
@@ -26,7 +27,12 @@ export function projectMergeBackEvent(event: MergeBackEvent, envelope: Orchestra
   const merge = mergeBackSchema.parse(row.value);
   const { state, runId, messageId } = event.payload;
   const attaching = state === "attached";
-  if (!transitions[merge.state].includes(state)
+  // Findings delivered by output go back only when the run's provider dropped the prompt that carried them
+  // (T3 `promptDropped`): the run's status change, recorded first, says so.
+  const runRow = merge.state === "delivered" && merge.runId !== null ? read("run", merge.runId) : undefined;
+  const run = runRow ? orchestrationRunSchema.parse(runRow.value) : undefined;
+  const dropped = run?.delivery !== undefined && run.promptDropped === true && state === "undelivered";
+  if ((!transitions[merge.state].includes(state) && !dropped)
     || (attaching ? runId === null || messageId === null : runId !== merge.runId || messageId !== merge.messageId)
     || (attaching && (read("run", runId!)?.threadId !== envelope.threadId
       || merge.turnIds.some((turnId) => read("rolled-back-turn", turnId))))) {

@@ -319,9 +319,10 @@ function startCodexRun(
           : compatibilityError === "fast-mode-unsupported"
             ? "This Codex App Server version or selected model did not apply the requested response speed. Choose Standard, refresh models, or update Codex CLI."
           : runtimeFailure?.reason === "codex-error"
-            // A turn error carrying auth, quota or model guidance is more
-            // useful than the fixed "could not complete the turn" sentence.
-            ? (providerMessage !== genericProviderMessage ? providerMessage : runtimeFailure.message)
+            // A managed code's summary replaces Codex's raw error. Otherwise a turn error carrying
+            // auth, quota or model guidance is more useful than the fixed "could not complete the turn" sentence.
+            ? (runtimeFailure.code === undefined && providerMessage !== genericProviderMessage
+              ? providerMessage : runtimeFailure.message)
             : runtimeFailure?.reason === "protocol-overflow"
               ? runtimeFailure.message
               : runtimeFailure?.reason === "malformed-protocol"

@@ -5194,3 +5194,248 @@ OpenCode or ACP servers.
   same.
 - Eviction still scans every message with attachments, as before. The pin
   adds an indexed check per user message whose run was not delivered.
+
+## D.4 provider polish, first four items — 2026-11-22
+
+Status: committed on top of `faace427` (PR #686), macOS arm64, Node 22, with
+the Cursor SDK store tests also run on Linux. T3 anchors are at `6f49071a3`.
+These are items 1 to 4 of D.4 in `t3code-delta-2026-11-22.md`, in its order:
+one working-tree safety gap and three paths that lost user work. Four
+implementers worked in two lines, each package was reviewed independently
+until no finding remained open, and the lines were merged.
+
+### 1. Claude Full access refuses flagged removals and asks for what Claude Code forwards (`554be2c61`)
+
+T3 (`ClaudeAdapterV2.ts:3672-3677`, `:12705-12790`):
+
+- **Removals.** In `bypassPermissions`, a Bash request whose
+  `decisionReason` (terminal escapes stripped, trimmed) matches
+  `/^Dangerous rm(?:dir)?\b/i`, `/\bdangerous removal\b/i` or one of two
+  exact `shell -c` texts is denied when no ask rule matched. The deny
+  message tells Claude the user did not reject it and not to work around
+  the check.
+- **Everything else.** `requiresClaudeApproval` is true under bypass:
+  "CLI-forwarded requests need a person's decision even under bypass (ask
+  rules, safety checks, or settings fallback)", so every other request
+  Claude Code forwards goes to the user.
+
+Inertia allowed every forwarded request in Full access outside plan mode.
+Now (`src/server/provider/claude-permission-broker.ts`):
+
+- `claudeRemovalSafetyDenial` copies T3's rule and runs first;
+  `claudeSdkPermissionMode` gives the broker and the harness one launch mode.
+- Every other forwarded request in Full access goes through the approval
+  flow Supervised uses. Plan mode, read-only watchers and Supervised are
+  unchanged.
+- Approval display text: terminal escapes are stripped from the title,
+  description and reason, and a tab is accepted in the command, so a
+  coloured or tabbed request is shown instead of refused. Escapes in the
+  command or blocked path, bidi overrides, invisible characters and other
+  controls are still refused (`approval-display.ts` keeps its purpose). The
+  old refusal affected Supervised too.
+- Copy: Full access "runs commands and edits without approval prompts,
+  though Claude Code still asks about a few actions its safety checks
+  protect" (`accessCaution.ts`, `helpTopics.ts`, `README.md`,
+  `docs/user/faq.md`, `docs/user/getting-started.md`), following T3's
+  `docs/user/permission-modes.md`.
+
+What reaches `canUseTool` in bypass, read from the bundled Claude Code
+2.1.319: the checks bypass cannot waive (`dangerousRemoval`, unless
+`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS` waives it,
+`isolatePeerMachines`, `restrictedMode`, `outsideReadsBlocked`,
+`connectorFileSend`, `unfinishedCheck`), ask rules (only from managed policy,
+since `settingSources` is empty), a few tools that need a person, the MCP
+permission ceiling and read-block overrides. Prompts in Full access should be
+rare. The reworded "dangerous removal" text is not in 2.1.319 and is matched
+ahead of time. Other harnesses have no gap relative to T3: none of them
+prompts in Full access there either.
+
+### 2. A Claude follow-up Claude accepted but never read is kept (`e8c4824b7`, D.4 part)
+
+T3: a `completed` result is held while Claude holds an unread steer
+(`heldResult`); a steer cancelled, discarded or refused before reading, or
+left by a process exit, stays pending; at run end `requeueUnreadSteers`
+re-dispatches it with the same message id, ahead of later messages; Stop
+cancels it.
+
+Inertia failed the whole turn ("Claude cancelled an accepted follow-up before
+returning an answer") and lost the follow-up. Now:
+
+- **Harness** (`claude-agent-sdk-harness.ts`). Follow-ups go out at priority
+  `next`; a lifecycle `started` marks one read; an unread one that is
+  cancelled, discarded, refused or left by an exit is reported in
+  `ProviderRunResult.unreadFollowUps` and the turn completes. A started
+  follow-up that is then lost still fails as before. Stop reports nothing.
+- **Queue row** (the design follows a Fable 5.2 advisor's recommendation
+  after two review rounds of an in-memory design). Inside the settle
+  transaction each unread follow-up becomes an ordinary `queued_messages`
+  row with `user_message_id` naming the persisted message
+  (`requeueUnreadFollowUps`, `queued-message-repository.ts`; no migration).
+  The ended run's coverage leaves the message out.
+- **Dispatch** uses the normal queue path; admission moves the message into
+  the new turn and accepts the row in one transaction, so it runs once, on
+  its own message id, with its images and attribution
+  (`turn-ledger-repository.ts`). It refuses a rolled-back or running owner
+  and the owner's own prompt.
+- **Placement** follows Phase 5 N2: rows order by `created_at, sequence`, so
+  the follow-up runs after rows queued before it and ahead of later ones.
+- **Direct sends.** An idle send queues behind a waiting or dispatching
+  follow-up row and the queue head runs first, which releases a failed-turn
+  hold. Delegated results waiting for a manual send are not forced out, and
+  a full queue sends directly as before.
+- **History, route, rollback.** Portable history leaves out a message an
+  active row names. The row keeps the ended run's route; after a model,
+  access or workspace change it is blocked: "The agent did not read this
+  follow-up, and this chat's model, access or workspace has changed since.
+  Switch back to send it, or remove it." Rollback cancels the row.
+- **Delegated follow-ups.** After adoption the steered delegation generation
+  goes back from delivered to claimed (reason `steer-unread`) and is marked
+  dispatched to the adopting turn, whose settlement delivers or requeues it.
+- **UI.** The row reads "Not read, sends next", is left out of the queue
+  count, and offers Send now only while the chat is idle; the timeline hides
+  the message while its row waits (T3 `9fb449232`). Such rows bypass the cap
+  of 3, at most 64 per chat; one that cannot be queued is counted delivered
+  and stays visible.
+
+### 3. Codex encrypted-history rejection starts the next turn fresh (`b99333dc7`)
+
+T3 (`CodexManagedErrors.ts`, `CodexAdapterV2.ts:1303`,
+`ProviderTurnStartService.ts:1534-1578`): `invalid_encrypted_content` is
+found in the final `error` notification's code, message or
+`additionalDetails` (JSON-unwrapped), or in a failed `turn/completed`
+message. The next turn, when it would resume that native thread, skips the
+resume and starts fresh with a full recovery handoff, refusing while
+background work is pending. The failed turn shows "Codex could not verify
+this session's encrypted conversation history. Send another message to
+continue in a fresh session with the visible conversation history."
+
+Inertia had no handling; only the two-strike rule started fresh. Now:
+
+- `src/server/codex/managed-errors.ts` ports the classification (strings over
+  16 KiB are not parsed).
+- The failed run records `failureCode` (new optional run field, failed runs
+  only). `rejectedNativeHistorySession` finds the chat's latest accepted run
+  on the instance; when it failed with the code and the turn would resume
+  that session, the context-exhaustion replacement starts fresh with the
+  full portable history and retires the backing (`rejected-native-history`).
+  Background work pending refuses with T3's message.
+- A classified error's stored technical detail is only `Codex error:
+  invalid_encrypted_content`, as T3 persists only class, message and code.
+  Response header maps are redacted from every other Codex error's stored
+  detail (`redactCodexErrorHeaders`).
+
+### 4. A Cursor SDK turn that ends before its first checkpoint did not deliver its prompt (`c5fa33b27`)
+
+T3 (`provider-cursor/src/server/adapter.ts:2596-2611`): a failed or cancelled
+run whose checkpoint never moved is `promptDropped`; it is not delivered
+anywhere, its inline handoffs return to pending, and a cancelled dropped run
+is a missed run. A run compacted during the turn is never dropped.
+
+Cursor SDK 1.0.38 streams output before its first checkpoint, and a run that
+never moves its checkpoint leaves its prompt out of what the next run loads.
+Now:
+
+- The worker answers after closing its store, from the store's in-memory
+  tables (`executeCursorSdkRun`, `cursor-sdk-session.ts`); a closed store
+  refuses later writes, so the answer matches what the next resume loads.
+  Either the run's or the agent's pointer moving counts as checkpointed. A
+  store whose journal write failed answers "cannot tell".
+- The harness reports `promptDropped` only for a failed or cancelled run with
+  confirmed cleanup, a `false` answer for the run that streamed, and no
+  summary during the run (SDK 1.0.38 surfaces compaction only as a `task`
+  message). A kill, a crash or any uncertainty reports nothing.
+- Settlement marks the run `not-delivered` with `promptDropped`, abandons an
+  inline handoff even after output marked it delivered, restores the backing,
+  credits nothing, and returns delivered merge-backs of the run to
+  `undelivered`, superseding a pending merge-back prepared on top of one.
+  The missed-run walk and eviction pin count a cancelled run only with
+  `promptDropped`.
+- The checkpoint base64 check no longer overflows V8's stack on large
+  checkpoints.
+
+### Differences from T3
+
+| Difference | Why |
+| --- | --- |
+| The Claude broker reads the launch permission mode; T3 reads the live mode | Inertia never changes the mode mid-session; a switch to plan errs toward refusing a flagged removal |
+| An unread Claude follow-up is not requeued after an app crash mid-turn | No durable per-steer read mark until Phase 5's steer outcomes |
+| No "Steer delivery not confirmed" notice on Stop | Unchanged from before; Stop still credits the follow-up to the stopped turn |
+| A direct send that cannot be queued (workspace context, documents, an update hold) runs before an unread follow-up | Queue rows cannot carry context or documents until Phase 5; the follow-up still runs afterwards as a request |
+| An unread follow-up row is blocked after a route change instead of running on the ended run's selection | An Inertia turn always runs on the chat's route |
+| Unread follow-up rows are exempt from the queue cap of 3 | T3 has no cap |
+| A goal start right after an encrypted-history rejection resumes the old thread | An Inertia fresh session carries no history for a withheld prompt; the next message recovers, as with context exhaustion |
+| Encrypted-history strings over 16 KiB are not parsed | Bounded input (AGENTS.md) |
+| A Cursor SDK run whose checkpoint lookup is unknown is not dropped; a moved agent pointer counts as checkpointed | Not delivered is a definite claim here; a wrong drop resends history into a session that holds it |
+| The Cursor SDK drop signal is ordered before settlement | T3 can restore handoffs after a Stop finalized the run; a force-detach before the harness returns loses the signal in Inertia |
+| A summary message always suppresses the Cursor SDK drop | SDK 1.0.38 does not expose T3's `failed` flag on the summary |
+
+### Reviews
+
+Each package was reviewed independently until no finding remained open.
+
+- **Claude Full access.** The first version denied flagged removals but kept
+  Inertia's Full-access allow for everything else, including ask-rule
+  matches. T3's `requiresClaudeApproval` asks for every forwarded request, so
+  the package adopted that. A review then found the approval path refused
+  coloured or tabbed requests outright ("unsafe permission display text"),
+  in Supervised too (medium, probe-confirmed); fixed. The removal rule was
+  confirmed identical to T3.
+- **Unread Claude follow-ups.** Five rounds. The first design kept the
+  follow-up in an in-memory list beside the queue, with a history safety net.
+  Reviews found silent loss on a refused dispatch and on restart (two high),
+  swallowed manual sends, a stalled queue, a rollback resend, an overtaken
+  deferred Send now, and the follow-up reaching Claude only as history. A
+  Fable 5.2 advisor traced all of them to running a second queue and
+  recommended the queue-row design that landed. Its reviews then found
+  delegated results forced out by a direct send, a follow-up running on a
+  later route, a direct send failing on a full queue, a race with a
+  dispatching row, and a direct send stuck behind a failed follow-up; all
+  fixed. A delegation "reopen" added in between went beyond T3 (which keeps
+  steered results delivered) and could leave the mailbox stuck (high); it was
+  removed.
+- **Codex encrypted history.** No high finding. The raw service response,
+  including a turn-state header, still reached the stored error detail
+  (predating the package); fixed by storing only the code and redacting
+  header maps from every Codex error. Three filter conditions gained tests.
+- **Cursor SDK dropped prompt.** Two rounds; no case found where a delivered
+  prompt is marked dropped. Fixed: the synchronous journal read blocked the
+  shared event loop for about half a second on large journals (moved into the
+  worker), a merge-back stayed delivered after a drop, a pending merge-back on
+  a reverted base could skip fork work, a poisoned store could answer "not
+  checkpointed" for a loaded checkpoint, compaction did not suppress the drop,
+  and the checkpoint base64 check overflowed the stack on large checkpoints.
+
+Open risks:
+
+- An unread Claude follow-up is lost to the queue by an app crash mid-turn
+  (it stays in its turn, outside coverage) until Phase 5.
+- The Claude bypass behaviour comes from reading the bundled Claude Code;
+  no live run triggered the safety checks.
+- The Codex error shapes come from T3's fixture and schema, not a live Codex.
+- The Cursor SDK checkpoint timing was never observed against Cursor's
+  backend.
+
+### Verification
+
+On the merged tree (macOS arm64, Node 22):
+
+- `npm test`: 20,706 passed, 181 skipped (1,615 files passed, 14 skipped).
+- `npm run test:portable`: 4,587 passed, 38 skipped.
+- `typecheck`, `lint` and `check:architecture`: passed.
+- Cursor SDK store, run-checkpoint, harness and session tests in a Linux
+  Node 22 container (Colima, stopped afterwards), on the Cursor SDK line
+  before the merge: 73 passed, including the real-journal tests that skip on
+  macOS.
+
+Every test added fails without its fix. Main files:
+`claude-permission-broker`, `claude-plan-mode-permissions`,
+`claude-follow-up-settlement`, `queued-message-runtime`, `delegation-queue`,
+`runtime-composer-queue.dom`, `conversation-projection-new-turn.dom`,
+`codex-app-server-terminal-outcomes`, `orchestration-rejected-native-history`,
+`cursor-sdk-harness`, `cursor-sdk-run-checkpoint`, `cursor-sdk-store`,
+`orchestration-dropped-prompt`, `orchestration-merge-back`,
+`orchestration-missed-run-images`.
+
+Not run: the full `npm run check`, the Electron scenarios (the
+`settings-evidence` spec's copy assertion was updated, not run), a packaged
+build, Windows, and real Claude Code, Codex or Cursor accounts.

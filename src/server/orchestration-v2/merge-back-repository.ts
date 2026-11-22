@@ -36,7 +36,7 @@ export interface MergeBackAccess {
   };
 }
 
-type Lifecycle = "attached" | "dispatched";
+type Lifecycle = "attached" | "dispatched" | "delivered";
 type WorkValues = { files: string; commands: string; checkpoints: ConversationContextCheckpoint;
   handoffs: ConversationContextHandoff };
 type WorkKind = keyof WorkValues;
@@ -196,11 +196,37 @@ export class MergeBackRepository {
     for (const merge of this.forRun(runId, ["attached", "dispatched"])) this.change(merge, "delivered");
   }
 
-  settleRun(turn: AgentTurn, undelivered = false): void {
+  /**
+   * `promptDropped`: the provider dropped the run's prompt (T3 `promptDropped`, passed with `undelivered`), so findings
+   * its output already marked delivered never reached it either: they go back to undelivered, and the fork's next
+   * merge-back starts from the last delivery before them again.
+   */
+  settleRun(turn: AgentTurn, undelivered = false, promptDropped = false): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
     if (turn.status === "completed") this.acknowledge(turn.runId);
-    for (const merge of this.forRun(turn.runId, ["attached", "dispatched"])) {
+    for (const merge of this.forRun(turn.runId, promptDropped && undelivered ? ["attached", "dispatched", "delivered"]
+      : ["attached", "dispatched"])) {
       this.change(merge, merge.state === "attached" || undelivered ? "undelivered" : "uncertain");
+      if (merge.state === "delivered") this.releaseStaleBase(merge);
+    }
+  }
+
+  /**
+   * A merge-back from the same fork that is still pending on top of `reverted` (its base is the point `reverted`
+   * delivered through) would skip the fork work `reverted` carried once it is delivered: the fork's next merge-back
+   * would start after it. As `prepare` does with a stale draft, a prepared one is superseded (its draft removed) or
+   * withdrawn; one already attached to a queued turn becomes undelivered, so its delivery never moves the base and
+   * the next merge-back carries that work again.
+   */
+  private releaseStaleBase(reverted: MergeBack): void {
+    const stale = this.rows(`thread_id = ? AND json_extract(payload_json, '$.forkThreadId') = ?
+      AND json_extract(payload_json, '$.baseTurnId') = ? AND json_extract(payload_json, '$.state') IN (SELECT value FROM json_each(?))`,
+    reverted.parentThreadId, reverted.forkThreadId, reverted.throughTurnId, JSON.stringify(PENDING_STATES));
+    for (const merge of stale) {
+      if (merge.state !== "prepared") { this.change(merge, "undelivered"); continue; }
+      const draft = this.draft(merge);
+      if (draft) this.access.contextPackets.deleteDraft(merge.packetId, merge.parentThreadId);
+      this.change(merge, draft ? "superseded" : "withdrawn");
     }
   }
 

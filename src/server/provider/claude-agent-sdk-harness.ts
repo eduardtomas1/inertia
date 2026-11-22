@@ -51,7 +51,7 @@ import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { CLAUDE_MESSAGE_DRAIN_TIMEOUT, nextClaudeMessage, claudeFastModeFailure } from "./claude-sdk-lifecycle-support";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
 import { claudeCommandLifecycleMessage } from "./claude-message-projector-support";
-import { ClaudePermissionBroker } from "./claude-permission-broker";
+import { ClaudePermissionBroker, claudeSdkPermissionMode } from "./claude-permission-broker";
 import {
   claudePrompt,
   claudePromptReservationBytes,
@@ -244,6 +244,14 @@ function startClaudeRun(
   let acceptingFollowUps = false;
   let acceptedFollowUp = false;
   const pendingFollowUpIds = new Set<string>();
+  // Follow-ups Claude reported starting: read, though no result answers them yet.
+  const startedFollowUpIds = new Set<string>();
+  // Accepted follow-ups Claude cancelled, discarded or refused before reading them.
+  const droppedFollowUpIds: string[] = [];
+  const followUpSteerIds = new Map<string, string>();
+  // T3 `heldResult`: a completed result keeps the turn open while Claude still
+  // holds an unread follow-up, and settles it if Claude drops that follow-up.
+  let heldResult: { message: SDKMessage; sawOutputText: boolean; turnEnded: boolean } | null = null;
   let sessionId = options.nativeContinuation?.nativeConversationId ?? options.input.sessionId;
   let authoritativeSessionId = sessionId;
   let checklistTasks = checklistSessions.tasks(sessionId, true);
@@ -416,15 +424,7 @@ function startClaudeRun(
           ...claudeIdentityOptions(identity, options.input.systemInstruction, options.input.sessionInstruction),
           managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
           settings: launchSettings,
-          permissionMode: options.input.readOnlyProfile === "watcher"
-            ? "default"
-            : options.input.interactionMode === "plan"
-              ? "plan"
-              : options.input.access === "full"
-                ? "bypassPermissions"
-                : options.input.access === "auto-edit"
-                  ? "acceptEdits"
-                  : "default",
+          permissionMode: claudeSdkPermissionMode(options.input),
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool: permissions.canUseTool,
           ...(launchRedaction ? { hooks: claudeCredentialCommandHooks() } : {}),
@@ -576,6 +576,11 @@ function startClaudeRun(
           fastModeVerified = requestedFastModeState === null;
         }
         const commandLifecycle = !childOwned ? claudeCommandLifecycleMessage(message) : null;
+        if (commandLifecycle?.state === "started" && pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
+          startedFollowUpIds.add(commandLifecycle.command_uuid);
+          // Claude now answers this follow-up, and that answer's result ends the turn.
+          heldResult = null;
+        }
         if (commandLifecycle && (commandLifecycle.state === "refused"
           || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
           if (pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
@@ -586,7 +591,18 @@ function startClaudeRun(
                 ? { ...projectedFailure, message: error }
                 : claudeFailure(error, `lifecycle/follow-up-${commandLifecycle.state}`));
             }
-            throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
+            if (startedFollowUpIds.has(commandLifecycle.command_uuid)) {
+              throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
+            }
+            // Claude removed the follow-up before reading it. It is not this
+            // turn's input: the runtime sends it as the next turn (T3 `e8c4824b7`).
+            pendingFollowUpIds.delete(commandLifecycle.command_uuid);
+            droppedFollowUpIds.push(commandLifecycle.command_uuid);
+            if (pendingFollowUpIds.size === 0 && heldResult?.turnEnded) {
+              if (!hasLiveTaskTrace) break;
+              terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
+            }
+            continue;
           }
           if (commandLifecycle.command_uuid === prompt.uuid) break;
         }
@@ -624,6 +640,7 @@ function startClaudeRun(
           terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
         }
         if (message.type === "result") {
+          if (!isClaudeQueuedCompletionAck(message)) heldResult = null;
           if (message.subtype === "success" && !message.is_error && pendingFollowUpIds.size > 0
             && !(isClaudeQueuedCompletionAck(message) && isClaudeNotificationResult(message))) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
@@ -637,6 +654,7 @@ function startClaudeRun(
               pendingFollowUpIds.delete(userMessageId);
             }
             if (pendingFollowUpIds.size > 0) {
+              heldResult = { message, sawOutputText: messageProjector.sawOutputText, turnEnded: lifecycle.turnEnded };
               // Each streaming-input result ends one SDK user turn. Parent
               // snapshots from the next turn must not be suppressed by text
               // that was emitted before the admitted follow-up was handled.
@@ -750,16 +768,22 @@ function startClaudeRun(
               ),
         );
       }
-      if (pendingFollowUpIds.size > 0) {
+      // A follow-up Claude started but never answered is lost to this turn. One
+      // it never started stays unread, and the runtime sends it as the next
+      // turn (T3: a steer whose process exited stays pending).
+      if ([...pendingFollowUpIds].some((id) => startedFollowUpIds.has(id))) {
         throw new Error(
           "Claude Agent SDK exited before correlating every accepted follow-up.",
         );
       }
-      if (isClaudeUnansweredPromptResult(finalMessage, messageProjector.sawOutputText, options.input.operation?.kind === "compact", promptText)) {
+      // A held result already streamed its answer before the follow-up reset.
+      const sawOutputText = messageProjector.sawOutputText
+        || (heldResult?.message === finalMessage && heldResult.sawOutputText);
+      if (isClaudeUnansweredPromptResult(finalMessage, sawOutputText, options.input.operation?.kind === "compact", promptText)) {
         const error = routeFailure(claudeLifecycleFailure("prompt-unanswered"));
         return finishResult("failed", error, claudeFailure(error, "result/unanswered"));
       }
-      if (!messageProjector.sawOutputText && typeof finalMessage.result === "string") {
+      if (!sawOutputText && typeof finalMessage.result === "string") {
         messageProjector.emitTerminalText(finalMessage.result, finalMessage.uuid);
       }
       return finishResult(
@@ -904,6 +928,11 @@ function startClaudeRun(
     const settledFailure = failure && status === "failed" && messageProjector.rateLimitRejected
       ? { ...failure, usageLimited: true as const }
       : failure;
+    // Stop drops unread follow-ups; every other ending hands them back.
+    const unreadFollowUps = status === "cancelled" ? [] : [
+      ...droppedFollowUpIds,
+      ...[...pendingFollowUpIds].filter((id) => !startedFollowUpIds.has(id)),
+    ].flatMap((id) => followUpSteerIds.get(id) ?? []);
     return {
       ...providerRunTerminal(options.input, status, settledFailure),
       ...(sessionId ? { sessionId } : {}),
@@ -916,6 +945,7 @@ function startClaudeRun(
       cleanupConfirmed: true,
       ...(error ? { error } : {}),
       ...(settledFailure ? { failure: settledFailure } : {}),
+      ...(unreadFollowUps.length > 0 ? { unreadFollowUps } : {}),
     };
   }
 
@@ -982,12 +1012,16 @@ function startClaudeRun(
           return false;
         }
         followUp.uuid = randomUUID();
+        // "now" makes Claude Code cancel the tool calls in flight (T3 `e8c4824b7`).
+        followUp.priority = "next";
         pendingFollowUpIds.add(followUp.uuid);
+        if (input.steerId) followUpSteerIds.set(followUp.uuid, input.steerId);
         const accepted = promptChannel.push(followUp, reservation);
         if (accepted) {
           acceptedFollowUp = true;
         } else {
           pendingFollowUpIds.delete(followUp.uuid);
+          followUpSteerIds.delete(followUp.uuid);
         }
         return accepted;
       },

@@ -1,10 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ChatAttachment, Conversation } from "../../shared/contracts";
-import { MAX_QUEUED_MESSAGES, type QueuedMessage } from "../../shared/queued-messages";
+import { MAX_QUEUED_MESSAGES, MAX_UNREAD_FOLLOW_UP_ROWS, type QueuedMessage } from "../../shared/queued-messages";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { delegatedCompletionFromJson, parseStoredAttachments, rendererSafeAttachments, watcherNoteFromJson } from "./codecs";
+import { MESSAGE_PROJECTION_COLUMNS } from "./stream-text-storage";
 
 interface QueueRow {
   id: string; conversation_id: string; content: string; attachments_json: string;
@@ -14,6 +15,8 @@ interface QueueRow {
   delegated_completion_json?: string | null;
 }
 const ACTIVE_STATES = "('waiting','dispatching','blocked')";
+/** An active row that names a persisted message: a follow-up its provider accepted but never read. */
+const NAMES_UNREAD_FOLLOW_UP = "user_message_id IS NOT NULL";
 function project(row: QueueRow): QueuedMessage {
   const watcherNote = watcherNoteFromJson(row.watcher_note_json);
   const delegatedCompletion = delegatedCompletionFromJson(row.delegated_completion_json);
@@ -68,13 +71,60 @@ export class QueuedMessageRepository {
     return project(row);
   }
   list(conversationId: string): QueuedMessage[] {
+    // Submission time, so an unread follow-up keeps its place (Phase 5 N2): behind rows queued before it was
+    // sent, ahead of rows queued after.
     return (this.database.prepare(`SELECT * FROM queued_messages WHERE conversation_id = ? AND state IN ${ACTIVE_STATES}
-      ORDER BY (delegated_completion_json IS NULL), (watcher_note_json IS NOT NULL), sequence`)
+      ORDER BY (delegated_completion_json IS NULL), (watcher_note_json IS NOT NULL), created_at, sequence`)
       .all(conversationId) as QueueRow[]).map(project);
   }
   cappedCount(conversationId: string): number {
     return (this.database.prepare(`SELECT COUNT(*) AS count FROM queued_messages WHERE conversation_id = ?
-      AND state IN ${ACTIVE_STATES} AND delegated_completion_json IS NULL`).get(conversationId) as { count: number }).count;
+      AND state IN ${ACTIVE_STATES} AND delegated_completion_json IS NULL AND NOT (${NAMES_UNREAD_FOLLOW_UP})`)
+      .get(conversationId) as { count: number }).count;
+  }
+  /**
+   * Queues, by reference, each follow-up its provider accepted but never read, in the settlement transaction of
+   * the turn that dropped it (T3 `requeueUnreadSteers`, Phase 5 N2). The row names the message, which the
+   * dispatched turn adopts; its time is the follow-up's submission, or its original row's for a queued message
+   * sent during the turn. Outside the cap; never with a delegated attribution, which dispatch reads from the
+   * message instead. The row keeps the route its turn ran on: the chat's route at settlement, since the chat's
+   * configuration cannot change while a run is active. Returns the ids it queued; beyond the bound of 64 the
+   * rest are logged and stay in their turn, credited as delivered, so none is ever hidden.
+   *
+   * Deviation until Phase 5: only a settled turn queues its unread follow-ups. A restart mid-turn ends that turn
+   * through recovery, with no provider report of which follow-ups were read, so none is queued (T3 requeues them
+   * in recovery from its per-steer pending state).
+   */
+  requeueUnreadFollowUps(conversation: Conversation, turnId: string, messageIds: readonly string[]): string[] {
+    const message = this.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
+      JOIN agent_turns AS turn ON turn.id = messages.turn_id
+      WHERE messages.id = ? AND messages.conversation_id = ? AND messages.turn_id = ? AND messages.role = 'user'
+        AND turn.user_message_id <> messages.id`);
+    const named = this.database.prepare(`SELECT 1 FROM queued_messages WHERE conversation_id = ?
+      AND state IN ${ACTIVE_STATES} AND user_message_id = ?`);
+    const count = this.database.prepare(`SELECT COUNT(*) AS count FROM queued_messages WHERE conversation_id = ?
+      AND state IN ${ACTIVE_STATES} AND ${NAMES_UNREAD_FOLLOW_UP}`);
+    const original = this.database.prepare(`SELECT created_at FROM queued_messages WHERE conversation_id = ?
+      AND state = 'accepted' AND user_message_id = ? ORDER BY sequence LIMIT 1`);
+    const insert = this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json,
+      intent_digest, route_identity, state, created_at, user_message_id) VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`);
+    const queued: string[] = [];
+    for (const messageId of new Set(messageIds)) {
+      const row = message.get(messageId, conversation.id, turnId) as { content: string; attachments_json: string; created_at: string } | undefined;
+      if (!row || named.get(conversation.id, messageId)) continue;
+      if ((count.get(conversation.id) as { count: number }).count >= MAX_UNREAD_FOLLOW_UP_ROWS) {
+        console.warn("Too many unread follow-ups wait in this chat; the rest stay in their turn.");
+        break;
+      }
+      const attachments = rendererSafeAttachments(parseStoredAttachments(row.attachments_json));
+      // The row shows the text; the adopted message carries all of it.
+      const content = row.content.slice(0, 20_000);
+      const createdAt = (original.get(conversation.id, messageId) as { created_at: string } | undefined)?.created_at ?? row.created_at;
+      insert.run(randomUUID(), conversation.id, content, JSON.stringify(attachments), queuedIntentDigest(content, attachments),
+        queuedRouteIdentity(conversation), createdAt, messageId);
+      queued.push(messageId);
+    }
+    return queued;
   }
   activeDelegatedDelivery(conversationId: string): QueuedMessage | null {
     const row = this.database.prepare(`SELECT * FROM queued_messages WHERE conversation_id = ? AND state IN ${ACTIVE_STATES}
@@ -129,6 +179,8 @@ export class QueuedMessageRepository {
     })();
   }
   routeMatches(message: QueuedMessage, conversation: Conversation): boolean {
+    // Delegated results run on the chat's current route. An unread follow-up keeps the route its turn ran on
+    // (T3 `08804b217`), like any queued message.
     const row = this.database.prepare(`SELECT route_identity, delegated_completion_json IS NOT NULL AS delegated
       FROM queued_messages WHERE id = ? AND conversation_id = ?`)
       .get(message.id, conversation.id) as { route_identity: string; delegated: 0 | 1 } | undefined;

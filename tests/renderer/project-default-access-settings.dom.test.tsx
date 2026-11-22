@@ -8,7 +8,7 @@ import { defaultProjectPreferences } from "../../src/shared/project-preferences"
 import type { IssueReportSettingsProps } from "../../src/renderer/src/components/IssueReportSettings";
 import { provider } from "./composer-fixtures";
 
-const FULL_ACCESS_WARNING = "Full access lets the agent act without asking. Choose it only for a workspace and task you trust.";
+const FULL_ACCESS_WARNING = "Full access runs commands and edits without approval prompts, though Claude Code still asks about a few actions its safety checks protect. Choose it only for a workspace and task you trust.";
 const project: Project = { id: "11111111-1111-4111-8111-111111111111", name: "Studio", path: "/workspace/studio", normalizedPath: "/workspace/studio",
   repositoryIdentity: "git:/workspace/studio/.git", repositoryRoot: "/workspace/studio", repositoryRelativePath: "",
   groupingMode: null, gitRepositoryLimit: 128, color: "#5661d8", status: "ready", createdAt: "2026-09-09T08:00:00.000Z",

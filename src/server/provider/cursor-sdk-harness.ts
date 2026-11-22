@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CURSOR_SDK_SECRET_REFERENCE } from "../../node/runtime-credential-protocol";
-import { CURSOR_SDK_RUN_TIMEOUT_MS, cursorSdkAuthoritySchema } from "../../node/cursor-sdk-protocol";
+import { CURSOR_SDK_RUN_TIMEOUT_MS, cursorSdkAuthoritySchema, cursorSdkStartResultSchema } from "../../node/cursor-sdk-protocol";
 import { providerInstanceId } from "../orchestration-v2/provider-instance";
 import { createAgentHarnessEmitter, type AgentHarness, type AgentHarnessCapabilities, type AgentHarnessStartOptions, type AgentHarnessRun } from "./agent-harness";
 import { providerRunTerminal, ProviderSteerDeliveryUnknownError, type ProviderRunResult } from "./contracts";
@@ -30,7 +30,6 @@ const eventSchema = z.object({ authority: cursorSdkAuthoritySchema, message: z.o
   agent_id: z.string().min(1).max(512), run_id: z.string().min(1).max(512),
 }).passthrough() }).strict();
 const hostSchema = z.object({ authority: cursorSdkAuthoritySchema, callId: z.string().uuid(), tool: z.string().min(1).max(128), arguments: z.unknown() }).strict();
-const resultSchema = z.object({ agentId: z.string().min(1).max(512), id: z.string().min(1).max(512), status: z.enum(["finished", "cancelled", "error"]) }).passthrough();
 
 /** `existing`: the store of the checkout a moved chat's agent was created in; it is opened, never created. */
 export type CursorSdkRunStateRootResolver = (configuration: CursorSdkConfiguration, workspace: string, providerInstanceId: string,
@@ -67,6 +66,14 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
   let host: ProviderHostToolRuntime | undefined;
   let cancelled = false; let timedOut = false; let finished = false; let live = false;
   let sessionId = input.sessionId; let nativeRun: string | undefined;
+  /** The worker's answer to whether Cursor saved a checkpoint for its run (`cursorSdkStartResultSchema`). */
+  let checkpoint: { agentId: string; runId: string; checkpointed: boolean } | undefined;
+  /**
+   * Cursor summarized the conversation during the run (T3 `context.compacted`, set on `summary-completed`). SDK 1.0.38
+   * keeps `summary-started` and `summary-completed` out of `run.stream()` and surfaces only the summary itself, as a
+   * `task` message (its only source of `task` messages), so that message is the signal here.
+   */
+  let compacted = false;
   let text = "";
   let uncertainChild: import("node:child_process").ChildProcess | undefined;
   const redact = new AcpSecretRedactor(options.environment);
@@ -161,6 +168,8 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
             const thought = z.string().max(1024 * 1024).parse(message.text);
             const safe = redact.reasoningChunk(thought);
             if (safe) emit.activity("reasoning", "info", "Thinking", { outputDelta: safe });
+          } else if (message.type === "task") {
+            compacted = true;
           } else if (message.type === "tool_call") {
             const tool = z.object({ name: z.string().max(128), status: z.enum(["running", "completed", "error"]), call_id: z.string().max(512) }).parse(message);
             emit.activity("tool", tool.status === "running" ? "started" : tool.status === "completed" ? "completed" : "failed", redact.payload(tool.name));
@@ -168,16 +177,22 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
           return null;
         } });
       live = true; emit.status("running");
-      const completed = resultSchema.parse(await worker.channel.request("start", { authority, apiKey, stateRoot,
+      const outcome = cursorSdkStartResultSchema.parse(await worker.channel.request("start", { authority, apiKey, stateRoot,
         prompt: input.prompt, sessionId: input.sessionId, ...(storeWorkspace !== undefined ? { storeWorkspace } : {}),
         ...(agentStateRoot ? { agentStateRoot } : {}), ...(agentStateRoot && adoptFrom ? { adoptFrom } : {}),
         model: input.modelSelection.modelId,
         nativeTools: !options.providerNativeToolsAvailable ? "none" : input.access === "full" && input.interactionMode !== "plan" ? "full" : "read",
         tools: host?.definitions().map(({ name, description, inputSchema, readOnly }) => ({ name, description, inputSchema, readOnly })) ?? [],
       }, CURSOR_SDK_RUN_TIMEOUT_MS));
+      if (outcome.unverified === true) {
+        checkpoint = { agentId: outcome.agentId, runId: outcome.id, checkpointed: outcome.runCheckpointed };
+        throw new Error("Cursor SDK execution could not be verified.");
+      }
+      const completed = outcome;
       if (sessionId && completed.agentId !== sessionId) throw new Error("Cursor SDK terminal session mismatch.");
       sessionId = completed.agentId; emit.session(sessionId);
       if (nativeRun && completed.id !== nativeRun) throw new Error("Cursor SDK terminal mismatch.");
+      if (completed.runCheckpointed !== undefined) checkpoint = { agentId: completed.agentId, runId: completed.id, checkpointed: completed.runCheckpointed };
       if (sessionId) emit.nativeBoundary({ nativeConversationId: sessionId, nativeSessionId: sessionId,
         nativeTurnId: completed.id, persistedHeadId: completed.id, phase: "settled" });
       append(redact.finishAssistant());
@@ -191,7 +206,16 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
       try { await worker?.close(); } catch { cleanupConfirmed = false; }
       finished = true;
     }
-    emit.status(status, status === "failed" ? failure : undefined);
+    // T3 c5fa33b27: Cursor keeps a run in its conversation only once the run saved a checkpoint, so a failed or
+    // cancelled run without one dropped its prompt, even after it streamed output. The worker answers after closing
+    // its store (`executeCursorSdkRun`). Anything uncertain reports nothing, and settlement keeps its usual evidence:
+    // no answer (a killed or crashed worker, a lost channel, a store that could not tell), an answer about another
+    // agent or run than the one that streamed, or a worker whose process-tree cleanup is unconfirmed. As in T3, a run
+    // during which Cursor summarized the conversation is never reported dropped.
+    const promptDropped = (status === "failed" || status === "cancelled") && cleanupConfirmed && !compacted
+      && checkpoint?.checkpointed === false && (sessionId === undefined || checkpoint.agentId === sessionId)
+      && (nativeRun === undefined || checkpoint.runId === nativeRun);
+    emit.status(status, status === "failed" ? failure : undefined, undefined, promptDropped);
     const unavailable = status === "failed" && sessionUnavailable
       ? { reason: "provider-error" as const, message: failure, sessionUnavailable: true as const } : undefined;
     return { ...providerRunTerminal(input, status, unavailable), sessionId, text, textTruncated: false, exitCode: null, signal: null,

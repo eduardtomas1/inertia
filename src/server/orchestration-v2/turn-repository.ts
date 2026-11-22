@@ -16,6 +16,7 @@ import {
   type OrchestrationAttemptReplacementReason,
   type OrchestrationCleanupRelease,
   type OrchestrationDomainEvent,
+  type OrchestrationRunFailureCode,
 } from "../../shared/orchestration-v2";
 import type { PreparedContextHandoff } from "../../shared/orchestration-backings";
 import type { BeginAgentTurnInput, NewConversationOptions } from "../persistence/types";
@@ -332,10 +333,34 @@ export class OrchestratedTurnRepository {
     return portableHistoryItem(this.database, input);
   }
 
-  lifecycle<T>(turnId: string, updateCompatibilityProjection: () => T, delivery?: "not-delivered"): T {
+  /**
+   * The native session whose encrypted history Codex rejected (T3 `rejected_native_history`, b99333dc7): the
+   * session of the chat's latest run on `providerInstanceId` that its provider accepted, when that run failed
+   * with `invalid_encrypted_content`. A run its provider never received (`delivery` set) is passed over, as T3
+   * passes over runs without a delivered provider turn; a dropped prompt (`promptDropped`) always sets `delivery`.
+   * Null otherwise, and for a run without a native session.
+   */
+  rejectedNativeHistorySession(threadId: string, instanceId: string): string | null {
+    const row = this.database.prepare(`SELECT run.payload_json AS run_json FROM agent_turns AS turn
+      JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.id = turn.run_id
+      WHERE turn.conversation_id = ? AND json_extract(run.payload_json, '$.providerInstanceId') = ?
+        AND json_extract(run.payload_json, '$.delivery') IS NULL
+      ORDER BY turn.requested_at DESC, turn.rowid DESC LIMIT 1`).get(threadId, instanceId) as
+      { run_json: string } | undefined;
+    if (!row) return null;
+    // A rolled-back run still counts: a native revert keeps the session and the older turns whose content was rejected.
+    const run = orchestrationRunSchema.parse(JSON.parse(row.run_json));
+    if (run.status !== "failed" || run.failureCode !== "invalid_encrypted_content") return null;
+    const attempt = this.events.projection("attempt", run.attemptId);
+    return attempt ? orchestrationAttemptSchema.parse(attempt.value).nativeSessionId : null;
+  }
+
+  /** `unreadFollowUpMessageIds` is read after `updateCompatibilityProjection` runs, which may fill it. */
+  lifecycle<T>(turnId: string, updateCompatibilityProjection: () => T, delivery?: "not-delivered" | "prompt-dropped",
+    failureCode?: OrchestrationRunFailureCode, unreadFollowUpMessageIds?: readonly string[]): T {
     return this.database.transaction(() => {
       const result = updateCompatibilityProjection();
-      this.synchronize(this.access.agentTurn(turnId), undefined, delivery);
+      this.synchronize(this.access.agentTurn(turnId), undefined, delivery, failureCode, unreadFollowUpMessageIds);
       return result;
     }).immediate();
   }
@@ -366,8 +391,17 @@ export class OrchestratedTurnRepository {
    * continuation cursors return to their state before dispatch. A run whose
    * history was injected but whose turn was never accepted is recorded as
    * `prompt-not-delivered` and otherwise settles as delivered history.
+   * `delivery: "prompt-dropped"` (T3 `promptDropped`) settles a run whose
+   * provider dropped its prompt, on any end but completion, as a turn the
+   * provider never accepted, whatever output it streamed: its run is
+   * `not-delivered` (or `prompt-not-delivered` after an injection) and marked
+   * `promptDropped`, its handoff is abandoned even once output delivered it,
+   * and its backing returns to its state before dispatch. Only an explicit
+   * refusal returns a rollback cursor: the dropped run opened its session.
+   * `failureCode` is recorded on a failed run only.
    */
-  synchronize(turn: AgentTurn, observer?: AttemptObserver, delivery?: "not-delivered"): StaleAttemptObservation | null {
+  synchronize(turn: AgentTurn, observer?: AttemptObserver, delivery?: "not-delivered" | "prompt-dropped",
+    failureCode?: OrchestrationRunFailureCode, unreadFollowUpMessageIds: readonly string[] = []): StaleAttemptObservation | null {
     const previous = this.events.projection("run", turn.runId);
     if (!previous) return null; // Imported/pre-V2 history has no invented execution authority.
     const run = orchestrationRunSchema.parse(previous.value);
@@ -378,7 +412,9 @@ export class OrchestratedTurnRepository {
     // to no one. Unless its history was injected, the run did not reach the provider at all; with it injected the
     // route was reached but the prompt (and its images) still was not (`prompt-not-delivered`).
     const explicit = delivery === "not-delivered";
-    const unaccepted = isAgentTurnTerminalStatus(turn.status) && this.backings.unaccepted(turn);
+    // A dropped prompt is the provider's own report that it never accepted the turn (T3 `isDeliveredProviderTurn`).
+    const dropped = delivery === "prompt-dropped" && isAgentTurnTerminalStatus(turn.status) && turn.status !== "completed";
+    const unaccepted = isAgentTurnTerminalStatus(turn.status) && (dropped || this.backings.unaccepted(turn));
     const injected = unaccepted && this.backings.historyInjected(this.backings.handoff(turn.runId));
     const notDelivered = (explicit && turn.status === "failed") || (unaccepted && !injected);
     const event: OrchestrationDomainEvent = { type: "run.status-changed", payload: {
@@ -391,6 +427,8 @@ export class OrchestratedTurnRepository {
       nativeSessionId: turn.providerSessionAfter ?? turn.providerSessionBefore,
       ...(notDelivered ? { delivery: "not-delivered" as const }
         : unaccepted && injected ? { delivery: "prompt-not-delivered" as const } : {}),
+      ...(dropped ? { promptDropped: true as const } : {}),
+      ...(failureCode && turn.status === "failed" ? { failureCode } : {}),
     } };
     const before = { ...event.payload, status: run.status, stateRevision: run.stateRevision,
       executionState: run.executionState, providerState: run.providerState,
@@ -407,14 +445,14 @@ export class OrchestratedTurnRepository {
       ...(capture && !this.effects.get(capture.id) ? { effects: [capture] } : {}), result: null });
     if (isAgentTurnTerminalStatus(turn.status)) this.effects.retirePending(this.startEffectId(turn.runId), "run-settled");
     if (unaccepted && !injected && !explicit) dropRestoredHistoryRecord(this.database, turn.id);
-    this.backings.settle(turn, explicit, unaccepted);
+    this.backings.settle(turn, explicit, unaccepted, dropped, unreadFollowUpMessageIds);
     // A rollback cursor is a launch option the harness applies when it opens the session, before any turn, so
     // acceptance says nothing about it: only an explicit refusal returns it to pending; otherwise an applied-or-not
     // cursor stays uncertain and its backing continues portably. (Codex, the one harness that reports acceptance,
     // rolls back with `thread/revert` and returns no continuation.) Merge-back packets travel with the prompt, so
     // an unaccepted turn delivered none, even when its history was injected.
     this.history.settleRun(turn, (backing) => this.backings.invalidate(backing, "uncertain-delivery"), explicit);
-    this.mergeBacks.settleRun(turn, explicit || unaccepted);
+    this.mergeBacks.settleRun(turn, explicit || unaccepted, dropped);
     if (turn.runState?.state === "cancelling" && attempt.interruptRequestedAt === null) {
       const interrupted: OrchestrationDomainEvent = { type: "attempt.interrupt-requested",
         payload: { runId: run.id, attemptId: attempt.id } };

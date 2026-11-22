@@ -63,8 +63,10 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
     runId: id, attemptId: id, backingId: id, fromNativeSessionId: nativeId, nativeSessionId: nativeId,
     handoffId: id.nullable(),
   }).strict() }).strict(),
+  /** `rejected-native-history`: Codex rejected the session's encrypted history (T3 `rejected_native_history`). */
   z.object({ type: z.literal("provider.backing-invalidated"), payload: z.object({
-    backingId: id, reason: z.enum(["uncertain-delivery", "native-resume-failed", "workspace-changed", "rolled-back", "context-exhausted"]),
+    backingId: id, reason: z.enum(["uncertain-delivery", "native-resume-failed", "workspace-changed", "rolled-back",
+      "context-exhausted", "rejected-native-history"]),
   }).strict() }).strict(),
   z.object({ type: z.literal("provider.backing-rewound"), payload: z.object({
     rollbackId: id, backingId: id, nativeSessionId: nativeId,

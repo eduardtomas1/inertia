@@ -203,6 +203,67 @@ describe("delegated result deliveries in the parent queue", () => {
     } finally { await f.close(); }
   });
 
+  it("lets delegated results that wait for a manual send stay put when a direct send runs an unread follow-up first", async () => {
+    const f = await createDelegationQueueFixture({ clock: () => new Date() });
+    try {
+      const parentTurn = f.startParent();
+      const steer = vi.spyOn(f.provider, "steer");
+      await f.queue.turnInteractionHandler(null as unknown as WebSocket, { type: "message.send", requestId: randomUUID(),
+        payload: { conversationId: f.parentId, content: "Also check the cache.", attachments: [] } });
+      const steerId = steer.mock.calls.at(-1)![1].steerId!;
+      steer.mockRestore();
+      f.provider.steerSupported = false;
+      const delegated = await f.delegate(parentTurn);
+      await f.completeChild(delegated.childTurn, "Result the user sends by hand.");
+      f.provider.steerSupported = true;
+      f.provider.resolve({ status: "failed", unreadFollowUps: [steerId],
+        failure: { reason: "provider-error", message: "Usage limit reached.", usageLimited: true } });
+      await f.drain();
+      // Automatic wakes off with the results still armed: they wait for the user's own Send now.
+      f.automatic.enabled = false;
+      const delivery = f.store.queuedMessages.activeDelegatedDelivery(f.parentId);
+      expect(delivery?.state).toBe("waiting");
+      expect(f.store.queuedMessages.list(f.parentId).some(({ userMessageId }) => userMessageId !== null)).toBe(true);
+      await f.queue.turnInteractionHandler(null as unknown as WebSocket, { type: "message.send", requestId: randomUUID(),
+        payload: { conversationId: f.parentId, content: "Sent directly", attachments: [] } });
+      await f.drain();
+      expect(f.parentTurns()).toHaveLength(2);
+      expect(wakeMessage(f, f.parentTurns()[1]!.id)).toMatchObject({ content: "Also check the cache." });
+      expect(wakeMessage(f, f.parentTurns()[1]!.id).delegatedCompletion).toBeUndefined();
+      expect(f.store.queuedMessages.get(f.parentId, delivery!.id)?.state).toBe("waiting");
+    } finally { await f.close(); }
+  });
+
+  it("keeps delegated results steered into a turn that never read them delivered, as T3 does, and later results flow", async () => {
+    const f = await createDelegationQueueFixture();
+    try {
+      const parentTurn = f.startParent();
+      const steer = vi.spyOn(f.provider, "steer");
+      const steered = await f.delegate(parentTurn);
+      await f.completeChild(steered.childTurn, "Steered result.");
+      await vi.waitFor(() => expect(f.delegation.service.view(steered.task.taskId).delivery.state).toBe("delivered"));
+      const steerId = steer.mock.calls.at(-1)![1].steerId!;
+      steer.mockRestore();
+      f.provider.resolve({ text: "Parent answer", unreadFollowUps: [steerId] });
+      await f.drain();
+      expect(f.parentTurns()).toHaveLength(2);
+      const adopting = f.parentTurns()[1]!;
+      // The adopted message keeps its attribution as metadata; the delivery was marked when the steer was accepted.
+      expect(wakeMessage(f, adopting.id).delegatedCompletion?.taskIds).toEqual([steered.task.taskId]);
+      expect(f.delegation.service.view(steered.task.taskId).delivery.state).toBe("delivered");
+      // Stopping the adopting turn leaves the steered results delivered (T3: notification.delivery.accept).
+      expect(f.controller.cancel(f.parentId)).toBe(true);
+      f.provider.resolve({ status: "cancelled" });
+      await f.drain();
+      expect(f.delegation.service.view(steered.task.taskId).delivery.state).toBe("delivered");
+
+      const next = f.startParent("Continue");
+      const later = await f.delegate(next, { title: "Later" });
+      await f.completeChild(later.childTurn, "Later result.");
+      await vi.waitFor(() => expect(f.delegation.service.view(later.task.taskId).delivery.state).toBe("delivered"));
+    } finally { await f.close(); }
+  });
+
   it("disposes results for an archived parent and withdraws a queued delivery on archive", async () => {
     const f = await createDelegationQueueFixture();
     try {

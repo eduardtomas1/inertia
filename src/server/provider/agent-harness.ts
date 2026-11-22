@@ -439,10 +439,12 @@ export interface AgentHarnessEmitter {
     label: string,
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta" | "fileMutation">,
   ) => void;
+  /** `promptDropped`: see `ProviderStatusEvent.promptDropped`; kept only on a failed or cancelled status. */
   status: (
     status: ProviderStatusEvent["status"],
     message?: string,
     providerState?: string,
+    promptDropped?: boolean,
   ) => void;
   /** `forkedFrom`: the resumed session this one copies into the run's checkout (see `ProviderSessionEvent`). */
   session: (sessionId: string, forkedFrom?: string) => void;
@@ -522,12 +524,13 @@ export function createAgentHarnessEmitter(
         ...(detail.fileMutation === true ? { fileMutation: true as const } : {}),
       });
     },
-    status: (status, message, providerState) => emit({
+    status: (status, message, providerState, promptDropped) => emit({
       ...base,
       type: "status",
       status,
       ...(message ? { message } : {}),
       ...(providerState ? { providerState } : {}),
+      ...(promptDropped === true && (status === "failed" || status === "cancelled") ? { promptDropped: true as const } : {}),
     }),
     session: (sessionId, forkedFrom) => emit({ ...base, type: "session", sessionId,
       ...(forkedFrom !== undefined && forkedFrom !== sessionId ? { forkedFrom } : {}) }),

@@ -8,7 +8,7 @@ import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMess
 import { readSourceText } from "../helpers/source-text";
 import { chatQueueRunner } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import type { Conversation } from "../../src/shared/contracts";
-import { announceRuntimeQueueChanged } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
+import { announceRuntimeQueueChanged, useRuntimeQueueLength, useRuntimeQueuedFollowUps } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
 
 const conversationId = "40404040-4040-4040-8040-404040404040";
 const queued: QueuedMessage = { id: "50505050-5050-4050-8050-505050505050", conversationId, content: "Next task", attachments: [], state: "waiting", createdAt: "2026-09-26T00:00:00.000Z", error: null, turnId: null, userMessageId: null };
@@ -269,6 +269,63 @@ describe("runtime queue presentation and durable draft identity", () => {
     expect(document.querySelector('[role="tooltip"]')).toBeNull();
     vi.useRealTimers();
   });
+  it("labels a follow-up the agent never read, keeps it out of the queue count, and hides its message from the timeline while it waits", async () => {
+    const unread: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Also look at this.",
+      userMessageId: "70707070-7070-4070-8070-707070707070" };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([unread, queued]));
+    const observed: { length: number; hidden: readonly string[] } = { length: -1, hidden: [] };
+    function Observer(): null {
+      observed.length = useRuntimeQueueLength(conversationId);
+      observed.hidden = useRuntimeQueuedFollowUps(conversationId);
+      return null;
+    }
+    const view = render(<>
+      <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
+        latestTurnId="first" latestTurnStatus="failed" queueHost={null} />
+      <Observer />
+    </>);
+    expect(await screen.findByText("Not read, sends next")).toBeTruthy();
+    expect(screen.getByText("Also look at this.")).toBeTruthy();
+    const sendNow = screen.getByRole("button", { name: "Send unread follow-up now" });
+    expect(screen.getByRole("button", { name: "Remove unread follow-up" })).toBeTruthy();
+    expect(observed).toEqual({ length: 1, hidden: [unread.userMessageId] });
+    run.mockResolvedValue(response([queued]));
+    sendNow.focus();
+    fireEvent.click(sendNow);
+    await waitFor(() => expect(screen.queryByText("Not read, sends next")).toBeNull());
+    expect(run).toHaveBeenCalledWith({ type: "message.queue.send", payload: { conversationId, id: unread.id } });
+    expect(observed.hidden).toEqual([]);
+    view.unmount();
+  });
+
+  it("shows a blocked unread follow-up only as blocked, with its error", async () => {
+    const blocked: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606062", content: "Also look at this.",
+      userMessageId: "70707070-7070-4070-8070-707070707072", state: "blocked", error: "An image of this follow-up is no longer available." };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([blocked]));
+    const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
+      latestTurnId="first" latestTurnStatus="failed" queueHost={null} />);
+    expect(await screen.findByText("Needs attention")).toBeTruthy();
+    expect(screen.queryByText("Not read, sends next")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("An image of this follow-up is no longer available.");
+    expect(screen.getByRole("button", { name: "Send unread follow-up now" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove unread follow-up" })).toBeTruthy();
+    view.unmount();
+  });
+
+  it("offers Send now on an unread follow-up only once the chat has no running turn", async () => {
+    const unread: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606061", content: "Also look at this.",
+      userMessageId: "70707070-7070-4070-8070-707070707071" };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([unread]));
+    const props = { conversationId, onCommand: run, canSend: true, latestTurnId: "first", queueHost: null };
+    const view = render(<RuntimeComposerQueuedActions {...props} latestTurnStatus="running" />);
+    expect(await screen.findByText("Not read, sends next")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send unread follow-up now" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove unread follow-up" })).toBeTruthy();
+    view.rerender(<RuntimeComposerQueuedActions {...props} latestTurnStatus="completed" />);
+    expect(await screen.findByRole("button", { name: "Send unread follow-up now" })).toBeTruthy();
+    view.unmount();
+  });
+
   it("pins the delegated results delivery first and offers only Remove during a turn, which the service treats as dismiss", async () => {
     const delivery: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Delegated tasks finished.",
       createdAt: "2026-09-26T00:01:00.000Z",

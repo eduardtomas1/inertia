@@ -247,6 +247,68 @@ describe("fork context merge-back", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("returns findings its output delivered to undelivered when the provider dropped the prompt that carried them (T3 c5fa33b27)", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child } = await forkWithWork(runtime);
+      const attempt = mergeBack(runtime, child.id);
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "parent-dropped request",
+        context: { conversationContextPacketIds: [attempt.packetId] }, contextRequestId: requestId() });
+      runtime.controller.start(queued.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Reading the fork's findings" });
+      expect(runtime.store.orchestration.mergeBacks.get(attempt.mergeBackId)?.state).toBe("delivered");
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "failed", promptDropped: true });
+      runtime.provider.resolve({ status: "failed" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.mergeBacks.get(attempt.mergeBackId)?.state).toBe("undelivered");
+      // The fork's next merge-back starts from the last delivery before the dropped one again.
+      const retry = mergeBack(runtime, child.id);
+      expect(retry).toMatchObject({ turnCount: 2 });
+      expect(runtime.store.orchestration.mergeBacks.get(retry.mergeBackId)?.baseTurnId).toBeNull();
+      const before = runtime.store.orchestration.mergeBacks.get(attempt.mergeBackId);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(runtime.store.orchestration.mergeBacks.get(attempt.mergeBackId)).toEqual(before);
+      // Without a dropped prompt, delivered findings stay delivered.
+      const delivered = await finish(runtime, "parent-retry", runtime.conversationId, "completed", [retry.packetId]);
+      const event = { type: "merge-back.changed" as const, payload: { id: retry.mergeBackId, state: "undelivered" as const,
+        runId: delivered.turn.runId, messageId: delivered.turn.userMessageId } };
+      const { events } = runtime.store.orchestration;
+      expect(() => events.commit({ actorId: "runtime", commandId: "undeliver-delivered", projectId: runtime.store.conversation(runtime.conversationId).projectId,
+        threadId: runtime.conversationId, command: event, expectedRevision: events.revision(runtime.conversationId), events: [event], result: null }))
+        .toThrow(OrchestrationConflict);
+    } finally { runtime.store.close(); }
+  });
+
+  it("supersedes a merge-back prepared on top of findings whose prompt was dropped, so no fork work is skipped", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const { child, two } = await forkWithWork(runtime);
+      const first = mergeBack(runtime, child.id);
+      await finish(runtime, "fork-three", child.id);
+      const carrier = runtime.controller.queue({ conversationId: runtime.conversationId, content: "parent-dropped request",
+        context: { conversationContextPacketIds: [first.packetId] }, contextRequestId: requestId() });
+      runtime.controller.start(carrier.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Reading the fork's findings" });
+      // While the carrying turn runs, its output has delivered the first merge-back, so the next one starts after it.
+      const stale = mergeBack(runtime, child.id);
+      expect(stale).toMatchObject({ turnCount: 1 });
+      expect(runtime.store.orchestration.mergeBacks.get(stale.mergeBackId)).toMatchObject({ state: "prepared", baseTurnId: two.turn.id });
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "failed", promptDropped: true });
+      runtime.provider.resolve({ status: "failed" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.mergeBacks.get(first.mergeBackId)?.state).toBe("undelivered");
+      // Sending it would deliver fork-three alone and move the base past fork-one and fork-two for good.
+      expect(runtime.store.orchestration.mergeBacks.get(stale.mergeBackId)?.state).toBe("superseded");
+      expect(() => runtime.store.contextPackets.get(stale.packetId, runtime.conversationId)).toThrow("unavailable");
+      const next = mergeBack(runtime, child.id);
+      expect(next).toMatchObject({ turnCount: 3 });
+      expect(runtime.store.orchestration.mergeBacks.get(next.mergeBackId)?.baseTurnId).toBeNull();
+      const before = runtime.store.orchestration.mergeBacks.get(stale.mergeBackId);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(runtime.store.orchestration.mergeBacks.get(stale.mergeBackId)).toEqual(before);
+    } finally { runtime.store.close(); }
+  });
+
   it("serializes concurrent production merge-back commands on the source chat and replays the original request", async () => {
     const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
     try {

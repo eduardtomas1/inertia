@@ -1,10 +1,11 @@
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile, readFile, link, lstat, rename, unlink, readdir, truncate } from "node:fs/promises";
-import { renameSync, symlinkSync } from "node:fs";
+import { renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cursorSdkAgentStoreDirectory, cursorSdkStoreDirectory, cursorSdkStoreHasJournal, CursorSdkStoreMissingError, openCursorSdkStore,
   prepareCursorSdkAgentStore, withCursorSdkAgentStoreLock } from "../../src/server/provider/cursor-sdk-store";
+import { executeCursorSdkRun } from "../../src/server/provider/cursor-sdk-session";
 
 const race = vi.hoisted(() => ({ beforeOpen: undefined as ((path: unknown) => void) | undefined, beforeWrite: undefined as (() => void) | undefined }));
 vi.mock("node:fs", async (original) => {
@@ -201,6 +202,56 @@ describe.skipIf(process.platform !== "linux")("Cursor SDK descriptor-contained d
     }
     await truncate(path, 128 * 1024 * 1024 + 1);
     await expect(openCursorSdkStore(directory, workspace)).rejects.toThrow("limit");
+  });
+  describe("the worker's checkpoint answer against the real journal (T3 c5fa33b27)", () => {
+    const start = { schemaVersion: 1 as const, rootBlobId: "blob-test" };
+    const run = { agentId: "agent-test", runId: "run-follow-up", turnNumber: 2, status: "running" as const, createdAt: 1, updatedAt: 2,
+      startCheckpointRef: start, latestCheckpointRef: start };
+    const session = { nativeSessionId: "agent-test", nativeRun: { agentId: "agent-test", runId: "run-follow-up" } };
+    const next = { schemaVersion: 1 as const, rootBlobId: "blob-next" };
+
+    it("answers from the closed store what a fresh replay of its journal says, and a write after close leaves the journal unchanged", async () => {
+      for (const checkpointed of [false, true]) {
+        const { workspace, directory } = await scoped();
+        const store = await openCursorSdkStore(directory, workspace);
+        await store.agents.create({ agent: document(workspace) });
+        await store.runs.create({ run });
+        const answer = await executeCursorSdkRun(session, store, async () => {
+          await store.runs.update({ run: { ...run, status: "error", updatedAt: 3, ...(checkpointed ? { latestCheckpointRef: next } : {}) } });
+          throw new Error("Cursor SDK execution could not be verified.");
+        });
+        expect(answer).toEqual({ unverified: true, agentId: "agent-test", id: "run-follow-up", runCheckpointed: checkpointed });
+        const journal = join(directory, "native-store.v1.jsonl");
+        const written = await readFile(journal);
+        // A checkpoint the SDK still patches after a Stop is refused by the closed store and never reaches the journal.
+        const late = { schemaVersion: 1 as const, rootBlobId: "blob-late" };
+        await expect(store.runs.update({ run: { ...run, status: "cancelled", updatedAt: 4, latestCheckpointRef: late } })).rejects.toThrow("closed");
+        await expect(store.agents.update({ agent: { ...document(workspace), updatedAt: 4, latestCheckpoint: late } })).rejects.toThrow("closed");
+        expect(await readFile(journal)).toEqual(written);
+        const replayed = await openCursorSdkStore(directory, workspace);
+        try { expect(replayed.runCheckpointed("agent-test", "run-follow-up")).toBe(checkpointed); }
+        finally { await replayed.dispose(); }
+      }
+    });
+
+    it("cannot tell once a write failed after its record reached the journal, which then holds a checkpoint the tables lack", async () => {
+      const { workspace, directory } = await scoped();
+      const store = await openCursorSdkStore(directory, workspace);
+      await store.agents.create({ agent: document(workspace) });
+      await store.runs.create({ run });
+      const foreign = join(directory, "foreign-entry");
+      // The record is written and synced, then the store's own check finds a foreign entry and poisons it.
+      race.beforeWrite = () => { race.beforeWrite = undefined; writeFileSync(foreign, "x", { mode: 0o600 }); };
+      await expect(store.agents.update({ agent: { ...document(workspace), updatedAt: 3, latestCheckpoint: next } }))
+        .rejects.toThrow("unrecognized data");
+      expect(store.runCheckpointed("agent-test", "run-follow-up")).toBeUndefined();
+      const failure = new Error("Cursor SDK execution could not be verified.");
+      await expect(executeCursorSdkRun(session, store, async () => { throw failure; })).rejects.toBe(failure);
+      await rm(foreign);
+      const replayed = await openCursorSdkStore(directory, workspace);
+      try { expect(replayed.runCheckpointed("agent-test", "run-follow-up")).toBe(true); }
+      finally { await replayed.dispose(); }
+    });
   });
   it("never persists supplied vault credentials in native records or checkpoint bytes", async () => {
     const { workspace, directory } = await scoped();

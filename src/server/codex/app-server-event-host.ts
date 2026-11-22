@@ -1,4 +1,5 @@
 import type { TurnFailureKind } from "../../shared/turn-lifecycle";
+import type { OrchestrationRunFailureCode } from "../../shared/orchestration-v2";
 import type { ProviderRunFailure } from "../provider/contracts";
 import type { CodexRunPhase } from "./app-server-config";
 import type { CappedTextBuffer, JsonObject } from "./protocol";
@@ -33,5 +34,6 @@ export interface CodexAppServerEventHost {
     technicalDetail?: string,
     usageLimited?: boolean,
     failureKind?: TurnFailureKind,
+    code?: OrchestrationRunFailureCode,
   ) => void;
 }

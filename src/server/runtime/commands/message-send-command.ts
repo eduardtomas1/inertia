@@ -582,6 +582,9 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       ? dependencies.turns.queue({
           orchestrationRequest,
           queuedMessageId: dependencies.queuedMessage?.id,
+          // A queue row that names an unread follow-up starts its turn on that persisted message.
+          ...(dependencies.queuedMessage?.userMessageId
+            ? { adoptedFollowUp: { messageId: dependencies.queuedMessage.userMessageId } } : {}),
           limitResetPlanId: dependencies.limitResetDispatch?.planId,
           restartContinuationPlanId: dependencies.restartContinuationDispatch?.planId,
           conversationId: conversation.id,

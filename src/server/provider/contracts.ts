@@ -27,6 +27,7 @@ import type {
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
 import type { ProviderAccountKind } from "../../shared/provider";
 import type { TurnFailureKind } from "../../shared/turn-lifecycle";
+import type { OrchestrationRunFailureCode } from "../../shared/orchestration-v2";
 import type {
   AgentApprovalDecision,
   AgentApprovalPermissionRoot,
@@ -188,6 +189,12 @@ export function isIsolatedProviderConversationId(conversationId: string): boolea
 export interface ProviderSteerInput {
   content: string;
   imagePaths: readonly string[];
+  /**
+   * Inertia's identity for this follow-up. A harness that learns the provider
+   * dropped an accepted follow-up unread names it in
+   * `ProviderRunResult.unreadFollowUps` by this id.
+   */
+  steerId?: string;
 }
 
 export class ProviderSteerDeliveryUnknownError extends Error {
@@ -245,6 +252,11 @@ export interface ProviderRunFailure {
   notDelivered?: true;
   usageLimited?: true;
   failureKind?: TurnFailureKind;
+  /**
+   * A provider failure code the next turn acts on, classified from the provider's own error
+   * (T3 `OrchestrationV2ProviderFailure.code`). `message` is then the code's safe summary.
+   */
+  code?: OrchestrationRunFailureCode;
 }
 
 /**
@@ -373,6 +385,13 @@ export interface ProviderStatusEvent extends ProviderEventBase {
   /** Bounded provider-native phase; never used as a cross-provider synonym. */
   providerState?: string;
   message?: string;
+  /**
+   * On a `failed` or `cancelled` status only: the provider dropped this turn's prompt before keeping it in its
+   * native history, whatever output it streamed (T3 `promptDropped`; Cursor SDK: the run saved no checkpoint).
+   * Settlement then treats the turn as not delivered. It travels on the terminal status event, which the harness
+   * emits before its result, so it arrives even when a Stop already asked for the turn's end.
+   */
+  promptDropped?: true;
 }
 
 export interface ProviderSessionEvent extends ProviderEventBase {
@@ -703,6 +722,14 @@ export interface ProviderRunResult extends ProviderRunIdentity {
   error?: string;
   failure?: ProviderRunFailure;
   sessionInstructionApplied?: false;
+  /**
+   * Steer outcome for accepted follow-ups the provider never read: it
+   * cancelled, discarded or refused them before reading, or its process ended
+   * first (T3 `e8c4824b7`). Each is a `ProviderSteerInput.steerId`. The
+   * runtime sends them as the next turn instead of crediting them to this one.
+   * Never reported for a run the user stopped: Stop drops them.
+   */
+  unreadFollowUps?: string[];
   /** True only after authoritative complete process-tree cleanup. */
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;

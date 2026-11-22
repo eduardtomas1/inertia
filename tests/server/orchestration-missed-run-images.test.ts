@@ -293,6 +293,43 @@ describe("images of runs the provider never received ride on the next prompt (T3
     } finally { runtime.store.close(); }
   });
 
+  it("carries and pins the images of a run stopped after its provider dropped the prompt, though output streamed (T3 c5fa33b27)", async () => {
+    const f = await fixture();
+    const { runtime } = f;
+    try {
+      await delivered(runtime, "Opening request");
+      const screenshot = await image(f, "screenshot.png");
+      const stopped = await send(runtime, "Look at this", [screenshot]);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Looking" });
+      // The Stop settles the turn once the provider run settled; the harness reports its terminal status first.
+      runtime.provider.deferOwnedStop("settled");
+      runtime.controller.cancel(runtime.conversationId);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "cancelled", promptDropped: true });
+      runtime.provider.resolve({ status: "cancelled", sessionId: "codex-native" });
+      runtime.provider.resolveOwnedStop();
+      await flushTurnControllerTestPromises();
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.events.projection("run", stopped.turn.runId)?.value)
+        .toMatchObject({ status: "cancelled", delivery: "not-delivered", promptDropped: true });
+      expect(runtime.store.evictableAttachmentIds()).not.toContain(screenshot.id);
+
+      // A later stopped run without a dropped prompt neither carries its own image nor ends the carry.
+      const withdrawn = await image(f, "withdrawn.png");
+      const later = await send(runtime, "Never mind", [withdrawn]);
+      expect(runtime.provider.input?.imagePaths).toEqual([screenshot.path, withdrawn.path]);
+      runtime.provider.resolve({ status: "cancelled", sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.orchestration.events.projection("run", later.turn.runId)?.value)
+        .toMatchObject({ status: "cancelled", delivery: "not-delivered" });
+      expect(runtime.store.orchestration.events.projection("run", later.turn.runId)?.value).not.toHaveProperty("promptDropped");
+      expect(runtime.store.evictableAttachmentIds()).toContain(withdrawn.id);
+
+      expect((await delivered(runtime, "Try again")).sent).toEqual([screenshot.path]);
+      expect(runtime.store.evictableAttachmentIds()).toContain(screenshot.id);
+    } finally { runtime.store.close(); }
+  });
+
   it("never evicts a pending missed image, and evicts it once a later delivered run superseded it", async () => {
     const f = await fixture();
     const { runtime } = f;

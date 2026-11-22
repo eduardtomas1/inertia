@@ -9,6 +9,21 @@ import {
 } from "../../provider/contracts";
 import type { ActiveTurn, TurnTerminalCause } from "./turn-controller-types";
 
+/**
+ * A dropped prompt arrives on the provider's terminal status (`ProviderStatusEvent.promptDropped`). It is kept even
+ * after a Stop asked for the turn's end, when the turn no longer takes provider events: the harness emits that status
+ * before its result, and a Stop settles the turn only after the provider run settled, so the settlement still sees
+ * it. It is kept for the exact run and attempt only, and never once the turn is settled.
+ */
+export function observeProviderPromptDropped(active: ActiveTurn, event: ProviderEvent, attemptId?: string | null): void {
+  if (event.type !== "status" || event.promptDropped !== true
+    || (event.status !== "failed" && event.status !== "cancelled") || active.runState.isTerminal()
+    || event.providerId !== active.turn.providerId || event.conversationId !== active.conversation.id
+    || event.runId !== active.turn.runId || event.turnId !== active.turn.id
+    || (attemptId && attemptId !== active.attemptId)) return;
+  active.providerPromptDropped = true;
+}
+
 export function providerEventMatchesActiveTurn(
   store: RuntimeStore,
   active: ActiveTurn,

@@ -5,6 +5,11 @@ import { watcherNoteAttributionSchema } from "./watcher";
 import { delegatedCompletionAttributionSchema } from "./orchestration-delegation";
 
 export const MAX_QUEUED_MESSAGES = 3;
+/**
+ * Rows that name a follow-up its provider accepted but never read (`userMessageId` on an active row). They wait
+ * outside the cap of three, bounded per chat.
+ */
+export const MAX_UNREAD_FOLLOW_UP_ROWS = 64;
 export const queuedMessageStateSchema = z.enum(["waiting", "dispatching", "blocked", "accepted", "cancelled"]);
 const queuedAttachmentSchema = z.strictObject({
   id: z.uuid(), name: z.string().min(1).max(255), path: z.string().min(1).max(4096),
@@ -21,10 +26,11 @@ export const queuedMessageSchema = z.strictObject({
 }).refine((value) => !(value.watcherNote && value.delegatedCompletion), "A queued message has one automatic attribution.");
 export const messageQueueResultSchema = z.strictObject({
   kind: z.literal("message.queue"), conversationId: z.uuid(),
-  entries: z.array(queuedMessageSchema).max(MAX_QUEUED_MESSAGES + 1)
+  entries: z.array(queuedMessageSchema).max(MAX_QUEUED_MESSAGES + 1 + MAX_UNREAD_FOLLOW_UP_ROWS)
     .refine((entries) => entries.filter(({ delegatedCompletion }) => delegatedCompletion).length <= 1
-      && entries.filter(({ delegatedCompletion }) => !delegatedCompletion).length <= MAX_QUEUED_MESSAGES,
-    "A queue holds at most three messages plus one delegated result delivery."),
+      && entries.filter(({ delegatedCompletion, userMessageId }) => !delegatedCompletion && userMessageId === null).length <= MAX_QUEUED_MESSAGES
+      && entries.filter(({ userMessageId }) => userMessageId !== null).length <= MAX_UNREAD_FOLLOW_UP_ROWS,
+    "A queue holds at most three messages plus one delegated result delivery, and the follow-ups the agent did not read."),
   receipt: queuedMessageSchema.nullable(),
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;

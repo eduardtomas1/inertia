@@ -133,7 +133,10 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         || (run.completedAt !== null && payload.completedAt !== run.completedAt)
         || (isAgentTurnTerminalStatus(payload.status) !== (payload.completedAt !== null))
         // Not delivered: a failed refusal, or (C6) any turn its provider never accepted, stopped or interrupted too.
-        || (payload.delivery !== undefined && (!isAgentTurnTerminalStatus(payload.status) || payload.status === "completed"))) {
+        || (payload.delivery !== undefined && (!isAgentTurnTerminalStatus(payload.status) || payload.status === "completed"))
+        // A dropped prompt is recorded on a run its provider did not deliver, whatever ended it.
+        || (payload.promptDropped !== undefined && payload.delivery === undefined)
+        || (payload.failureCode !== undefined && payload.status !== "failed")) {
         throw new OrchestrationConflict("revision-conflict");
       }
       const terminal = isAgentTurnTerminalStatus(payload.status);
@@ -142,7 +145,9 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
           status: payload.status, executionState: payload.executionState, providerState: payload.providerState,
           stateRevision: payload.stateRevision, startedAt: payload.startedAt,
           completedAt: payload.completedAt, terminalMessageId: payload.terminalMessageId,
-          ...(payload.delivery ? { delivery: payload.delivery } : {}) } },
+          ...(payload.delivery ? { delivery: payload.delivery } : {}),
+          ...(payload.promptDropped ? { promptDropped: payload.promptDropped } : {}),
+          ...(payload.failureCode ? { failureCode: payload.failureCode } : {}) } },
         { kind: "attempt", id: attempt.id, value: { ...attempt, status: payload.status,
           nativeSessionId: payload.nativeSessionId ?? attempt.nativeSessionId } },
       ];

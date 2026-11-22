@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ToolName } from "@cursor/sdk";
 import { CursorSdkChannel } from "../../node/cursor-sdk-channel";
 import { cursorSdkStartSchema } from "../../node/cursor-sdk-protocol";
-import { CursorSdkSession, resumeCursorSdkAgent } from "./cursor-sdk-session";
+import { CursorSdkSession, executeCursorSdkRun, resumeCursorSdkAgent } from "./cursor-sdk-session";
 import { loadCursorSdk, verifyCursorSdkPlatform } from "./cursor-sdk-loader";
 import { openCursorSdkStore, prepareCursorSdkAgentStore } from "./cursor-sdk-store";
 
@@ -87,7 +87,7 @@ async function handle(method: string, params: unknown): Promise<unknown> {
       customTools: (sessionId) => cursorSdkHostTools(input, sessionId, controller.signal,
         (method, value, timeoutMs) => channel.request(method, value, timeoutMs)),
     });
-    const result = await session.execute(input.apiKey, input.prompt, input.sessionId);
-    return { ...result, agentId: session.nativeSessionId };
+    const active = session;
+    return await executeCursorSdkRun(active, store, () => active.execute(input.apiKey, input.prompt, input.sessionId));
   } finally { await store.dispose?.(); }
 }

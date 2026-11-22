@@ -10,7 +10,14 @@ const agentSchema = z.object({ agentId: identity, cwd: identity, status: z.enum(
 const runSchema = z.object({ agentId: identity, runId: identity, turnNumber: z.number().int().positive(),
   status: z.enum(["queued", "running", "finished", "error", "cancelled", "expired"]), createdAt: time, updatedAt: time,
   startCheckpointRef: ref, latestCheckpointRef: ref }).passthrough();
-const checkpointSchema = z.object({ agentId: identity, blobId: identity, data: z.string().regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u) }).strict();
+/**
+ * Canonical padded base64. A length test and one character-class scan, not a repeated-group pattern: V8 overflows its
+ * stack matching `(?:[A-Za-z0-9+/]{4})*` against the multi-megabyte strings a checkpoint encodes to.
+ */
+function isBase64(value: string): boolean {
+  return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
+}
+const checkpointSchema = z.object({ agentId: identity, blobId: identity, data: z.string().refine(isBase64) }).strict();
 const eventSchema = z.object({ runId: identity, seq: z.number().int().positive(), offset: identity, eventType: identity,
   payload: z.unknown(), payloadRef: z.string().nullable(), idempotencyKey: z.string().nullable(), createdAt: time }).strict();
 const tableSchema = z.enum(["agents", "runs", "checkpoints", "runEvents"]);
@@ -50,6 +57,11 @@ function validated(table: Table, value: unknown): { key: string; value: Row } {
 
 export class CursorSdkStoreRecords implements LocalAgentStore {
   private readonly tables: Record<Table, Map<string, Row>> = { agents: new Map(), runs: new Map(), checkpoints: new Map(), runEvents: new Map() };
+  /**
+   * A journal write threw. The journal store appends and syncs a record before its last checks, so a write that
+   * threw may still be in the journal while the tables never took it: from then on they may lag the journal.
+   */
+  private persistFailed = false;
   constructor(private readonly check: () => void, private readonly persist: (mutation: CursorSdkStoreMutation) => void,
     readonly dispose: () => Promise<void>, private readonly secret?: string) {}
 
@@ -75,6 +87,24 @@ export class CursorSdkStoreRecords implements LocalAgentStore {
       ...put("runEvents", [...this.tables.runEvents.values()].filter((row) => runIds.has((row as LocalAgentRunEventDocument).runId))),
       ...put("agents", [agent]),
     ];
+  }
+
+  /**
+   * Whether Cursor saved a checkpoint during this run (T3 `runCheckpointed`, `CursorAgentSdk.ts`). Cursor starts a run
+   * from the agent's latest checkpoint (`startCheckpointRef`) and every later run from `checkpointStore.loadLatest`, the
+   * agent's `latestCheckpoint`, so a run whose checkpoint never moved off its start left nothing of its prompt in the
+   * native conversation. Both the run's and the agent's pointer count: the SDK saves the blob and the agent pointer
+   * before it patches the run, so a moved agent pointer alone still means the next run loads this one's history.
+   * Undefined when the records cannot tell: the agent or the run is not in this store, or a journal write failed, after
+   * which the journal may hold a checkpoint the tables lack.
+   */
+  runCheckpointed(agentId: string, runId: string): boolean | undefined {
+    if (this.persistFailed) return undefined;
+    const agent = this.tables.agents.get(agentId) as LocalAgentDocument | undefined;
+    const run = this.tables.runs.get(pair(agentId, runId)) as LocalAgentRunDocument | undefined;
+    if (!agent || !run) return undefined;
+    const start = run.startCheckpointRef?.rootBlobId ?? null;
+    return (run.latestCheckpointRef?.rootBlobId ?? null) !== start || (agent.latestCheckpoint?.rootBlobId ?? null) !== start;
   }
 
   replay(input: unknown): void {
@@ -116,7 +146,8 @@ export class CursorSdkStoreRecords implements LocalAgentStore {
   private persistChecked(input: CursorSdkStoreMutation): void {
     const mutation = mutationSchema.parse(input);
     this.assertSecretFree(mutation);
-    this.persist(mutation);
+    try { this.persist(mutation); }
+    catch (error) { this.persistFailed = true; throw error; }
   }
   private get<T extends Row>(table: Table, key: string): T | null {
     this.check(); return clone((this.tables[table].get(key) as T | undefined) ?? null);

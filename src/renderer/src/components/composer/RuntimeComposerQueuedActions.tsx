@@ -4,7 +4,7 @@ import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages";
 import { isAgentTurnTerminalStatus, type AgentTurnStatus } from "@shared/turn-lifecycle";
 import { RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "./runtimeQueueClient";
-import { setRuntimeQueueLength } from "./runtimeQueueEvents";
+import { setRuntimeQueueLength, setRuntimeQueuedFollowUps } from "./runtimeQueueEvents";
 import { IconButton } from "../ui";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 
@@ -78,13 +78,22 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
     }, 10_000);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener(RUNTIME_QUEUE_CHANGED, changed); document.removeEventListener("visibilitychange", refresh); };
   }, [conversationId, onCommand, latestTurnId, latestTurnStatus, updateQueue]);
-  const userQueued = queue.filter(({ watcherNote, delegatedCompletion }) => !watcherNote && !delegatedCompletion).length;
+  // Unread follow-ups wait outside the cap of three.
+  const userQueued = queue.filter(({ watcherNote, delegatedCompletion, userMessageId }) =>
+    !watcherNote && !delegatedCompletion && userMessageId === null).length;
   useEffect(() => setRuntimeQueueLength(conversationId, userQueued), [conversationId, userQueued]);
+  const unreadFollowUpIds = queue.flatMap(({ userMessageId }) => userMessageId === null ? [] : [userMessageId]).join(" ");
+  useEffect(() => {
+    setRuntimeQueuedFollowUps(conversationId, unreadFollowUpIds ? unreadFollowUpIds.split(" ") : []);
+    return () => setRuntimeQueuedFollowUps(conversationId, []);
+  }, [conversationId, unreadFollowUpIds]);
   const first = queue[0];
   if (!first) return null;
   const dispatching = first.state === "dispatching";
   const delegated = Boolean(first.delegatedCompletion);
-  const sendable = !delegated || (latestTurnStatus !== null && isAgentTurnTerminalStatus(latestTurnStatus as AgentTurnStatus));
+  const unread = first.userMessageId !== null;
+  // Delegated results and unread follow-ups start their own turn: Send now waits for the chat to be idle.
+  const sendable = (!delegated && !unread) || (latestTurnStatus !== null && isAgentTurnTerminalStatus(latestTurnStatus as AgentTurnStatus));
   const mutate = async (type: "message.queue.send" | "message.queue.remove"): Promise<void> => {
     if (busy) return;
     setBusy(true); setError(null);
@@ -104,11 +113,12 @@ export function RuntimeComposerQueuedActions({ conversationId, onCommand, canSen
       <CornerDownRight size={14} aria-hidden="true" />
       {first.watcherNote && <small className="composer-queue-count">From watcher</small>}
       {delegated && <small className="composer-queue-count">Delegated results</small>}
+      {unread && first.state !== "blocked" && <small className="composer-queue-count">Not read, sends next</small>}
       <span className="composer-queue-copy" title={first.content}>{first.content}</span>
       {first.attachments.length > 0 && <span className="composer-queue-media"><Paperclip size={14} aria-hidden="true" />{first.attachments.length} {first.attachments.length === 1 ? "image" : "images"}</span>}
       <small className="composer-queue-count">{dispatching ? "Sending…" : first.state === "blocked" ? "Needs attention" : queue.length > 1 ? `1 of ${queue.length}` : "Queued"}</small>
-      {sendable && <button type="button" className="composer-queue-send" aria-label={delegated ? "Send delegated results now" : "Send queued message now"} disabled={busy || dispatching || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>}
-      <IconButton label="Remove" aria-label={delegated ? "Remove delegated results" : "Remove queued message"} className="composer-queue-remove" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></IconButton>
+      {sendable && <button type="button" className="composer-queue-send" aria-label={delegated ? "Send delegated results now" : unread ? "Send unread follow-up now" : "Send queued message now"} disabled={busy || dispatching || !canSend} onClick={() => void mutate("message.queue.send")}>Send now</button>}
+      <IconButton label="Remove" aria-label={delegated ? "Remove delegated results" : unread ? "Remove unread follow-up" : "Remove queued message"} className="composer-queue-remove" disabled={busy || dispatching} onClick={() => void mutate("message.queue.remove")}><Trash2 size={14} aria-hidden="true" /></IconButton>
     </div>
     {(error ?? first.error) && <span role="status">{error ?? first.error}</span>}
   </div>;

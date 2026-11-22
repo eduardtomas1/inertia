@@ -99,7 +99,7 @@ Use **New chat** in the sidebar, or press ⌘N on macOS (Ctrl+N elsewhere). In t
 
 - **Supervised** keeps provider approvals active.
 - **Auto-edit** allows supported file edits without asking.
-- **Full Access** is an explicit choice for a workspace and task you trust.
+- **Full Access** runs commands and edits without approval prompts, so choose it only for a workspace and task you trust. Claude Code still asks about a few actions its safety checks protect.
 
 New chats start in the mode chosen in **Settings → Chats → New chats**. A project can start its new chats in another mode with **Settings → Projects → Default access**; you can still change the mode for each chat in the composer.
 

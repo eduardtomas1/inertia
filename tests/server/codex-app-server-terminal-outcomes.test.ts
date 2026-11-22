@@ -20,6 +20,7 @@ vi.mock("../../src/server/codex-app-server", async (original) => {
 
 import { startCodexAppServerRun } from "../../src/server/codex/app-server-run";
 import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
+import { redactCodexErrorHeaders } from "../../src/server/codex/managed-errors";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
 function fixture(throughHarness = false, heldMethods: readonly string[] = []) {
@@ -701,4 +702,166 @@ describe("Codex App Server terminal outcomes", () => {
       });
     },
   );
+});
+
+// T3 b99333dc7: Codex wraps the Responses API's `invalid_encrypted_content` rejection in a generic turn error.
+const REJECTED_HISTORY_MESSAGE = "Codex could not verify this session's encrypted conversation history. Send another message to continue in a fresh session with the visible conversation history.";
+const REJECTED_HISTORY_RESPONSE = JSON.stringify({
+  error: {
+    type: "invalid_request_error",
+    code: "invalid_encrypted_content",
+    message: "Encrypted content could not be decrypted or parsed.",
+  },
+  headers: { "x-codex-turn-state": "dummy-sensitive" },
+  status: 400,
+});
+
+describe("Codex rejecting the native thread's encrypted history", () => {
+  function finalError(app: ReturnType<typeof fixture>, error: Record<string, unknown>, willRetry = false) {
+    app.notification("error", { threadId: "thread-test", turnId: "turn-test", willRetry, error });
+  }
+
+  it.each([false, true])("classifies T3's fixture from the final error notification (through the harness: %s)", async (throughHarness) => {
+    const app = fixture(throughHarness);
+    await vi.advanceTimersByTimeAsync(0);
+    finalError(app, { message: REJECTED_HISTORY_RESPONSE, codexErrorInfo: "other", additionalDetails: null });
+    app.terminal("failed", { message: REJECTED_HISTORY_RESPONSE, codexErrorInfo: "other", additionalDetails: null });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error",
+      code: "invalid_encrypted_content", message: REJECTED_HISTORY_MESSAGE } });
+    if (throughHarness) expect("error" in result ? result.error : undefined).toBe(REJECTED_HISTORY_MESSAGE);
+    // T3 stores only the code and its summary: none of the raw service response.
+    expect(result.failure?.technicalDetail).toContain("Codex error: invalid_encrypted_content");
+    expect(result.failure?.technicalDetail).not.toContain("Encrypted content could not be decrypted");
+    expect(JSON.stringify(result)).not.toContain("dummy-sensitive");
+    expect(JSON.stringify(result)).not.toContain("x-codex-turn-state");
+    if (!throughHarness) expect(JSON.stringify(app.observed.onActivity.mock.calls)).not.toContain("dummy-sensitive");
+  });
+
+  it("keeps a failed turn's own classified error out of the technical detail", async () => {
+    const app = fixture(true);
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("failed", { message: REJECTED_HISTORY_RESPONSE, codexErrorInfo: "other", additionalDetails: null });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result.failure?.technicalDetail).toContain("Codex error: invalid_encrypted_content");
+    expect(JSON.stringify(result)).not.toContain("dummy-sensitive");
+    expect(JSON.stringify(result)).not.toContain("Encrypted content could not be decrypted");
+  });
+
+  it.each([false, true])("redacts the response headers of an unclassified Codex service error (retried first: %s)", async (retried) => {
+    const response = JSON.stringify({
+      error: { type: "server_error", code: "server_overloaded", message: "The server is overloaded." },
+      headers: { "x-codex-turn-state": "dummy-sensitive", "x-request-id": "req-dummy-sensitive" },
+      status: 503,
+    });
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    if (retried) finalError(app, { message: response, codexErrorInfo: "other" }, true);
+    finalError(app, { message: response, codexErrorInfo: "other", additionalDetails: null });
+    app.terminal("failed", { message: response, codexErrorInfo: "other", additionalDetails: null });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result.failure?.code).toBeUndefined();
+    expect(result.failure?.technicalDetail).toContain("server_overloaded");
+    expect(result.failure?.technicalDetail).toContain('"headers":"[redacted]"');
+    expect(JSON.stringify(result)).not.toContain("dummy-sensitive");
+    expect(JSON.stringify(app.observed.onActivity.mock.calls)).not.toContain("dummy-sensitive");
+  });
+
+  it.each([
+    ["JSON", '{"error":{"code":"x"},"headers":{"a":"dummy-sensitive","b":"}{"},"status":400}', '{"error":{"code":"x"},"headers":"[redacted]","status":400}'],
+    ["JSON inside a JSON string", '"{\\"headers\\":{\\"a\\":\\"dummy-sensitive\\"},\\"status\\":400}"',
+      '"{\\"headers\\":\\"[redacted]\\",\\"status\\":400}"'],
+    ["Rust debug text", 'status: 400, headers: {"a": "dummy-sensitive"}, body: x', 'status: 400, headers:[redacted], body: x'],
+    ["a map cut off by a bound", '{"headers":{"a":"dummy-sensitive', '{"headers":"[redacted]"'],
+    ["text without headers", "Codex could not continue.", "Codex could not continue."],
+  ] as const)("redacts Codex header maps in %s", (_label, text, expected) => {
+    expect(redactCodexErrorHeaders(text)).toBe(expected);
+  });
+
+  it.each([
+    ["the additional details", { message: "Codex could not continue.", additionalDetails: REJECTED_HISTORY_RESPONSE }],
+    ["the error's own code", { message: "Codex could not continue.", code: "invalid_encrypted_content" }],
+    ["a bare code", { message: "invalid_encrypted_content" }],
+    ["a service error without a wrapper", { message: JSON.stringify({ code: "invalid_encrypted_content" }) }],
+  ] as const)("classifies %s of the final error notification", async (_label, error) => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    finalError(app, error);
+    app.terminal("failed", { message: "Codex could not continue." });
+    app.finishCleanup(true);
+
+    expect((await app.run.result).failure).toMatchObject({ code: "invalid_encrypted_content", message: REJECTED_HISTORY_MESSAGE });
+  });
+
+  it("classifies a failed turn's own error message without an error notification", async () => {
+    const app = fixture(true);
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("failed", { message: REJECTED_HISTORY_RESPONSE, codexErrorInfo: "other", additionalDetails: null });
+    app.finishCleanup(true);
+
+    expect((await app.run.result).failure).toMatchObject({ code: "invalid_encrypted_content", message: REJECTED_HISTORY_MESSAGE });
+  });
+
+  it("names the rejection that the turn reports after an earlier unrelated final error", async () => {
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    finalError(app, { message: "Codex could not continue." });
+    app.terminal("failed", { message: REJECTED_HISTORY_RESPONSE });
+    app.finishCleanup(true);
+
+    expect((await app.run.result).failure).toMatchObject({ code: "invalid_encrypted_content", message: REJECTED_HISTORY_MESSAGE });
+  });
+
+  /** One run whose final error notification carries `error`; the turn then fails with a plain message. */
+  async function notifiedOutcome(error: Record<string, unknown>, willRetry = false) {
+    const app = fixture(true);
+    await vi.advanceTimersByTimeAsync(0);
+    finalError(app, error, willRetry);
+    app.terminal("failed", { message: "Codex could not continue." });
+    app.finishCleanup(true);
+    return await app.run.result;
+  }
+
+  it.each([
+    ["an unrelated service code", { message: JSON.stringify({ error: { code: "server_overloaded", message: "Overloaded" } }) }, false],
+    ["plain provider text", { message: "Encrypted content could not be verified" }, false],
+    ["a code nested below the service error", { message: JSON.stringify({ detail: { error: { code: "invalid_encrypted_content" } } }) }, false],
+    ["a non-string code", { message: JSON.stringify({ error: { code: ["invalid_encrypted_content"] } }) }, false],
+    ["truncated JSON", { message: REJECTED_HISTORY_RESPONSE.slice(0, 60) }, false],
+    ["a non-string message", { message: { code: "invalid_encrypted_content" }, additionalDetails: 42 }, false],
+    ["an oversized service response", { message: JSON.stringify({ error: { code: "invalid_encrypted_content" }, padding: "x".repeat(20_000) }) }, false],
+    ["a rejection Codex retries", { message: REJECTED_HISTORY_RESPONSE }, true],
+  ] as const)("leaves %s unclassified", async (_label, error, willRetry) => {
+    // Control: the same run with T3's response is classified, so the negative below is not vacuous.
+    expect((await notifiedOutcome({ message: REJECTED_HISTORY_RESPONSE })).failure?.code).toBe("invalid_encrypted_content");
+
+    const result = await notifiedOutcome(error, willRetry);
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.code).toBeUndefined();
+    expect(result.failure?.message).not.toBe(REJECTED_HISTORY_MESSAGE);
+    expect(result.failure?.message.length).toBeLessThanOrEqual(4_000);
+  });
+
+  it("leaves an interrupted turn's error unclassified", async () => {
+    const control = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    control.terminal("failed", { message: REJECTED_HISTORY_RESPONSE });
+    control.finishCleanup(true);
+    expect((await control.run.result).failure?.code).toBe("invalid_encrypted_content");
+
+    const app = fixture();
+    await vi.advanceTimersByTimeAsync(0);
+    app.terminal("interrupted", { message: REJECTED_HISTORY_RESPONSE, codexErrorInfo: null });
+    app.finishCleanup(true);
+
+    const result = await app.run.result;
+    expect(result).toMatchObject({ status: "failed", failure: { reason: "codex-error" } });
+    expect(result.failure?.code).toBeUndefined();
+  });
 });

@@ -1,4 +1,5 @@
 import type { AgentOptions, LocalAgentStore, Run, RunResult, SDKAgent, SDKMessage, SDKCustomTool, ToolName } from "@cursor/sdk";
+import type { CursorSdkStartResult } from "../../node/cursor-sdk-protocol";
 
 export interface CursorSdkAuthority {
   conversationId: string;
@@ -46,6 +47,31 @@ function boundedText(text: string): void {
   if (!text.trim() || Buffer.byteLength(text) > MAX_MESSAGE_BYTES) throw new Error("Cursor SDK input exceeds its limit.");
 }
 
+/**
+ * Runs the session's turn, then closes its store before asking whether Cursor saved a checkpoint for the run
+ * (`CursorSdkStoreRecords.runCheckpointed`). This runs in the worker child, off the runtime's event loop. The store's
+ * tables mirror its journal (a record joins them only once its append committed) and a closed store refuses every
+ * later write, an SDK checkpoint still in flight after a Stop included, so the answer is what the next resume loads.
+ * A turn that failed without verified terminal evidence is answered `unverified` with its checkpoint answer, or
+ * rethrown when no native run exists or the store cannot tell.
+ */
+export async function executeCursorSdkRun(session: Pick<CursorSdkSession, "nativeSessionId" | "nativeRun">,
+  store: { dispose(): Promise<void>; runCheckpointed(agentId: string, runId: string): boolean | undefined },
+  execute: () => Promise<RunResult>): Promise<CursorSdkStartResult> {
+  let result: RunResult | undefined;
+  let failure: unknown;
+  try { result = await execute(); } catch (error) { failure = error; }
+  await store.dispose();
+  const run = session.nativeRun;
+  const runCheckpointed = run ? store.runCheckpointed(run.agentId, run.runId) : undefined;
+  if (result === undefined) {
+    if (!run || runCheckpointed === undefined) throw failure;
+    return { unverified: true, agentId: run.agentId, id: run.runId, runCheckpointed };
+  }
+  return { ...result, agentId: session.nativeSessionId!,
+    ...(runCheckpointed !== undefined && run?.runId === result.id ? { runCheckpointed } : {}) } as CursorSdkStartResult;
+}
+
 export class CursorSdkSession {
   private agent: SDKAgent | undefined;
   private run: Run | undefined;
@@ -64,6 +90,12 @@ export class CursorSdkSession {
   }
 
   get nativeSessionId(): string | undefined { return this.agent?.agentId; }
+
+  /** The native run Cursor started for the prompt, once `send` returned one of this session's agent. */
+  get nativeRun(): { agentId: string; runId: string } | undefined {
+    const agentId = this.agent?.agentId;
+    return this.run?.id && agentId && this.run.agentId === agentId ? { agentId, runId: this.run.id } : undefined;
+  }
 
   async execute(apiKey: string, prompt: string, sessionId?: string): Promise<RunResult> {
     if (this.active || this.closed) throw new Error("Cursor SDK session is unavailable.");

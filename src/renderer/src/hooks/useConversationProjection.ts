@@ -24,7 +24,7 @@ import {
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
-import { announceRuntimeQueueChanged } from "../components/composer/runtimeQueueEvents";
+import { announceRuntimeQueueChanged, useRuntimeQueuedFollowUps } from "../components/composer/runtimeQueueEvents";
 import type { StreamingAgentChannel } from "../utils/responseTimeline";
 import {
   appendStreamingReasoning,
@@ -966,14 +966,16 @@ export function useConversationProjection({
     () => withProvisionalLatestTurn(projectedTurns, conversation, activeLiveMessages),
     [activeLiveMessages, conversation, projectedTurns],
   );
-  const messages = useMemo(
-    () => mergeProjectionRecords(
+  // A follow-up the agent never read waits in the queue as its own turn's prompt; the timeline shows it there.
+  const queuedFollowUps = useRuntimeQueuedFollowUps(activeConversationId);
+  const messages = useMemo(() => {
+    const merged = mergeProjectionRecords(
       detail?.messages ?? [],
       activeLiveMessages,
       compareCreatedRecords,
-    ),
-    [activeLiveMessages, detail?.messages],
-  );
+    );
+    return queuedFollowUps.length === 0 ? merged : merged.filter(({ id }) => !queuedFollowUps.includes(id));
+  }, [activeLiveMessages, detail?.messages, queuedFollowUps]);
   const activities = useMemo(() => mergeProjectionRecords(
     detail?.activities ?? [],
     activeConversationId ? liveActivities[activeConversationId] ?? [] : [],

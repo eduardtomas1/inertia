@@ -13,7 +13,7 @@ import type { AgentHarnessEvent, AgentHarnessStartOptions } from "../../src/serv
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((path) => rm(path, { force: true, recursive: true }))); });
-async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof openCursorSdkWorker>[0]["handle"]) => Promise<unknown>) {
+async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof openCursorSdkWorker>[0]["handle"], signal: AbortSignal) => Promise<unknown>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "cursor-sdk-harness-"))); roots.push(root);
   const store = join(root, "store");
   const originStores = { missing: new Set<string>(), broken: new Set<string>() };
@@ -37,7 +37,7 @@ async function fixture(body?: (input: CursorSdkStart, handle: Parameters<typeof 
     request.mockImplementation(async (method?: unknown, value?: unknown) => {
       if (method !== "start") return "revert_to_followup";
       const input = value as CursorSdkStart;
-      if (body) return body(input, options.handle);
+      if (body) return body(input, options.handle, options.signal);
       await options.handle("event", { authority: input.authority, message: { type: "assistant", agent_id: "native-session", run_id: "native-run", message: { role: "assistant", content: [{ type: "text", text: "Done" }] } } });
       return { agentId: "native-session", id: "native-run", status: "finished" };
     });
@@ -193,4 +193,94 @@ describe("Cursor SDK production harness", () => {
     } finally { Object.defineProperty(process, "platform", original); }
   });
 
+});
+
+describe("Cursor SDK turn that ends before its first checkpoint (T3 c5fa33b27)", () => {
+  type Body = NonNullable<Parameters<typeof fixture>[0]>;
+  const streamed = (input: CursorSdkStart, handle: Parameters<Body>[1]) => handle("event", { authority: input.authority,
+    message: { type: "assistant", agent_id: "native-session", run_id: "native-run", message: { role: "assistant", content: [{ type: "text", text: "Partial" }] } } });
+  /** Output streams, then the worker answers `answer` for the run. */
+  const answering = (answer: Record<string, unknown>): Body => async (input, handle) => { await streamed(input, handle); return answer; };
+  const failedRun = (runCheckpointed?: unknown) => ({ agentId: "native-session", id: "native-run", status: "error",
+    ...(runCheckpointed === undefined ? {} : { runCheckpointed }) });
+  const unverified = (runCheckpointed: unknown, identity: { agentId?: string; id?: string } = {}) => ({ unverified: true,
+    agentId: identity.agentId ?? "native-session", id: identity.id ?? "native-run", runCheckpointed });
+  const terminal = (events: AgentHarnessEvent[]) => events.filter((event) => event.type === "status").at(-1);
+
+  it("reports the prompt dropped when output streamed and the run failed before Cursor saved a checkpoint", async () => {
+    for (const answer of [failedRun(false), unverified(false)]) {
+      const f = await fixture(answering(answer));
+      const result = await f.start().result;
+      expect(result).toMatchObject({ status: "failed", text: "Partial", cleanupConfirmed: true });
+      expect(terminal(f.events)).toMatchObject({ status: "failed", promptDropped: true });
+    }
+  });
+
+  it("reports the prompt dropped when the user stopped the run after output and the worker answered before it exited", async () => {
+    let answer!: (value: unknown) => void;
+    const answered = new Promise((resolve) => { answer = resolve; });
+    const f = await fixture(async (input, handle) => { await streamed(input, handle); return await answered; });
+    const run = f.start();
+    await vi.waitFor(() => expect(f.events.some((event) => event.type === "text")).toBe(true));
+    // The worker's `cancel` stops the run; its `start` then answers unverified, after closing its store.
+    f.request.mockImplementation(async (method?: unknown) => { if (method === "cancel") answer(unverified(false)); return null; });
+    run.cancel(false);
+    expect(await run.result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    expect(terminal(f.events)).toMatchObject({ status: "cancelled", promptDropped: true });
+  });
+
+  it("reports nothing for a run the harness killed: its worker never answers", async () => {
+    const f = await fixture(async (input, handle, signal) => {
+      await streamed(input, handle);
+      return await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("killed")), { once: true }));
+    });
+    const run = f.start();
+    await vi.waitFor(() => expect(f.events.some((event) => event.type === "text")).toBe(true));
+    run.cancel(true);
+    expect(await run.result).toMatchObject({ status: "cancelled" });
+    expect(terminal(f.events)).not.toHaveProperty("promptDropped");
+  });
+
+  it("never reports a drop for a run during which Cursor summarized the conversation, as T3 does after compaction", async () => {
+    const summarized: Body = async (input, handle) => {
+      await streamed(input, handle);
+      await handle("event", { authority: input.authority, message: { type: "task", agent_id: "native-session", run_id: "native-run", text: "Summary of the conversation so far" } });
+      return unverified(false);
+    };
+    const f = await fixture(summarized);
+    expect(await f.start().result).toMatchObject({ status: "failed", cleanupConfirmed: true });
+    expect(terminal(f.events)).not.toHaveProperty("promptDropped");
+    // The same answer without the summary is a drop.
+    const plain = await fixture(answering(unverified(false)));
+    await plain.start().result;
+    expect(terminal(plain.events)).toMatchObject({ promptDropped: true });
+  });
+
+  it("keeps a run that checkpointed before it failed delivered", async () => {
+    for (const answer of [failedRun(true), unverified(true)]) {
+      const f = await fixture(answering(answer));
+      expect(await f.start().result).toMatchObject({ status: "failed" });
+      expect(terminal(f.events)).toMatchObject({ status: "failed" });
+      expect(terminal(f.events)).not.toHaveProperty("promptDropped");
+    }
+  });
+
+  it("reports nothing without a valid answer about the streamed run, after a completion, or when cleanup is unconfirmed", async () => {
+    const cases: Array<{ answer: Record<string, unknown>; status: string; unconfirmed?: true }> = [
+      { answer: failedRun(), status: "failed" }, // the store could not tell
+      { answer: failedRun("false"), status: "failed" }, // malformed at the protocol boundary
+      { answer: unverified(undefined), status: "failed" },
+      { answer: { ...unverified(false), status: "error" }, status: "failed" },
+      { answer: unverified(false, { id: "other-run" }), status: "failed" },
+      { answer: unverified(false, { agentId: "other-agent" }), status: "failed" },
+      { answer: { agentId: "native-session", id: "native-run", status: "finished", runCheckpointed: false }, status: "completed" },
+      { answer: unverified(false), status: "failed", unconfirmed: true },
+    ];
+    for (const { answer, status, unconfirmed } of cases) {
+      const f = await fixture(answering(answer));
+      if (unconfirmed) f.close.mockRejectedValue(new Error("cleanup failed"));
+      expect(await f.start().result).toMatchObject({ status, cleanupConfirmed: !unconfirmed });
+      expect(terminal(f.events), JSON.stringify(answer)).not.toHaveProperty("promptDropped");
+    }
+  });
 });

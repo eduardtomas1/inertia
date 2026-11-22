@@ -33,3 +33,16 @@ export const cursorSdkStartSchema = z.object({
   && (start.adoptFrom === undefined || (start.agentStateRoot !== undefined && start.storeWorkspace !== undefined
     && start.adoptFrom !== start.agentStateRoot)));
 export type CursorSdkStart = z.infer<typeof cursorSdkStartSchema>;
+
+/**
+ * The worker's answer to `start`. `runCheckpointed`: whether Cursor saved a checkpoint for the run (T3 c5fa33b27),
+ * read in the worker from its store's records once the store was closed, so no write lands after it; absent when the
+ * store could not tell. A run that ended without verified terminal evidence (an error, an output limit, a Stop) is
+ * `unverified`: it is still a failure, and the checkpoint answer is all the worker reports about it.
+ */
+export const cursorSdkStartResultSchema = z.union([
+  z.object({ unverified: z.literal(true), agentId: identity, id: identity, runCheckpointed: z.boolean() }).strict(),
+  z.object({ agentId: identity, id: identity, status: z.enum(["finished", "cancelled", "error"]),
+    runCheckpointed: z.boolean().optional(), unverified: z.undefined().optional() }).passthrough(),
+]);
+export type CursorSdkStartResult = z.infer<typeof cursorSdkStartResultSchema>;

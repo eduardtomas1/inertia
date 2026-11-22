@@ -53,6 +53,7 @@ import {
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
 import { projectCodexErrorNotification } from "./app-server-error-events";
+import { classifyCodexManagedError } from "./managed-errors";
 import { codexFailureKind, codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
 import type { CodexAppServerEventHost } from "./app-server-event-host";
 export type { CodexAppServerEventHost } from "./app-server-event-host";
@@ -875,8 +876,11 @@ export class CodexAppServerEvents {
         status, turnError, this.host.cancelRequested(),
       );
       const providerInterrupted = interruptionFailure !== undefined;
-      const lastError =
-        boundedText(turnError?.message, 4_000) ?? this.host.lastError();
+      // T3 classifies a failed turn's own error message (`turn.error.message`) only. A classified error keeps
+      // only its code and safe summary (T3 stores no raw text).
+      const managed = status === "failed" ? classifyCodexManagedError(stringValue(turnError?.message)) : undefined;
+      const lastError = managed?.message
+        ?? boundedText(turnError?.message, 4_000) ?? this.host.lastError();
       if (lastError) this.host.setLastError(lastError);
       this.host.setTerminalEvent("turn/completed");
       const hasLiveDelegatedWork = this.liveSubagentIds.size > 0;
@@ -907,10 +911,13 @@ export class CodexAppServerEvents {
       } else if (status === "failed" || providerInterrupted) {
         this.host.rememberFailure(
           "codex-error",
-          interruptionFailure?.message ?? boundedText(turnError?.message, 4_000) ?? "Codex could not complete the turn.",
-          interruptionFailure ? interruptionFailure.technicalDetail : lastError,
+          interruptionFailure?.message ?? managed?.message
+            ?? boundedText(turnError?.message, 4_000) ?? "Codex could not complete the turn.",
+          interruptionFailure ? interruptionFailure.technicalDetail
+            : managed ? `Codex error: ${managed.code}` : lastError,
           codexUsageLimited(turnError?.codexErrorInfo),
           codexFailureKind(turnError?.codexErrorInfo),
+          managed?.code,
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {

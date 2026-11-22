@@ -37,6 +37,12 @@ export const orchestrationThreadSchema = z.object({
 }).strict();
 
 export const orchestrationRunDeliverySchema = z.enum(["not-delivered", "prompt-not-delivered"]);
+/**
+ * A provider failure code a later run acts on (T3 keeps the code on the run's error item).
+ * `invalid_encrypted_content`: Codex rejected the native thread's encrypted history, so the next
+ * run on that thread starts a fresh one with the portable history (T3 `rejected_native_history`).
+ */
+export const orchestrationRunFailureCodeSchema = z.enum(["invalid_encrypted_content"]);
 
 export const orchestrationRunSchema = z.object({
   id: orchestrationIdSchema,
@@ -65,6 +71,15 @@ export const orchestrationRunSchema = z.object({
    * the turn, so the prompt and its images were not delivered (the route was still reached).
    */
   delivery: orchestrationRunDeliverySchema.optional(),
+  /**
+   * With `delivery` only: the provider itself reported that it dropped the prompt before keeping it in its native
+   * history (T3 `promptDropped`; Cursor SDK: the run saved no checkpoint), whatever output it streamed. It tells a
+   * run the provider dropped from one the user stopped before its provider accepted it: a cancelled run is missed
+   * (its images ride on the next prompt) only with it. Absent on runs settled before it was recorded.
+   */
+  promptDropped: z.literal(true).optional(),
+  /** Set on a failed run only; absent on runs settled before failure codes were recorded. */
+  failureCode: orchestrationRunFailureCodeSchema.optional(),
 }).strict();
 
 export const orchestrationCleanupReleaseSchema = z.object({
@@ -126,6 +141,10 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
     terminalMessageId: orchestrationIdSchema.nullable(),
     nativeSessionId: nativeId.nullable(),
     delivery: orchestrationRunDeliverySchema.optional(),
+    /** With `delivery` only (see the run's `promptDropped`); absent on events written before it was recorded. */
+    promptDropped: z.literal(true).optional(),
+    /** Failed status only; absent on events written before failure codes were recorded. */
+    failureCode: orchestrationRunFailureCodeSchema.optional(),
   }).strict() }).strict(),
   z.object({ type: z.literal("run.attempt-replaced"), payload: z.object({
     runId: orchestrationIdSchema,
@@ -156,3 +175,4 @@ export type OrchestrationAttempt = z.infer<typeof orchestrationAttemptSchema>;
 export type OrchestrationAttemptReplacementReason = z.infer<typeof orchestrationAttemptReplacementReasonSchema>;
 export type OrchestrationCleanupRelease = z.infer<typeof orchestrationCleanupReleaseSchema>;
 export type OrchestrationDomainEvent = z.infer<typeof orchestrationDomainEventSchema>;
+export type OrchestrationRunFailureCode = z.infer<typeof orchestrationRunFailureCodeSchema>;

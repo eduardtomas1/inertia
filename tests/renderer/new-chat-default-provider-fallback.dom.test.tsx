@@ -43,7 +43,7 @@ describe("new chat default provider fallback", () => {
   it("states the Full access caution on the Access row whatever is chosen", () => {
     const { container } = renderDefaults([provider, claudeReady]);
     expect(container.querySelector('[data-setting-id="new-chat-access"]'))
-      .toHaveTextContent("Full access lets the agent act without asking. Choose it only for a workspace and task you trust.");
+      .toHaveTextContent("Full access runs commands and edits without approval prompts, though Claude Code still asks about a few actions its safety checks protect. Choose it only for a workspace and task you trust.");
   });
 
   it("says nothing extra while the stored provider is ready", () => {

@@ -152,6 +152,12 @@ export interface BeginAgentTurnInput
     continuation: import("../../shared/orchestration-history").HistoryCursor["continuation"] & object;
   };
   queuedMessageId?: string;
+  /**
+   * Start on this persisted follow-up message, which its provider accepted but
+   * never read, instead of creating one. It moves only out of the ended,
+   * retained turn that still owns it.
+   */
+  adoptedFollowUp?: { messageId: string };
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
   content: string;
@@ -200,8 +206,22 @@ export interface AgentTurnSettlementUpdate
    * before dispatch instead of treating the delivery as uncertain, and the
    * turn's restored-history notice is dropped (except for a provider-switch
    * restore, which also marks the route handoff).
+   *
+   * `prompt-dropped`: the provider took the request but dropped the prompt before keeping it in its native
+   * history (T3 `promptDropped`; Cursor SDK), so its output delivered nothing either: the turn settles as not
+   * delivered (handoff abandoned, backing restored, nothing credited) on a failed, cancelled or interrupted turn,
+   * and its run is marked so that a cancelled one still counts as missed. A rollback cursor the harness applied when
+   * it opened the session stays applied.
    */
-  providerDelivery?: "not-delivered";
+  providerDelivery?: "not-delivered" | "prompt-dropped";
+  /** A failed turn's provider failure code, recorded on its V2 run for the next turn's preparation. */
+  providerFailureCode?: import("../../shared/orchestration-v2").OrchestrationRunFailureCode;
+  /**
+   * Accepted follow-ups the provider never read. Their messages never count
+   * toward this turn's provider coverage, and settlement queues each one by
+   * reference to be sent as its own turn.
+   */
+  unreadFollowUpMessageIds?: readonly string[];
   /** Controller-owned stored projections belong to the same terminal commit. */
   projection?: {
     workspaceRunCreated: boolean;

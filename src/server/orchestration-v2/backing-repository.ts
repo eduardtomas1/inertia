@@ -134,7 +134,9 @@ export class ProviderBackingRepository {
    * first delivered turn, so it is bounded by the chat's own turns; unaccepted
    * Codex starts can make that run longer than any fixed window. A
    * `prompt-not-delivered` turn counts as delivered: its injected history
-   * reached the route.
+   * reached the route. A turn whose provider dropped its prompt is
+   * `not-delivered` (with `promptDropped`), so it does not count, as T3's
+   * `lastDeliveredRunForProviderThread` skips a `promptDropped` turn.
    */
   deliveredRouteTurnId(threadId: string): string | null {
     const row = this.database.prepare(`SELECT turn.id FROM agent_turns AS turn
@@ -350,8 +352,15 @@ export class ProviderBackingRepository {
     return handoff?.state === "delivered" && handoff.method === "native";
   }
 
-  /** `unaccepted`: decided once by the caller (`unaccepted(turn)` before settlement), else here. */
-  settle(turn: AgentTurn, undelivered = false, unacceptedTurn?: boolean): void {
+  /**
+   * `unaccepted`: decided once by the caller (`unaccepted(turn)` before settlement), else here. `promptDropped`: the
+   * provider dropped the turn's prompt (T3 `promptDropped`, passed with `unaccepted`), so an inline handoff its output
+   * already delivered is abandoned too: it reached the provider only inside that prompt (T3 restores the handoffs it
+   * sent to pending). The next run prepares a new one from the restored backing.
+   * `unreadFollowUpMessageIds`: follow-ups the provider accepted but never read; the session never held them.
+   */
+  settle(turn: AgentTurn, undelivered = false, unacceptedTurn?: boolean, promptDropped = false,
+    unreadFollowUpMessageIds: readonly string[] = []): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
     const run = this.run(turn.runId);
     if (!run) return;
@@ -370,7 +379,8 @@ export class ProviderBackingRepository {
     const unaccepted = unacceptedTurn ?? ((nativeDelivered || harnessDeclaresCapability(turn.harnessId, "turn-acceptance"))
       && !this.turnAccepted(turn, run, handoff));
     const notDelivered = undelivered || (unaccepted && !nativeUncertain && !nativeDelivered);
-    if (handoff?.state === "prepared" || (notDelivered && handoff?.state === "dispatching" && !nativeUncertain)) {
+    if (handoff?.state === "prepared" || (notDelivered && handoff?.state === "dispatching" && !nativeUncertain)
+      || (promptDropped && notDelivered && handoff?.state === "delivered" && handoff.method === "inline")) {
       this.changeHandoff(handoff, "abandoned");
     } else if (handoff?.state === "dispatching") this.changeHandoff(handoff, "uncertain", backing);
     if (backing && (nativeUncertain
@@ -386,10 +396,11 @@ export class ProviderBackingRepository {
     const rows = this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND turn_id = ?
       AND role IN ('user','assistant') ORDER BY created_at, rowid LIMIT ?`)
       .all(run.threadId, run.turnId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];
+    const unread = new Set(unreadFollowUpMessageIds);
     // An injection delivered before a turn Codex never accepted: its items are in the thread, the prompt is not.
     const coverage = [...new Set([...backing.coveredItemIds,
       ...(handoff?.state === "delivered" ? [...handoff.itemIds, ...handoff.omittedItemIds ?? []] : []),
-      ...(unaccepted ? [] : rows.map(({ id }) => id))])];
+      ...(unaccepted ? [] : rows.flatMap(({ id }) => unread.has(id) ? [] : [id]))])];
     this.record({ ...backing, coveredItemIds: coverage.slice(-MAX_BACKING_COVERAGE_ITEMS),
       coverageComplete: backing.coverageComplete && coverage.length <= MAX_BACKING_COVERAGE_ITEMS }, run.id, run.attemptId);
   }

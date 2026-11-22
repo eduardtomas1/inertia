@@ -10,6 +10,7 @@ import {
 import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import { INERTIA_VERSION } from "../../shared/version";
 import type { TurnFailureKind } from "../../shared/turn-lifecycle";
+import type { OrchestrationRunFailureCode } from "../../shared/orchestration-v2";
 import {
   CODEX_RPC_TIMEOUT_MS,
   CODEX_CHILD_INTERRUPT_OVERALL_TIMEOUT_MS,
@@ -32,6 +33,7 @@ import {
   type CodexRunPhase,
 } from "./app-server-config";
 import { CodexAppServerEvents } from "./app-server-events";
+import { redactCodexErrorHeaders } from "./managed-errors";
 import { CodexJsonLineWriter } from "./jsonl-writer";
 import {
   boundedText,
@@ -197,7 +199,9 @@ export function startCodexAppServerRun(
     technicalDetail?: string,
     usageLimited = false,
     failureKind?: TurnFailureKind,
+    code?: OrchestrationRunFailureCode,
   ): void => {
+    message = redactCodexErrorHeaders(message);
     failure ??= {
       reason,
       message,
@@ -208,6 +212,10 @@ export function startCodexAppServerRun(
     };
     if (usageLimited && reason === "codex-error" && failure.reason === "codex-error") failure.usageLimited = true;
     if (failureKind && reason === "codex-error" && failure.reason === "codex-error") failure.failureKind ??= failureKind;
+    // A managed code names the failure whichever Codex error reported it first; its summary replaces the raw text.
+    if (code && reason === "codex-error" && failure.reason === "codex-error" && failure.code === undefined) {
+      Object.assign(failure, { code, message });
+    }
   };
 
   const rememberTransportFailure = (message: string, technicalDetail?: string): void => {
@@ -249,10 +257,10 @@ export function startCodexAppServerRun(
       lastError,
       diagnostic.toString(),
     ].filter((value): value is string => Boolean(value));
-    // A custom backend token is materialized in the launch environment; the
-    // pattern scrubber alone misses JSON-shaped echoes of it.
+    // A custom backend token is materialized in the launch environment, and the pattern scrubber misses
+    // JSON-shaped echoes of it; Codex errors and stderr can also carry a service response's header maps.
     const technicalDetail = sanitizeProviderFailureDetail(
-      details.join("\n"),
+      redactCodexErrorHeaders(details.join("\n")),
       launchCredentialValues(options.environment),
       { workspaceRoot: options.cwd },
     );
@@ -546,7 +554,7 @@ export function startCodexAppServerRun(
     cancelRequested: () => cancelRequested,
     lastError: () => lastError,
     setLastError: (message) => {
-      lastError = message;
+      lastError = redactCodexErrorHeaders(message);
     },
     setLastProtocolMethod: (method) => {
       lastProtocolMethod = method;

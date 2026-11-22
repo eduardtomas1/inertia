@@ -286,6 +286,7 @@ export function normalizedProviderRunFailure(
     ...(reported?.activityId ? { activityId: reported.activityId } : {}),
     ...(reported?.usageLimited ? { usageLimited: true as const } : {}),
     ...(reported?.notDelivered ? { notDelivered: true as const } : {}),
+    ...(reported?.code ? { code: reported.code } : {}),
     technicalDetail,
   };
 }

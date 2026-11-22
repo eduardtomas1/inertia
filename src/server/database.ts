@@ -802,8 +802,20 @@ export class RuntimeStore {
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    const result = this.orchestration.lifecycle(turnId, () => settleProjectedAgentTurn(this.database, this, update.projection,
-      () => this.turnLedgerRepository.settle(turnId, update)), update.providerDelivery);
+    // Filled by the settlement below before coverage is computed in the same transaction: only a follow-up that
+    // a queue row now names stays out of the run's coverage, so one that could not be queued is never hidden.
+    const queuedUnread: string[] = [];
+    const result = this.orchestration.lifecycle(turnId, () => {
+      const settled = settleProjectedAgentTurn(this.database, this, update.projection,
+        () => this.turnLedgerRepository.settle(turnId, update));
+      // Same transaction: a follow-up the provider never read is queued by reference, never lost.
+      if (settled.settled && update.unreadFollowUpMessageIds?.length) {
+        const turn = this.agentTurn(turnId);
+        queuedUnread.push(...this.queuedMessages.requeueUnreadFollowUps(this.conversation(turn.conversationId), turnId,
+          update.unreadFollowUpMessageIds));
+      }
+      return settled;
+    }, update.providerDelivery, update.providerFailureCode, queuedUnread);
     // Orchestration settlement may drop the restored-history record of a turn its provider never accepted.
     return result.settled ? { ...result, turn: this.agentTurn(turnId) } : result;
   }

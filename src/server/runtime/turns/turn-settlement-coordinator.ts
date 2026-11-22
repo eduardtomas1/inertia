@@ -4,7 +4,9 @@ import {
   type ChatMessage,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
+import type { AgentTurnSettlementUpdate } from "../../persistence/types";
 import type { TurnFailureKind } from "../../../shared/turn-lifecycle";
+import type { OrchestrationRunFailureCode } from "../../../shared/orchestration-v2";
 import { turnFailureKind } from "./turn-failure-kind";
 import type {
   ProviderRunFailure,
@@ -196,7 +198,10 @@ export class TurnSettlementCoordinator {
         stopUnconfirmed ? withProviderStopNote(message) : message,
         status === "failed" && failure?.usageLimited === true,
         status === "failed" ? turnFailureKind(failure) : undefined,
-        status === "failed" && failure?.notDelivered === true,
+        // A dropped prompt (T3 `promptDropped`) is not delivered whatever ended the turn, a Stop included.
+        active.providerPromptDropped === true && status !== "completed" ? "prompt-dropped"
+          : status === "failed" && failure?.notDelivered === true ? "not-delivered" : undefined,
+        status === "failed" ? failure?.code : undefined,
       );
     } catch {
       try {
@@ -240,7 +245,8 @@ export class TurnSettlementCoordinator {
     message?: string,
     usageLimited = false,
     failureKind?: TurnFailureKind,
-    notDelivered = false,
+    providerDelivery?: AgentTurnSettlementUpdate["providerDelivery"],
+    failureCode?: OrchestrationRunFailureCode,
   ): CommittedSettlement {
     const completedAt = this.options.now();
     try {
@@ -257,7 +263,9 @@ export class TurnSettlementCoordinator {
         startedAt: active.turn.startedAt ?? completedAt,
         completedAt,
         updatedAt: completedAt,
-        ...(notDelivered ? { providerDelivery: "not-delivered" as const } : {}),
+        ...(providerDelivery ? { providerDelivery } : {}),
+        ...(failureCode ? { providerFailureCode: failureCode } : {}),
+        ...(active.unreadFollowUpMessageIds?.length ? { unreadFollowUpMessageIds: active.unreadFollowUpMessageIds } : {}),
         projection: {
           workspaceRunCreated: active.workspaceRunCreated,
           detail: message ?? active.conversation.title,

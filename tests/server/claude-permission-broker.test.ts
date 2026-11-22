@@ -80,6 +80,53 @@ function watcherBroker(
   });
 }
 
+function accessBroker(
+  access: "full" | "supervised" | "auto-edit",
+  interactionMode: "build" | "plan" = "build",
+  events: AgentHarnessEvent[] = [],
+): ClaudePermissionBroker {
+  return new ClaudePermissionBroker({
+    input: nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-permission-broker-access",
+      cwd: "/workspace",
+      prompt: "Clean up the build",
+      interactionMode,
+      access,
+    }),
+    emitter: createAgentHarnessEmitter(
+      "claude",
+      "claude-permission-broker-access",
+      { onEvent: (event) => events.push(event) },
+      "claude-permission-broker-run",
+      "claude-permission-broker-turn",
+    ),
+    providerNativeToolsAvailable: true,
+    hostToolNames: new Set([HOST_TOOL]),
+    cancelled: () => false,
+  });
+}
+
+// Claude Code's removal safety warnings, as its bypass mode forwards them to
+// canUseTool. The rm, rmdir and shell -c texts are Claude Code 2.1.319's own;
+// the reworded one comes from a later release (T3 #38581).
+const REMOVAL_SAFETY_REASONS = [
+  ["a dangerous rm", "Dangerous rm operation on possibly-empty variable path: $TARGET\nUse a literal absolute path instead."],
+  ["a dangerous rm in a shell -c script", "Dangerous rm operation in a shell -c script, on a target built from a value known only when it runs"],
+  ["a dangerous rmdir", "Dangerous rmdir operation on statically-unresolvable target: ./*/*"],
+  ["an unchecked shell -c script", "This shell -c script runs rm and could not be checked"],
+  ["a denied command in a shell -c script", "A permission rule denies a command in this shell -c script"],
+  ["the reworded removal check", "Claude Code can't be sure it read this command the way the shell will, so it can't rule out a dangerous removal. Read the command, and don't go ahead if you can't tell what it does."],
+] as const;
+const REMOVAL_COMMAND = { command: 'rm -rf -- "$TARGET/build"', description: "Remove the build output" };
+
+function removalSafetyDenial(reason: string) {
+  return {
+    behavior: "deny",
+    message: `Claude Code's removal safety check denied this command; the user did not reject it. The command did not run. Do not bypass the check by splitting the removal, putting it in a script, or using another tool or shell. If the warning below supplies a safe rewrite, use it and let the same check evaluate it. Otherwise continue the rest of the task without the removal and tell the user what you needed to delete and why. Warning: ${reason}`,
+  };
+}
+
 function approvalRequests(events: readonly AgentHarnessEvent[]): Array<{ requestId: string; kind: string; command?: string }> {
   return events.flatMap((event) => event.type === "extension"
     && event.extension === "claude-agent-sdk"
@@ -362,6 +409,143 @@ describe("Claude watcher decisions", () => {
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+async function answeredApproval(
+  access: "full" | "supervised" | "auto-edit",
+  interactionMode: "build" | "plan",
+  toolName: string,
+  input: Record<string, unknown>,
+  extra: Record<string, unknown>,
+  decision: "approve" | "deny" | "cancel",
+) {
+  const events: AgentHarnessEvent[] = [];
+  const permissions = accessBroker(access, interactionMode, events);
+  const result = permissions.canUseTool(toolName, input, callbackOptions(extra));
+  await expect.poll(() => approvalRequests(events).length).toBe(1);
+  const [request] = approvalRequests(events);
+  expect(permissions.settleApproval(request!.requestId, decision)).toBe(true);
+  return { request: request!, result: await result };
+}
+
+describe("Claude permission broker in Full access", () => {
+  it.each(REMOVAL_SAFETY_REASONS)("denies a Bash removal Claude Code flagged as %s and tells Claude not to work around it", async (_label, reason) => {
+    const events: AgentHarnessEvent[] = [];
+    await expect(accessBroker("full", "build", events).canUseTool(
+      "Bash",
+      REMOVAL_COMMAND,
+      callbackOptions({ decisionReason: `\u001b[33m${reason}\u001b[39m `, suppressAlwaysAllowRule: true }),
+    )).resolves.toEqual(removalSafetyDenial(reason));
+    expect(events).toEqual([]);
+  });
+
+  it.each([
+    ["no reason", undefined, "Bash"],
+    ["a path outside the workspace", "Path is outside allowed working directories", "Bash"],
+    ["another dangerous operation", "Dangerous mv operation on a target built from a variable", "Bash"],
+    ["a removal warning that does not lead", "Claude Code flagged: Dangerous rm operation on /", "Bash"],
+    ["a longer rm word", "Dangerous rmtree operation", "Bash"],
+    ["a shell -c text that is not exact", "This shell -c script runs rm and could not be checked.", "Bash"],
+    ["a removal warning on another tool", "Dangerous rm operation on possibly-empty variable path: $TARGET", "PowerShell"],
+  ] as const)("asks the user, without the removal denial, about a forwarded request with %s", async (_label, reason, toolName) => {
+    const extra = reason === undefined ? {} : { decisionReason: reason };
+    const approved = await answeredApproval("full", "build", toolName, REMOVAL_COMMAND, extra, "approve");
+    expect(approved.request).toMatchObject({ command: REMOVAL_COMMAND.command, ...(reason ? { reason } : {}) });
+    expect(approved.result).toEqual({ behavior: "allow", updatedInput: REMOVAL_COMMAND });
+  });
+
+  it.each([
+    ["an isolate-peer-machines check", "SendMessage", { to: "peer", message: "Status?" }, { decisionReason: "isolatePeerMachines is enabled \u2014 cross-machine message requires explicit approval" }],
+    ["a read outside the working folders under the read block", "Bash", { command: "cat \"$HOME/notes\"" }, { decisionReason: "cat names a path that is computed at run time, which cannot be checked against the read block (permissions.blockReadsOutsideWorkingDirectories)", blockedPath: "/home/user/notes" }],
+    ["an MCP tool that needs a person", "mcp__deploy__release", { version: "1.2.3" }, { mcpServer: { name: "deploy", source: "user" } }],
+    ["an unfinished permission check", "Bash", { command: "make release" }, { decisionReason: "The permission check for this command did not finish, so its safety checks did not run." }],
+  ] as const)("honours the user's decision both ways on %s that Claude Code forwards", async (_label, toolName, input, extra) => {
+    const approved = await answeredApproval("full", "build", toolName, input, extra, "approve");
+    expect(approved.result).toEqual({ behavior: "allow", updatedInput: input });
+    const declined = await answeredApproval("full", "build", toolName, input, extra, "deny");
+    expect(declined.result).toEqual({ behavior: "deny", message: "User declined tool execution." });
+    const cancelled = await answeredApproval("full", "build", toolName, input, extra, "cancel");
+    expect(cancelled.result).toEqual({ behavior: "deny", message: "User cancelled tool execution.", interrupt: true });
+  });
+
+  it.each([
+    ["Supervised", "supervised", "build"],
+    ["Auto-edit", "auto-edit", "build"],
+    ["Full access in plan mode", "full", "plan"],
+  ] as const)("leaves the flagged removal to the user's approval in %s", async (_label, access, interactionMode) => {
+    for (const [, reason] of REMOVAL_SAFETY_REASONS) {
+      await expect(accessBroker("full").canUseTool(
+        "Bash",
+        REMOVAL_COMMAND,
+        callbackOptions({ decisionReason: reason }),
+      )).resolves.toEqual(removalSafetyDenial(reason));
+      const { request, result } = await answeredApproval(access, interactionMode, "Bash", REMOVAL_COMMAND, { decisionReason: reason }, "approve");
+      expect(request).toMatchObject({ kind: "command", command: REMOVAL_COMMAND.command, reason });
+      expect(result).toEqual({ behavior: "allow", updatedInput: REMOVAL_COMMAND });
+    }
+  });
+
+  it.each([
+    ...REMOVAL_SAFETY_REASONS.map(([label, reason]) => [label, reason] as const),
+    ["a command with no safety warning", undefined] as const,
+  ])("asks the user about a request their ask rule forced, for %s, and honours the answer", async (_label, reason) => {
+    const extra = {
+      ...(reason === undefined ? {} : { decisionReason: reason }),
+      matchedAskRule: { source: "policySettings", toolName: "Bash", ruleContent: "rm:*" },
+    };
+    const approved = await answeredApproval("full", "build", "Bash", REMOVAL_COMMAND, extra, "approve");
+    expect(approved.result).toEqual({ behavior: "allow", updatedInput: REMOVAL_COMMAND });
+    const declined = await answeredApproval("full", "build", "Bash", REMOVAL_COMMAND, extra, "deny");
+    expect(declined.result).toEqual({ behavior: "deny", message: "User declined tool execution." });
+  });
+});
+
+describe("Claude permission broker approval display", () => {
+  const MODES = [
+    ["Full access", "full", "build"],
+    ["Full access in plan mode", "full", "plan"],
+    ["Supervised", "supervised", "build"],
+  ] as const;
+
+  it.each(MODES)("asks about an ask-rule request whose reason Claude Code coloured, showing the plain text, in %s", async (_label, access, interactionMode) => {
+    const reason = REMOVAL_SAFETY_REASONS[0][1];
+    const { request, result } = await answeredApproval(access, interactionMode, "Bash", REMOVAL_COMMAND, {
+      title: "\u001b[1mClaude wants to run rm\u001b[22m",
+      decisionReason: `\u001b[33m${reason}\u001b[39m\n`,
+      matchedAskRule: { source: "policySettings", toolName: "Bash", ruleContent: "rm:*" },
+    }, "approve");
+    expect(request).toMatchObject({ title: "Claude wants to run rm", reason, command: REMOVAL_COMMAND.command });
+    expect(result).toEqual({ behavior: "allow", updatedInput: REMOVAL_COMMAND });
+  });
+
+  it.each(MODES)("asks about a command containing a tab and shows it exactly, in %s", async (_label, access, interactionMode) => {
+    const input = { command: "printf 'name\\tsize\\n'\t> table.tsv", description: "Write the table header" };
+    const { request, result } = await answeredApproval(access, interactionMode, "Bash", input, {
+      decisionReason: "isolatePeerMachines is enabled — cross-machine message requires explicit approval",
+    }, "deny");
+    expect(request).toMatchObject({ command: input.command });
+    expect(result).toEqual({ behavior: "deny", message: "User declined tool execution." });
+  });
+
+  it.each(MODES)("still refuses approval text that could hide what runs, in %s", async (_label, access, interactionMode) => {
+    // The same reason field accepts Claude Code's colour codes but no other control character.
+    const coloured = await answeredApproval(access, interactionMode, "Bash", { command: "rm -rf build" }, {
+      decisionReason: "\u001b[33mNeeds approval\u001b[39m",
+    }, "deny");
+    expect(coloured.request).toMatchObject({ reason: "Needs approval" });
+    for (const [toolName, input, extra] of [
+      ["Bash", { command: "rm -rf build ‮ dlrow" }, {}],
+      ["Bash", { command: "rm -rf \u001b[8mhidden\u001b[0m build" }, {}],
+      ["Bash", { command: "rm -rf build" }, { decisionReason: "Dangerous rm‮ operation" , matchedAskRule: { source: "policySettings", toolName: "Bash" } }],
+      ["Bash", { command: "rm -rf build" }, { decisionReason: "Needs approval\u0007" }],
+      ["Write", { file_path: "notes.txt", content: "x" }, { blockedPath: "/outside\u001b[0m/notes.txt" }],
+    ] as const) {
+      const events: AgentHarnessEvent[] = [];
+      await expect(accessBroker(access, interactionMode, events).canUseTool(toolName, input, callbackOptions(extra)))
+        .resolves.toEqual({ behavior: "deny", message: "Claude sent unsafe permission display text." });
+      expect(approvalRequests(events)).toEqual([]);
     }
   });
 });

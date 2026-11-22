@@ -278,6 +278,11 @@ export interface QueueTurnRequest {
   /** Original validated ingress command for durable acknowledgement replay. */
   orchestrationRequest?: CommandSource;
   queuedMessageId?: string;
+  /**
+   * Start the turn on this unread follow-up's persisted message instead of a new one (the queue row that names
+   * it is `queuedMessageId`).
+   */
+  adoptedFollowUp?: { messageId: string };
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
   conversationId: string;
@@ -405,6 +410,13 @@ export interface ActiveTurn {
   /** FIFO admission tail for parent follow-ups on this exact active turn. */
   followUpAdmissionTail: Promise<void>;
   supportsFollowUpImages: boolean;
+  /** Persisted follow-up message by the steer id its provider was given. */
+  followUpMessagesBySteerId?: Map<string, string>;
+  /**
+   * Follow-ups the provider accepted but never read (`ProviderRunResult.unreadFollowUps`). Settlement leaves
+   * them out of this run's coverage and queues each one by reference.
+   */
+  unreadFollowUpMessageIds?: readonly string[];
   runState: AuthoritativeRunStateEngine;
   deferredSettlement: {
     status: AgentTurnTerminalStatus;
@@ -413,6 +425,11 @@ export interface ActiveTurn {
     failure?: ProviderRunFailure;
   } | null;
   providerStopStarted: boolean;
+  /**
+   * The provider reported, on its terminal status, that it dropped this turn's prompt before keeping it in its
+   * native history (`ProviderStatusEvent.promptDropped`). Settlement records the turn as not delivered.
+   */
+  providerPromptDropped?: true;
   sessionAfter: string | null;
   providerSessionTitle?: string;
   /** This turn's restored history for native delivery; absent or null when it has none to deliver. */

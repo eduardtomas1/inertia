@@ -17,6 +17,7 @@ import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint } from "./json";
 import { OrchestrationConflict, type CommandSource } from "./types";
+import { pruneTerminalQueuedMessages } from "../persistence/queued-message-repository";
 
 export class HistoryRollbackError extends Error {}
 
@@ -213,6 +214,11 @@ export class HistoryRollbackRepository {
     const removed = new Set((this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ?
       AND turn_id IN (SELECT value FROM json_each(?))`).all(threadId, JSON.stringify(plan.rolledBackTurnIds)) as { id: string }[])
       .map(({ id }) => id));
+    // An unread follow-up of a rolled-back turn is rolled back with it: its queue row never sends.
+    this.database.prepare(`UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL
+      WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked')
+        AND user_message_id IN (SELECT value FROM json_each(?))`).run(threadId, JSON.stringify([...removed]));
+    pruneTerminalQueuedMessages(this.database, threadId);
     const turns = new Set(plan.rolledBackTurnIds);
     const source = native?.control.request.source;
     let active: ProviderBacking | undefined;

@@ -45,7 +45,7 @@ Inertia is a desktop app for working with coding agents. Each chat belongs to a 
 - **Call your own agents.** Save named agents with their own instructions, skills and character in **Settings → Custom agents**, start from nine presets, and type `/calling` to hand the next message to one. The transcript shows it working beside the answer.
 - **Get visual answers.** An agent can reply with a chart, table, diagram or mockup rendered in the chat, themed like the app and sandboxed from the network and your files. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
 - **Spend less on long chats.** Return to a chat of 200K tokens or more on a Claude subscription, an Anthropic key or an OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. Claude chats compact on their own at 400K tokens instead of near 1M, and can compact while idle before their cache expires; Codex chats compact at 300K. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
-- **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** lets the agent act without asking.
+- **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** runs commands and edits without approval prompts. Claude Code still asks about a few actions its own safety checks or settings protect, and refuses a removal its dangerous-removal check flags.
 
 ## Find anything
 

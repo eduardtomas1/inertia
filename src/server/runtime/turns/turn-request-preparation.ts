@@ -200,6 +200,12 @@ function routeHostBridgeAttested(
     && routeUsesTrustedHostBridge(route);
 }
 
+/** A native session the turn replaces with a fresh one carrying the portable history; retired at adoption. */
+interface ReplacedBacking {
+  backing: ProviderBacking;
+  reason: "context-exhausted" | "rejected-native-history";
+}
+
 function replaceExhaustedSession(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
@@ -208,7 +214,7 @@ function replaceExhaustedSession(
 ): ResolvedTurnRequest {
   let replacement: ResolvedTurnRequest;
   try {
-    replacement = resolveTurnRequest(dependencies, request, backing);
+    replacement = resolveTurnRequest(dependencies, request, { backing, reason: "context-exhausted" });
   } catch (error) {
     throw error instanceof PortableHistoryBudgetError ? exhaustion : error;
   }
@@ -216,6 +222,23 @@ function replaceExhaustedSession(
     throw new ContextHandoffBackgroundWorkError();
   }
   return replacement;
+}
+
+/**
+ * T3 `rejected_native_history` (b99333dc7): Codex rejected the encrypted history of the native session this
+ * turn would resume, on the latest run its provider accepted. The turn starts a fresh session with the full
+ * portable history instead, and the rejected session's backing is retired. A fresh session would orphan
+ * background work still running on the rejected one, so the turn is refused first while any is pending.
+ */
+function replaceRejectedHistorySession(
+  dependencies: PrepareTurnRequestDependencies,
+  request: QueueTurnRequest,
+  backing: ProviderBacking,
+): ResolvedTurnRequest {
+  if (providerBackgroundWork(dependencies.providers, exhaustedBackingSession(backing)) === "pending") {
+    throw new ContextHandoffBackgroundWorkError("rejected-native-history");
+  }
+  return resolveTurnRequest(dependencies, request, { backing, reason: "rejected-native-history" });
 }
 
 export function compactionSessionInstruction(
@@ -286,7 +309,7 @@ export function claudeSpendLimitApplies(route: {
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
-  exhaustedBacking?: ProviderBacking,
+  replacedBacking?: ReplacedBacking,
 ): ResolvedTurnRequest {
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
@@ -416,7 +439,7 @@ export function resolveTurnRequest(
     && (mobility === "resume" || !localBacking || localBacking.status === "retired") ? currentBacking : null;
   const candidateBacking = movedBacking ?? localBacking;
   const usable = (backing: ProviderBacking | null) => backing?.status === "ready" && backing.coverageComplete
-    && backing.id !== exhaustedBacking?.id ? backing : null;
+    && backing.id !== replacedBacking?.backing.id ? backing : null;
   const relocation = movedBacking && mobility === "resume" && usable(movedBacking)
     && !dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
       providerInstanceId: movedBacking.providerInstanceId, workspaceKey: movedBacking.workspaceKey,
@@ -471,6 +494,15 @@ export function resolveTurnRequest(
     )
     ? staleProviderSessionDecision()
     : resolvedContinuation;
+  // Only a turn that would resume the backing's native session (T3 checks at the native resume). A goal start
+  // withholds its prompt and a fresh session gets no history without one, so it resumes, as with exhaustion.
+  if (route.providerId === "codex" && continuation.action === "resume-session" && reusableBacking
+    && replacedBacking === undefined && request.goalStart === undefined
+    && resumeSessionId === reusableBacking.nativeSessionId
+    && dependencies.store.orchestration.rejectedNativeHistorySession(conversation.id, reusableBacking.providerInstanceId)
+      === reusableBacking.nativeSessionId) {
+    return replaceRejectedHistorySession(dependencies, request, reusableBacking);
+  }
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
   const canResume = continuation.action === "resume-session";
@@ -598,7 +630,9 @@ export function resolveTurnRequest(
   };
   const prepareHistory = (capacityBytes: number, currentPromptBytes: number,
     options: { excludedMessageId?: string; target: ProviderBacking | null; skipEmpty?: boolean }) => {
-    const { excludedMessageId, target } = options;
+    const { target } = options;
+    // An adopted unread follow-up is already persisted, but it is this turn's prompt, never its history.
+    const excludedMessageId = options.excludedMessageId ?? request.adoptedFollowUp?.messageId;
     const usage = target ? previousTurnBoundaryUsage(dependencies.store.agentTurn(target.lastTurnId), target.nativeSessionId) : null;
     const history = dependencies.store.orchestration.portableHistory({
       threadId: conversation.id, capacityBytes, currentPromptBytes,
@@ -673,7 +707,7 @@ export function resolveTurnRequest(
     assembled = startsFreshInEstablishedChat ? assembleOnFreshSession() : assembleOnResumedSession();
   } catch (error) {
     if (error instanceof PortableHistoryBudgetError && deliversDelta && !startsFreshInEstablishedChat
-      && exhaustedBacking === undefined) {
+      && replacedBacking === undefined) {
       return replaceExhaustedSession(dependencies, request, deltaTarget!, error);
     }
     throw error;
@@ -767,6 +801,7 @@ export function resolveTurnRequest(
   });
   const input: BeginAgentTurnInput = {
     queuedMessageId: request.queuedMessageId,
+    ...(request.adoptedFollowUp ? { adoptedFollowUp: request.adoptedFollowUp } : {}),
     limitResetPlanId: request.limitResetPlanId,
     restartContinuationPlanId: request.restartContinuationPlanId,
     id: turnId,
@@ -820,8 +855,8 @@ export function resolveTurnRequest(
     importNote,
     handoffFromTurnId: latestTurn !== null && latestTurn.providerId !== route.providerId ? latestTurn.id : null,
     adopt: (queued) => {
-      const exhausted = exhaustedBacking ? dependencies.store.orchestration.backings.get(exhaustedBacking.id) : null;
-      if (exhausted) dependencies.store.orchestration.backings.invalidate(exhausted, "context-exhausted");
+      const replaced = replacedBacking ? dependencies.store.orchestration.backings.get(replacedBacking.backing.id) : null;
+      if (replaced) dependencies.store.orchestration.backings.invalidate(replaced, replacedBacking!.reason);
       instructionDelivery.recordPromptPack(queued.turn.id);
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();

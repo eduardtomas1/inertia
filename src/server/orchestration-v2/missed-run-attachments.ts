@@ -13,8 +13,14 @@ import { parseStoredAttachments } from "../persistence/codecs";
 export const MISSED_RUN_WALK_LIMIT = 64;
 
 const TERMINAL = "('completed','failed','cancelled','interrupted')";
-/** A run the user stopped is withdrawn, not missed: T3 resends a cancelled run only after its provider dropped it. */
-const MISSED_STATUSES = "('failed','interrupted')";
+
+/**
+ * SQL: the turn aliased `turn`, of the run aliased `run`, ended in a way a missed run can (T3 `missedRuns`,
+ * `c5fa33b27`): failed or interrupted, or cancelled after its provider dropped the prompt (`promptDropped`). A run the
+ * user stopped before its provider accepted it is withdrawn, not missed.
+ */
+const missedStatus = (turn: string, run: string) => `(${turn}.status IN ('failed','interrupted')
+  OR (${turn}.status = 'cancelled' AND COALESCE(json_extract(${run}.payload_json, '$.promptDropped'), 0) = 1))`;
 
 /** SQL: the turn aliased `turn` is rolled back. */
 const rolledBack = (turn: string) => `EXISTS (SELECT 1 FROM orchestration_v2_entities AS rollback
@@ -40,7 +46,7 @@ export function pendingMissedRunAttachmentSql(message: string): string {
   return `EXISTS (SELECT 1 FROM agent_turns AS missed_turn
     JOIN orchestration_v2_entities AS missed_run ON missed_run.kind = 'run' AND missed_run.id = missed_turn.run_id
     WHERE missed_turn.id = ${message}.turn_id AND missed_turn.user_message_id = ${message}.id
-      AND missed_turn.status IN ${MISSED_STATUSES}
+      AND ${missedStatus("missed_turn", "missed_run")}
       AND ${missedRun("missed_run")}
       AND (SELECT COUNT(*) FROM (SELECT 1 FROM agent_turns AS newer
         WHERE newer.conversation_id = missed_turn.conversation_id
@@ -62,6 +68,7 @@ interface WalkRow {
   has_run: number;
   instance: string | null;
   delivery: string | null;
+  prompt_dropped: number | null;
   rolled_back: number;
   withheld: number;
   attachments_json: string | null;
@@ -71,9 +78,10 @@ interface WalkRow {
  * The image attachments of this chat's runs on `providerInstanceId` whose prompt its provider never received
  * (`not-delivered`, or `prompt-not-delivered` when only injected history reached it), oldest run first, each
  * message's own order (T3 `prepareRetryHandoff` attachments). The walk goes newest first (ties by insertion) and
- * stops at the first delivered run whose prompt reached the provider. A run on another instance, a goal start (its prompt
- * was withheld), a run still in flight and a run the user stopped before its provider accepted it (T3 resends a
- * cancelled run only when its provider dropped the prompt) neither contribute nor stop it; a rolled-back run contributes nothing and
+ * stops at the first delivered run whose prompt reached the provider. A cancelled run contributes only when its provider
+ * dropped the prompt (`promptDropped`, T3 `c5fa33b27`), as a failed one does. A run on another instance, a goal start
+ * (its prompt was withheld), a run still in flight and a run the user stopped before its provider accepted it neither
+ * contribute nor stop it; a rolled-back run contributes nothing and
  * does not stop it either, since its rollback took back what it carried. A turn V2 never admitted (imported or
  * pre-V2 history) has no delivery record and is passed over too. Only images: documents became prompt text through
  * extraction that a retry cannot redo here.
@@ -85,6 +93,7 @@ export function missedRunImageAttachments(database: Database.Database, input: {
   const rows = database.prepare(`SELECT turn.status, run.payload_json IS NOT NULL AS has_run,
       json_extract(run.payload_json, '$.providerInstanceId') AS instance,
       json_extract(run.payload_json, '$.delivery') AS delivery,
+      json_extract(run.payload_json, '$.promptDropped') AS prompt_dropped,
       ${rolledBack("turn")} AS rolled_back, ${promptWithheld("turn")} AS withheld,
       message.attachments_json
     FROM agent_turns AS turn
@@ -100,7 +109,7 @@ export function missedRunImageAttachments(database: Database.Database, input: {
     if (row.has_run !== 1 || row.instance !== input.providerInstanceId || !isAgentTurnTerminalStatus(row.status)
       || row.rolled_back === 1) continue;
     if (row.delivery === "not-delivered" || row.delivery === "prompt-not-delivered") {
-      if (row.status === "cancelled") continue;
+      if (row.status === "cancelled" && row.prompt_dropped !== 1) continue;
       newestFirst.push(parseStoredAttachments(row.attachments_json ?? "[]")
         .filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image"));
       continue;

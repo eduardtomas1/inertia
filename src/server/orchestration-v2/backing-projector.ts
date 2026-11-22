@@ -117,8 +117,11 @@ function projectBackingWrites(event: OrchestrationBackingEvent, envelope: Orches
     return [{ kind: "context-handoff", id: handoff.id, value: handoff }];
   }
   const prior = contextHandoffSchema.parse(read("context-handoff", event.payload.handoffId)?.value);
+  // An inline handoff delivered by output goes back only when its run's provider dropped the prompt that carried it
+  // (T3 `promptDropped`): the run's status change, recorded first, says so.
+  const droppedInline = prior.method === "inline" && run.delivery !== undefined && run.promptDropped === true;
   const allowed: Record<string, readonly string[]> = { prepared: ["dispatching", "abandoned"], dispatching: ["delivered", "uncertain", "abandoned"],
-    delivered: [], uncertain: [], abandoned: [] };
+    delivered: droppedInline ? ["abandoned"] : [], uncertain: [], abandoned: [] };
   const { state, targetBackingId, nativeSessionId } = event.payload;
   // An event without a method keeps the handoff's (every event before native injection). A method changes only
   // while dispatching, and staying in `dispatching` is allowed only to change it.

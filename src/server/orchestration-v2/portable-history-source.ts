@@ -42,6 +42,13 @@ interface TurnFacts { run_id: string; status: string; provider_id: ProviderId; t
 
 const TERMINAL_TURN_STATUSES = "('completed','failed','cancelled','interrupted')";
 const COVERED = "(SELECT value FROM json_each(?))";
+/**
+ * A follow-up its provider never read waits in the queue to be its own turn's prompt; until then no turn carries
+ * it as history.
+ */
+const NOT_QUEUED = `messages.id NOT IN (SELECT user_message_id FROM queued_messages
+  WHERE conversation_id = messages.conversation_id AND state IN ('waiting','dispatching','blocked')
+    AND user_message_id IS NOT NULL)`;
 
 function turnItemStatus(status: string | null): PortableHistoryItem["status"] {
   return status === "failed" || status === "cancelled" || status === "interrupted"
@@ -57,7 +64,7 @@ function candidateIndex(input: {
   const retained = `(messages.turn_id IS NULL OR messages.turn_id NOT IN (SELECT id FROM orchestration_v2_entities
     WHERE kind = 'rolled-back-turn' AND thread_id = messages.conversation_id))`;
   const messageWhere = `messages.conversation_id = ? AND messages.role IN ('user','assistant')
-    AND messages.id <> ? ${route.sql} AND ${retained}`;
+    AND messages.id <> ? ${route.sql} AND ${retained} AND ${NOT_QUEUED}`;
   const messageParameters = [input.threadId, input.excludedMessageId ?? "", ...route.parameters];
   const routeTurn = input.route ? continuationRouteTurnSql("item_turn", input.route) : { sql: "1", parameters: [] };
   const attached = (column: string) => ({
@@ -171,7 +178,7 @@ export function portableHistorySource(database: Database.Database, input: {
   const eligible = count(`(${index.sql})`, index.parameters);
   const routedCount = count(`messages WHERE ${index.messageWhere}`, index.messageParameters);
   const total = count(`messages WHERE messages.conversation_id = ? AND messages.role IN ('user','assistant')
-    AND messages.id <> ? AND ${index.retained}`, index.messageParameters.slice(0, 2));
+    AND messages.id <> ? AND ${index.retained} AND ${NOT_QUEUED}`, index.messageParameters.slice(0, 2));
   const select = `SELECT * FROM (${index.sql})`;
   // Reserve places for opening/latest user and latest assistant even in a long stream of updates.
   const rows = database.prepare(`${select} ORDER BY at DESC, source_order DESC, position DESC LIMIT ?`)

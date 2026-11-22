@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import { snapshotPromptContext } from "../../../shared/snapshots";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attachment-context";
 import type { ChatAttachment } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
-import { ProviderSteerDeliveryUnknownError, type ProviderSteerInput } from "../../provider/contracts";
+import { ProviderSteerDeliveryUnknownError, type ProviderRunResult, type ProviderSteerInput } from "../../provider/contracts";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type {
   ActiveTurn,
@@ -24,6 +26,23 @@ function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<
     signal.addEventListener("abort", settle, { once: true });
     void active.runState.providerTurnStarted().then(settle);
   });
+}
+
+/** Lets a provider's report of an unread follow-up (by steer id) find its persisted message. */
+function recordFollowUpMessage(active: ActiveTurn, steerId: string, messageId: string): void {
+  (active.followUpMessagesBySteerId ??= new Map()).set(steerId, messageId);
+}
+
+/**
+ * A follow-up the provider accepted but never read is not its run's input:
+ * settlement leaves it out of the run's coverage and the queue sends it next.
+ * A Stop drops it instead (T3 `requeueUnreadSteers`).
+ */
+export function recordUnreadFollowUps(store: RuntimeStore, active: ActiveTurn, result: ProviderRunResult): void {
+  if (result.status === "cancelled" || !result.unreadFollowUps?.length
+    || store.orchestration.runControl.interruptRequested(active.conversation.id)) return;
+  active.unreadFollowUpMessageIds = [...new Set(result.unreadFollowUps
+    .flatMap((steerId) => active.followUpMessagesBySteerId?.get(steerId) ?? []))];
 }
 
 export const UNKNOWN_FOLLOW_UP_DELIVERY = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
@@ -130,11 +149,12 @@ export class TurnFollowUpCoordinator {
     }
     const freshSessionRequest = active.freshSessionRequest;
     active.freshSessionRequest = null;
+    const steerId = randomUUID();
     let accepted: boolean;
     try {
       accepted = await this.options.providers.steer(
         lease.conversationId,
-        { content: [providerContent, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths },
+        { content: [providerContent, snapshotContext].filter(Boolean).join("\n\n"), imagePaths: input.imagePaths, steerId },
         { runId: active.turn.runId, turnId: active.turn.id },
       );
     } catch (error) {
@@ -159,19 +179,18 @@ export class TurnFollowUpCoordinator {
       if (outcome !== "completed") {
         return { kind: "unconfirmed", message: "The follow-up was accepted as its turn ended. Check this chat before retrying." };
       }
-      return {
-        kind: "accepted",
-        message: this.options.store.createAcknowledgedFollowUpMessage(
-          lease.conversationId,
-          active.turn.id,
-          followUp,
-          lease.submittedAt,
-          this.options.now(),
-          attachments,
-          options.queuedMessageId,
-          ...messageOptions,
-        ),
-      };
+      const message = this.options.store.createAcknowledgedFollowUpMessage(
+        lease.conversationId,
+        active.turn.id,
+        followUp,
+        lease.submittedAt,
+        this.options.now(),
+        attachments,
+        options.queuedMessageId,
+        ...messageOptions,
+      );
+      recordFollowUpMessage(active, steerId, message.id);
+      return { kind: "accepted", message };
     }
     const boundary = this.options.answerBoundary?.prepare(active);
     const message = this.options.store.createAcknowledgedFollowUpMessage(
@@ -185,6 +204,7 @@ export class TurnFollowUpCoordinator {
       ...messageOptions,
     );
     this.options.answerBoundary?.record(active, message.createdAt, boundary?.deferred ?? false);
+    recordFollowUpMessage(active, steerId, message.id);
     return { kind: "accepted", message };
   }
 

@@ -55,6 +55,8 @@ interface QueuedMessageRuntimeOptions {
 }
 
 export const WATCHER_NOTE_REMOVED_REASON = "it was removed from the main chat's queue";
+/** It was written for the route its turn ran on and cannot be queued again; Send now re-checks the route. */
+export const UNREAD_FOLLOW_UP_ROUTE_CHANGED = "The agent did not read this follow-up, and this chat's model, access or workspace has changed since. Switch back to send it, or remove it.";
 
 export function createQueuedMessageRuntime(
   dependencies: TurnInteractionCommandDependencies,
@@ -113,7 +115,8 @@ export function createQueuedMessageRuntime(
     const manualId = manualTarget(conversationId, requestedId);
     const skipped = (entry: QueuedMessage): boolean => entry.id !== manualId && (entry.delegatedCompletion
       ? manualId !== undefined || entry.state === "blocked" || !hooks?.automatic(conversationId, entry.delegatedCompletion)
-      : entry.watcherNote !== undefined && entry.state === "blocked");
+      // A blocked watcher note or unread follow-up waits for the user's Remove or Send now; the queue goes on.
+      : (entry.watcherNote !== undefined || entry.userMessageId !== null) && entry.state === "blocked");
     const first = store.queuedMessages.list(conversationId).find((entry) => !skipped(entry));
     const retry = manualRetries.get(conversationId);
     manualRetries.delete(conversationId);
@@ -138,7 +141,9 @@ export function createQueuedMessageRuntime(
     if (conversation.archivedAt !== null) return;
     if (!manual && !releasesQueue(store.latestAgentTurnForConversation(conversationId))) return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
-      block(conversationId, first, "This chat's model, access or workspace changed. Remove and queue the message again.");
+      block(conversationId, first, first.userMessageId === null
+        ? "This chat's model, access or workspace changed. Remove and queue the message again."
+        : UNREAD_FOLLOW_UP_ROUTE_CHANGED);
       changed(conversationId);
       return;
     }
@@ -152,17 +157,26 @@ export function createQueuedMessageRuntime(
       return;
     }
     const attribution = first.delegatedCompletion;
-    const content = attribution ? hooks?.content(attribution) ?? null : first.content;
+    // A row that names an unread follow-up sends that message's own text and attribution (the turn adopts it).
+    const unread = first.userMessageId === null ? null : unreadFollowUpMessage(conversationId, first.userMessageId);
+    if (first.userMessageId !== null && !unread) {
+      block(conversationId, first, "This follow-up is no longer in its chat. Remove it and send it again.");
+      changed(conversationId);
+      return;
+    }
+    const content = unread ? unread.content : attribution ? hooks?.content(attribution) ?? null : first.content;
     if (content === null) {
       if (store.queuedMessages.withdrawDelegatedDelivery(conversationId, first.id)) changed(conversationId);
       return;
     }
     if (!store.queuedMessages.claim(conversationId, first.id)) return;
     changed(conversationId);
+    const watcherNote = unread ? unread.watcherNote : first.watcherNote;
+    const delegatedCompletion = unread ? unread.delegatedCompletion : attribution;
     const handler = createTurnInteractionCommandHandler({
       ...dependencies, queuedMessage: first,
-      ...(first.watcherNote ? { watcherDelivery: watcherNoteDelivery(first.watcherNote) } : {}),
-      ...(attribution ? { delegatedDelivery: delegatedDelivery(attribution) } : {}),
+      ...(watcherNote ? { watcherDelivery: watcherNoteDelivery(watcherNote) } : {}),
+      ...(delegatedCompletion ? { delegatedDelivery: delegatedDelivery(delegatedCompletion) } : {}),
       send: (_socket, _event) => undefined,
     });
     try {
@@ -170,6 +184,8 @@ export function createQueuedMessageRuntime(
         type: "message.send", requestId: first.id,
         payload: { conversationId, content, attachments: [], activate: false },
       });
+      // Delegated results steered into a turn that never read them stay delivered, as in T3 (delivery is
+      // marked when the steer is accepted); their message keeps its attribution as metadata only.
       const turnId = attribution ? store.queuedMessages.get(conversationId, first.id)?.turnId : null;
       if (attribution && turnId) hooks?.dispatched(attribution, turnId);
     } catch (error) {
@@ -180,6 +196,15 @@ export function createQueuedMessageRuntime(
       changed(conversationId);
     }
   }
+
+  const unreadFollowUpMessage = (conversationId: string, messageId: string) => {
+    try {
+      const message = store.message(messageId);
+      return message.conversationId === conversationId && message.role === "user" && message.turnId !== null ? message : null;
+    } catch {
+      return null;
+    }
+  };
 
   const retryAfterAdmission = (conversationId: string): void => {
     if (options.signal.aborted || deferred.has(conversationId)) return;
@@ -377,6 +402,10 @@ export function createQueuedMessageRuntime(
       throw new RuntimeRequestError("Delegated results continue this chat after the current turn ends.");
     }
     const first = store.queuedMessages.list(conversationId).find((entry) => !entry.delegatedCompletion);
+    // Steering it would persist a second copy of a message the chat already holds.
+    if (store.queuedMessages.get(conversationId, id)?.userMessageId) {
+      throw new RuntimeRequestError("This follow-up sends as its own turn when the current turn ends.");
+    }
     if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
     if (first.state === "dispatching") return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
@@ -552,7 +581,8 @@ export function createQueuedMessageRuntime(
     const hooks = options.delegated?.();
     const entry = store.queuedMessages.activeDelegatedDelivery(conversationId);
     const attribution = entry?.delegatedCompletion;
-    if (!hooks || !entry || !attribution || entry.state !== "waiting" || !hooks.automatic(conversationId, attribution)
+    if (!hooks || !entry || !attribution || entry.userMessageId !== null || entry.state !== "waiting"
+      || !hooks.automatic(conversationId, attribution)
       || !hooks.steerable(conversationId, attribution)) return false;
     const content = hooks.content(attribution);
     if (content === null) return false;
@@ -586,19 +616,50 @@ export function createQueuedMessageRuntime(
     }
   }
 
+  /**
+   * The queue head to send before an idle chat's direct message: a waiting delegated delivery, or the head of a
+   * queue that holds a waiting unread follow-up (T3 sends a steer that missed its turn before the user's next
+   * message). Sending it explicitly releases a hold after a failed turn, as T3's user send does.
+   */
+  const sendsBeforeDirectMessage = (conversationId: string): QueuedMessage | null => {
+    const delivery = waitingDelivery(conversationId);
+    if (delivery) return delivery;
+    // Delegated results waiting for a manual send stay manual: only the chat's own queue goes first. A head that
+    // is already starting (its preparation can take seconds) counts too, so the direct message waits behind it.
+    const entries = store.queuedMessages.list(conversationId).filter(({ delegatedCompletion }) => !delegatedCompletion);
+    const head = entries[0];
+    const pending = (state: QueuedMessage["state"]) => state === "waiting" || state === "dispatching";
+    return head && pending(head.state) && entries.some(({ userMessageId, state }) => userMessageId !== null && pending(state))
+      ? head : null;
+  };
+
   async function queueBehindDelivery(socket: WebSocket,
     command: Extract<ClientCommand, { type: "message.send" }>): Promise<boolean> {
     const { conversationId, content, attachments, context } = command.payload;
     if (!dependencies.enableProviders || isHeld() || context !== undefined || turns.isActive(conversationId)) return false;
-    const delivery = waitingDelivery(conversationId);
+    const delivery = sendsBeforeDirectMessage(conversationId);
     if (!delivery || attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) return false;
     if (!store.queuedMessages.get(conversationId, command.requestId)
       && store.queuedMessages.cappedCount(conversationId) >= MAX_QUEUED_MESSAGES) {
+      // A full queue never stops the user's own message: it starts now, as it did before unread follow-ups queued.
+      if (!delivery.delegatedCompletion) return false;
       throw new RuntimeRequestError("Delegated results continue this chat first, and its queue is full. Remove a queued message and send again.");
     }
     await enqueue({ conversationId, id: command.requestId, content, attachments }, command.requestId);
     await running.get(conversationId);
-    await dispatch(conversationId, delivery.id);
+    // A head that was already starting has finished by now; send it only if it still waits.
+    if (store.queuedMessages.get(conversationId, delivery.id)?.state === "waiting") await dispatch(conversationId, delivery.id);
+    // If what went first failed (its row is now blocked), the user's message must not wait in an idle chat:
+    // the queue goes on, up to and including that message.
+    for (let attempt = 0; attempt <= MAX_QUEUED_MESSAGES + 1 && !turns.isActive(conversationId); attempt += 1) {
+      if (store.queuedMessages.get(conversationId, command.requestId)?.state !== "waiting") break;
+      const head = store.queuedMessages.list(conversationId)
+        .find(({ delegatedCompletion, state }) => !delegatedCompletion && state === "waiting");
+      if (!head) break;
+      await running.get(conversationId);
+      await dispatch(conversationId, head.id);
+      if (store.queuedMessages.get(conversationId, head.id)?.state === "waiting") break;
+    }
     dependencies.send(socket, { type: "request.result", requestId: command.requestId, result: result(conversationId, command.requestId) });
     return true;
   }

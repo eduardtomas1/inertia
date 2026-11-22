@@ -43,6 +43,7 @@ import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
   agentTurnFromRow,
+  messageFromRow,
   normalizeAgentTurnUsage,
   optionalTurnString,
   providerModelSelectionFromLegacyFields,
@@ -71,6 +72,7 @@ import type { DailyWorkRange } from "../daily-work";
 import {
   compactMessageContentForTurn,
   compactReasoningContentForTurn,
+  MESSAGE_PROJECTION_COLUMNS,
 } from "./stream-text-storage";
 import { claimConversationContextPackets } from "./conversation-context-packet-repository";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
@@ -297,15 +299,17 @@ export class TurnLedgerRepository {
           );
         }
       }
-      const message = this.context.createMessage(
-        input.conversationId,
-        input.content,
-        "user",
-        input.attachments ?? [],
-        null,
-        input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
-      );
+      const message = input.adoptedFollowUp
+        ? this.adoptUnreadFollowUp(input.conversationId, input.adoptedFollowUp, input.requestedAt)
+        : this.context.createMessage(
+          input.conversationId,
+          input.content,
+          "user",
+          input.attachments ?? [],
+          null,
+          input.requestedAt,
+          { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
+        );
       const turn = this.create({
         ...input,
         userMessageId: message.id,
@@ -321,12 +325,15 @@ export class TurnLedgerRepository {
       if (input.restartContinuationPlanId) {
         completeRestartContinuationPlan(this.context.database, input.restartContinuationPlanId, input.conversationId, turn.id);
       }
+      if (input.adoptedFollowUp && !input.queuedMessageId) throw new Error("An unread follow-up starts only from its queue row.");
       if (input.queuedMessageId) {
+        // A row that names an unread follow-up (an active row with a message) accepts only with that message.
         const accepted = this.context.database.prepare(`
           UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ?, error = NULL,
             content = '', attachments_json = '[]', route_identity = ''
           WHERE id = ? AND conversation_id = ? AND state = 'dispatching'
-        `).run(turn.id, message.id, input.queuedMessageId, input.conversationId);
+            AND (user_message_id IS NULL OR user_message_id = ?) AND (user_message_id IS NOT NULL) = ?
+        `).run(turn.id, message.id, input.queuedMessageId, input.conversationId, message.id, input.adoptedFollowUp ? 1 : 0);
         if (accepted.changes !== 1) throw new Error("The queued message no longer owns this dispatch.");
         pruneTerminalQueuedMessages(this.context.database, input.conversationId);
       }
@@ -352,6 +359,35 @@ export class TurnLedgerRepository {
       }
       return { message: { ...message, turnId: turn.id }, turn };
     })();
+  }
+
+  /**
+   * Moves a follow-up its provider accepted but never read out of the ended
+   * turn that still owns it, to be the next turn's prompt. The owner is read
+   * here, in the admission transaction that also accepts the queue row naming
+   * the message, so a second adoption finds nothing and refuses (exactly
+   * once). A rolled-back owner, a running owner, or the owner's own prompt is
+   * refused. The message keeps its id, content and attachments; its time moves
+   * to the new request so it reads after the ended turn's answer.
+   */
+  private adoptUnreadFollowUp(
+    conversationId: string,
+    adoption: { messageId: string },
+    requestedAt: string | undefined,
+  ): ChatMessage {
+    const adoptedAt = requestedAt ?? new Date().toISOString();
+    const moved = this.context.database.prepare(`
+      UPDATE messages SET turn_id = NULL, created_at = ?
+      WHERE id = ? AND conversation_id = ? AND role = 'user'
+        AND turn_id IN (SELECT id FROM agent_turns WHERE conversation_id = ? AND user_message_id <> ?
+          AND status IN ('completed','failed','cancelled','interrupted'))
+        AND turn_id NOT IN (SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ?)
+    `).run(adoptedAt, adoption.messageId, conversationId, conversationId, adoption.messageId, conversationId);
+    if (moved.changes !== 1) throw new Error("The unread follow-up was already sent or is no longer in its turn.");
+    this.context.database.prepare("UPDATE conversations SET updated_at = MAX(updated_at, ?) WHERE id = ?")
+      .run(adoptedAt, conversationId);
+    return messageFromRow(this.context.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?`)
+      .get(adoption.messageId) as MessageRow);
   }
 
   runtimeInterruptionSource(conversationId: string): string | null {
@@ -603,7 +639,8 @@ export class TurnLedgerRepository {
    * into one it resumed (a switch back resumes with `same-continuation`).
    * Same-provider harness changes never count, and neither does a turn
    * settled as not delivered, whose history never reached the provider
-   * (`prompt-not-delivered` still counts: its history was injected).
+   * (`prompt-not-delivered` still counts: its history was injected). A turn
+   * whose provider dropped the prompt carrying its history is `not-delivered`.
    */
   latestProviderHandoffOnRoute(
     conversationId: string,

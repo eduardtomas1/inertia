@@ -14,7 +14,7 @@ describe("Claude plan mode permissions", () => {
     await Promise.all(roots.splice(0).map((root) => removePortableFixture(root)));
   });
 
-  it("asks before plan-mode writes even with full access", async () => {
+  it("asks before a write Claude Code forwards in full access, in plan and build mode", async () => {
     const root = portableFixtureRoot("Claude plan mode writes");
     roots.push(root);
     const outcomes: Record<string, { permission?: PermissionResult; approvals: string[] }> = {};
@@ -67,8 +67,8 @@ describe("Claude plan mode permissions", () => {
       permission: expect.objectContaining({ behavior: "deny", message: "User declined tool execution." }),
     });
     expect(outcomes.build).toEqual({
-      approvals: [],
-      permission: { behavior: "allow", updatedInput: { file_path: "plan.txt", content: "draft" } },
+      approvals: ["Claude wants to use Write"],
+      permission: expect.objectContaining({ behavior: "deny", message: "User declined tool execution." }),
     });
   });
 });

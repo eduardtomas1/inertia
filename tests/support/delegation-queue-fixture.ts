@@ -48,7 +48,7 @@ export interface DelegationQueueFixture extends TurnControllerTestRuntime {
   close(): Promise<void>;
 }
 
-export async function createDelegationQueueFixture(): Promise<DelegationQueueFixture> {
+export async function createDelegationQueueFixture(options: { clock?: () => Date } = {}): Promise<DelegationQueueFixture> {
   let queue: ReturnType<typeof createQueuedMessageRuntime> | undefined;
   let delegation: DelegationRuntime | undefined;
   const tasks = new Set<Promise<unknown>>();
@@ -62,7 +62,7 @@ export async function createDelegationQueueFixture(): Promise<DelegationQueueFix
       queue?.onTurnSettled(turn);
       if (delegation) void track(delegation.onTurnSettled(turn)).catch(() => undefined);
     },
-  }, { id: randomUUID });
+  }, { id: randomUUID, ...(options.clock ? { clock: options.clock } : {}) });
   const database = (runtime.store as unknown as { database: Database.Database }).database;
   const attachments = await ConversationAttachmentStore.open(runtime.directory);
   const abort = new AbortController();

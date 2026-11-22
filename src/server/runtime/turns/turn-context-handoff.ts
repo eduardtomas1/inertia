@@ -14,10 +14,17 @@ export class RestoredHistoryRejectedError extends RuntimeRequestError {
   }
 }
 
+/**
+ * A fresh session would orphan background work still running on the native session it replaces.
+ * `context-exhausted`: the session has no room for the chat's newer messages. `rejected-native-history`:
+ * Codex rejected the session's encrypted history; T3's own refusal message (`ContextHandoffBackgroundWorkError`).
+ */
 export class ContextHandoffBackgroundWorkError extends RuntimeRequestError {
-  constructor() {
+  constructor(readonly replacement: "context-exhausted" | "rejected-native-history" = "context-exhausted") {
     super(
-      "This provider session has no room for the chat's newer messages and still has background work running. Wait for that work to finish or stop it, then send again.",
+      replacement === "rejected-native-history"
+        ? "The target provider still has background work running. Wait for it to finish or stop it before retrying the handoff."
+        : "This provider session has no room for the chat's newer messages and still has background work running. Wait for that work to finish or stop it, then send again.",
       USER_CORRECTABLE_REQUEST,
     );
   }

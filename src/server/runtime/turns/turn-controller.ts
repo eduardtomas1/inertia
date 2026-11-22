@@ -70,11 +70,9 @@ import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
 import { PromptInstructionDeliveries, recordDeferredSessionInstruction } from "./turn-instruction-delivery";
 import {
-  providerEventMatchesActiveTurn,
-  providerFailureCause,
-  providerTerminalResultMatchesActiveTurn,
+  observeProviderPromptDropped, providerEventMatchesActiveTurn, providerFailureCause, providerTerminalResultMatchesActiveTurn,
 } from "./turn-provider-result";
-import { TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
+import { recordUnreadFollowUps, TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
 import {
@@ -1093,6 +1091,7 @@ export class TurnController {
    */
   handleProviderEvent(event: ProviderEvent, attemptId?: string | null): boolean {
     const active = this.activeByConversation.get(event.conversationId);
+    if (active) observeProviderPromptDropped(active, event, attemptId);
     if (!active || !providerEventMatchesActiveTurn(this.store, active, event)
       || (attemptId && attemptId !== active.attemptId)) return false;
     const observer = attemptId ? { attemptId } : undefined;
@@ -1129,9 +1128,7 @@ export class TurnController {
     }
     if (result.sessionInstructionApplied === false) recordDeferredSessionInstruction(this.store, result, this.hooks.reportIncident);
     if (rootAlreadyTerminal) return;
-    if (result.status === "completed") {
-      this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
-    }
+    if (result.status === "completed") this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     const outcomeAlreadyRequested = active.deferredSettlement !== null;
     if (!outcomeAlreadyRequested) recordRejectedProviderResume(this.store, active, result);
     if (!outcomeAlreadyRequested && providerSessionUnavailable(result)) {
@@ -1144,6 +1141,7 @@ export class TurnController {
       });
     }
     if (!outcomeAlreadyRequested) this.streams.reconcileAssistant(active, result);
+    if (!outcomeAlreadyRequested) recordUnreadFollowUps(this.store, active, result);
     if (result.status === "completed") {
       if (!outcomeAlreadyRequested && active.runState.hasLiveDescendants()) {
         const message = "The provider ended while delegated work was still running.";

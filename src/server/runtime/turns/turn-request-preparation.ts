@@ -48,6 +48,8 @@ import {
   type TurnContextProbes,
 } from "./turn-context-handoff";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { carriedMissedRunImages } from "./turn-missed-images";
+import { harnessDeclaresCapability } from "../../provider/capability-manifest";
 import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -373,6 +375,20 @@ export function resolveTurnRequest(
       );
     }
   }
+  // Images of earlier runs on this provider instance that never reached it ride on this prompt, provider-only (T3).
+  // A goal start withholds its prompt, and a model or harness without image input takes none (Cursor SDK and
+  // Antigravity refuse any image); none of these refuses the send.
+  const missedImages = carriedMissedRunImages({
+    providerId: route.providerId,
+    candidates: request.goalStart === undefined && supportsImages && harnessDeclaresCapability(route.harnessId, "images")
+      && dependencies.hooks.missedRunImageCheck
+      ? dependencies.store.orchestration.missedRunImages({ threadId: conversation.id,
+        providerInstanceId: providerInstanceId(route.providerId, route.continuationIdentity) })
+      : [],
+    ownAttachments: attachments,
+    ownImagePaths: request.imagePaths,
+    openCheck: dependencies.hooks.missedRunImageCheck,
+  });
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
@@ -506,7 +522,7 @@ export function resolveTurnRequest(
     visibleContent: request.content,
     ...(instructionDelivery.buildModeDue ? { interactionMode: conversation.interactionMode } : {}),
     attachments,
-    imagePaths: request.imagePaths,
+    imagePaths: missedImages.imagePaths ?? request.imagePaths,
     documentContexts: request.documentContexts,
     context: request.context,
     internalInstructions: [...instructionDelivery.promptPack, ...turnInstructions],
@@ -587,7 +603,7 @@ export function resolveTurnRequest(
     const history = dependencies.store.orchestration.portableHistory({
       threadId: conversation.id, capacityBytes, currentPromptBytes,
       ...portableHistoryBudgetInputs({
-        attachments, imageCount: request.imagePaths?.length ?? 0,
+        attachments, imageCount: (request.imagePaths?.length ?? 0) + missedImages.attachmentIds.length,
         configuredWindow: routeSelection.contextWindowOverride,
         limits: dependencies.providers.modelContextLimits?.({ providerId: route.providerId, harnessId: route.harnessId,
           selection: routeSelection, cwd: dependencies.store.conversationPath(conversation.id) }) ?? null,
@@ -722,7 +738,7 @@ export function resolveTurnRequest(
     imagePaths: assembled.imagePaths,
     attachmentReadRoots: dependencies.hooks.attachmentReadRoots?.({
       conversationId: conversation.id,
-      attachmentIds: attachments.map(({ id }) => id),
+      attachmentIds: [...missedImages.attachmentIds, ...attachments.map(({ id }) => id)],
     }) ?? [],
     skills: request.skills,
     ...(customAgentCall ? customAgentCall.providerInput : {}),

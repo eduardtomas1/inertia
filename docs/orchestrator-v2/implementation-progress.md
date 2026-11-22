@@ -5027,3 +5027,170 @@ Not run: the full `npm run check`, the Electron scenarios, a packaged build,
 Windows, and real Anthropic, Pi or Cursor accounts. No Pi binary was run (the
 fixtures follow Pi 1.0.2's published source); the Claude Code binaries were
 run only against a local fake Messages API; the Cursor SDK was run offline.
+
+## G9 follow-up: images of runs the provider never received — 2026-11-22
+
+Status: three commits on top of `4de6624a` (PR #686), macOS arm64, Node 22.
+T3 anchors are at `6f49071a3` (2026-11-22). This lands the "G9 follow-up:
+missed-run images" package from `t3code-delta-2026-11-17.md` (C2 rows
+`c2eb8f336`, `33892dcc7`) with the amendment from `t3code-delta-2026-11-22.md`
+C1 (`c5fa33b27`).
+
+### T3's rule
+
+`ProviderTurnStartService.ts`:
+
+- A missed run is an earlier run on the same provider thread that failed, was
+  interrupted, or was cancelled with a dropped prompt, and has no delivered
+  provider turn (`:1093-1104`, `:1167-1176`).
+- Its user message's attachments ride on the next prompted run start. They
+  stop once a later run on that provider thread has a delivered prompt.
+  Accepted compaction and `/goal` starts don't count as that later prompt and
+  carry none themselves (`prepareRetryHandoff`, `:1238-1262`; `:2089-2113`).
+- They go in front of the message's own, deduplicated by id, on the
+  provider-bound message only. They survive a resume fallback (`33892dcc7`).
+
+### What Inertia does now
+
+- **Which runs are missed.** A terminal V2 run whose `delivery` is
+  `not-delivered` (the provider received nothing) or the new
+  `prompt-not-delivered`. The second is a Codex turn whose restored history
+  was injected but that Codex never accepted
+  (`src/server/orchestration-v2/turn-repository.ts`, `synchronize`). It
+  otherwise settles exactly as before: the route counts as reached, the
+  injected history stays credited, and `deliveredRouteTurnId` and
+  `latestProviderHandoffOnRoute` treat it as delivered. Images are therefore
+  resent exactly when the run's prompt text is: both follow the same record.
+- **The walk** (`src/server/orchestration-v2/missed-run-attachments.ts`).
+  The chat's 64 newest turns, newest first, ties broken by insertion
+  (`rowid`). It looks only at runs on the current route's
+  `providerInstanceId` (T3's provider thread).
+  - A missed run that failed or was interrupted contributes its message's
+    images.
+  - The first delivered run that was not a goal start stops the walk.
+  - Goal starts (withheld prompts), runs still in flight, rolled-back runs,
+    runs the user stopped before the provider accepted them, and turns with
+    no V2 run (imported or pre-V2 history) are passed over.
+  - The result is oldest run first, each message in its own order.
+- **Where they ride** (`resolveTurnRequest`,
+  `src/server/runtime/turns/turn-request-preparation.ts`). Every prompted
+  start, whatever queued it: message send, queued messages, private connect,
+  duo, delegated child turns, watcher wakes, isolated review, todo, restart
+  continuation. Goal starts carry none, and neither does a model or harness
+  without image input. None of these refuses the send.
+  - The carried paths go first in the provider-bound `imagePaths`, so both
+    the resumed and the fresh-session assembly get them. The G9 replacement
+    attempt reuses the same input.
+  - They are counted in the history budget's image count.
+  - Their ids join the attachment read roots, listed last so the 4,096-root
+    bound keeps them.
+  - `attachments` is unchanged: the persisted message, attachment release and
+    structured context see only the user's own attachments.
+- **Checks** (`retainedMissedRunImageCheck`,
+  `src/server/runtime/attachments/trusted-attachment-resolver.ts`). The
+  stored path is ignored; the file is located at the retained store's layout
+  `<retained>/<id>/<id>.<ext>` from a UUID id. The folder and file must not be
+  symlinks, the file must be regular, 1 byte to 10 MiB, of an image type with
+  a matching extension, and realpath containment is checked at each level.
+  The retained root is resolved once per turn. A missing or unsafe image is
+  skipped.
+- **Limits** (`src/server/runtime/turns/turn-missed-images.ts`). The
+  message's own images stay whole. Carried images are added newest first
+  until the attachment count, the 80 MiB image total or the provider's image
+  rule (`providerImageRequestLimitError`) would be exceeded, so the oldest
+  are dropped first. Candidates are checked only as they are reached.
+- **Eviction** (`pendingMissedRunAttachmentSql`, used by
+  `evictableAttachmentIds`). A missed run's images are not evicted while no
+  later delivered, prompted, unrolled-back run on the same instance exists
+  and the missed turn is among the chat's 64 newest turns. This protects a
+  little more than the walk can carry (rolled-back missed runs), never less.
+  An image of an instance the chat no longer uses stays until 64 newer turns
+  exist.
+- **OpenCode image cap.** OpenCode joins the providers whose harness inlines
+  images under the 20 MiB request cap (`INLINE_IMAGE_PROVIDERS`). The own-send
+  validation had the same gap and now refuses more than 20 MiB of images for
+  OpenCode too. This is conservative for OpenCode 1.x servers, which read
+  file URLs.
+
+### Differences from T3
+
+| Difference | Why |
+| --- | --- |
+| Only images ride; a missed run's documents and PDFs do not | Inertia turns documents into prompt text through async extraction in `message-send-command.ts`. The synchronous request path, which every queue caller shares, cannot redo it |
+| Harnesses other than Codex carry no images from a failed run | They credit prompts they never confirmed (the open item in G11 part 2, review fixes second round, item 1). Images follow the text record so both stay consistent |
+| A Codex run the user stopped before Codex accepted it still resends its prompt text, though not its images | The images follow T3: a cancelled run is missed only when its provider dropped the prompt, which Inertia cannot observe yet (T3's only source is the Cursor SDK, `c5fa33b27`). The text follows Inertia's C6 acceptance rule, which marks the run `not-delivered`. Re-decide the text rule against T3 |
+| A delivered run that was later rolled back does not end the carry | Its rollback took back what it carried. T3 counts its accepted attempt as the boundary |
+| No "pending images force a prompted start" | Inertia has no empty-prompt native resume yet. Phase 5 N7 must add it, with T3's "Continue where you left off." (`245c57980`); a note marks the spot in `turn-missed-images.ts` |
+| OpenCode's 20 MiB image cap applies on every server version | Only OpenCode 2 inlines images; the server version is not known at send time |
+| Eviction keeps pending images; missing ones are skipped | T3 never evicts attachments. Inertia's retained store evicts under a storage cap, so pending images are pinned and a missing one cannot fail the send |
+
+### Reviews
+
+One implementer; two independent review rounds.
+
+Round 1 found one medium and four low defects, all fixed:
+
+1. **A refused turn whose history was injected counted as delivered**
+   (medium, probe-confirmed). Its prompt text was resent but not its images,
+   and it ended the carry and released the eviction pin. Fixed with
+   `prompt-not-delivered`.
+2. **Ties on `requested_at` broke by id string** (probe-confirmed). Now by
+   insertion order.
+3. **The eviction pin had no bound.** It now uses the walk's 64-turn window.
+4. **OpenCode's 20 MiB cap was not applied**, so carried images could make a
+   valid send fail. The same gap existed for the user's own images.
+5. **Sync file checks ran on every candidate** before the limits trimmed
+   them. Now the root is resolved once and checks stop at the first image
+   that no longer fits.
+
+Also fixed: carried ids could fall out of the 4,096-root read-root bound, and
+OpenCode's harness rejects images outside its roots; a harness without image
+input (Cursor SDK, Antigravity) would have failed a run that carried images.
+
+Round 2 (on the fixes) found one medium parity defect, fixed:
+
+1. **A run the user stopped before Codex accepted it carried its images**
+   (probe-confirmed). The parent commit already had it for `not-delivered`,
+   and the fix extended it to `prompt-not-delivered`. T3 resends a cancelled
+   run only after its provider dropped the prompt. Now a cancelled run is
+   passed over by the walk and never pinned.
+
+Recorded, not changed:
+- OpenCode 1.x sends over 20 MiB are now refused (conservative; see the
+  differences).
+- Cursor ACP, Kimi and Grok declare image input as `negotiated`. If the ACP
+  server did not advertise it, a carried image fails that turn, as the user's
+  own images already do.
+- `deliveredRouteTurnId` and `latestProviderHandoffOnRoute` still break
+  `requested_at` ties by id, while the walk uses insertion order. This
+  predates the package.
+
+### Verification
+
+On the merged tree before the stopped-run fix (macOS arm64, Node 22):
+- `npm test`: 20,585 passed, 179 skipped (1,612 files passed, 14 skipped).
+- `npm run test:portable`: 4,506 passed, 36 skipped.
+- `typecheck`, `lint` and `check:architecture`: passed.
+
+After the stopped-run fix: the missed-image, history-injection, read-root,
+selection, eviction, queued-message and send-command files (9 files) pass;
+typecheck and lint pass. The full `npm test` on the final tree: 20,586
+passed, 179 skipped.
+
+Every test added fails without its fix. New files:
+`tests/server/orchestration-missed-run-images.test.ts` (14 cases, portable)
+and `tests/server/turn-missed-images.test.ts`. Extended:
+`orchestration-history-injection`, `turn-attachment-read-roots`,
+`turn-interaction-commands`.
+
+Not run: the full `npm run check`, the Electron scenarios, a packaged build,
+Windows and Linux (the symlink case skips on Windows), and real Codex,
+OpenCode or ACP servers.
+
+### Open risks
+
+- A carried image that the check skips, or that falls outside the limits, is
+  not retried once a later delivered run moves the boundary. T3 behaves the
+  same.
+- Eviction still scans every message with attachments, as before. The pin
+  adds an indexed check per user message whose run was not delivered.

@@ -341,8 +341,13 @@ describe("turn acceptance on a harness that reports it (Codex)", () => {
       runtime.provider.resolve(failure);
       await flushTurnControllerTestPromises();
       expect(runtime.store.agentTurn(returned.turn.id).sessionRecovery?.restoredMessageCount).toBeGreaterThan(0);
+      // The prompt never reached Codex, but the injected history did: the route counts as reached.
       expect(runtime.store.orchestration.events.projection("run", returned.turn.runId)?.value)
-        .not.toHaveProperty("delivery");
+        .toMatchObject({ delivery: "prompt-not-delivered" });
+      expect(runtime.store.orchestration.backings.deliveredRouteTurnId(runtime.conversationId)).toBe(returned.turn.id);
+      const before = projectionRows(runtime.store);
+      runtime.store.orchestration.events.rebuildProjections();
+      expect(projectionRows(runtime.store)).toEqual(before);
     } finally { runtime.store.close(); }
   });
 

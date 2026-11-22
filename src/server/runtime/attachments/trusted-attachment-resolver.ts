@@ -1,6 +1,6 @@
 import { snapshotSourceSchema } from "../../../shared/snapshots";
 import { readAttachment, type AttachmentFileSource } from "../../../node/read-attachment.js";
-import { constants } from "node:fs";
+import { constants, lstatSync, realpathSync } from "node:fs";
 import {
   lstat,
   open,
@@ -23,11 +23,14 @@ import {
   MAX_ATTACHMENT_TOTAL_BYTES,
   storedAttachmentTypeMatchesName,
   chatAttachmentStorageExtension,
+  chatAttachmentKind,
+  MAX_IMAGE_ATTACHMENT_BYTES,
 } from "../../../shared/attachments.js";
 import type { ChatAttachment } from "../../../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../../../shared/runtime-attachments.js";
 import { AttachmentResolutionError } from "./attachment-errors.js";
 import { MAX_ATTACHMENT_READ_ROOTS } from "../../provider/attachment-read-grant.js";
+import { imageMediaType } from "../../provider/provider-image-read.js";
 
 export interface RuntimeAttachmentBroker {
   resolve(
@@ -213,15 +216,62 @@ export class TrustedAttachmentResolver {
   }
 }
 
+const RETAINED_ATTACHMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+/** Checks one missed run's image; null skips it. */
+export type MissedRunImageCheck = (input: { attachment: ChatAttachment }) => { path: string; size: number } | null;
+
+/**
+ * Opens one turn's check of missed runs' images, resolving the retained folder once (null when it cannot be). Each
+ * image is the retained file at its store layout `<retained>/<id>/<id>.<ext>` (never the stored path), resolving
+ * inside `<retained>/<id>`, a regular file that is no symlink, nonempty and within the image limit, with an image
+ * type and matching extension. A missing or unsafe file is skipped and never fails the send.
+ */
+export function retainedMissedRunImageCheck(
+  retained: { readonly directory: string },
+): () => MissedRunImageCheck | null {
+  return () => {
+    let root: string;
+    try { root = realpathSync(retained.directory); } catch { return null; }
+    return ({ attachment }) => {
+      if (!RETAINED_ATTACHMENT_ID.test(attachment.id) || chatAttachmentKind(attachment.mimeType) !== "image") return null;
+      try {
+        const folder = join(root, attachment.id);
+        const path = join(folder, `${attachment.id}.${chatAttachmentStorageExtension(attachment.mimeType)}`);
+        if (imageMediaType(path) !== attachment.mimeType) return null;
+        const directory = lstatSync(folder);
+        if (!directory.isDirectory() || directory.isSymbolicLink()) return null;
+        const file = lstatSync(path);
+        if (!file.isFile() || file.isSymbolicLink() || file.size <= 0 || file.size > MAX_IMAGE_ATTACHMENT_BYTES) return null;
+        const canonicalFolder = realpathSync(folder);
+        const canonical = realpathSync(path);
+        if (!singleSegmentWithin(root, canonicalFolder) || !singleSegmentWithin(canonicalFolder, canonical)) return null;
+        return { path: canonical, size: file.size };
+      } catch {
+        return null;
+      }
+    };
+  };
+}
+
+function singleSegmentWithin(parent: string, child: string): boolean {
+  const contained = relative(parent, child);
+  return contained !== "" && !contained.startsWith("..") && !isAbsolute(contained) && !contained.includes(sep);
+}
+
 export function conversationAttachmentReadRoots(
   store: { attachments(conversationId: string): readonly { readonly id: string }[] },
   retained: { readonly directory: string },
 ): (input: { conversationId: string; attachmentIds: readonly string[] }) => string[] {
-  return ({ conversationId, attachmentIds }) => [...new Set([
-    ...store.attachments(conversationId).map(({ id }) => id),
-    ...attachmentIds,
-  ])]
-    .filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(id))
-    .slice(-MAX_ATTACHMENT_READ_ROOTS)
-    .map((id) => join(retained.directory, id));
+  // The requested ids (the message's own and any carried from missed runs) go last, so the bound never drops them.
+  return ({ conversationId, attachmentIds }) => {
+    const requested = new Set(attachmentIds);
+    return [...new Set([
+      ...store.attachments(conversationId).map(({ id }) => id).filter((id) => !requested.has(id)),
+      ...requested,
+    ])]
+      .filter((id) => RETAINED_ATTACHMENT_ID.test(id))
+      .slice(-MAX_ATTACHMENT_READ_ROOTS)
+      .map((id) => join(retained.directory, id));
+  };
 }

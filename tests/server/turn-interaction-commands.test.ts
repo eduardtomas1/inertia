@@ -755,6 +755,7 @@ describe("provider image request budgets", () => {
     ["claude", "Claude"],
     ["cursor", "Cursor"],
     ["kimi", "Kimi Code"],
+    ["opencode", "OpenCode"],
   ] as const)("refuses more than 20 MiB of images for %s before any turn or retention", async (providerId, name) => {
     const selected = images(3, 8 * 1024 * 1024);
     const queue = vi.fn(() => queuedTurn());

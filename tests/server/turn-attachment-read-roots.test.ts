@@ -30,6 +30,16 @@ describe("attachment read roots", () => {
     expect(roots({ conversationId: "chat-b", attachmentIds: [] })).toEqual([join(STORE, OTHER_CHAT)]);
   });
 
+  it("keeps every requested id when the chat has more attachments than the bound", () => {
+    const ids = Array.from({ length: 4_100 }, (_, index) =>
+      `55555555-5555-4555-8555-${String(index).padStart(12, "0")}`);
+    const roots = conversationAttachmentReadRoots({ attachments: () => ids.map((id) => ({ id })) }, { directory: STORE });
+    // An image carried from a missed run is one of the chat's oldest attachments.
+    const listed = roots({ conversationId: "chat-a", attachmentIds: [ids[0]!, ids[1]!] });
+    expect(listed).toHaveLength(4_096);
+    expect(listed.slice(-2)).toEqual([join(STORE, ids[0]!), join(STORE, ids[1]!)]);
+  });
+
   it("passes the conversation's read roots to the provider run it starts", async () => {
     const readRoots = vi.fn(({ attachmentIds }: { conversationId: string; attachmentIds: readonly string[] }) =>
       attachmentIds.map((id) => join(STORE, id)));

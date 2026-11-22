@@ -13,6 +13,7 @@ import { customAgentCallAttributionSchema, type CustomAgentCallAttribution } fro
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
+import { pendingMissedRunAttachmentSql } from "../orchestration-v2/missed-run-attachments";
 
 import type {
   ChatAttachment,
@@ -389,13 +390,18 @@ export class TranscriptRepository {
     return projectAttachments(rows);
   }
 
+  /**
+   * Attachments eviction may delete, oldest first. Never one of a chat with a run in flight, nor an image a run its
+   * provider never received still owes the next prompt (`pendingMissedRunAttachmentSql`).
+   */
   evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] {
     const rows = this.context.database.prepare(`
-      SELECT messages.conversation_id, messages.attachments_json, EXISTS (
+      SELECT messages.conversation_id, messages.attachments_json, (EXISTS (
         SELECT 1 FROM agent_turns
         WHERE agent_turns.conversation_id = messages.conversation_id
           AND agent_turns.status IN (SELECT value FROM json_each(?))
-      ) AS active
+      ) OR (messages.role = 'user' AND messages.turn_id IS NOT NULL
+        AND ${pendingMissedRunAttachmentSql("messages")})) AS active
       FROM messages
       WHERE messages.attachments_json <> '[]'
       ORDER BY messages.created_at ASC, messages.id ASC

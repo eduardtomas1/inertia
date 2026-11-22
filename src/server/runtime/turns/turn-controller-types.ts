@@ -222,6 +222,12 @@ export interface TurnControllerHooks {
     conversationId: string;
     attachmentIds: readonly string[];
   }): readonly string[];
+  /**
+   * Opens a synchronous check of missed runs' retained images for one turn, before its prompt carries them to the
+   * provider again (containment in the retained folder, a regular non-symlink file within the image limit). The
+   * check returns null to skip an image. Without this hook, or when it returns null, no missed image is carried.
+   */
+  missedRunImageCheck?(): ((input: { attachment: ChatAttachment }) => { path: string; size: number } | null) | null;
   releaseGeneratedAttachments?(paths: readonly string[]): void | Promise<void>;
   /**
    * Required orchestration. Durable owners provide recovery; the controller

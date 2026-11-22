@@ -602,7 +602,8 @@ export class TurnLedgerRepository {
    * provider and restored history, whether onto a new session or as a delta
    * into one it resumed (a switch back resumes with `same-continuation`).
    * Same-provider harness changes never count, and neither does a turn
-   * settled as not delivered, whose history never reached the provider.
+   * settled as not delivered, whose history never reached the provider
+   * (`prompt-not-delivered` still counts: its history was injected).
    */
   latestProviderHandoffOnRoute(
     conversationId: string,

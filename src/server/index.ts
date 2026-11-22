@@ -78,7 +78,9 @@ import { ConversationCompactionStates } from "./runtime/conversation-compaction-
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
 import { createAgentThreadRuntime, type AgentThreadRuntime } from "./runtime/agent-thread-runtime";
 import { attachRuntimeWebSocketBoundary } from "./runtime/websocket-boundary";
-import { TrustedAttachmentResolver, conversationAttachmentReadRoots } from "./runtime/attachments/trusted-attachment-resolver";
+import {
+  TrustedAttachmentResolver, conversationAttachmentReadRoots, retainedMissedRunImageCheck,
+} from "./runtime/attachments/trusted-attachment-resolver";
 import { PrivateGeneratedAttachmentStore } from "./runtime/attachments/private-generated-attachments";
 import { unavailableSecureFileBroker } from "./secure-files";
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
@@ -666,6 +668,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           : undefined,
       releaseGeneratedAttachments: (paths) => generatedAttachments.release(paths),
       attachmentReadRoots: conversationAttachmentReadRoots(store, initializedConversationAttachments),
+      missedRunImageCheck: retainedMissedRunImageCheck(initializedConversationAttachments),
       validateModelSelection: (selection) =>
         backendProfileController.validateSelection(selection),
       refreshProviderMetadata: createTurnUsageRefresh(providerUsage),

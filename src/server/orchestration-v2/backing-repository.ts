@@ -132,7 +132,9 @@ export class ProviderBackingRepository {
    * them attempted is still due. The walk follows the chat's
    * `(conversation_id, requested_at, id)` index newest first and stops at the
    * first delivered turn, so it is bounded by the chat's own turns; unaccepted
-   * Codex starts can make that run longer than any fixed window.
+   * Codex starts can make that run longer than any fixed window. A
+   * `prompt-not-delivered` turn counts as delivered: its injected history
+   * reached the route.
    */
   deliveredRouteTurnId(threadId: string): string | null {
     const row = this.database.prepare(`SELECT turn.id FROM agent_turns AS turn

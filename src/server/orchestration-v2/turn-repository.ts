@@ -26,6 +26,7 @@ import { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint, durableJson } from "./json";
 import { ORCHESTRATION_V2_PROJECTION_VERSION, projectOrchestrationEvent } from "./projector";
 import { portableHistoryItem, readPortableContinuationHistory } from "./portable-history-source";
+import { missedRunImageAttachments } from "./missed-run-attachments";
 import { ProviderBackingRepository } from "./backing-repository";
 import { NativeBoundaryRepository } from "./native-boundary-repository";
 import { NativeControlRepository } from "./native-control-repository";
@@ -319,6 +320,12 @@ export class OrchestratedTurnRepository {
     return readPortableContinuationHistory(this.database, input);
   }
 
+  /** Images of this chat's runs its provider instance never received, still due on the next prompt. */
+  missedRunImages(input: Parameters<typeof missedRunImageAttachments>[1]) {
+    this.access.conversation(input.threadId);
+    return missedRunImageAttachments(this.database, input);
+  }
+
   /** One item of this chat's own portable history by its handoff id; never another chat's. */
   portableHistoryItem(input: Parameters<typeof portableHistoryItem>[1]) {
     this.access.conversation(input.threadId);
@@ -356,7 +363,9 @@ export class OrchestratedTurnRepository {
   /**
    * `delivery: "not-delivered"` settles a run the provider refused before
    * anything reached it: its handoff is abandoned and its backing and
-   * continuation cursors return to their state before dispatch.
+   * continuation cursors return to their state before dispatch. A run whose
+   * history was injected but whose turn was never accepted is recorded as
+   * `prompt-not-delivered` and otherwise settles as delivered history.
    */
   synchronize(turn: AgentTurn, observer?: AttemptObserver, delivery?: "not-delivered"): StaleAttemptObservation | null {
     const previous = this.events.projection("run", turn.runId);
@@ -366,7 +375,8 @@ export class OrchestratedTurnRepository {
     if (stale) return stale;
     const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
     // Decided once: on a harness that reports acceptance, a turn its provider never accepted delivered its prompt
-    // to no one. Unless its history was injected, the run did not reach the provider at all.
+    // to no one. Unless its history was injected, the run did not reach the provider at all; with it injected the
+    // route was reached but the prompt (and its images) still was not (`prompt-not-delivered`).
     const explicit = delivery === "not-delivered";
     const unaccepted = isAgentTurnTerminalStatus(turn.status) && this.backings.unaccepted(turn);
     const injected = unaccepted && this.backings.historyInjected(this.backings.handoff(turn.runId));
@@ -379,7 +389,8 @@ export class OrchestratedTurnRepository {
       startedAt: turn.startedAt, completedAt: turn.completedAt,
       terminalMessageId: turn.terminalAssistantMessageId,
       nativeSessionId: turn.providerSessionAfter ?? turn.providerSessionBefore,
-      ...(notDelivered ? { delivery: "not-delivered" as const } : {}),
+      ...(notDelivered ? { delivery: "not-delivered" as const }
+        : unaccepted && injected ? { delivery: "prompt-not-delivered" as const } : {}),
     } };
     const before = { ...event.payload, status: run.status, stateRevision: run.stateRevision,
       executionState: run.executionState, providerState: run.providerState,

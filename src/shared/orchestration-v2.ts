@@ -36,6 +36,8 @@ export const orchestrationThreadSchema = z.object({
   updatedAt: timestamp,
 }).strict();
 
+export const orchestrationRunDeliverySchema = z.enum(["not-delivered", "prompt-not-delivered"]);
+
 export const orchestrationRunSchema = z.object({
   id: orchestrationIdSchema,
   threadId: orchestrationIdSchema,
@@ -57,8 +59,12 @@ export const orchestrationRunSchema = z.object({
   startedAt: timestamp.nullable(),
   completedAt: timestamp.nullable(),
   terminalMessageId: orchestrationIdSchema.nullable(),
-  /** Set on a terminal run the provider definitely received nothing for. */
-  delivery: z.literal("not-delivered").optional(),
+  /**
+   * Set on a terminal run whose prompt never reached its provider. `not-delivered`: the provider received nothing.
+   * `prompt-not-delivered`: its restored history was injected into the session, but the provider never accepted
+   * the turn, so the prompt and its images were not delivered (the route was still reached).
+   */
+  delivery: orchestrationRunDeliverySchema.optional(),
 }).strict();
 
 export const orchestrationCleanupReleaseSchema = z.object({
@@ -119,7 +125,7 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
     completedAt: timestamp.nullable(),
     terminalMessageId: orchestrationIdSchema.nullable(),
     nativeSessionId: nativeId.nullable(),
-    delivery: z.literal("not-delivered").optional(),
+    delivery: orchestrationRunDeliverySchema.optional(),
   }).strict() }).strict(),
   z.object({ type: z.literal("run.attempt-replaced"), payload: z.object({
     runId: orchestrationIdSchema,

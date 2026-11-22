@@ -3,6 +3,8 @@ import { objectValue, type JsonObject } from "./protocol";
 export const CODEX_WATCHER_DISABLED_CONFIG_KEYS = [
   "cloud.skills.enabled",
   "features.apps",
+  // Codex still reads the legacy connectors key as an alias for apps.
+  "features.connectors",
   "features.enable_fanout",
   "features.hooks",
   "features.image_generation",

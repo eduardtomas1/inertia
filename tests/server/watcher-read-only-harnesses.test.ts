@@ -673,7 +673,8 @@ describe("watcher turns on the Codex app-server harness", () => {
     });
     expect((threadStart.config as Record<string, unknown>)["tools.experimental_request_user_input.enabled"]).toBe(false);
     expect(CODEX_WATCHER_DISABLED_CONFIG_KEYS).toEqual(expect.arrayContaining([
-      "features.apps", "features.plugins", "features.hooks", "features.multi_agent", "features.standalone_web_search",
+      "features.apps", "features.connectors", "features.plugins", "features.hooks", "features.multi_agent",
+      "features.standalone_web_search",
       "tools.experimental_request_user_input.enabled",
     ]));
     expect(String((turnStart.input as Array<{ text: string }>)[0]!.text)).not.toContain(WATCHER_ROLE);
@@ -738,7 +739,7 @@ describe("watcher turns on the Codex app-server harness", () => {
       .toBe(false);
   });
 
-  it("disables the user's MCP servers, apps, plugins, hooks and web search on a resumed watcher thread too", async () => {
+  it("disables the user's MCP servers, apps (and the legacy connectors key), plugins, hooks and web search on a resumed watcher thread too", async () => {
     const root = portableFixtureRoot("watcher codex resume");
     roots.push(root);
     const repo = repository(root, ["app-server"]);
@@ -757,6 +758,7 @@ describe("watcher turns on the Codex app-server harness", () => {
       approvalPolicy: "untrusted",
       config: {
         "features.apps": false,
+        "features.connectors": false,
         "features.plugins": false,
         "features.hooks": false,
         web_search: "disabled",

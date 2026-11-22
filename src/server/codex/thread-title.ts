@@ -35,6 +35,8 @@ const DISABLED_CONFIG_KEYS = [
   "features.apps",
   "features.code_mode",
   "features.code_mode_only",
+  // Codex still reads the legacy connectors key as an alias for apps.
+  "features.connectors",
   "features.context_management",
   "features.current_time_reminder",
   "features.deferred_executor",

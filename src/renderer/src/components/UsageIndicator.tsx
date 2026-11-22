@@ -255,12 +255,13 @@ export function UsageIndicator({
     return remaining !== null && (lowest === null || remaining < lowest) ? remaining : lowest;
   }, null);
 
-  const closePopover = useCallback((restoreFocus: boolean): void => {
+  const closePopover = useCallback((restoreFocus: "always" | "unless-moved" | "never"): void => {
     setOpen(false);
-    if (restoreFocus && typeof window !== "undefined") {
+    if (restoreFocus !== "never" && typeof window !== "undefined") {
       window.requestAnimationFrame(() => {
         const active = document.activeElement;
-        const focusMovedAway = active !== null
+        const focusMovedAway = restoreFocus === "unless-moved"
+          && active !== null
           && active !== document.body
           && active.isConnected
           && !document.getElementById(detailsId)?.contains(active);
@@ -292,14 +293,14 @@ export function UsageIndicator({
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target;
       if (target instanceof Node && !anchorRef.current?.contains(target)) {
-        closePopover(outsidePointerShouldRestoreFocus(target));
+        closePopover(outsidePointerShouldRestoreFocus(target) ? "always" : "never");
       }
     };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      closePopover(true);
+      closePopover("unless-moved");
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -368,7 +369,7 @@ export function UsageIndicator({
               type="button"
               className="usage-popover-close"
               aria-label="Close usage and context"
-              onClick={() => closePopover(true)}
+              onClick={() => closePopover("always")}
             >
               <X size={14} aria-hidden="true" />
             </button>
@@ -459,7 +460,7 @@ export function UsageIndicator({
               <button
                 type="button"
                 className="usage-limits-shortcut"
-                onClick={() => { closePopover(false); limitsContext.open(triggerRef.current, "limits"); }}
+                onClick={() => { closePopover("never"); limitsContext.open(triggerRef.current, "limits"); }}
               >
                 All provider limits
                 <ChevronRight size={14} aria-hidden="true" />

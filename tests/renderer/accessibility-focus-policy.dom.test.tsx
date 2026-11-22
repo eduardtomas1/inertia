@@ -117,6 +117,25 @@ describe("outside-pointer focus policy", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it("returns usage focus to its trigger when a blank outside press lands in a programmatic focus container", async () => {
+    renderUsage();
+    const trigger = screen.getByRole("button", { name: /Open usage and context/u });
+    fireEvent.click(trigger);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    screen.getByRole("button", { name: "Close usage and context" }).focus();
+    const container = screen.getByTestId("blank-surface");
+    container.tabIndex = -1;
+
+    fireEvent.pointerDown(container);
+    container.focus();
+    await act(async () => {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Usage & context" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("leaves focus with a real destination pressed outside the usage popover", async () => {
     renderUsage();
     fireEvent.click(screen.getByRole("button", { name: /Open usage and context/u }));

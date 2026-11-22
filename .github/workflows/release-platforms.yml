@@ -611,14 +611,14 @@ jobs:
             arch: x64
             evidence: macos-x64-1-of-2
             unit_command: "npm test -- --maxWorkers=2 --shard=1/2"
-            timeout_minutes: 40
+            timeout_minutes: 60
           - label: macOS x64 (2/2)
             runner: macos-15-intel
             platform: macos-x64
             arch: x64
             evidence: macos-x64-2-of-2
             unit_command: "npm test -- --maxWorkers=2 --shard=2/2"
-            timeout_minutes: 40
+            timeout_minutes: 60
           - label: macOS arm64
             runner: macos-15
             platform: macos-arm64

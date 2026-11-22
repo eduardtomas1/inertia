@@ -105,6 +105,143 @@ does not use the allowance. Arguments that fail validation return
 tools. A Codex thread registers it from its next new provider
 thread.
 
+### Choosing a route
+
+`inertia_list_models` (pack revision 5) tells an agent which `route` values
+`inertia_create_conversation` accepts, so it does not have to guess them; the
+create tool's description points to it. It takes an optional
+`backendProfileId` and returns the chat's current route (`current`) and the
+backend profiles the user has: native accounts, API-key presets, the Kimi
+preset and custom backends. Each backend has its `backendProfileId`, `name`,
+`providerId`, `routeKind` (`account` or `api-key`), `primaryModelId` (the model
+a route that names only the backend gets), `usable`, and its models with their
+labels and `reasoningEfforts`; the chat's current model is marked
+`current: true`. `providerId` is the provider of the backend's harness, which is
+what `route.providerId` accepts: the Kimi key route runs on the Claude harness,
+so it is `claude`. Every listed backend, model and reasoning effort has passed
+the create call's own route validation, so a model that a backend shows but
+cannot route to now, such as Grok's built-in catalog while Grok has not
+reported its models, is left out.
+
+`usable: false` comes with a `reason` from a fixed set (not signed in, agent
+CLI missing or needing an update, turned off in Settings, API key missing, last
+connection test failed, not compatible with its harness), worked out from state
+Inertia already holds: the tool never probes a backend. A custom backend's
+model that still needs a connection test reads as usable, because the create
+call tests it before the chat starts. The result never carries base URLs,
+endpoint hosts, keys, provider status messages or account details. Without a
+filter each backend lists at most 40 models; the result stays within 31 KiB
+with usable backends first, a cut sets `truncated` or `modelsTruncated` with
+`totalModels`, and `next` then says to call again with a `backendProfileId`.
+The tool is read-only and needs no approval. Arguments that fail validation,
+including an unknown `backendProfileId`, return `invalid_arguments` in the same
+`<field>: <problem>` form as the other chat tools.
+
+Before this tool, every `route` that named a backend or a model failed: the
+create call parsed the profile controller's view as a stored profile, and that
+schema refuses the view's status fields. The selection is now built from the
+view's model, and the controller's validation makes it canonical as before. A
+wrong route field fails with a line that names it (`route.backendProfileId: no
+such backend`, `route.modelId: not a model of this backend`,
+`route.providerId: does not match the backend's provider`) and points to
+`inertia_list_models`. A Codex thread registers the tool from its next new
+provider thread.
+
+### Answering a managed chat's questions
+
+Pack revision 6 lets a parent read and answer the questions its managed chats
+ask, so a child that stops on `needs-input` does not wait until the user
+notices. `inertia_get_conversation_status`, and the wait tool, which returns
+the same status, carry `pendingQuestions` while the child has a question
+another agent may answer: one entry per pending request with its `requestId`
+and, per question, the `header`, the `question`, the `options` numbered from 1
+with their `label` and `description`, `multiSelect`, and `freeText` (whether
+an answer may be typed). Extending the status result costs the agent surface
+only a longer status description (62 bytes per provider) instead of a second
+read tool, and the wait that reports `needs-input` already carries the
+question, so the parent needs no extra call. The question text was written by
+another model: it is secret-scrubbed and neutralized like a latest result, and
+the whole list stays within 32 KiB. A request that does not fit drops its
+option descriptions, then shortens its question to 1,000 bytes and its labels
+to 200 bytes, and is marked `truncated`; one that still does not fit is left
+out and counted in `omittedQuestions`.
+
+Only plain provider questions are shown. Tool and permission approvals and
+secret cards are kept elsewhere and never appear; within the questions,
+Inertia leaves out any request with a secret question (Codex's `isSecret`),
+the chat chooser `inertia_request_context` opens, and any request whose
+answer grants the provider a permission. Kimi's plan review, which lets Kimi
+leave plan mode and act, arrives through ACP's permission request and is now
+marked that way; Kimi's questions are not. When the child needs input and
+nothing it waits on can be shown, or a request was left out, `next` tells the
+parent to ask the user to answer in that chat. The pack's private instruction
+says the same in one line.
+
+`inertia_answer_question` takes the child's `conversationId`, the `requestId`,
+and `answers`: one per question, in order, each with `options` (option
+numbers) and/or `text`. Answers follow the rules of the app's own answer card,
+`agent.input.respond`: every question answered, a single-select question one
+option or one text, a multi-select question up to 20 values, and text only
+where `freeText` is true. A wrong answer returns `invalid_arguments` with lines
+such as `answers.0.options: question 1 has options 1 to 2`, before anything is
+asked. The tool changes a chat, so it goes through the same approval, operation
+record, replay rule and per-turn limits as `inertia_send_message`: the card
+reads "Answer a managed chat's question" and shows each question with the
+proposed answer, and a denial or a timeout sends nothing. After approval
+Inertia sends the answer only if that exact request, in the same provider turn,
+is still pending, then answers through the turn controller's
+`respondToInput`, the call `agent.input.respond` ends in. A request id that is
+not pending, or a question the user answered while the card was open, returns
+`host_tool_failed` with a line saying nothing was sent. A request id that
+names an approval or a secret request is refused by name, and one that names
+the chat chooser or a plan review with a line saying only the user can answer
+it, all before anything is asked. Only the direct parent may read or answer, as with every
+managed-chat tool. Free text is checked for active secret values like a sent
+message, and counts toward the turn's 65,536-character input budget. A retried
+provider call with the same identity finds the question answered and answers
+nothing again.
+
+The operation log's tool-name check gains `inertia_answer_question` in
+database schema 118, which rebuilds `agent_thread_operations` with every
+column, row and index unchanged.
+
+### Send modes
+
+`inertia_send_message` takes an optional `mode` (pack revision 6):
+
+- `auto`, the default and the earlier behaviour: a follow-up into the running
+  turn, otherwise a new turn.
+- `queue`: the message joins the child's own message queue, which runs it as
+  the next turn once the current one completes. It is an ordinary queued
+  message that the user sees in the child's queue and can remove; the queue's
+  limit of three applies, and a full queue is refused before the approval, or
+  after it when the queue filled meanwhile. The queue stores at most 20,000
+  characters, so a longer `content` with `mode: "queue"` returns
+  `invalid_arguments`. The result carries `queuedMessageId` and `position`,
+  and a `next` line when the child's last turn did not complete, because the
+  queue then waits for the user. The turn the queue later starts belongs to the
+  queue, not to the parent's call, so a parent turn that fails does not cancel
+  it.
+- `steer`: only a follow-up into the running turn. An idle child is refused
+  before the approval; a turn that ended before an approved steer could be
+  delivered returns an error and sends nothing rather than starting a new turn.
+- `restart`: stops the running turn, then starts a new turn with the message.
+  It needs a running turn, takes that turn's exact identity before asking,
+  and stops it with the stop tool's exact-owner stop and cleanup check, then
+  starts the new turn through the new-turn path, under one approval and one
+  operation. If the approved turn already ended, or another turn replaced it,
+  nothing is stopped or sent. The identity is held by the call rather than
+  recorded on the operation, so a parent that fails before approval cannot
+  cancel the turn it meant to restart; the new turn is recorded like any sent
+  turn and is cancelled if the parent turn fails.
+
+The approval card's title and first detail line name the mode: "Send work to a
+managed chat" (auto), "Queue work for a managed chat", "Steer a managed chat's
+running turn" or "Stop and restart a managed chat". A Codex thread registers
+`inertia_answer_question` and the `mode` field from its next new provider
+thread; a resumed thread keeps calling `inertia_send_message` without `mode`,
+which still means `auto`.
+
 ### Reading chat context
 
 `inertia.orchestration` also carries `inertia_request_context`, which lets an
@@ -186,8 +323,9 @@ set a fixed viewport, such as 1280 by 800 for a desktop layout, with
 
 ### Visual replies
 
-`inertia.visual-replies` adds one tool, `inertia_render_html`, for every
-provider that has Inertia host tools. The agent passes one self-contained HTML
+`inertia.visual-replies` (revision 3) adds two tools for every provider that
+has Inertia host tools: `inertia_render_html`, below, and
+`inertia_send_to_user`, described under Messages to the user. The agent passes one self-contained HTML
 document (at most 262,144 UTF-8 bytes, stated in the `html` field description
 rather than as `maxLength`, which JSON Schema counts in characters), a title of at most 120 characters without
 control characters, and an optional initial frame height from 80 to 2000 CSS
@@ -248,11 +386,68 @@ Codex chats created before this pack therefore see `inertia_render_html` from
 their next new provider thread. Claude, Cursor, Kimi, and OpenCode attach host
 tools for each turn and see it from their next turn.
 
+### Messages to the user
+
+Claude 5.1 and later return the text a model writes before a tool call only
+as a short summary, while the tool's input arrives intact. An agent therefore
+cannot show the user a draft, a code block, or what a question it is about to
+ask refers to by writing it before its next tool call. `inertia_send_to_user`
+takes `{ message }`, Markdown of 1 to 4,000 characters, and shows it in the
+agent's own turn exactly as written. The description reads: "Show the user a
+Markdown message in this chat, exactly as written, before your turn ends. Use
+it for content the user must read in full mid-turn, such as a draft, a code
+block, or what a question you are about to ask refers to. Don't repeat it in
+your reply." Characters are counted as Unicode code points, the unit JSON
+Schema's `maxLength` counts and the unit `inertia_render_html` counts its title
+in, so 4,000 emoji are accepted. A message that is empty, only whitespace, or
+contains a NUL character is refused; the advertised `pattern` states the same
+rule, so every schema-valid message is accepted. The text is stored unchanged,
+leading and trailing whitespace included.
+
+The tool is read-only, non-destructive and not idempotent, and needs no
+approval in any access mode or in Plan mode: it writes only the caller's own
+turn. It sets `alwaysLoad`, so Claude Code never defers it behind tool search,
+since a model that cannot see the tool writes the message as pre-tool text,
+which arrives summarized. A call is accepted only from the exact active source
+turn, and a turn shows at most 20 messages. In one database transaction
+Inertia checks that the turn is still active and under the limit, then stores
+a turn-scoped system message with the Markdown as its text and
+`sentToUser: true` (database schema 118 adds the `messages.sent_to_user`
+flag, which only a system message may set). The message reaches clients
+through the ordinary `conversation.message.persisted` event, and the model
+receives `{ sent: true, message: "Shown to the user. Don't repeat it in your
+reply." }`. Arguments that fail validation, a settled turn, a turn at its
+limit, a cancelled call, a message that contains a secret the user gave the
+agent, and a storage failure return `{ error: { code, message } }` with
+`invalid_arguments` (one `<field>: <problem>` line per problem, like the chat
+tools), `turn_not_active` (or the shared `host_tool_failed` when the turn had
+already settled before dispatch), `message_limit_reached`, `call_cancelled`,
+`secret_value_not_allowed`, or `message_not_saved`.
+
+The chat draws the message as the agent's own words, through the same
+sanitizing Markdown renderer as its replies, with a small *Sent mid-turn*
+label, at its place among the turn's prose and tool calls: it ends the group
+of tool rows before it, like prose does. When a settled turn folds its work,
+the message stays in view below the fold row with the turn's other exchanges
+(follow-ups, pages, secret cards), and a turn whose only other content is
+its answer keeps its work log instead of consolidating, so the message is not
+lost. It is never the turn's reply: the final answer, its anchor, the
+latest-result read (`inertia_get_latest_result` still says a turn without a
+reply ended without one), the minimap summary and title generation ignore it.
+Later reads of the chat see it as the agent's words: a turn read
+(`inertia_request_context`) lists it as a `sent-to-user` entry with its text,
+neutralized like other agent text; shared chat context, continuation history
+for another model or a fresh native session, and Private Connect carry its
+text as an assistant message under their usual bounds (an excerpt keeps at
+most 8 KiB of a message that is not the final answer); and message search
+finds it. Pages stay one-line notes there. Watcher digests read only
+assistant messages and leave it out.
+
 ### inertia.workspace
 
-`inertia.workspace` (revision 2) lets an agent read what the user sees in
+`inertia.workspace` (revision 3) lets an agent read what the user sees in
 Inertia's surfaces for its own chat. It is offered to every provider that has
-Inertia host tools, whatever the project's Browser setting. Its six tools are
+Inertia host tools, whatever the project's Browser setting. Its seven tools are
 read-only and non-destructive, take flat argument objects with no required
 fields, and never ask for approval:
 
@@ -264,6 +459,7 @@ fields, and never ask for approval:
 | `inertia_read_goal` | none | The chat's current goal as the Goal panel shows it: `source` (`codex-native` or `inertia-local`), objective (at most 4 KiB), status, token budget, tokens used, time used, and times; or `goal: null`. |
 | `inertia_list_tasks` | `includeDone?` | Up to 200 open (or, with `includeDone`, all) tasks, newest first: tasks assigned to this project, and tasks with no project (from before tasks had one) that are unlinked or linked to a chat in this project, with `id`, `title`, `note` (at most 1 KiB), `priority`, `dueDate`, `done`, `linkedConversationId`, and `linkedStatus`. |
 | `inertia_project_actions` | none | The project's Run actions for the chat's workspace (configured actions and package scripts) with `id`, `label`, `command`, `preview`, whether each is running (and running in this chat), and `previewUrl` when a local port was detected. Starting and stopping are not offered. |
+| `inertia_pull_request_status` | none | The GitHub pull request of the chat's branch: `number`, `url`, `title`, `state` (`OPEN`, `CLOSED` or `MERGED`), `draft`, `baseBranch`, `headBranch`, `headMatchesLocal`, `mergeable`, `mergeState`, `reviewDecision`, `updatedAt`, `checkCounts` by state, `totalChecks`, and up to 50 `checks` (failed, cancelled and pending first) with `checksTruncated`; or `pullRequest: null` with a `next` step. |
 
 Git status reuses the Changes view's status scan, and turn diffs reuse the
 stored turn artifacts. A settled turn returns its stored patch, or only its
@@ -288,6 +484,25 @@ it returned. A live turn's file list can change between calls; when it has,
 the next result starts again from the first file with `restarted: true`
 instead of skipping or repeating files. Passing a cursor back with another
 turn, or a cursor the tool did not return, is `invalid_arguments`.
+
+Pull request status reads GitHub through the user's own GitHub CLI, found and
+run as for the Pre-merge view: through the restricted runner, without a shell,
+with only the operating-system and proxy variables of its environment
+allowlist, so `gh` uses its own sign-in and never a token from the
+environment. It reads the branch checked out in the chat's workspace (the
+folder `inertia_git_status` reads) and the GitHub repository of that branch's
+push remote, then runs `gh pr list --head <branch> --state all`: the newest
+open pull request from that repository wins, else the newest closed or merged
+one. When the repository has none, `gh repo view --json parent` tells whether
+it is a fork, and the parent is searched for a pull request from the fork's
+owner. One `gh pr view` then reads that pull request. A workspace that is not a
+repository, a detached HEAD, a push remote that is not on github.com and a
+branch without a pull request each return `pullRequest: null` with a `next`
+step, not an error. `headMatchesLocal` says whether the local commit is the
+pull request's head, so unpushed commits show. At most 100 checks are parsed,
+and a check's details link is kept only for failed and cancelled checks and
+only inside the pull request's repository. Git and GitHub CLI share one
+20-second deadline, and cancelling the call stops `gh` and its process tree.
 
 Every result is checked against the 32 KiB host-tool result cap, and lists
 stop early with `truncated` when the next entry would not fit. Text in results
@@ -319,7 +534,10 @@ chat tools), `turn_not_found` (a
 turn of another chat, or no such turn), `workspace_unavailable` (no readable
 workspace folder, or turn diffs in a workspace that is not a Git repository),
 `call_cancelled`, and `host_tool_failed` (including a call from a turn that is
-no longer active).
+no longer active). Pull request status adds `github_cli_unavailable` (GitHub
+CLI missing), `github_cli_unauthenticated` (not signed in), `github_timeout`,
+and `github_unavailable` (offline, rate limited, no access to the repository,
+or malformed data).
 
 Codex App Server registers dynamic tools only when a thread starts, so Codex
 chats see this pack from their next new provider thread. Claude, Cursor, Kimi,
@@ -376,7 +594,7 @@ A Codex-native goal is not repeated there: it reaches Codex through its own
 thread-goal API as before.
 
 When a project turns Browser access off, its turns are not offered
-`inertia.frontend-workbench`: none of the sixteen Browser tools is advertised
+`inertia.frontend-workbench`: none of the seventeen Browser tools is advertised
 and the frontend instructions are left out of the block. The other packs,
 including `inertia.workspace`, are unchanged. The block's digest changes with
 the setting, so the next turn delivers the changed block. Claude, Cursor, Kimi, and OpenCode attach tools for each turn, so
@@ -429,6 +647,18 @@ The MCP server keeps the identifier `inertia-chat-manager`, because provider
 tool names and permission rules are derived from it. Its `initialize` result
 carries no instructions: the hidden instruction block and the tool
 descriptions say what the tools do.
+
+Claude Code defers MCP tools behind its tool search. A tool definition can set
+`alwaysLoad`, which Claude's tools/list sends as
+`_meta: { "anthropic/alwaysLoad": true }`, so Claude Code always loads that
+tool. Only `inertia_request_secret` and `inertia_send_to_user` set it: a
+model that cannot see the first asks for the secret in chat, which the tool
+exists to prevent, and one that cannot see the second writes the message as
+pre-tool text, which arrives summarized. The key is
+Anthropic's, so the tool lists Codex, Cursor, Kimi and OpenCode receive do not
+carry it.
+`alwaysLoad` enters a pack's definition digest only when it is set, so other
+tools keep their digests.
 
 ## Hidden instruction delivery
 

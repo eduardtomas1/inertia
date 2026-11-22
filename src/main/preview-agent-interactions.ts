@@ -6,11 +6,13 @@ import {
 import type { BrowserEvidenceEntry } from "../shared/browser-evidence.js";
 import { AgentBrowserRefusal, changedGeometry, stopForAbort } from "./preview-agent-action.js";
 import type { BrowserApprovalGuard } from "./preview-agent-approvals.js";
+import { performAgentPageDrag } from "./preview-agent-drag.js";
 import { hoverAgentPageRef } from "./preview-agent-input.js";
-import { locateAgentPageRef, showAgentPageCursor, type PreviewAgentTarget } from "./preview-agent-page.js";
+import { agentPageDropPoint, locateAgentPageRef, showAgentPageCursor, type PreviewAgentTarget } from "./preview-agent-page.js";
 import { blankTabRefusal, OUTSIDE_VIEWPORT_MESSAGE, type AgentOperationSession, type PreviewAgentOperations } from "./preview-agent-operations.js";
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import type { AgentOperationScope } from "./preview-agent-scope.js";
+import { agentPageRefOutsideViewport } from "./preview-agent-scroll.js";
 import { selectAgentPageOption, type AgentPageSelection } from "./preview-agent-select.js";
 import { agentPageViewPoint } from "./preview-agent-viewport.js";
 
@@ -20,10 +22,12 @@ const LISTED_OPTIONS_SUFFIX_RESERVE = 40;
 const STALE_MESSAGE = "That page element is stale. Take a new inertia_browser_snapshot for current refs.";
 const BLOCKED_MESSAGE = "That page element cannot be controlled by the Browser agent.";
 const DISABLED_MESSAGE = "That page element is disabled.";
+const DRAG_OUTSIDE_MESSAGE = "A drag needs both elements in view at once. Scroll with inertia_browser_scroll, or set a larger viewport with inertia_browser_resize, then take a new snapshot and try again.";
 
 type Point = { x: number; y: number };
 type HoverCommand = Extract<AgentBrowserCommand, { action: "hover" }>;
 type SelectCommand = Extract<AgentBrowserCommand, { action: "select" }>;
+type DragCommand = Extract<AgentBrowserCommand, { action: "drag" }>;
 
 function targetFailure(target: PreviewAgentTarget, missing: string): AgentBrowserResult | null {
   if (!target.found || target.x === undefined || target.y === undefined) return failure("not-found", missing);
@@ -130,6 +134,136 @@ export async function hoverAgentPageElement<Session extends AgentOperationSessio
   }
   operations.recordActivity(session, "hover", "Agent hovered a page element", { x: target.x, y: target.y });
   return stateResult(operations, session, { hovered: command.ref, element: element(target) });
+}
+
+async function locateDragRef<Session extends AgentOperationSession>(
+  operations: PreviewAgentOperations<Session>,
+  session: Session,
+  ref: string,
+  generation: number,
+  scope: AgentOperationScope,
+): Promise<(PreviewAgentTarget & Point) | AgentBrowserResult> {
+  const contents = operations.activeTab(session).view.webContents;
+  const located = await operations.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+  if (session.boundsGeneration !== generation) return changedGeometry();
+  if (!located.found && await operations.rendererOperation(
+    contents,
+    () => agentPageRefOutsideViewport(contents, ref),
+    { scope, phase: "page-scroll" },
+  )) return failure("not-found", DRAG_OUTSIDE_MESSAGE);
+  return targetFailure(located, STALE_MESSAGE) ?? located as PreviewAgentTarget & Point;
+}
+
+/**
+ * Drag one ref onto another. Unlike a click, a drag never scrolls: moving
+ * the page to reach one element could carry the other out of view, so both
+ * must already be visible. Both are located, hit-tested and, in a Supervised
+ * chat, bound to the approval like any other target.
+ */
+export async function dragAgentPageElement<Session extends AgentOperationSession>(
+  operations: PreviewAgentOperations<Session>,
+  session: Session,
+  command: DragCommand,
+  scope: AgentOperationScope,
+  validate?: BrowserApprovalGuard,
+): Promise<AgentBrowserResult> {
+  const contents = operations.activeTab(session).view.webContents;
+  const blank = blankTabRefusal(contents, command);
+  if (blank) return blank;
+  await operations.prepareInput(contents, scope);
+  const generation = session.boundsGeneration;
+  const changed = "A dragged element changed before the drag. Take a new inertia_browser_snapshot for current refs.";
+  const locate = (ref: string) => locateDragRef(operations, session, ref, generation, scope);
+  const source = await locate(command.ref);
+  if (!("found" in source)) return source;
+  const destination = await locate(command.targetRef);
+  if (!("found" in destination)) return destination;
+  stopForAbort(scope.signal);
+  await operations.rendererOperation(
+    contents,
+    () => showAgentPageCursor(contents, source.x, source.y, "Agent drag"),
+    { scope, phase: "page-cursor" },
+  );
+  if (session.boundsGeneration !== generation) return changedGeometry();
+  const lookup = (ref: string) => operations.rendererOperation(contents, () => locateAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+  const revalidatedSource = await lookup(command.ref);
+  const revalidatedTarget = await lookup(command.targetRef);
+  if (session.boundsGeneration !== generation) return changedGeometry();
+  const revalidationRefusal = targetFailure(revalidatedSource, changed) ?? targetFailure(revalidatedTarget, changed);
+  if (revalidationRefusal) return revalidationRefusal;
+  validate?.(revalidatedSource);
+  validate?.(revalidatedTarget, "drop");
+  stopForAbort(scope.signal);
+  const map = await operations.pointMap(session, contents, scope);
+  if (session.boundsGeneration !== generation) return changedGeometry();
+  let from = revalidatedSource as PreviewAgentTarget & Point;
+  let to = revalidatedTarget as PreviewAgentTarget & Point;
+  if (!agentPageViewPoint(map, from.x, from.y) || !agentPageViewPoint(map, to.x, to.y)) {
+    return failure("not-found", DRAG_OUTSIDE_MESSAGE);
+  }
+  // Assigned inside the delivery callback, so keep the full union for the checks below.
+  let outcome = "refused" as Awaited<ReturnType<typeof performAgentPageDrag>>;
+  const deliveryRefusal = await operations.deliverInput(contents, async () => {
+    scope.inputSent = true;
+    const hovered = await operations.rendererOperation(
+      contents,
+      () => hoverAgentPageRef(contents, command.ref, from.x, from.y, scope.signal, map),
+      { scope, phase: "page-hover" },
+    );
+    from = deliveredTarget(session, generation, hovered, changed, validate);
+    // Hovering can reveal drag handles or move the layout; find the drop target again.
+    to = deliveredTarget(session, generation, await lookup(command.targetRef), changed);
+    validate?.(to, "drop");
+    if (!agentPageViewPoint(map, from.x, from.y) || !agentPageViewPoint(map, to.x, to.y)) {
+      throw new AgentBrowserRefusal(failure("not-found", DRAG_OUTSIDE_MESSAGE));
+    }
+    // Just before the drop: a native drop target must still pass the full
+    // check and approval binding, and the in-page guard refuses a drop that
+    // lands anywhere else. A pointer drag keeps the dragged element under the
+    // pointer, so its release only needs the same target still in view and
+    // no frame over it.
+    const confirmDrop = async (native: boolean): Promise<Point | null> => {
+      if (session.boundsGeneration !== generation) return null;
+      let point: Point | null = null;
+      if (native) {
+        const fresh = await locateAgentPageRef(contents, command.targetRef);
+        if (targetFailure(fresh, changed)) return null;
+        validate?.(fresh, "drop");
+        to = fresh as PreviewAgentTarget & Point;
+        point = to;
+      } else {
+        point = await agentPageDropPoint(contents, command.targetRef);
+        if (point) to = { ...to, ...point };
+      }
+      if (session.boundsGeneration !== generation || !point || !agentPageViewPoint(map, point.x, point.y)) return null;
+      return point;
+    };
+    outcome = await operations.rendererOperation(
+      contents,
+      () => performAgentPageDrag(contents, from, to, map, confirmDrop, scope.signal),
+      { scope, phase: "page-drag" },
+    );
+  }, scope, { pressRef: command.ref, drag: true, dropRef: command.targetRef });
+  if (deliveryRefusal && deliveryRefusal !== "retargeted") {
+    return failure("invalid", deliveryRefusal === "file"
+      ? "File inputs cannot be activated by the Browser agent."
+      : deliveryRefusal === "disabled" ? "The dragged element became disabled during the drag."
+        : "The drag reached a target Inertia cannot inspect. Take a new snapshot and drag between listed controls.");
+  }
+  if (outcome === "retargeted") {
+    return failure("not-found", "The drop target moved out of view or changed during the drag, so nothing was dropped on it. Take a new inertia_browser_snapshot for current refs.");
+  }
+  if (deliveryRefusal === "retargeted" || outcome === "refused") {
+    return failure("not-found", "The dragged element or its drop target changed under the pointer. Take a new inertia_browser_snapshot for current refs.");
+  }
+  operations.recordActivity(session, "drag", "Agent dragged a page element", { x: to.x, y: to.y });
+  return stateResult(operations, session, {
+    dragged: command.ref,
+    onto: command.targetRef,
+    element: element(from),
+    target: element(to),
+    native: outcome === "native",
+  });
 }
 
 function selectionFailure(selection: Exclude<AgentPageSelection, { outcome: "selected" }>): AgentBrowserResult {

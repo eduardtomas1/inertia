@@ -380,7 +380,6 @@ export function installedWindowsNativeBinaryPaths(
     join(installDirectory, applicationName),
     ...["d3dcompiler_47.dll", "dxcompiler.dll", "ffmpeg.dll", "vk_swiftshader.dll", "vulkan-1.dll"]
       .map((name) => join(installDirectory, name)),
-    join(unpackedModules, `@anthropic-ai/claude-agent-sdk-win32-${architecture}/claude.exe`),
     join(unpackedModules, `@napi-rs/canvas-win32-${architecture}-msvc/skia.win32-${architecture}-msvc.node`),
     join(unpackedModules, `better-sqlite3/prebuilds/win32-${architecture}.node`),
     ...NODE_PTY_RELEASE_FILES

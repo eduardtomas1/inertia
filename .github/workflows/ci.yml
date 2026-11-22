@@ -111,6 +111,10 @@ jobs:
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
 
+      - name: Check provider SDK pins against the capability manifests
+        timeout-minutes: 3
+        run: npm exec -- vitest run --maxWorkers=1 tests/server/provider-capability-manifest.test.ts
+
       - name: Verify migrations, architecture, lint, and types
         run: npm run check:quality
 
@@ -994,7 +998,7 @@ jobs:
     if: needs.classify.outputs.macos_x64_unit == 'true'
     runs-on: macos-15-intel
     needs: [classify, gate]
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

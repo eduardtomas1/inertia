@@ -40,6 +40,9 @@ export const SECRET_REQUEST_TOOL_DEFINITION: ProviderHostToolDefinition = {
   readOnly: true,
   destructive: false,
   idempotent: false,
+  // A deferred tool is one Claude may not know it has, and then it asks for
+  // the secret in chat, which this description forbids.
+  alwaysLoad: true,
 };
 
 const ARGUMENT_RULES: Readonly<Record<string, string>> = {

@@ -38,7 +38,7 @@ import {
   type AgentViewportSetting,
 } from "./preview-agent-viewport.js";
 import type { PreviewAgentOperationFailure } from "./preview-agent-phase.js";
-import { agentPageLogs, hoverAgentPageElement, selectAgentPageElement } from "./preview-agent-interactions.js";
+import { agentPageLogs, dragAgentPageElement, hoverAgentPageElement, selectAgentPageElement } from "./preview-agent-interactions.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
 import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
 import { PreviewContextRegistry } from "./preview-lifecycle.js";
@@ -331,11 +331,11 @@ export class PreviewBroker {
               case "history":
                 return await this.#operations.history(session, command.direction, operation, validate);
               case "click":
-                return await this.#operations.click(session, command.ref, operation, validate, command.dialog);
+                return await this.#operations.click(session, command, operation, validate);
               case "type":
                 return await this.#operations.type(session, command.ref, command.text, command.replace, operation, validate);
               case "press":
-                return await this.#operations.press(session, command.key, operation, validate, command.dialog);
+                return await this.#operations.press(session, command, operation, validate);
               case "scroll":
                 return await this.#operations.scroll(session, command, operation, validate);
               case "tabs":
@@ -346,6 +346,8 @@ export class PreviewBroker {
                 return await hoverAgentPageElement(this.#operations, session, command, operation, validate);
               case "select":
                 return await selectAgentPageElement(this.#operations, session, command, operation, validate);
+              case "drag":
+                return await dragAgentPageElement(this.#operations, session, command, operation, validate);
               case "logs":
                 return agentPageLogs(this.#operations, session);
               case "tab-open":

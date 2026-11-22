@@ -8,7 +8,33 @@ const belowFold = "<h1>Long form</h1>"
   + "<script>document.querySelector('#save').addEventListener('click',()=>{window.__bottomClicked=true;"
   + "document.querySelector('h1').textContent='Saved at the bottom'})</script>";
 
+const pointerActions = "<title>Pointer actions</title><style>body{margin:0;width:3000px;height:3000px}"
+  + "#card,#column,#native,#zone{position:absolute;width:120px;height:60px}"
+  + "#card{left:40px;top:120px}#column{left:400px;top:160px}#native{left:40px;top:260px}#zone{left:400px;top:300px}"
+  + "#twice{position:absolute;left:40px;top:40px}#field{position:absolute;left:240px;top:40px}"
+  + "#route{position:absolute;left:520px;top:40px}</style>"
+  + "<button id='twice' type='button'>Open twice</button><input id='field' aria-label='Keys field' value='abc'>"
+  + "<button id='route' type='button'>Open order</button>"
+  + "<div id='card' role='button' tabindex='0' aria-label='Pointer card'>Pointer card</div>"
+  + "<div id='column' role='list' tabindex='0' aria-label='Done column'>Done column</div>"
+  + "<div id='native' draggable='true' role='button' tabindex='0' aria-label='Native card'>Native card</div>"
+  + "<div id='zone' role='region' tabindex='0' aria-label='Native zone'>Native zone</div>"
+  + "<script>window.__clicks=[];window.__keys=[];window.__drops=[];const twice=document.querySelector('#twice');"
+  + "twice.addEventListener('click',e=>__clicks.push([e.detail,e.shiftKey,e.ctrlKey,e.altKey,e.metaKey].join(':')));"
+  + "twice.addEventListener('dblclick',()=>__clicks.push('dblclick'));"
+  + "document.querySelector('#field').addEventListener('keydown',e=>__keys.push([e.key,e.shiftKey,e.ctrlKey,e.altKey,e.metaKey].join(':')));"
+  + "document.querySelector('#route').addEventListener('click',()=>history.pushState({},'','/orders/7'));"
+  + "let dragging=false,moves=0;document.querySelector('#card').addEventListener('mousedown',()=>{dragging=true;moves=0});"
+  + "addEventListener('mousemove',e=>{if(dragging&&e.buttons===1)moves++});"
+  + "addEventListener('mouseup',e=>{if(!dragging)return;dragging=false;const t=document.elementFromPoint(e.clientX,e.clientY);"
+  + "__drops.push('pointer:'+(t&&t.id)+':'+(moves>=5))});"
+  + "const native=document.querySelector('#native');native.addEventListener('dragstart',e=>e.dataTransfer.setData('text/plain','card-7'));"
+  + "native.addEventListener('dragend',()=>__drops.push('dragend'));"
+  + "const zone=document.querySelector('#zone');zone.addEventListener('dragover',e=>e.preventDefault());"
+  + "zone.addEventListener('drop',e=>{e.preventDefault();__drops.push('native:'+e.dataTransfer.getData('text/plain'))})</script>";
+
 const pages: Record<string, string> = {
+  "/agent-browser-pointer-actions": pointerActions,
   "/agent-browser-below-fold": `<title>Below the fold</title>${belowFold}`,
   "/agent-browser-below-fold-smooth": `<title>Smooth below the fold</title><style>html{scroll-behavior:smooth}</style>${belowFold}`,
   "/agent-browser-history-first": "<title>First page</title><p>First page body</p>",

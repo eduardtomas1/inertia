@@ -2,7 +2,6 @@ import type { AgentRunState } from "./run-state";
 import type { MascotSpriteImport, MascotSprites, MascotTemplateExport } from "./mascot-sprites";
 
 export const MASCOT_IPC = {
-  preferences: "inertia:mascot-preferences",
   configure: "inertia:mascot-configure",
   changed: "inertia:mascot-changed",
   snapshot: "inertia:mascot-snapshot",

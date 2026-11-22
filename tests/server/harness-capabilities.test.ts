@@ -333,7 +333,7 @@ describe("HarnessCapabilityRegistry", () => {
 describe("Inertia's compiled packs", () => {
   const workspaceTools = WORKSPACE_TOOL_DEFINITIONS.map(({ name }) => name);
 
-  it("compiles inertia.workspace revision 2 into the manifest and its private instruction", () => {
+  it("compiles inertia.workspace revision 3 into the manifest and its private instruction", () => {
     const registry = createInertiaHarnessCapabilities({
       orchestrationTools: [],
       browserEnabled: true,
@@ -346,7 +346,7 @@ describe("Inertia's compiled packs", () => {
       "inertia.workspace",
     ]);
     expect(registry.manifest().packs.find(({ id }) => id === "inertia.workspace")).toMatchObject({
-      revision: 2,
+      revision: 3,
       toolNames: workspaceTools,
       evaluation: { evidenceKinds: ["git-artifact", "host-tool-result"] },
     });

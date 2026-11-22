@@ -117,6 +117,25 @@ describe("outside-pointer focus policy", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it("returns usage focus to its trigger when a blank outside press lands in a programmatic focus container", async () => {
+    renderUsage();
+    const trigger = screen.getByRole("button", { name: /Open usage and context/u });
+    fireEvent.click(trigger);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    screen.getByRole("button", { name: "Close usage and context" }).focus();
+    const container = screen.getByTestId("blank-surface");
+    container.tabIndex = -1;
+
+    fireEvent.pointerDown(container);
+    container.focus();
+    await act(async () => {
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    });
+
+    expect(screen.queryByRole("dialog", { name: "Usage & context" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("leaves focus with a real destination pressed outside the usage popover", async () => {
     renderUsage();
     fireEvent.click(screen.getByRole("button", { name: /Open usage and context/u }));
@@ -130,6 +149,63 @@ describe("outside-pointer focus policy", () => {
     });
 
     expect(screen.queryByRole("dialog", { name: "Usage & context" })).not.toBeInTheDocument();
+    expect(destination).toHaveFocus();
+  });
+});
+
+describe("usage popover Escape focus policy", () => {
+  function queueFrames(): () => Promise<void> {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    return async () => {
+      await act(async () => { for (const frame of frames.splice(0)) frame(performance.now()); });
+    };
+  }
+
+  async function openUsageWithFocusInside(): Promise<HTMLElement> {
+    renderUsage();
+    const trigger = screen.getByRole("button", { name: /Open usage and context/u });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    const close = screen.getByRole("button", { name: "Close usage and context" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Usage & context" })).not.toBeInTheDocument();
+    return trigger;
+  }
+
+  it("returns focus to the usage trigger after Escape from inside the popover", async () => {
+    const flushFrames = queueFrames();
+    const trigger = await openUsageWithFocusInside();
+
+    await flushFrames();
+
+    expect(trigger).toHaveFocus();
+  });
+
+  it("returns focus to the usage trigger when the hidden popover dropped focus to the body", async () => {
+    const flushFrames = queueFrames();
+    const trigger = await openUsageWithFocusInside();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    await flushFrames();
+
+    expect(trigger).toHaveFocus();
+  });
+
+  it("leaves focus where the user moved it before the frame after Escape", async () => {
+    const flushFrames = queueFrames();
+    await openUsageWithFocusInside();
+    const destination = screen.getByRole("button", { name: "Outside action" });
+    destination.focus();
+
+    await flushFrames();
+
     expect(destination).toHaveFocus();
   });
 });

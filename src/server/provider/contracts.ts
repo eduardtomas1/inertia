@@ -479,6 +479,12 @@ export interface ProviderHostToolDefinition {
   readOnly: boolean;
   destructive?: boolean;
   idempotent?: boolean;
+  /**
+   * Claude Code must never defer this tool behind its tool search. Claude's
+   * tools/list then carries `_meta["anthropic/alwaysLoad"]`; other transports
+   * have no deferral and advertise the tool unchanged.
+   */
+  alwaysLoad?: boolean;
 }
 
 export type ProviderHostToolApprovalDecision = AgentApprovalDecision | "timeout";

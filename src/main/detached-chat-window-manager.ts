@@ -265,10 +265,6 @@ export class DetachedChatWindowManager {
     }
   }
 
-  broadcast(channel: string, ...args: unknown[]): void {
-    this.sendToAll(channel, ...args);
-  }
-
   flushWindowState(): void {
     this.#cancelScheduledSave();
     for (const record of this.#byConversation.values()) {

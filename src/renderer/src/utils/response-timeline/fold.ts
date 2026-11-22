@@ -49,15 +49,18 @@ export function isQuietSettledTurn(
     | "followUpMessages"
     | "systemMessages"
     | "terminalAssistantMessage"
-  >,
+  > & Partial<Pick<ResponseTurn, "sentMessages">>,
   foldVisible: boolean,
 ): boolean {
+  // A message the agent showed mid-turn is prose the reader keeps in view, so
+  // the turn keeps its work log, which shows the message at its place.
   return !foldVisible
     && shouldFoldSettledTurn(turn)
     && !needsStaticFoldRow(turn, foldVisible)
     && turn.importantActivities.length === 0
     && turn.followUpMessages.length === 0
-    && turn.systemMessages.length === 0;
+    && turn.systemMessages.length === 0
+    && (turn.sentMessages?.length ?? 0) === 0;
 }
 
 export function needsStaticFoldRow(

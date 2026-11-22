@@ -27,14 +27,22 @@ export interface ProviderMcpProtocolResult {
 
 export interface ProviderMcpToolOptions {
   destructiveHints?: boolean;
+  /**
+   * Marks tools that set `alwaysLoad` with `_meta["anthropic/alwaysLoad"]`,
+   * which only Claude Code reads: it never defers such a tool behind its tool
+   * search. Other clients do not defer tools, so they are not sent it.
+   */
+  alwaysLoadMeta?: boolean;
   includes?(tool: string): boolean;
 }
+
+const ALWAYS_LOAD_META = Object.freeze({ "anthropic/alwaysLoad": true });
 
 export function providerMcpTools(
   definitions: readonly ProviderHostToolDefinition[],
   options: ProviderMcpToolOptions = {},
 ): Tool[] {
-  return definitions.map(({ name, description, inputSchema, readOnly, destructive, idempotent }) => {
+  return definitions.map(({ name, description, inputSchema, readOnly, destructive, idempotent, alwaysLoad }) => {
     if (inputSchema.type !== "object") {
       throw new Error(`Inertia host tool '${name}' must accept an object.`);
     }
@@ -48,6 +56,7 @@ export function providerMcpTools(
         idempotentHint: idempotent ?? readOnly,
         openWorldHint: false,
       },
+      ...(options.alwaysLoadMeta === true && alwaysLoad === true ? { _meta: { ...ALWAYS_LOAD_META } } : {}),
     };
   });
 }

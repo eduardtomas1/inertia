@@ -18,9 +18,14 @@ import { parseAgentBrowserCommand } from "../../src/shared/agent-browser";
 
 type Schema = Record<string, unknown>;
 
+// JSON Schema without not/oneOf cannot say "not 0", "not only spaces" or
+// "two different refs"; the validator refuses these with invalid_arguments.
 const KNOWN = new Set([
   "inertia_browser_scroll {\"deltaY\":0}",
+  "inertia_browser_scroll {\"deltaX\":0}",
   "inertia_browser_wait_for {\"text\":\" \"}",
+  "inertia_browser_drag {\"ref\":\"e1\",\"targetRef\":\"e1\"}",
+  `inertia_browser_drag {"ref":"${"x".repeat(64)}","targetRef":"${"x".repeat(64)}"}`,
 ]);
 
 function stringCandidates(property: Schema): unknown[] {

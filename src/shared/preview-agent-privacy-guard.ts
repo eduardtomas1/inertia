@@ -16,6 +16,9 @@ interface AgentBrowserPrivacyState {
   agentActivationTarget?: EventTarget;
   blockedAgentActivationKey?: "Enter" | "Space";
   expectedAgentClickRef?: string;
+  agentDragActive?: boolean;
+  /** During a drag, the ref a native drop must land on. */
+  expectedAgentDropRef?: string;
   agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
   evidenceWithheld?: PreviewAgentWithheldReason;
   framesObserved?: boolean;
@@ -1006,9 +1009,23 @@ export function installPreviewAgentPrivacyGuard(
     state.agentActivationTarget !== undefined
     && (path === null || !path.includes(state.agentActivationTarget))
   );
-  for (const eventName of ["mousedown", "mouseup", "click"] as const) {
+  for (const eventName of ["mousedown", "mouseup", "click", "dblclick"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
       if (!state.agentInputActive || event.isTrusted !== true) return;
+      if (state.agentDragActive === true && eventName !== "mousedown") {
+        // A drag presses the named element and releases wherever the page
+        // has moved the pointer, often onto the dragged element itself.
+        // The release is never matched, so a drag cannot get stuck; the
+        // click a browser then sends to the common ancestor is stopped only
+        // for a file input or a target Inertia cannot inspect.
+        if (eventName === "mouseup") return;
+        const refusal = activationEventRefusal(event);
+        const blocked = refusal === "file" || refusal === "nested";
+        if (!blocked && !state.agentInputRefused) return;
+        if (blocked) recordRefusal(refusal);
+        stopActivationEvent(event);
+        return;
+      }
       const expectedRef = state.expectedAgentClickRef;
       if (!expectedRef && state.agentActivationTarget === undefined) return;
       const expected = expectedRef ? state.refs.get(expectedRef) : undefined;
@@ -1024,6 +1041,20 @@ export function installPreviewAgentPrivacyGuard(
       stopActivationEvent(event);
     }, true);
   }
+  // A native drop is delivered to the approved target or not at all, even if
+  // the page moves or replaces it after the last check.
+  activationTarget.addEventListener("drop", (event) => {
+    if (!state.agentInputActive || state.agentDragActive !== true || event.isTrusted !== true) return;
+    const expectedRef = state.expectedAgentDropRef;
+    if (!expectedRef) return;
+    const expected = state.refs.get(expectedRef);
+    const path = boundedEventPath(event);
+    const refusal = activationEventRefusal(event, path)
+      || (!expected?.isConnected || path === null || !path.includes(expected) ? "retargeted" : null);
+    if (!refusal) return;
+    recordRefusal(refusal);
+    stopActivationEvent(event);
+  }, true);
   activationTarget.addEventListener("keydown", (event) => {
     if (!state.agentInputActive || event.isTrusted !== true) return;
     const key = activationKey(event);

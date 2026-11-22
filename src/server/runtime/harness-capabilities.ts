@@ -448,6 +448,8 @@ export class HarnessCapabilityRegistry {
         inputSchema: definition.inputSchema,
         readOnly: definition.readOnly,
         destructive: definition.destructive === true,
+        // Only when set, so the digests of every other tool stay unchanged.
+        ...(definition.alwaysLoad === true ? { alwaysLoad: true } : {}),
       })),
       evaluation: pack.evaluation,
     }));

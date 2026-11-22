@@ -16,6 +16,11 @@ describe("active-secret host tool arguments", () => {
         { tool: "inertia_create_conversation", arguments: { title: "Child", prompt: SURFACE_SECRET_VALUE } },
         { tool: "inertia_create_conversation", arguments: { title: SURFACE_SECRET_VALUE, prompt: "Work" } },
         { tool: "inertia_send_message", arguments: { conversationId: child, content: SURFACE_SECRET_VALUE } },
+        { tool: "inertia_send_message", arguments: { conversationId: child, content: SURFACE_SECRET_VALUE, mode: "queue" } },
+        {
+          tool: "inertia_answer_question",
+          arguments: { conversationId: child, requestId: randomUUID(), answers: [{ text: SURFACE_SECRET_VALUE }] },
+        },
         { tool: "inertia_render_html", arguments: { html: `<p>${SURFACE_SECRET_VALUE}</p>`, title: "Page" } },
         { tool: "inertia_request_secret", arguments: { title: "New key", description: SURFACE_SECRET_VALUE } },
       ];

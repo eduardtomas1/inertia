@@ -37,4 +37,9 @@ export interface AgentInputRequest {
   requestId: string;
   questions: AgentInputQuestion[];
   autoResolutionMs: number | null;
+  /**
+   * Answering grants the provider a permission rather than information, as a
+   * Kimi plan approval does. Only the user may answer such a request.
+   */
+  grantsPermission?: true;
 }

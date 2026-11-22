@@ -27,10 +27,8 @@ import {
   ClaudeLaunchRedactor,
   claudeKeyedLaunchSecrets,
 } from "../../src/server/provider/claude-launch-redaction";
-import {
-  claudeBackendProfileRegistrations,
-  createClaudeBackendLaunchResolver,
-} from "../../src/server/runtime/backends/claude-compatible-adapter";
+import { BackendProfileRuntime } from "../../src/server/runtime/backends/backend-profile-runtime";
+import { createClaudeBackendLaunchResolver } from "../../src/server/runtime/backends/claude-compatible-adapter";
 import type { ProviderRunResult } from "../../src/server/provider/contracts";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import {
@@ -117,7 +115,7 @@ async function runKeyed(
   });
   const manager = ProviderManager.createForTests({
     commands: { claude: "/fake/claude" },
-    ...claudeBackendProfileRegistrations([profile]),
+    ...new BackendProfileRuntime(undefined, [profile]).providerManagerOptions([]),
     resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
       profiles: [profile],
       resolveSecret: async () => SECRET,

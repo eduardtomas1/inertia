@@ -37,6 +37,21 @@ The useful changes in each Inertia release, in plain language.
   and on any high advisory in build tools unless it has a reviewed,
   expiring exception.
 
+### Browser agent
+
+- Agents can double- and triple-click, hold Shift, Control, Alt or Meta while
+  clicking or pressing a key, scroll sideways, and drag one control onto
+  another, including on pages that use native HTML drag and drop. A drag
+  never carries a file, needs both controls in view, and its approval names
+  both. Clicks at a screen position are not offered, because an approval
+  could not say what they would hit.
+- Agents can wait for the page to reach a path such as `/orders/*`, or for a
+  control to disappear. They still only see a page's origin: a wait compares
+  the whole path and answers only whether it matched.
+- Scrolling by pixels went the wrong way: scrolling down scrolled up. The
+  arrow keys reached pages as an unidentified key and stopped the agent as if
+  the user had typed. Both work now.
+
 ### Dependencies
 
 - Updated the Claude Agent SDK to 0.3.323. If a wrapper script keeps Claude
@@ -58,6 +73,24 @@ The useful changes in each Inertia release, in plain language.
 - Kept better-sqlite3 at 13.0.3. The SQLite 3.54.1 that 13.1.1 bundles
   prepares many of Inertia's queries again on every call, which made loading
   a chat's history about a third slower.
+
+### Agent tools
+
+- An agent can show you a draft, a code block or the subject of a question in
+  full while it works, instead of a shortened summary. The message appears in
+  the turn where the agent sent it, marked *Sent mid-turn*, stays in view
+  when the turn folds, and survives a restart. It is never taken for the
+  agent's reply. Message search, Private Connect and chats that read this one
+  see its text.
+- A chat that started another chat can see the questions that chat is
+  waiting on and answer them, after you approve the answer on a card that
+  shows each question and the proposed answer. Approvals, secret requests,
+  plan approvals and the chat picker stay yours: the agent never sees them
+  and is told to ask you instead.
+- An agent sending to a chat it started can now choose how: join the running
+  turn, add the message to that chat's queue to run next (up to three, which
+  you can see and remove), or stop the running turn and start again with the
+  message. The approval card says which.
 
 ### Look
 

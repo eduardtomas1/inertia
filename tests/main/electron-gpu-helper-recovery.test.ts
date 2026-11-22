@@ -413,7 +413,7 @@ describe("prepared close with a stalled window destroy", () => {
     diagnostic.samples.push({ pid: MAIN_PID, reason: "electron-helper-processes-before-force-stop",
       status: "completed", output: `777 ${MAIN_PID} R< gpu-process\n778 ${MAIN_PID} R< utility/network.mojom.NetworkService`,
       truncated: false });
-    const inventory = "windows=0 webContents=1 resources=FSReqCallback:1,Timeout:2";
+    const inventory = "windows=0 webContents=1 webContentsTypes=window resources=FSReqCallback:1,Timeout:2";
     const closing = closeWith({ main, diagnostic,
       stderr: ["window-destroy-entered", "window-destroy-returned", `exit-inventory ${inventory}`] })
       .catch((error: unknown) => error);

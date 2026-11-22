@@ -56,7 +56,7 @@ Same machine, same account, same model family, both apps launching Claude Code
 | **Before the cache expires** (beta): compact an idle Claude chat two minutes before its 1-hour cache expires | `idle-compaction-scheduler.ts`, `compactIdleConversation` | T3 Code's idle compaction; the history is still read from the cache |
 | **Auto-compact Claude chats after**, 400K tokens by default | `autoCompactWindow` in the Claude launch settings | Claude Code's default waits until 967K on 1M-token models |
 | A fresh session in an existing chat carries at most 64 KiB of history and points at `inertia_request_context` for the rest; a route that cannot call that tool keeps 192 KiB | `NATIVE_RESTORED_HISTORY_BYTES` | T3 Code caps every handoff at 64,000 bytes (16K tokens) and lets the agent read more on demand |
-| Inertia's host tools load through tool search instead of on every request, also inside subagents | `claude-host-tools.ts` | T3 Code defers its MCP tools on purpose |
+| Inertia's host tools load through tool search instead of on every request, also inside subagents; only `inertia_request_secret` and `inertia_send_to_user` always load (`anthropic/alwaysLoad`), so Claude never asks for a secret in chat, or writes a message it means to show in full as pre-tool text that arrives summarized, for want of the tool | `claude-host-tools.ts` | T3 Code defers its MCP tools on purpose, except the tools it marks the same way |
 | The context meter reads the summary instead of counting each category through the token-count API | `readClaudeContextUsage` | The default `'full'` made several requests after every assistant message |
 
 ## Measured after the change

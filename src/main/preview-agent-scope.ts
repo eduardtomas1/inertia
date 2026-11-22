@@ -95,6 +95,7 @@ export function agentOperationBudget(command: AgentBrowserCommand): number {
       return command.timeoutMs + WAIT_REPORT_RESERVE_MS;
     case "hover":
     case "select":
+    case "drag":
       return AGENT_BROWSER_INPUT_BUDGET_MS;
     default:
       return AGENT_BROWSER_INSPECT_BUDGET_MS;

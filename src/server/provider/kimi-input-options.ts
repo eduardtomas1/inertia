@@ -4,6 +4,7 @@ import type {
   ToolKind,
 } from "@agentclientprotocol/sdk/unstable";
 
+import type { AgentInputRequest } from "./interactions";
 import {
   interactionDisplayIdentity,
   isSafeInteractionDisplayText,
@@ -24,6 +25,33 @@ export interface KimiInputOptions {
   kind: "question" | "plan";
   prompt: string;
   options: KimiInputOption[];
+}
+
+export const KIMI_INPUT_QUESTION_ID = "selection";
+
+/**
+ * The input card for one Kimi question or plan review. A plan answer lets Kimi
+ * leave plan mode and act, so it grants a permission; a question answer only
+ * informs Kimi.
+ */
+export function kimiInputRequest(requestId: string, input: KimiInputOptions): AgentInputRequest {
+  return {
+    requestId,
+    autoResolutionMs: null,
+    ...(input.kind === "plan" ? { grantsPermission: true as const } : {}),
+    questions: [{
+      id: KIMI_INPUT_QUESTION_ID,
+      header: "Kimi permission",
+      question: input.prompt,
+      isOther: false,
+      isSecret: false,
+      allowMultiple: false,
+      options: input.options.map((option) => ({
+        ...option,
+        description: "Selecting this option authorizes the Kimi request.",
+      })),
+    }],
+  };
 }
 
 export function kimiInputOptions(

@@ -1,6 +1,6 @@
 import type { MainWindowTarget } from "@shared/desktop";
 
-export type { MainWindowNewChatCheckout, MainWindowTarget } from "@shared/desktop";
+export type { MainWindowTarget } from "@shared/desktop";
 
 export function openInMain(target: MainWindowTarget): Promise<void> {
   return window.inertia.openInMainWindow(target);

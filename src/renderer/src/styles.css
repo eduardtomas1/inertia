@@ -130,7 +130,6 @@
   --composer-toolbar-padding-bottom: 12px;
   --composer-icon-button-size: 28px;
   --usage-ring-size: 28px;
-  --active-work-text-rest: #585880;
   --active-work-text-highlight: #2a294c;
   --answer-font-size: var(--text-base);
   --transcript-section-spacing: 18px;
@@ -288,7 +287,6 @@
   --glass-saturate: 1.08;
   --diff-addition-surface: color-mix(in srgb, var(--status-completed) 15%, transparent);
   --diff-deletion-surface: color-mix(in srgb, var(--status-failed) 13%, transparent);
-  --active-work-text-rest: #9091ba;
   --active-work-text-highlight: #e4e6fe;
   --syntax-keyword: #a1a1fa;
   --syntax-string: #70c18e;
@@ -1128,23 +1126,6 @@ textarea {
 .mobile-close,
 .sidebar-scrim {
   display: none;
-}
-
-.project-icon {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-}
-
-.project-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-name {
-  color: var(--text);
-  font-size: var(--text-sm);
-  font-weight: 500;
 }
 
 .conversation-menu {
@@ -9011,6 +8992,12 @@ button.sent-attachment-open:hover {
 
 .turn-commentary-row.is-streaming {
   padding-bottom: 3px;
+}
+
+.turn-sent-message-label {
+  margin: 0 0 2px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
 }
 
 .turn-follow-up-row {

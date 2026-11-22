@@ -28,7 +28,6 @@ export {
   type WorktreeFilesystemIdentityDependencies,
   type RegisteredWorktreeIdentity,
   removeOwnedWorktree,
-  removeWorktree,
 } from "./git/worktrees";
 export {
   parseWorktreeFilesystemReceipt,
@@ -56,6 +55,11 @@ export {
 export {
   inspectGitHubPreMergeConfidence,
 } from "./git/github-pre-merge";
+export {
+  GitHubPullRequestStatusError,
+  inspectGitHubPullRequestStatus,
+  type GitHubPullRequestLookup,
+} from "./git/github-pull-request-status";
 export {
   inspectGitRemoteRouting,
   parseGitRemoteWebTarget,

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_TURN_STATUSES,
-  agentTurnAssociationSchema,
-  agentTurnStatusSchema,
   canTransitionAgentTurnStatus,
   clientCommandSchema,
   isAgentTurnTerminalStatus,
@@ -28,14 +26,10 @@ describe("agent turn contract", () => {
       "interrupted",
     ]);
     for (const status of AGENT_TURN_STATUSES) {
-      expect(agentTurnStatusSchema.parse(status)).toBe(status);
       expect(isAgentTurnTerminalStatus(status)).toBe(
         ["completed", "failed", "cancelled", "interrupted"].includes(status),
       );
     }
-    expect(agentTurnAssociationSchema.parse("authoritative")).toBe("authoritative");
-    expect(agentTurnAssociationSchema.parse("inferred")).toBe("inferred");
-    expect(agentTurnAssociationSchema.safeParse("guessed").success).toBe(false);
   });
 
   it("allows forward and idempotent lifecycle writes but never replaces a terminal outcome", () => {

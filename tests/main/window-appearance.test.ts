@@ -8,7 +8,7 @@ import {
   applyWindowTheme,
   parseWindowThemePreference,
   readWindowThemePreference,
-  resolveWindowBackground,
+  resolveWindowTheme,
   windowChromeOptions,
   writeWindowThemePreference,
 } from "../../src/main/window-appearance";
@@ -23,11 +23,11 @@ describe("window appearance", () => {
     expect(parseWindowThemePreference(null)).toBe("system");
   });
 
-  it("matches the native first-paint background to the resolved theme", () => {
-    expect(resolveWindowBackground("light", true)).toBe("#fafafd");
-    expect(resolveWindowBackground("dark", false)).toBe("#18181b");
-    expect(resolveWindowBackground("system", false)).toBe("#fafafd");
-    expect(resolveWindowBackground("system", true)).toBe("#18181b");
+  it("resolves the native window theme from the preference and system appearance", () => {
+    expect(resolveWindowTheme("light", true)).toBe("light");
+    expect(resolveWindowTheme("dark", false)).toBe("dark");
+    expect(resolveWindowTheme("system", false)).toBe("light");
+    expect(resolveWindowTheme("system", true)).toBe("dark");
   });
 
   it("persists a small validated cache and safely falls back from invalid files", () => {

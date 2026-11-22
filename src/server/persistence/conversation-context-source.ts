@@ -14,8 +14,11 @@ export type ConversationContextSourceRow = Pick<
   MessageRow, "id" | "turn_id" | "role" | "created_at" | "attachments_json" | "content"
 > & { contentTruncated: boolean; tail: string | null; final: boolean };
 
+// Visual replies and messages the agent showed the user mid-turn are the
+// agent's words too: a page as a one-line note, a message as its own text.
 export const CONVERSATION_CONTEXT_MESSAGE_SQL = `(messages.role IN ('user', 'assistant')
-  OR (messages.role = 'system' AND messages.html_render_json IS NOT NULL AND messages.turn_id IS NOT NULL))`;
+  OR (messages.role = 'system' AND messages.turn_id IS NOT NULL
+    AND (messages.html_render_json IS NOT NULL OR messages.sent_to_user = 1)))`;
 
 export interface ContinuationRouteFilter {
   backendProfileId: string;
@@ -75,6 +78,7 @@ export function continuationRouteSql(route?: ContinuationRouteFilter): {
 type StoredSourceRow = Omit<ConversationContextSourceRow, "content" | "contentTruncated" | "tail"> & {
   content: Buffer;
   page_title?: unknown;
+  sent_to_user?: number;
 };
 
 function pageRow({ page_title: title, ...row }: StoredSourceRow): ConversationContextSourceRow {
@@ -143,7 +147,8 @@ export function* conversationContextSourceRows(
   const rows = database.prepare(`
     SELECT id, turn_id, role, created_at, attachments_json,
       COALESCE(substr(CAST(content AS BLOB), 1, ?), X'') AS content,
-      CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title
+      CASE WHEN role = 'system' THEN json_extract(html_render_json, '$.title') END AS page_title,
+      sent_to_user
     FROM messages
     WHERE conversation_id = ? AND ${CONVERSATION_CONTEXT_MESSAGE_SQL}
       ${messageIds ? `AND id IN (${messageIds.map(() => "?").join(", ")})` : ""}
@@ -162,6 +167,11 @@ export function* conversationContextSourceRows(
   const read = sourceRowReader(database);
   let awaitingAnswer = true;
   for (const row of rows) {
+    if (row.role === "system" && row.sent_to_user === 1) {
+      // The agent's own words, but never the turn's final answer.
+      yield read({ ...row, role: "assistant" }, MAX_CONVERSATION_CONTEXT_UPDATE_EXCERPT_BYTES, false);
+      continue;
+    }
     if (row.role === "system") {
       yield pageRow(row);
       continue;

@@ -18,9 +18,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  consumeRuntimeCleanupReceipt,
   RuntimeCleanupReceiptJournal,
-  publishRuntimeCleanupReceipt,
   runtimeCleanupReceiptIds,
 } from "../../src/main/runtime-cleanup-receipts";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
@@ -124,7 +122,7 @@ describe("runtime cleanup receipt journal", () => {
 
   it("finishes an exact consume transient after a crash", () => {
     const path = directory();
-    expect(publishRuntimeCleanupReceipt(path, generationA)).toBe(true);
+    expect(new RuntimeCleanupReceiptJournal(path).publish(generationA)).toBe(true);
     renameSync(
       join(path, canonicalName(generationA)),
       join(path, transientName(generationA, "consume")),
@@ -227,7 +225,8 @@ describe("runtime cleanup receipt journal", () => {
     "preserves group- or world-accessible canonical and transient leaves",
     () => {
       const canonicalPath = directory();
-      expect(publishRuntimeCleanupReceipt(canonicalPath, generationA)).toBe(true);
+      expect(new RuntimeCleanupReceiptJournal(canonicalPath).publish(generationA))
+        .toBe(true);
       const canonical = join(canonicalPath, canonicalName(generationA));
       chmodSync(canonical, 0o666);
       expect(() => runtimeCleanupReceiptIds(canonicalPath)).toThrow("unsafe");
@@ -250,7 +249,7 @@ describe("runtime cleanup receipt journal", () => {
     redirectLeaf(outside, join(path, ".runtime-cleanup-receipts"), true);
 
     expect(() => runtimeCleanupReceiptIds(path)).toThrow("legacy");
-    expect(publishRuntimeCleanupReceipt(path, generationA)).toBe(false);
+    expect(() => new RuntimeCleanupReceiptJournal(path)).toThrow("legacy");
     expect(readFileSync(sentinel, "utf8")).toBe("outside");
     expect(lstatSync(join(path, ".runtime-cleanup-receipts")).isSymbolicLink())
       .toBe(true);
@@ -264,7 +263,6 @@ describe("runtime cleanup receipt journal", () => {
     writeFileSync(sentinel, "legacy");
 
     expect(() => new RuntimeCleanupReceiptJournal(path)).toThrow("legacy");
-    expect(publishRuntimeCleanupReceipt(path, generationA)).toBe(false);
     expect(readFileSync(sentinel, "utf8")).toBe("legacy");
   });
 
@@ -282,8 +280,6 @@ describe("runtime cleanup receipt journal", () => {
 
     expect(() => runtimeCleanupReceiptIds(path)).toThrow("unsafe");
     expect(() => new RuntimeCleanupReceiptJournal(path)).toThrow("unsafe");
-    expect(publishRuntimeCleanupReceipt(path, generationB)).toBe(false);
-    expect(consumeRuntimeCleanupReceipt(path, generationA)).toBe(false);
     expect(readFileSync(sentinel, "utf8")).toBe("outside");
     expect(lstatSync(sentinel).nlink).toBe(beforeLinks);
   });

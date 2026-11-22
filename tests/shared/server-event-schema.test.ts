@@ -1127,6 +1127,23 @@ describe("server event conversation discriminant boundary", () => {
       expect(() => parseServerEvent(detail(rejected))).toThrow("Malformed server event");
     }
   });
+  it("accepts only authoritative or inferred turn associations", () => {
+    const detail = (association: unknown) => event({
+      kind: "conversation.detail",
+      conversationId: conversation.id,
+      state: "ready",
+      detail: {
+        ...conversationDetail,
+        agentTurns: [{ ...conversationDetail.agentTurns[0], association }],
+      },
+    });
+    for (const accepted of ["authoritative", "inferred"]) {
+      expect(parseServerEvent(detail(accepted))).toMatchObject({ type: "request.result" });
+    }
+    for (const rejected of ["guessed", "", null, undefined]) {
+      expect(() => parseServerEvent(detail(rejected))).toThrow("Malformed server event");
+    }
+  });
   it("validates response-speed identity while allowing pending conversation transitions", () => {
     expect(() => parseServerEvent(snapshotEvent({
       ...conversationShell,

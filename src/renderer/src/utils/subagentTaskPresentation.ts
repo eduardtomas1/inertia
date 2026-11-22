@@ -5,9 +5,7 @@ import { isBackgroundCommandTrace } from "./subagentTraceRows";
 export {
   isBackgroundCommandTrace,
   linkedSubagentTraces,
-  MAX_UNLINKED_SUBAGENT_ROWS,
   subagentCurrentStep,
-  subagentTraceHasToolRow,
   unlinkedSubagentTraces,
 } from "./subagentTraceRows";
 

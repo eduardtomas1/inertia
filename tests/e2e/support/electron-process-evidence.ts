@@ -37,7 +37,7 @@ export interface ElectronProcessEvidence {
 }
 
 const records = new WeakMap<ChildProcess, ElectronProcessEvidence>();
-const EXIT_INVENTORY = /^\[Inertia test exit: exit-inventory (windows=(?:\d{1,6}|unavailable) webContents=(?:\d{1,6}|unavailable) resources=(?:none|unavailable|[A-Za-z]{1,40}:\d{1,7}(?:,[A-Za-z]{1,40}:\d{1,7}){0,5}))\]$/u;
+const EXIT_INVENTORY = /^\[Inertia test exit: exit-inventory (windows=(?:\d{1,6}|unavailable) webContents=(?:\d{1,6}|unavailable) webContentsTypes=(?:none|unavailable|[A-Za-z]{1,20}(?:-destroyed)?(?:,[A-Za-z]{1,20}(?:-destroyed)?){0,3}) resources=(?:none|unavailable|[A-Za-z]{1,40}:\d{1,7}(?:,[A-Za-z]{1,40}:\d{1,7}){0,5}))\]$/u;
 const MAX_STDERR_LINE = 512;
 const STDERR_STAGES = new Map<string, ProcessStage>([
   ["[Inertia test exit: window-destroy-entered]", "window-destroy-entered"],

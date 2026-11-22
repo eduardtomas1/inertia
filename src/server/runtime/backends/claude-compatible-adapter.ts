@@ -1,21 +1,15 @@
 import {
   CLAUDE_INTERNAL_TIER_IDS,
-  claudeHarnessBackendCompatibility,
   claudeCodeModelIdentifier,
   claudeCompatibleBackendProfileSchema,
   kimiModelSupportsContextWindow,
-  modelBackendProfileForClaudeProfile,
   nativeAnthropicBackendProfile,
   mappedClaudeEffortLevel,
   resolveClaudeModelRouting,
   type ClaudeCompatibleBackendProfile,
 } from "../../../shared/claude-backend-profiles";
 import { CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS } from "../../../node/provider-routing-environment";
-import type {
-  HarnessBackendCompatibility,
-  KnownHarnessId,
-  ModelBackendProfile,
-} from "../../../shared/model-routing";
+import type { KnownHarnessId } from "../../../shared/model-routing";
 import type {
   ProviderBackendLaunchOptions,
   ProviderManagerOptions,
@@ -135,11 +129,6 @@ export interface ClaudeBackendLaunchResolverOptions {
     signal: AbortSignal,
   ) => Promise<unknown>;
   allowPrivateNetwork?: (profileId: string) => boolean;
-}
-
-export interface ClaudeBackendProfileRegistrations {
-  backendProfiles: readonly ModelBackendProfile[];
-  backendCompatibilities: readonly HarnessBackendCompatibility[];
 }
 
 export class ClaudeBackendLaunchConfigurationError extends Error {
@@ -364,24 +353,6 @@ function normalizedProfileMap(
     result.set(profile.id, profile);
   }
   return result;
-}
-
-/**
- * Produce the safe registration envelopes consumed by Task 18's generic
- * routing foundation. Full Claude configuration remains in the privileged
- * resolver closure.
- */
-export function claudeBackendProfileRegistrations(
-  profiles: readonly ClaudeCompatibleBackendProfile[],
-  harnessId: Extract<KnownHarnessId, "claude-agent-sdk" | "claude-cli"> = "claude-agent-sdk",
-): ClaudeBackendProfileRegistrations {
-  const normalized = [...normalizedProfileMap(profiles).values()]
-    .filter((profile) => profile.preset !== "anthropic");
-  return {
-    backendProfiles: normalized.map(modelBackendProfileForClaudeProfile),
-    backendCompatibilities: normalized.map((profile) =>
-      claudeHarnessBackendCompatibility(profile, harnessId)),
-  };
 }
 
 /**

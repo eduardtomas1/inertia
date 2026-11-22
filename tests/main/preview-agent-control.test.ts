@@ -36,6 +36,13 @@ describe("agent page input ownership", () => {
     expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "Tab" } as never)).toBe(true);
   });
 
+  it("expects an arrow sent by its Electron accelerator name under the DOM key Chromium reports", () => {
+    const page = contents();
+    sendAgentPageInput(page as never, { type: "keyDown", keyCode: "Left", modifiers: ["shift"] });
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "ArrowLeft" } as never)).toBe(false);
+    expect(agentPageInputIsUser(page as never, { type: "rawKeyDown", key: "ArrowLeft" } as never)).toBe(true);
+  });
+
   it("sends scaled view coordinates and expects the agent's own click there", () => {
     const page = contents();
     const map = { scale: 0.5, offsetX: 0, offsetY: 0, width: 640, height: 400 };

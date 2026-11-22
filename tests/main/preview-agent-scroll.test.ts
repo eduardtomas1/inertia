@@ -2,7 +2,9 @@ import { runInNewContext } from "node:vm";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { describeAgentPageRef, scrollAgentPageRefIntoView } from "../../src/main/preview-agent-scroll";
+import {
+  agentPageRefRendered, describeAgentPageRef, retainAgentPageRef, scrollAgentPageRefIntoView,
+} from "../../src/main/preview-agent-scroll";
 
 function control(tagName: string, attributes: Record<string, string>, text = "") {
   return {
@@ -19,6 +21,7 @@ function page(element: ReturnType<typeof control>, state: Record<string, unknown
       passwordNodes: new WeakSet(), passwordValues: new Set(), ...state,
     },
     innerWidth: 1_280, innerHeight: 800, scrollX: 0, scrollY: 640,
+    getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
   };
   return {
     executeJavaScriptInIsolatedWorld: vi.fn(async (_world: number, scripts: Array<{ code: string }>) => (
@@ -43,5 +46,17 @@ describe("Browser scroll targets", () => {
     await expect(scrollAgentPageRefIntoView(page(element) as never, "e1"))
       .resolves.toEqual({ found: true, viewport: { width: 1_280, height: 800, scrollX: 0, scrollY: 640 } });
     expect(element.scrollIntoView).toHaveBeenCalledWith({ behavior: "instant", block: "center", inline: "nearest" });
+  });
+
+  it("keeps a watched element through a snapshot that leaves it out", async () => {
+    const element = { ...control("BUTTON", {}), getBoundingClientRect: () => ({ width: 80, height: 24 }) };
+    const contents = page(element as never);
+    await retainAgentPageRef(contents as never, "e1");
+    const refs = await contents.executeJavaScriptInIsolatedWorld(0, [{ code: "__inertiaAgentBrowser.refs" }]) as Map<string, unknown>;
+    refs.clear();
+    await expect(agentPageRefRendered(contents as never, "e1")).resolves.toBe(true);
+    await expect(agentPageRefRendered(contents as never, "e2")).resolves.toBe(false);
+    element.isConnected = false;
+    await expect(agentPageRefRendered(contents as never, "e1")).resolves.toBe(false);
   });
 });

@@ -57,6 +57,14 @@ describe("Browser approval authority", () => {
     [{ action: "history", direction: "forward" }, "Go forward to http://localhost:3002"],
     [{ action: "history", direction: "reload" }, "Reload http://localhost:3000"],
     [{ action: "scroll", ref: "e1" }, "Scroll textbox: Message into view"],
+    [{ action: "click", ref: "e1", clickCount: 2 }, "Double-click textbox: Message"],
+    [{ action: "click", ref: "e1", clickCount: 3, modifiers: ["Control", "Shift"], dialog: "accept" },
+      "Triple-click textbox: Message holding Control+Shift and accept the page's confirmation dialog"],
+    [{ action: "press", key: "Shift+Tab", modifiers: ["Control"] }, "Press: Control+Shift+Tab"],
+    [{ action: "press", key: "ArrowRight", modifiers: ["Alt", "Shift"] }, "Press: Alt+Shift+ArrowRight"],
+    [{ action: "scroll", deltaY: 300 }, "Scroll down 300 pixels"],
+    [{ action: "scroll", deltaX: -120 }, "Scroll left 120 pixels"],
+    [{ action: "scroll", deltaX: 40, deltaY: -300 }, "Scroll up 300 and right 40 pixels"],
   ] as const)("names what %j will do in its approval", async (command, detail) => {
     const f = fixture();
     f.setTarget({ found: true, role: "textbox", label: "Message", editable: true, sensitive: false });
@@ -130,6 +138,31 @@ describe("Browser approval authority", () => {
       .toThrow("new approval");
     f.tab.documentSequence += 1;
     expect(() => resolved.validate()).toThrow("new approval");
+  });
+
+  it("names both ends of a drag and binds each to its own inspected element", async () => {
+    const f = fixture();
+    const targets: Record<string, PreviewAgentTarget> = {
+      e1: { found: true, role: "listitem", label: "Write tests", editable: false, sensitive: false },
+      e2: { found: true, role: "list", label: "Done", editable: false, sensitive: false },
+    };
+    f.inspect.mockImplementation((async (_tab: PreviewTab, ref: string) => ({ ...targets[ref]! })) as never);
+    const drag: AgentBrowserCommand = { action: "drag", ref: "e1", targetRef: "e2" };
+    const approval = await f.prepare(drag);
+    expect(approval.detail).toBe("Browser tab 1\nDrag listitem: Write tests\nonto list: Done");
+    expect(f.inspect.mock.calls.map((call) => (call as unknown[])[1])).toEqual(["e1", "e2"]);
+    const resolved = await f.execute(approval.token);
+    if (typeof resolved === "string" || !("validate" in resolved)) throw new Error("Missing delivery authority");
+    expect(() => resolved.validate(targets.e1)).not.toThrow();
+    expect(() => resolved.validate(targets.e2, "drop")).not.toThrow();
+    expect(() => resolved.validate(targets.e2)).toThrow("new approval");
+    expect(() => resolved.validate(targets.e1, "drop")).toThrow("new approval");
+
+    const swapped = await f.prepare(drag);
+    targets.e2 = { ...targets.e2!, label: "Archive" };
+    await expect(f.execute(swapped.token)).rejects.toThrow("new approval");
+    targets.e2 = { found: true, role: "list", label: "Done", editable: false, sensitive: false, disabled: true };
+    await expect(f.prepare(drag)).rejects.toThrow("new approval");
   });
 
   it("bounds concurrently prepared approvals across independent slots", async () => {

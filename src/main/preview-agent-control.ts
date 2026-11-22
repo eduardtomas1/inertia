@@ -25,6 +25,11 @@ interface ExpectedInput {
 
 const expectedInputs = new WeakMap<object, ExpectedInput[]>();
 
+/** Chromium reports the DOM key for the accelerator names Electron takes. */
+const DOM_KEY_NAMES: Readonly<Record<string, string>> = {
+  Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight",
+};
+
 function inputKind(type: unknown): ExpectedInput["kind"] | null {
   if (type === "mouseDown") return "mouse";
   if (type === "keyDown" || type === "rawKeyDown") return "key";
@@ -58,7 +63,7 @@ export function sendAgentPageInput(contents: WebContents, page: AgentPageInput, 
     const sent = input as { keyCode?: unknown; x?: unknown; y?: unknown };
     live.push({
       kind,
-      key: typeof sent.keyCode === "string" ? sent.keyCode : "",
+      key: typeof sent.keyCode === "string" ? DOM_KEY_NAMES[sent.keyCode] ?? sent.keyCode : "",
       x: coordinate(sent.x),
       y: coordinate(sent.y),
       expiresAt: now + EXPECTED_INPUT_TTL_MS,

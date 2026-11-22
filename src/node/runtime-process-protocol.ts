@@ -75,7 +75,6 @@ export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
 export type { RuntimeWorkerOptions } from "./runtime-worker-options";
 export type {
-  RuntimeAttachmentFailureCode,
   RuntimeAttachmentReleaseResult,
   RuntimeAttachmentRelinquishResult,
   RuntimeAttachmentResult,

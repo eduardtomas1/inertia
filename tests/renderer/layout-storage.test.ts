@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { layoutStorage } from "../../src/renderer/src/utils/layoutStorage";
 import { readSplitConversationId, persistSplitConversationId } from "../../src/renderer/src/utils/splitConversation";
-import { readLegacyWorkspaceStartup } from "../../src/renderer/src/utils/workspaceStartup";
+import { forgetWorkspaceBoundLastTool } from "../../src/renderer/src/utils/workspaceStartup";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -11,7 +11,7 @@ it.each(["getter", "operation"])("keeps startup and split preferences usable whe
     ? { get localStorage() { return unavailable(); } }
     : { localStorage: { getItem: unavailable, setItem: unavailable, removeItem: unavailable } });
   expect(readSplitConversationId(layoutStorage)).toBeNull();
-  expect(readLegacyWorkspaceStartup(layoutStorage)).toBeNull();
+  expect(() => forgetWorkspaceBoundLastTool(layoutStorage)).not.toThrow();
   expect(() => persistSplitConversationId(layoutStorage, "conversation")).not.toThrow();
   expect(() => persistSplitConversationId(layoutStorage, null)).not.toThrow();
 });

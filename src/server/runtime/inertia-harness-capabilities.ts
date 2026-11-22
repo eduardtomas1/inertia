@@ -111,7 +111,9 @@ export function createInertiaHarnessCapabilities(
 ): HarnessCapabilityRegistry {
   const packs: HarnessCapabilityPack[] = [{
     id: "inertia.orchestration",
-    revision: 6,
+    // Main's revision 6 plus Orchestrator V2's fork-history and delegated-task
+    // tools and its send, stop and queue handler changes.
+    revision: 7,
     title: "Inertia orchestration",
     summary: "Bounded, approval-owned coordination of independent top-level Inertia chats.",
     instructions: [ORCHESTRATION_INSTRUCTION],

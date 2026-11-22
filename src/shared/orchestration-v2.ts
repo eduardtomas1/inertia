@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { modelSelectionSchema } from "./model-routing";
-import { agentTurnStatusSchema } from "./turn-lifecycle";
+import { AGENT_TURN_STATUSES } from "./turn-lifecycle";
 import { AGENT_RUN_STATES } from "./run-state";
 import { orchestrationIdSchema } from "./orchestration-identities";
 import { orchestrationBackingEventSchema } from "./orchestration-backings";
@@ -12,6 +12,8 @@ import { historyEventSchema } from "./orchestration-history";
 import { mergeBackEventSchema } from "./orchestration-merge-back";
 import { delegationEventSchema } from "./orchestration-delegation";
 import { runControlEventSchema } from "./orchestration-run-control";
+
+const agentTurnStatusSchema = z.enum(AGENT_TURN_STATUSES);
 
 export { orchestrationIdSchema } from "./orchestration-identities";
 const timestamp = z.iso.datetime();

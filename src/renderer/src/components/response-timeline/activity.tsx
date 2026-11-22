@@ -846,6 +846,7 @@ export function WorkLog({
   onBeforeToggle,
   onAfterToggle,
   fold = null,
+  foldedDetails = null,
 }: {
   turn: ResponseTurn;
   autoCollapse: boolean;
@@ -865,6 +866,8 @@ export function WorkLog({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
   fold?: TurnFoldControl | null;
+  /** Kept mounted inside the fold's region, so it keeps its state, and hidden with it while the fold is closed. */
+  foldedDetails?: React.ReactNode;
 }): React.JSX.Element | null {
   const [expanded, setExpanded] = useState(!autoCollapse);
   const [failureExpanded, setFailureExpanded] = useState(!autoCollapse);
@@ -1083,6 +1086,7 @@ export function WorkLog({
                 {traceDetails}
               </>
             )}
+            {foldedDetails}
           </div>
         )}
         {failureTitle && (

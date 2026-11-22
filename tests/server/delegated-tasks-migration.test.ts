@@ -42,7 +42,7 @@ async function v110WithManagedChats(): Promise<Fixture> {
   await copyFile(resolve("tests/fixtures/database/v0.0.6.sqlite"), path);
   const database = new Database(path);
   database.pragma("foreign_keys = ON");
-  migrateRuntimeDatabase(database, 120);
+  migrateRuntimeDatabase(database, 123);
   const parent = database.prepare("SELECT id FROM conversations ORDER BY rowid LIMIT 1").get() as { id: string };
   const turn = database.prepare("SELECT id, run_id FROM agent_turns WHERE conversation_id = ? ORDER BY rowid LIMIT 1")
     .get(parent.id) as { id: string; run_id: string };
@@ -61,6 +61,9 @@ async function v110WithManagedChats(): Promise<Fixture> {
     "completed", childId, 42, "{\"ok\":true}", null, now, now, null, null);
   operation.run(digest("send"), parent.id, turn.id, turn.run_id, digest("call-2"), "inertia_send_message", digest("f2"),
     "interrupted", childId, 7, null, "The host restarted before this operation settled.", now, now, null, null);
+  // Main's schema 119 operation, which the delegation rebuild must keep.
+  operation.run(digest("answer"), parent.id, turn.id, turn.run_id, digest("call-3"), "inertia_answer_question", digest("f3"),
+    "completed", childId, 12, "{\"answered\":true}", null, now, now, null, null);
   database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity,
     state, created_at, watcher_note_json) VALUES (?, ?, 'queued', '[]', ?, '[]', 'waiting', ?, NULL)`)
     .run(randomUUID(), parent.id, digest("queued"), now);
@@ -91,8 +94,8 @@ describe("delegated task migration", () => {
       const before = tableData(database);
       const objects = schemaObjects(database);
       const keys = database.pragma("foreign_key_list(agent_thread_operations)");
-      migrateRuntimeDatabase(database, 121);
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 121 });
+      migrateRuntimeDatabase(database, 124);
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 124 });
       const after = tableData(database);
       expect(after.agent_managed_conversations).toEqual(before.agent_managed_conversations);
       expect(after.agent_thread_operations).toEqual((before.agent_thread_operations as Record<string, unknown>[])
@@ -117,6 +120,16 @@ describe("delegated task migration", () => {
         .toEqual({ sql: expect.stringContaining("depth INTEGER NOT NULL CHECK (depth BETWEEN 1 AND 2)") });
       expect(database.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'").get())
         .toEqual({ sql: expect.stringContaining("UNIQUE(source_turn_id, tool_call_id_hash)") });
+      const operationsSql = (database.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'")
+        .get() as { sql: string }).sql;
+      expect([...operationsSql.matchAll(/'(inertia_[a-z_]+)'/gu)].map((entry) => entry[1])).toEqual([
+        "inertia_create_conversation", "inertia_send_message", "inertia_stop_conversation", "inertia_archive_conversation",
+        "inertia_answer_question", "inertia_delegate_task", "inertia_cancel_task",
+      ]);
+      expect(upgraded.map(({ name }) => name)).toEqual(expect.arrayContaining([
+        "agent_thread_operations_source_turn_idx", "agent_thread_operations_child_idx",
+      ]));
+      insertOperation(fixture, "inertia_answer_question", null);
 
       insertOperation(fixture, "inertia_delegate_task", digest("client-1"));
       insertOperation(fixture, "inertia_cancel_task", null);
@@ -145,8 +158,8 @@ describe("delegated task migration", () => {
 
       const rerunRows = tableData(database);
       const rerunObjects = schemaObjects(database);
-      database.prepare("DELETE FROM schema_migrations WHERE version = 121").run();
-      migrateRuntimeDatabase(database, 121);
+      database.prepare("DELETE FROM schema_migrations WHERE version = 124").run();
+      migrateRuntimeDatabase(database, 124);
       expect(tableData(database)).toEqual(rerunRows);
       expect(schemaObjects(database)).toEqual(rerunObjects);
     } finally { database.close(); }
@@ -159,8 +172,8 @@ describe("delegated task migration", () => {
       const rows = tableData(database);
       const objects = schemaObjects(database);
       const operationSql = database.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'").get();
-      expect(() => migrateRuntimeDatabase(database, 121)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 120 });
+      expect(() => migrateRuntimeDatabase(database, 124)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 123 });
       expect(tableData(database)).toEqual(rows);
       expect(schemaObjects(database)).toEqual(objects);
       expect(database.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'").get()).toEqual(operationSql);
@@ -178,8 +191,8 @@ describe("delegated task migration", () => {
       database.exec(`ALTER TABLE agent_thread_operations RENAME TO agent_thread_operations_old;
         CREATE TABLE agent_thread_operations (id TEXT PRIMARY KEY, tool_name TEXT NOT NULL CHECK (tool_name IN ('inertia_other')));`);
       database.pragma("foreign_keys = ON");
-      expect(() => migrateRuntimeDatabase(database, 121)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 120 });
+      expect(() => migrateRuntimeDatabase(database, 124)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 123 });
     } finally { database.close(); }
   });
 });

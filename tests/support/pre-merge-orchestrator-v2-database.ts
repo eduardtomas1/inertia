@@ -2,8 +2,6 @@ import type Database from "better-sqlite3";
 
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
 
-/** Main's last release before the 92e23166 sync, which orchestrator-v2 then numbered its own migrations after. */
-const PRE_MERGE_MAIN_SCHEMA = 111;
 const BRANCH_MIGRATIONS = [
   "OrchestrationV2EventStore",
   "SupportNativePiProvider",
@@ -15,12 +13,26 @@ const BRANCH_MIGRATIONS = [
 ] as const;
 
 /**
- * Builds the schema an orchestrator-v2 build from before the 92e23166 main
- * sync left behind: main's migrations through 111, then the branch's seven
- * recorded as 112 to 118, without main's later 112 to 116.
+ * Main's last release before each main sync, which orchestrator-v2 builds of
+ * that time numbered their own migrations after: 111 before the 92e23166 sync
+ * (branch migrations recorded as 112 to 118), and 116 before the e37ff42b sync
+ * (recorded as 117 to 123).
  */
-export function simulatePreMergeOrchestratorV2Database(database: Database.Database): void {
-  migrateRuntimeDatabase(database, PRE_MERGE_MAIN_SCHEMA);
+export const PRE_MERGE_MAIN_SCHEMAS = { "92e23166": 111, e37ff42b: 116 } as const;
+export type PreMergeSync = keyof typeof PRE_MERGE_MAIN_SCHEMAS;
+
+/**
+ * Builds the schema an orchestrator-v2 build from before the given main sync
+ * left behind: main's migrations through that sync's base, then the branch's
+ * seven numbered directly after it, without main's migrations released under
+ * those numbers since.
+ */
+export function simulatePreMergeOrchestratorV2Database(
+  database: Database.Database,
+  sync: PreMergeSync = "92e23166",
+): void {
+  const mainSchema = PRE_MERGE_MAIN_SCHEMAS[sync];
+  migrateRuntimeDatabase(database, mainSchema);
   const catalog = runtimeMigrationCatalog();
   database.pragma("foreign_keys = OFF");
   database.transaction(() => {
@@ -28,9 +40,9 @@ export function simulatePreMergeOrchestratorV2Database(database: Database.Databa
       const migration = catalog.find((entry) => entry.name === name);
       if (!migration) throw new Error(`Missing branch migration ${name}.`);
       if (typeof migration.up === "string") database.exec(migration.up);
-      else migration.up(database, { sourceSchemaVersion: PRE_MERGE_MAIN_SCHEMA, sourceReleases: [], setLegacyBackfillDiagnostics: () => undefined });
+      else migration.up(database, { sourceSchemaVersion: mainSchema, sourceReleases: [], setLegacyBackfillDiagnostics: () => undefined });
       database.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)")
-        .run(PRE_MERGE_MAIN_SCHEMA + 1 + index, "2026-11-08T12:00:00.000Z");
+        .run(mainSchema + 1 + index, sync === "92e23166" ? "2026-11-08T12:00:00.000Z" : "2026-11-20T12:00:00.000Z");
     });
   })();
   database.pragma("foreign_keys = ON");

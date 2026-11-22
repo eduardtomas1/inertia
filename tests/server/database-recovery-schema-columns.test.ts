@@ -87,8 +87,8 @@ function labelSchema(database: Database.Database, version: number): void {
       ALTER TABLE orchestration_v2_receipts DROP COLUMN status;
     `);
   }
-  if (version < 121) removeDelegatedTasksFromFixture(database);
-  if (version < 117) database.exec(`
+  if (version < 124) removeDelegatedTasksFromFixture(database);
+  if (version < 120) database.exec(`
     DROP TABLE orchestration_v2_effects;
     DROP TABLE orchestration_v2_receipts;
     DROP TABLE orchestration_v2_entities;
@@ -266,7 +266,7 @@ describe("database health check for settings and subagent columns", () => {
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([...Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 122,
+  it.each([...Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 125,
     ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });

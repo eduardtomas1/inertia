@@ -1607,7 +1607,7 @@ describe("inertia_wait_for_conversation", () => {
       expect(definition.description).toMatch(/after a timeout, call again, which doesn't use the allowance/u);
       expect(definition.description).toMatch(/remainingToolCalls/u);
       expect(definition.description.length).toBeLessThanOrEqual(300);
-      expect(env.manager.capabilityManifest().packs.find(({ id }) => id === "inertia.orchestration")?.revision).toBe(6);
+      expect(env.manager.capabilityManifest().packs.find(({ id }) => id === "inertia.orchestration")?.revision).toBe(7);
     } finally { env.store.close(); }
   });
 
@@ -2330,6 +2330,40 @@ describe("inertia_send_message modes", () => {
       expect(failureOf(await env.bridge.invoke(restarted)).message).toContain("approved turn is no longer active");
       expect(env.turns.activeIdentity(env.conversationId)).toEqual({ turnId: replacement.id, runId: replacement.runId });
       expect(env.starts).toEqual(["child-turn-1", replacement.id]);
+    } finally { env.store.close(); }
+  });
+
+  it("counts only the child's own queued messages toward the limit, and starts an idle child's turn before an unread follow-up", async () => {
+    const env = await runningChild();
+    try {
+      // A follow-up the child's provider accepted but never read, queued by reference when its turn settled.
+      (env.store as unknown as { database: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).database.prepare(`
+        INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity, state,
+          created_at, user_message_id) VALUES (?, ?, 'Unread', '[]', ?, '', 'waiting', ?, ?)`)
+        .run(crypto.randomUUID(), env.conversationId, queuedIntentDigest("Unread", []), new Date(0).toISOString(),
+          env.store.agentTurn(env.firstTurnId).userMessageId);
+      for (const position of [2, 3, 4]) {
+        const queued = JSON.parse((await env.bridge.invoke(sendCall({
+          conversationId: env.conversationId, content: `Queued task ${position}`, mode: "queue",
+        }))).text);
+        expect(queued).toMatchObject({ disposition: "queued", position });
+      }
+      const full = sendCall({ conversationId: env.conversationId, content: "Queued task 5", mode: "queue" });
+      expect(failureOf(await env.bridge.invoke(full)).message)
+        .toBe("The managed chat already has 3 queued messages; wait for one to run, or send with another mode.");
+      expect(full.requestApproval).not.toHaveBeenCalled();
+
+      for (const entry of env.store.queuedMessages.list(env.conversationId)) {
+        if (entry.userMessageId === null) env.store.queuedMessages.cancel(env.conversationId, entry.id);
+      }
+      env.turns.cancel(env.conversationId);
+      // An agent's new-turn send starts directly; the queue sends the unread follow-up after it.
+      const sent = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Next task" }))).text);
+      expect(sent).toMatchObject({ conversationId: env.conversationId, disposition: "new-turn", turnId: "child-turn-2", accepted: true });
+      expect(env.starts).toEqual(["child-turn-1", "child-turn-2"]);
+      expect(env.store.queuedMessages.list(env.conversationId)).toEqual([
+        expect.objectContaining({ state: "waiting", userMessageId: env.store.agentTurn(env.firstTurnId).userMessageId }),
+      ]);
     } finally { env.store.close(); }
   });
 

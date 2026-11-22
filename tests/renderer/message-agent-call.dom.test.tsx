@@ -201,3 +201,38 @@ describe("called agent badge", () => {
     expect(screen.queryByRole("button", { name: /^\d+ subagents?, /u })).toBeNull();
   });
 });
+
+describe("observed agent details in a settled fold", () => {
+  it("sits in the region the fold toggle controls and keeps its open state while the fold is closed", async () => {
+    const turn = { ...agentTurn(1), terminalAssistantMessageId: "assistant-1" };
+    const answer: ChatMessage = {
+      id: "assistant-1", conversationId, turnId: "turn-1", role: "assistant",
+      content: "The subagent found the cause.", attachments: [], createdAt: "2026-07-29T10:00:05.000Z",
+    };
+    const trace = taskTrace({
+      id: "task-1", conversationId, turnId: "turn-1", status: "completed", isLive: false,
+      result: "Cause found.", createdAt: "2026-07-29T10:00:02.000Z", updatedAt: "2026-07-29T10:00:04.000Z",
+    });
+    renderTimeline([userMessage(1, "Find the cause"), answer], [turn], [trace], vi.fn<DelegationCommandRunner>());
+    await screen.findByText("The subagent found the cause.");
+    const toggle = document.querySelector<HTMLButtonElement>(".turn-fold-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const region = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(region).not.toBeNull();
+    expect(region.hidden).toBe(true);
+    // Mounted inside the fold's region while it is closed, so the toggle hides and shows it.
+    expect(region.querySelector(".subagent-group-inspect")?.textContent).toBe("Agent details");
+
+    fireEvent.click(toggle);
+    expect(region.hidden).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Agent details" }));
+    expect(screen.getByRole("button", { name: "Hide agent details" })).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(region.hidden).toBe(true);
+    expect(region.querySelector(".subagent-group-inspect")?.textContent).toBe("Hide agent details");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Hide agent details" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".subagent-group-inspect")).toHaveLength(1);
+  });
+});

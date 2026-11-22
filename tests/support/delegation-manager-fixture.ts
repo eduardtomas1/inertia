@@ -8,12 +8,14 @@ import { vi } from "vitest";
 
 import type { AgentApprovalRequest, AgentInputRequest, AgentTurn, Conversation } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
+import { queuedIntentDigest } from "../../src/server/persistence/queued-message-repository";
 import type { BeginAgentTurnInput } from "../../src/server/persistence/types";
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import type { AgentApprovalDecision } from "../../src/server/provider/interactions";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import { ConversationContextRequestCoordinator } from "../../src/server/runtime/conversation-context-request-coordinator";
 import { DelegationTaskService } from "../../src/server/runtime/delegation/task-service";
+import type { ManagedMessageQueue } from "../../src/server/runtime/managed-send-modes";
 
 const roots: string[] = [];
 let callSequence = 0;
@@ -32,6 +34,8 @@ export interface DelegationManagerFixture {
   starts: string[];
   active: Map<string, { turnId: string; runId: string }>;
   turns: ReturnType<typeof fakeTurns>;
+  /** The child chats' message queue a parent's `mode: "queue"` sends go through. */
+  messageQueue: ManagedMessageQueue;
   invoke(tool: string, args: unknown, options?: CallOptions): Promise<ProviderHostToolResult>;
   invokeAs(source: { conversation: Conversation; turn: AgentTurn }, tool: string, args: unknown, options?: CallOptions):
     Promise<ProviderHostToolResult>;
@@ -99,6 +103,15 @@ function fakeTurns(store: RuntimeStore, database: Database.Database, onSettled: 
   const stopped: string[] = [];
   let followUpAdmission = true;
   const begin = (conversationId: string, content: string) => beginStoreTurn(store, conversationId, content);
+  const cancelExact = (conversationId: string, identity: { turnId: string; runId: string }) => {
+    const current = active.get(conversationId);
+    if (current?.turnId !== identity.turnId || current.runId !== identity.runId) return false;
+    active.delete(conversationId);
+    stopped.push(identity.turnId);
+    settleTurnRow(store, database, identity.turnId, "cancelled");
+    onSettled(store.agentTurn(identity.turnId));
+    return true;
+  };
   return {
     active, starts, steers, stopped, begin,
     acquireTurnAdmission: async (conversationId: string) => active.has(conversationId) ? null
@@ -115,15 +128,10 @@ function fakeTurns(store: RuntimeStore, database: Database.Database, onSettled: 
     },
     failBeforeStart: vi.fn(),
     cancel: (conversationId: string) => active.delete(conversationId),
-    cancelOwned: (conversationId: string, identity: { turnId: string; runId: string }) => {
-      const current = active.get(conversationId);
-      if (current?.turnId !== identity.turnId || current.runId !== identity.runId) return false;
-      active.delete(conversationId);
-      stopped.push(identity.turnId);
-      settleTurnRow(store, database, identity.turnId, "cancelled");
-      onSettled(store.agentTurn(identity.turnId));
-      return true;
-    },
+    cancelOwned: (conversationId: string, identity: { turnId: string; runId: string }) => cancelExact(conversationId, identity),
+    // The receipted Stop (an agent's inertia_stop_conversation and restart) cancels the exact turn the same way.
+    cancelExact: (conversationId: string, identity: { turnId: string; runId: string }) => cancelExact(conversationId, identity),
+    isReleasing: () => false,
     waitForProviderCleanup: async () => true,
     acquireFollowUpAdmission: (conversationId: string) => (
       active.has(conversationId) && followUpAdmission
@@ -167,6 +175,14 @@ export async function createDelegationManagerFixture(options: { pollMs?: number 
       sendDelegated: async (conversationId) => { offers.push(`send:${conversationId}`); },
     }),
   });
+  const messageQueue: ManagedMessageQueue = {
+    enqueueManagedMessage: (input) => {
+      const conversation = store.conversation(input.conversationId);
+      store.queuedMessages.add({ ...input, conversation, attachments: [], digest: queuedIntentDigest(input.content, []) });
+      return { kind: "message.queue", conversationId: conversation.id, entries: store.queuedMessages.list(conversation.id),
+        receipt: store.queuedMessages.get(conversation.id, input.id) };
+    },
+  };
   const source = store.createConversation(project.id, "Parent chat", { accessMode: "auto-edit" });
   const sourceTurn = turns.begin(source.id, "Coordinate the work").turn;
   turns.active.set(source.id, { turnId: sourceTurn.id, runId: sourceTurn.runId });
@@ -183,6 +199,7 @@ export async function createDelegationManagerFixture(options: { pollMs?: number 
     contextRequests: new ConversationContextRequestCoordinator({ pendingInputs: inputs, contextPackets: store.contextPackets,
       broadcast: vi.fn(), broadcastConversationShell: vi.fn() }),
     delegation: service,
+    messageQueue: () => messageQueue,
     providerInfo: () => [{ id: "codex", canRun: true, statusMessage: null }] as never,
     broadcastSnapshot: vi.fn(),
     broadcastConversationShell: vi.fn(),
@@ -204,7 +221,7 @@ export async function createDelegationManagerFixture(options: { pollMs?: number 
     }
   };
   return {
-    store, database, manager, service, source, sourceTurn, approvals, inputs, live, offers, turns,
+    store, database, manager, service, source, sourceTurn, approvals, inputs, live, offers, turns, messageQueue,
     starts: turns.starts, active: turns.active,
     call,
     invoke: (tool, args, callOptions) => manager.bridgeFor({ conversation: source, turn: sourceTurn }).invoke(call(tool, args, callOptions)),

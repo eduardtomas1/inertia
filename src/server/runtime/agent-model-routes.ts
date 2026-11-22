@@ -14,6 +14,7 @@ import type {
   ProviderHostToolDefinition,
   ProviderHostToolResult,
 } from "../provider/contracts";
+import { routeSchema } from "./agent-thread-schemas";
 import type { BackendProfileController } from "./backends/backend-profile-controller";
 import { boundedUntrustedAgentText } from "./untrusted-agent-text";
 
@@ -326,4 +327,44 @@ export async function listModelRoutes(
     if (kept.length > 0) included.push({ ...backend, models: kept, modelsTruncated: true, totalModels: total });
   }
   return { success: true, text: JSON.stringify(result(included, included.length < backends.length)) };
+}
+
+/** Whether `inertia_create_conversation` would accept `route` exactly as given. */
+function routeAccepted(
+  controller: Pick<BackendProfileController, "detail" | "validateSelection">,
+  source: Conversation,
+  route: ModelRouteCandidate,
+  detail: (profileId: string) => ModelBackendProfileDetail,
+): boolean {
+  const parsed = routeSchema.safeParse(route);
+  const fields = Object.keys(route) as (keyof ModelRouteCandidate)[];
+  if (!parsed.success || fields.some((field) => parsed.data[field] !== route[field])) return false;
+  try {
+    resolveRouteSelection(controller, source, parsed.data, detail);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `inertia_list_models`: the routes the create call accepts as listed, for the chat `source`. */
+export async function listAcceptedModelRoutes(
+  controller: Pick<BackendProfileController, "detail" | "profiles" | "validateSelection">,
+  providerInfo: readonly ProviderInfo[],
+  source: Conversation,
+  args: unknown,
+  signal: AbortSignal,
+): Promise<ProviderHostToolResult> {
+  // One read per backend instead of one per model and reasoning effort.
+  const details = new Map<string, ModelBackendProfileDetail>();
+  const detail = (profileId: string): ModelBackendProfileDetail => {
+    const known = details.get(profileId) ?? controller.detail(profileId);
+    details.set(profileId, known);
+    return known;
+  };
+  return listModelRoutes(source, args, {
+    profiles: () => controller.profiles(providerInfo),
+    providerInfo: () => providerInfo,
+    accepts: (route) => routeAccepted(controller, source, route, detail),
+  }, signal);
 }

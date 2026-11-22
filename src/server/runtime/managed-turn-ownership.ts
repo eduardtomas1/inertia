@@ -19,7 +19,7 @@ export function recordQueuedManagedTurn(store: RuntimeStore, turns: TurnControll
   }
 }
 
-const MANAGED_TURN_GONE_MESSAGE = "The approved turn is no longer active. A newer turn was not stopped.";
+export const MANAGED_TURN_GONE_MESSAGE = "The approved turn is no longer active. A newer turn was not stopped.";
 
 export async function stopOwnedManagedTurn(store: RuntimeStore, turns: TurnController, conversationId: string, owner: TurnOwnerIdentity): Promise<void> {
   if (!turns.cancelOwned(conversationId, owner)) throw new Error(MANAGED_TURN_GONE_MESSAGE);

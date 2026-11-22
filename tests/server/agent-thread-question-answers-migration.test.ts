@@ -59,10 +59,14 @@ describe("agent thread question answers migration", () => {
       migrateRuntimeDatabase(database);
 
       expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
-      expect(database.prepare("SELECT * FROM agent_thread_operations ORDER BY id").all()).toEqual(before.rows);
-      expect(database.pragma("table_info(agent_thread_operations)")).toEqual(before.columns);
+      // Orchestrator V2's PersistDelegatedTasks (schema 124) then appends the client request key and its index.
+      expect(database.prepare("SELECT * FROM agent_thread_operations ORDER BY id").all())
+        .toEqual((before.rows as Record<string, unknown>[]).map((row) => ({ ...row, client_request_key: null })));
+      expect((database.pragma("table_info(agent_thread_operations)") as Array<{ name: string }>)
+        .filter(({ name }) => name !== "client_request_key")).toEqual(before.columns);
       expect(database.pragma("foreign_key_list(agent_thread_operations)")).toEqual(before.foreignKeys);
-      expect(operationSchema(database)).toEqual(before.indexes);
+      expect((operationSchema(database) as Array<{ name: string }>)
+        .filter(({ name }) => name !== "agent_thread_operations_client_request_idx")).toEqual(before.indexes);
       expect(database.pragma("index_list(agent_thread_operations)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ unique: 1, origin: "u" }),
       ]));

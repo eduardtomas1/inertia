@@ -1,8 +1,11 @@
 // @inertia-test-suite portable
+import { randomUUID } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { DelegatedTaskView } from "../../src/shared/orchestration-delegation";
 import type { AgentApprovalDecision } from "../../src/server/provider/interactions";
+import { delegatedDeliveryId, queuedIntentDigest } from "../../src/server/persistence/queued-message-repository";
 import { createDelegationManagerFixture, errorCode, parsed } from "../support/delegation-manager-fixture";
 
 const TASK = { task: "Investigate the cache invalidation bug and report the root cause.", title: "Cache investigation" };
@@ -147,7 +150,7 @@ describe("inertia_delegate_task", () => {
       expect(details[0]).toMatch(/ · delegated task · result stays in the inbox; automatic continues are off$/u);
       expect(details[1]).toMatch(/ · delegated task · waits up to 1 ms · result stays in the inbox; automatic continues are off$/u);
       expect(details[2]).toMatch(/ · delegated task · no automatic wake$/u);
-      expect(details[3]).toBe(`Target ${view.conversationId} · Now write the fix. · starts a follow-up task · `
+      expect(details[3]).toBe(`Mode auto: joins the running turn, or starts a new one · Target ${view.conversationId} · Now write the fix. · starts a follow-up task · `
         + "result stays in the inbox; automatic continues are off");
     } finally { await f.close(); }
   });
@@ -325,9 +328,94 @@ describe("delegated task reads and follow-ups", () => {
 
       expect(details).toHaveLength(4);
       expect(details[0]).not.toContain(suffix);
-      expect(details[1]).toBe(`Target ${view.conversationId} · Now write the fix.${suffix}`);
+      expect(details[1]).toBe(`Mode auto: joins the running turn, or starts a new one · Target ${view.conversationId} · Now write the fix.${suffix}`);
       expect(details[2]).not.toContain(suffix);
       expect(details[3]).not.toContain(suffix);
+    } finally { await f.close(); }
+  });
+
+  // A follow-up the child's provider accepted but never read, queued by reference when its turn settled.
+  function queueUnreadFollowUp(f: Awaited<ReturnType<typeof createDelegationManagerFixture>>, childId: string, turnId: string): string {
+    const id = randomUUID();
+    f.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity,
+      state, created_at, user_message_id) VALUES (?, ?, 'Unread', '[]', ?, '', 'waiting', ?, ?)`)
+      .run(id, childId, queuedIntentDigest("Unread", []), new Date(0).toISOString(), f.store.agentTurn(turnId).userMessageId);
+    return id;
+  }
+
+  it.each(["auto", "restart"] as const)(
+    "starts a %s follow-up directly, linked to its task, while an unread follow-up waits in the child's queue",
+    async (mode) => {
+      const f = await createDelegationManagerFixture();
+      try {
+        const view = parsed<DelegatedTaskView>(await f.invoke("inertia_delegate_task", TASK));
+        await f.settle(view.firstTurnId, "completed", "Root cause found.");
+        const unread = queueUnreadFollowUp(f, view.conversationId, view.firstTurnId);
+        let running: string | null = null;
+        if (mode === "restart") {
+          running = f.beginTurn(view.conversationId, "The user's own work").id;
+          f.turns.start(running);
+        }
+        const sent = parsed<{ disposition: string; turnId?: string; taskId?: string; stoppedTurnId?: string }>(await f.invoke(
+          "inertia_send_message", { conversationId: view.conversationId, content: "Now write the fix.", mode }));
+        expect(sent).toMatchObject({ disposition: "new-turn", turnId: expect.any(String), taskId: expect.any(String),
+          ...(running ? { stoppedTurnId: running } : {}) });
+        if (running) expect(f.turns.stopped).toEqual([running]);
+        expect(f.active.get(view.conversationId)?.turnId).toBe(sent.turnId);
+        expect(f.service.view(sent.taskId!)).toMatchObject({ kind: "follow-up", status: "running", completionWake: "always" });
+        // The user's unread follow-up keeps its row; the queue runs it after this turn.
+        expect(f.store.queuedMessages.get(view.conversationId, unread)).toMatchObject({ state: "waiting" });
+
+        f.offers.splice(0);
+        await f.settle(sent.turnId!, "completed", "Fixed.");
+        expect(f.service.view(sent.taskId!)).toMatchObject({ status: "completed", result: { text: "Fixed." } });
+        expect(f.store.queuedMessages.activeDelegatedDelivery(f.source.id)?.delegatedCompletion?.taskIds).toContain(sent.taskId);
+        expect(f.offers).toContain(f.source.id);
+      } finally { await f.close(); }
+    },
+  );
+
+  it("restarts a child whose full queue holds a delegated result, sending the message after the stop", async () => {
+    const f = await createDelegationManagerFixture();
+    try {
+      const view = parsed<DelegatedTaskView>(await f.invoke("inertia_delegate_task", TASK));
+      const child = f.store.conversation(view.conversationId);
+      f.store.queuedMessages.insertDelegatedDelivery({ id: delegatedDeliveryId(child.id, 1), conversation: child,
+        content: "Results of the child's own tasks", attribution: { parentConversationId: child.id, generation: 1,
+          taskIds: ["a".repeat(64)] } });
+      for (const index of [1, 2, 3]) f.messageQueue.enqueueManagedMessage({ conversationId: child.id, id: randomUUID(), content: `Queued ${index}` });
+      const queued = f.store.queuedMessages.list(child.id).map(({ id, state }) => ({ id, state }));
+      expect(queued).toHaveLength(4);
+      const restarted = await f.invoke("inertia_send_message", { conversationId: child.id, content: "Start over.", mode: "restart" });
+      expect(parsed(restarted)).toMatchObject({ disposition: "new-turn", stoppedTurnId: view.firstTurnId, accepted: true });
+      expect(f.turns.stopped).toEqual([view.firstTurnId]);
+      expect(f.starts.at(-1)).toBe(f.active.get(child.id)?.turnId);
+      expect(f.store.queuedMessages.list(child.id).map(({ id, state }) => ({ id, state }))).toEqual(queued);
+    } finally { await f.close(); }
+  });
+
+  it("refuses a restart that could not start its new turn, before approval and again before the stop", async () => {
+    const f = await createDelegationManagerFixture();
+    try {
+      const view = parsed<DelegatedTaskView>(await f.invoke("inertia_delegate_task", TASK));
+      const restoring = vi.spyOn(f.store.conversationWork, "restoreBlocksConversation").mockReturnValue(true);
+      const early = vi.fn(async (): Promise<AgentApprovalDecision> => "approve");
+      const refused = await f.invoke("inertia_send_message",
+        { conversationId: view.conversationId, content: "Start over.", mode: "restart" }, { approval: early });
+      expect(refused.success).toBe(false);
+      expect(early).not.toHaveBeenCalled();
+
+      restoring.mockReturnValue(false);
+      const late = vi.fn(async (): Promise<AgentApprovalDecision> => {
+        restoring.mockReturnValue(true);
+        return "approve";
+      });
+      const approvedThenBlocked = await f.invoke("inertia_send_message",
+        { conversationId: view.conversationId, content: "Start over.", mode: "restart" }, { approval: late });
+      expect(approvedThenBlocked.success).toBe(false);
+      expect(late).toHaveBeenCalledOnce();
+      expect(f.turns.stopped).toEqual([]);
+      expect(f.active.get(view.conversationId)?.turnId).toBe(view.firstTurnId);
     } finally { await f.close(); }
   });
 

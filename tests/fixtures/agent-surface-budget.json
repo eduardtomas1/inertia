@@ -170,6 +170,12 @@
       "cursorKimi": 519,
       "opencode": 518
     },
+    "inertia_fork_history": {
+      "claude": 586,
+      "codex": 482,
+      "cursorKimi": 586,
+      "opencode": 586
+    },
     "inertia_list_conversations": {
       "claude": 477,
       "codex": 373,
@@ -183,10 +189,10 @@
       "opencode": 410
     },
     "inertia_request_context": {
-      "claude": 933,
-      "codex": 827,
-      "cursorKimi": 933,
-      "opencode": 933
+      "claude": 1021,
+      "codex": 915,
+      "cursorKimi": 1021,
+      "opencode": 1021
     },
     "inertia_list_models": {
       "claude": 536,
@@ -195,10 +201,10 @@
       "opencode": 536
     },
     "inertia_create_conversation": {
-      "claude": 1454,
-      "codex": 1348,
-      "cursorKimi": 1454,
-      "opencode": 1454
+      "claude": 1459,
+      "codex": 1353,
+      "cursorKimi": 1459,
+      "opencode": 1459
     },
     "inertia_send_message": {
       "claude": 718,
@@ -241,6 +247,30 @@
       "codex": 378,
       "cursorKimi": 484,
       "opencode": 484
+    },
+    "inertia_delegate_task": {
+      "claude": 1824,
+      "codex": 1718,
+      "cursorKimi": 1824,
+      "opencode": 1824
+    },
+    "inertia_get_task_status": {
+      "claude": 421,
+      "codex": 317,
+      "cursorKimi": 421,
+      "opencode": 421
+    },
+    "inertia_wait_for_task": {
+      "claude": 492,
+      "codex": 388,
+      "cursorKimi": 492,
+      "opencode": 492
+    },
+    "inertia_cancel_task": {
+      "claude": 599,
+      "codex": 494,
+      "cursorKimi": 600,
+      "opencode": 599
     },
     "inertia_request_secret": {
       "claude": 1216,
@@ -313,24 +343,24 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 29263,
-      "withoutBrowser": 16266,
-      "withCad": 51627
+      "withBrowser": 33278,
+      "withoutBrowser": 20281,
+      "withCad": 55642
     },
     "codex": {
-      "withBrowser": 25102,
-      "withoutBrowser": 13887,
-      "withCad": 46317
+      "withBrowser": 28594,
+      "withoutBrowser": 17379,
+      "withCad": 49809
     },
     "cursorKimi": {
-      "withBrowser": 29197,
-      "withoutBrowser": 16190,
-      "withCad": 51562
+      "withBrowser": 33213,
+      "withoutBrowser": 20206,
+      "withCad": 55578
     },
     "opencode": {
-      "withBrowser": 29187,
-      "withoutBrowser": 16190,
-      "withCad": 51551
+      "withBrowser": 33202,
+      "withoutBrowser": 20205,
+      "withCad": 55566
     }
   }
 }

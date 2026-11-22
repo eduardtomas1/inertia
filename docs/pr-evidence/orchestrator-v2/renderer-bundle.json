@@ -643,5 +643,115 @@
       }
     },
     "transcriptNote": "Measured, the merged transcript is only 960 bytes above base plus both sides' growth (ResponseTimeline +279 where main's fold and subagent group and the branch's fork and delegation code meet, the delegation chunk +177 from Grok and Pi provider maps, the rest in small shared chunks). Compared through caps it looks about 10 KB larger because the base's 600 KiB cap sat 11,370 bytes above its 603,030-byte measurement, and both sides' caps were raised from that cap rather than from the measurement."
+  },
+  "mainSynce37ff42b": {
+    "date": "2026-11-22",
+    "checkpoint": "Merge of origin/main e37ff42b (#742 provider slash commands through #762) into ac607089",
+    "platform": "macOS arm64, Node 22.23.2",
+    "measurement": "electron-vite renderer output of the merged tree, and of 92e23166 (the previous sync base), ac607089 (the branch) and e37ff42b (main), each exported with git archive and built on the same machine against the merged dependency tree (main's lockfile plus @cursor/sdk), so every build shares one dependency graph. Route closures and core inclusions or exclusions are unchanged.",
+    "capResolution": "Each conflicting cap is the merged measurement plus the branch's 512-byte cross-platform headroom, as in the earlier main syncs. deferredComposerQueueJavaScript did not conflict but measures 14,003 bytes in the branch build alone on this dependency graph, over the branch's 13,855; it keeps its 256-byte headroom. Every other route keeps its merged cap, which still covers it.",
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 951984,
+        "branchLimit": 948705,
+        "mainLimit": 993611,
+        "limit": 952496,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 834150,
+        "branchLimit": 830967,
+        "mainLimit": 875988,
+        "limit": 834662,
+        "headroom": 512
+      },
+      "settingsJavaScript": {
+        "bytes": 106969,
+        "branchLimit": 107301,
+        "mainLimit": 106251,
+        "limit": 107481,
+        "headroom": 512
+      },
+      "transcriptJavaScript": {
+        "bytes": 700633,
+        "branchLimit": 697764,
+        "mainLimit": 654699,
+        "limit": 701145,
+        "headroom": 512
+      },
+      "detachedChatJavaScript": {
+        "bytes": 22225,
+        "branchLimit": 22682,
+        "mainLimit": 22460,
+        "limit": 22737,
+        "headroom": 512
+      },
+      "coreJavaScript": {
+        "bytes": 2754846,
+        "branchLimit": 2746581,
+        "mainLimit": 2680701,
+        "limit": 2755358,
+        "headroom": 512
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 14003,
+        "branchLimit": 13855,
+        "mainLimit": 13276,
+        "limit": 14259,
+        "headroom": 256
+      }
+    },
+    "growthAccounting": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "base": 990560,
+        "branchGrowth": -41396,
+        "mainGrowth": 2832,
+        "merged": 951984,
+        "mergeInteraction": -12
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "base": 873034,
+        "branchGrowth": -41608,
+        "mainGrowth": 2736,
+        "merged": 834150,
+        "mergeInteraction": -12
+      },
+      "settingsJavaScript": {
+        "base": 105871,
+        "branchGrowth": 1010,
+        "mainGrowth": 88,
+        "merged": 106969,
+        "mergeInteraction": 0
+      },
+      "transcriptJavaScript": {
+        "base": 651776,
+        "branchGrowth": 46041,
+        "mainGrowth": 2761,
+        "merged": 700633,
+        "mergeInteraction": 55
+      },
+      "detachedChatJavaScript": {
+        "base": 22160,
+        "branchGrowth": 21,
+        "mainGrowth": 44,
+        "merged": 22225,
+        "mergeInteraction": 0
+      },
+      "coreJavaScript": {
+        "base": 2673275,
+        "branchGrowth": 74589,
+        "mainGrowth": 6934,
+        "merged": 2754846,
+        "mergeInteraction": 48
+      },
+      "deferredComposerQueueJavaScript": {
+        "base": 13276,
+        "branchGrowth": 727,
+        "mainGrowth": 0,
+        "merged": 14003,
+        "mergeInteraction": 0
+      }
+    },
+    "attribution": "Every route measures within 55 bytes of base plus both sides' growth; routes neither side changed measure identically in all four builds."
   }
 }

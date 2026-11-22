@@ -45,6 +45,7 @@ export const OPENCODE_WAIT_HOST_TOOLS: ReadonlySet<string> = new Set([
   "inertia_send_message",
   "inertia_stop_conversation",
   "inertia_archive_conversation",
+  "inertia_answer_question",
   "inertia_delegate_task",
   "inertia_wait_for_task",
   "inertia_cancel_task",

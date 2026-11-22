@@ -1613,6 +1613,82 @@ metadata, Grok and Kimi cleanup tests need the runtime process guardian that
 `npm run build:bundle` builds first; without it they fail identically on
 `origin/main`.
 
+## Main sync onto e37ff42b — 2026-11-22
+
+Main released migrations 117 to 119 (`ExtendColorThemeLibrary`,
+`PersistSentToUserMessages`, `RecordAgentThreadQuestionAnswers`), so the
+branch's unreleased migrations move up by three. Earlier entries in this file
+use the old numbers:
+
+| Before | After | Migration |
+| --- | --- | --- |
+| 117 | 120 | `OrchestrationV2EventStore` |
+| 118 | 121 | `SupportNativePiProvider` |
+| 119 | 122 | `SupportCursorSdkHarness` |
+| 120 | 123 | `RaiseConversationContextSupplementBound` |
+| 121 | 124 | `PersistDelegatedTasks` |
+| 122 | 125 | `PersistDelegationAutomaticWakes` |
+| 123 | 126 | `OrchestrationV2ReceiptStatusAndProjectionMetadata` |
+
+Lineage entries 1 to 119 are byte-identical to main's. Main's 119 rebuilds
+`agent_thread_operations` with five tool names, so `PersistDelegatedTasks` now
+appends only the missing delegation tools to the list it finds, keeping
+`inertia_answer_question`. The Pi and Cursor SDK rebuilds touch none of main's
+three tables; their tests and the delegation test now assert main's colour
+theme constraint, `messages.sent_to_user` and the widened operation log with
+both indexes. A database from an orchestrator-v2 build before this sync (or
+before 92e23166) has the event store but not main's `sent_to_user` column, a
+state no released numbering produces; the `orchestrator-v2-development-database`
+blocker now keys on that and on a latest version up to 123, and its test
+builds both older generations.
+
+`inertia_send_message`'s modes compose with the queue rows only the branch
+keeps. `queue` counts against the queue's own cap (unread follow-ups and the
+delegated result stay outside it, before and after approval). `auto` on an idle
+child and `restart` start their turn directly, as on main and on the branch
+before the merge, so the turn stays linked to its delegated task, is the
+operation's dispatch and matches the approval card; only the user's own direct
+idle send waits behind an unread follow-up. Deviation until Phase 5 package 2:
+a waiting unread follow-up then runs after the managed turn, through the queue,
+where T3 places unread steers before a racing start (N2). `restart` stops
+through the receipted agent Stop, never cancels queue rows, and is refused
+before approval and again before the stop when a checkout restore or a resumed
+provider terminal would keep the new turn from starting. Rollback still cancels
+only rows naming rolled-back messages. Main's new-turn and steer paths in
+`managed-send-modes.ts` gained the branch's checkout-restore check, turn
+admission, fork-session preparation and delegated-task linking.
+`inertia_answer_question` joins OpenCode's `inertia-chat-waits` server. The
+orchestration pack moves from main's revision 6 to 7.
+
+Other integration: provider slash commands refuse to run when a resumed
+session has missed turns on another route; a history delta deferred from the
+session's own last turn waits for the next message. Search finds main's
+messages to the user but keeps the branch's rollback and unread-follow-up
+exclusions. Observed-agent details sit after the work log now that main places
+subagent groups where they started, and inside a settled fold's region, kept
+mounted, when the agents fold with the work. Main's dead-code removal took
+`agentTurnStatusSchema`, now local to `orchestration-v2.ts`. `providers.ts` and
+the chat manager stay under the line ceiling by moving the skill readers to
+`native-skill-discovery.ts` and model listing to `agent-model-routes.ts`.
+
+The agent surface budget is exactly main plus the branch's growth, with no
+interaction: Claude and OpenCode +4,015 bytes, Codex +3,492, Cursor and Kimi
++4,016 in every variant. Renderer routes were measured against builds of
+92e23166, the branch and main on one dependency tree; every route is within
+55 bytes of base plus both sides' growth, and the raised caps are measured
+size plus 512 bytes.
+
+Verification on macOS arm64 with Node 22.23.2: `npm run typecheck`,
+`npm run lint`, `npm run check:architecture`, `npm run check:quality` and
+`npm run build:bundle` pass, and `npm run check:migrations` verifies 126
+lineage entries, also against e37ff42b as the base. The 333 test files either
+side changed since 92e23166 pass in six isolated chunks (6,737 tests passed,
+62 skipped). `npm run test:portable` passes 5,147 tests with 38 skipped; its
+one failure, main's unchanged `inertia_list_tasks` ordering test, fails about
+one run in five because two tasks created in the same millisecond tie on a
+random id. The Antigravity, Grok and Kimi cleanup tests again need the process
+guardian that `npm run build:bundle` builds. Electron scenarios were not run.
+
 ## G5: command authority for sends, Stop, configuration and queue edits — 2026-11-02
 
 **Lanes.** `OrchestrationCommandLanes`

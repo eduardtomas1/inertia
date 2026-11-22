@@ -8,6 +8,9 @@ import type { RuntimeStore } from "../database";
 import { QueuedMessageLimitError, releasesQueue } from "../persistence/queued-message-repository";
 import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../provider/contracts";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
+import type { ProviderManager } from "../providers";
+import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
+import { prepareForkSession } from "./fork-session-service";
 import { MAX_PROMPT_CHARS, MULTILINE_PATTERN, idSchema, safeMultilineSchema } from "./managed-chat-schemas";
 import { recordManagedTurn, recordQueuedManagedTurn } from "./managed-turn-ownership";
 import type { TurnController } from "./turns/turn-controller";
@@ -19,10 +22,11 @@ export const RESTART_IDLE = "The managed chat has no running turn to restart; se
 const QUEUE_FULL = `The managed chat already has ${MAX_QUEUED_MESSAGES} queued messages; wait for one to run, or send with another mode.`;
 const QUEUE_UNAVAILABLE = "Queued sends are not available in this Inertia runtime.";
 const QUEUE_HELD_NEXT = "Its last turn did not complete, so its queue waits for the user to send this; to start a turn now, send with mode auto.";
+const TERMINAL_RESUMED = "End the resumed provider terminal for the target chat before sending another message.";
 export const STEER_ENDED = "The managed chat's turn ended before the follow-up was sent; nothing was sent. Send with mode auto to start a new turn.";
 
 const SEND_MODES = ["auto", "queue", "steer", "restart"] as const;
-type SendMode = (typeof SEND_MODES)[number];
+export type SendMode = (typeof SEND_MODES)[number];
 
 /** The approval card's title and first detail line for each mode. */
 export const SEND_APPROVALS: Readonly<Record<SendMode, { title: string; effect: string }>> = {
@@ -68,9 +72,13 @@ export interface ManagedMessageQueue {
   enqueueManagedMessage(input: { conversationId: string; id: string; content: string }): MessageQueueResult;
 }
 
+/** Links a child turn a send dispatched to the parent's delegated task for that child, answering its task id. */
+export type ManagedFollowUpLink = (childTurn: { id: string; runId: string }, via: "send" | "steer") => Promise<string | null>;
+
 export interface ManagedDispatchDependencies {
   store: RuntimeStore;
   turns: TurnController;
+  providers: Pick<ProviderManager, "resolveModelRoute" | "nativeConversation" | "isRunning">;
   providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "acquire" | "release">;
   /** Resolved per call: the queue runtime starts after the chat manager. */
   messageQueue?(): ManagedMessageQueue | undefined;
@@ -99,6 +107,7 @@ export async function steerManagedTurn(
   content: string,
   operationId: string,
   signal: AbortSignal,
+  link?: ManagedFollowUpLink,
 ): Promise<ProviderHostToolResult> {
   const lease = dependencies.turns.acquireFollowUpAdmission(target.id);
   if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
@@ -111,41 +120,55 @@ export async function steerManagedTurn(
       id: lease.turnId, runId: lease.runId,
     }, dependencies.now()), signal);
     if (steered.kind !== "accepted" || !steered.message.turnId) throw new Error("The target provider did not accept the follow-up.");
+    const taskId = await link?.({ id: lease.turnId, runId: lease.runId }, "steer") ?? null;
     dependencies.broadcastSnapshot();
     return json({
       conversationId: target.id,
       turnId: steered.message.turnId,
       disposition: "follow-up",
       accepted: true,
+      ...(taskId ? { taskId } : {}),
     });
   } finally {
     lease.release();
   }
 }
 
-/** Starts a new child turn with `content`, recorded as this operation's dispatch. */
+/**
+ * Starts a new child turn with `content`, recorded as this operation's dispatch, so it stays linked to the parent's
+ * delegated task and is cancelled with a parent turn that fails. Unlike the user's direct send, it does not wait
+ * behind an unread follow-up or a delegated result in the child's queue; the queue runs those after this turn.
+ * Deviation until Phase 5 package 2: T3 places an unread steer before a racing start (N2).
+ */
 export async function startManagedTurn(
   dependencies: ManagedDispatchDependencies,
   target: Conversation,
   content: string,
   operationId: string,
   signal: AbortSignal,
-  restarted?: { stoppedTurnId: string },
+  options: { restarted?: { stoppedTurnId: string }; link?: ManagedFollowUpLink } = {},
 ): Promise<ProviderHostToolResult> {
-  if (!dependencies.providerTerminalResumes.acquire(target.id)) {
-    throw new Error(
-      "End the resumed provider terminal for the target chat before sending another message.",
-    );
+  const { restarted } = options;
+  if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+  if (dependencies.store.conversationWork.restoreBlocksConversation(target.id)) {
+    throw new Error(CHECKOUT_RESTORE_IN_PROGRESS);
   }
+  if (!dependencies.providerTerminalResumes.acquire(target.id)) throw new Error(TERMINAL_RESUMED);
+  let admission: Awaited<ReturnType<TurnController["acquireTurnAdmission"]>> = null;
   try {
+    if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+    admission = await dependencies.turns.acquireTurnAdmission(target.id, 30_000);
+    if (!admission) throw new Error("The target chat cannot accept a message right now.");
+    await prepareForkSession(dependencies, target.id, signal);
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
     dispatching(dependencies, operationId, target);
     const queued = dependencies.turns.queue({
       conversationId: target.id,
       content,
       activateConversation: false,
-    });
+    }, undefined, admission);
     recordQueuedManagedTurn(dependencies.store, dependencies.turns, operationId, queued.turn, dependencies.now());
+    const taskId = await options.link?.(queued.turn, "send") ?? null;
     if (!dependencies.turns.start(queued.turn.id)) {
       dependencies.turns.failBeforeStart(target.id, "The managed follow-up could not start.");
       throw new Error("The target chat could not start the new turn.");
@@ -157,10 +180,26 @@ export async function startManagedTurn(
       disposition: "new-turn",
       accepted: true,
       ...(restarted ? { stoppedTurnId: restarted.stoppedTurnId } : {}),
+      ...(taskId ? { taskId } : {}),
     });
   } finally {
+    admission?.release();
     dependencies.providerTerminalResumes.release(target.id);
   }
+}
+
+/**
+ * Refuses what would keep a new child turn from starting. A restart checks it before its approval and again just
+ * before its stop, so it never stops a turn and then sends nothing for these reasons.
+ */
+export function assertManagedTurnCanStart(
+  dependencies: Pick<ManagedDispatchDependencies, "store"> & {
+    providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "isActive">;
+  },
+  target: Conversation,
+): void {
+  if (dependencies.store.conversationWork.restoreBlocksConversation(target.id)) throw new Error(CHECKOUT_RESTORE_IN_PROGRESS);
+  if (dependencies.providerTerminalResumes.isActive(target.id)) throw new Error(TERMINAL_RESUMED);
 }
 
 function messageQueue(dependencies: Pick<ManagedDispatchDependencies, "messageQueue">): ManagedMessageQueue {
@@ -175,7 +214,8 @@ export function assertManagedQueueRoom(
   target: Conversation,
 ): void {
   messageQueue(dependencies);
-  if (dependencies.store.queuedMessages.list(target.id).length >= MAX_QUEUED_MESSAGES) {
+  // The queue's own cap: unread follow-ups and a delegated result wait outside it.
+  if (dependencies.store.queuedMessages.cappedCount(target.id) >= MAX_QUEUED_MESSAGES) {
     throw new Error(QUEUE_FULL);
   }
 }

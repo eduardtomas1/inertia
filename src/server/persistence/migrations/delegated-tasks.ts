@@ -2,8 +2,12 @@ import type Database from "better-sqlite3";
 
 import type { DatabaseMigrationDefinition } from "./catalog";
 
+/**
+ * The four original tools, main's `inertia_answer_question` (schema 119), then
+ * the two delegation tools this migration appends to whichever list it finds.
+ */
 const DELEGATION_OPERATION_TOOLS = ["inertia_create_conversation", "inertia_send_message", "inertia_stop_conversation",
-  "inertia_archive_conversation", "inertia_delegate_task", "inertia_cancel_task"] as const;
+  "inertia_archive_conversation", "inertia_answer_question", "inertia_delegate_task", "inertia_cancel_task"] as const;
 
 function delegationIdentifier(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
@@ -38,10 +42,13 @@ function widenDelegationOperationTools(database: Database.Database): void {
   const match = current && header.test(current.sql) ? toolCheck.exec(current.sql) : null;
   if (!current || !match) throw new Error("The managed-chat operation schema is not the expected version.");
   const names = [...match[2]!.matchAll(/'([a-z_]+)'/gu)].map((entry) => entry[1]!);
-  if (DELEGATION_OPERATION_TOOLS.every((name) => names.includes(name)) && names.length === DELEGATION_OPERATION_TOOLS.length) return;
-  if (names.length !== 4 || DELEGATION_OPERATION_TOOLS.slice(0, 4).some((name) => !names.includes(name))) {
+  const known: readonly string[] = DELEGATION_OPERATION_TOOLS;
+  if (new Set(names).size !== names.length || names.some((name) => !known.includes(name))
+    || DELEGATION_OPERATION_TOOLS.slice(0, 4).some((name) => !names.includes(name))) {
     throw new Error("The managed-chat operation tool constraint is not the expected version.");
   }
+  const additions = DELEGATION_OPERATION_TOOLS.slice(5).filter((name) => !names.includes(name));
+  if (additions.length === 0) return;
   const triggers = database.prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL
     AND (tbl_name = ? OR instr(sql, ?) > 0) ORDER BY name`).all(table, table) as { name: string; sql: string }[];
   const indexes = database.prepare(`SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL
@@ -49,7 +56,7 @@ function widenDelegationOperationTools(database: Database.Database): void {
   const columns = delegationColumns(database, table).map(delegationIdentifier).join(", ");
   const rows = (database.prepare(`SELECT COUNT(*) AS count FROM ${delegationIdentifier(table)}`).get() as { count: number }).count;
   for (const { name } of triggers) database.exec(`DROP TRIGGER ${delegationIdentifier(name)}`);
-  const widened = DELEGATION_OPERATION_TOOLS.map((name) => `\n        '${name}'`).join(",");
+  const widened = [...names, ...additions].map((name) => `\n        '${name}'`).join(",");
   database.exec(current.sql.replace(header, `CREATE TABLE ${delegationIdentifier(replacement)} (`)
     .replace(toolCheck, (_match, prefix: string, _values: string, suffix: string) => `${prefix}${widened}\n      ${suffix}`));
   database.exec(`INSERT INTO ${delegationIdentifier(replacement)} (${columns}) SELECT ${columns} FROM ${delegationIdentifier(table)}`);

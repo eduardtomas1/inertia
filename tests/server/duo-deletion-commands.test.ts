@@ -19,7 +19,6 @@ import {
 const sideEffects = vi.hoisted(() => ({
   deleteCheckpoints: vi.fn(async () => undefined),
   removeOwnedWorktree: vi.fn(async () => "absent"),
-  removeWorktree: vi.fn(async () => undefined),
   restoreCheckpoint: vi.fn(async () => undefined),
 }));
 
@@ -36,7 +35,6 @@ vi.mock("../../src/server/runtime/checkpoint-restoration", () => ({
 vi.mock("../../src/server/git", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../src/server/git")>(),
   removeOwnedWorktree: sideEffects.removeOwnedWorktree,
-  removeWorktree: sideEffects.removeWorktree,
 }));
 
 const projectId = "11111111-1111-4111-8111-111111111111";
@@ -174,7 +172,6 @@ describe("Duo deletion command preflights", () => {
   beforeEach(() => {
     sideEffects.deleteCheckpoints.mockClear();
     sideEffects.removeOwnedWorktree.mockClear();
-    sideEffects.removeWorktree.mockClear();
     sideEffects.restoreCheckpoint.mockClear();
     sideEffects.removeOwnedWorktree.mockResolvedValue("absent");
   });
@@ -415,7 +412,7 @@ describe("Duo deletion command preflights", () => {
     expect(store.archiveConversation).not.toHaveBeenCalled();
     expect(store.settleConversation).not.toHaveBeenCalled();
     expect(store.deleteConversation).not.toHaveBeenCalled();
-    expect(sideEffects.removeWorktree).not.toHaveBeenCalled();
+    expect(sideEffects.removeOwnedWorktree).not.toHaveBeenCalled();
   });
 
   it("rejects a live paired project before deletion-cache effects", async () => {

@@ -39,7 +39,6 @@ import { getRepositoryStatus } from "./status";
 import {
   GitError,
   type CreateWorktreeOptions,
-  type GitMutationResult,
   type GitRepositoryStatus,
 } from "./types";
 import {
@@ -1189,47 +1188,4 @@ export async function removeOwnedWorktree(
   // for explicit manual removal. Once Git reports it absent, the owning chat
   // can be deleted safely without touching filesystem content.
   return "retained";
-}
-
-export async function removeWorktree(
-  repositoryPath: string,
-  worktreePath: string,
-  force = false,
-): Promise<GitMutationResult> {
-  const root = await repositoryRoot(repositoryPath);
-  if (
-    !isAbsolute(worktreePath)
-    || worktreePath.length > MAX_PATH_LENGTH
-    || worktreePath.includes("\0")
-  ) {
-    throw new GitError(
-      "invalid-input",
-      "The worktree path must be an absolute path.",
-    );
-  }
-  const requestedTarget = resolve(worktreePath);
-  const target = await realpath(requestedTarget).catch(() => requestedTarget);
-  if (target === root || target === parse(target).root) {
-    throw new GitError(
-      "invalid-input",
-      "The main repository cannot be removed as a worktree.",
-    );
-  }
-  const worktrees = await registeredWorktrees(root);
-  const registered = worktrees.find(
-    (worktree) => pathsEqual(worktree.path, target),
-  );
-  if (!registered) {
-    throw new GitError(
-      "not-found",
-      "The requested worktree is not registered with this repository.",
-    );
-  }
-  const args = ["worktree", "remove"];
-  if (force) args.push("--force");
-  args.push("--", registered.path);
-  await runGit(root, args, {
-    failureMessage: "Unable to remove the worktree.",
-  });
-  return { status: await getRepositoryStatus(root) };
 }

@@ -689,6 +689,21 @@ describe("CadService save copy", () => {
     }
   });
 
+  it("checks the default copy path of an AutoCAD drawing as a local Windows path before it is offered", async () => {
+    const directory = await stateDirectory();
+    const host = fakeCadHost("autocad");
+    const cad = new CadService({ hosts: [host], stateDirectory: directory, platform: "win32", now: () => START });
+    host.documents = [cadDocument("autocad", { path: "C:\\Projects\\Plan.dwg" })];
+    expect(await cad.saveDestination({ documentId: ACAD_DOCUMENT_ID })).toBe(copyName("C:\\Projects\\Plan.dwg", START));
+    host.documents = [cadDocument("autocad", { path: "\\\\server\\share\\Plan.dwg" })];
+    const error = await rejection(cad.saveDestination({ documentId: ACAD_DOCUMENT_ID }));
+    expect(error.code).toBe("INVALID_REQUEST");
+    expect(error.message).toContain("local drive");
+    expect(await cad.saveDestination({ documentId: ACAD_DOCUMENT_ID, destination: "C:\\Projects\\Plan copy.dwg" }))
+      .toBe("C:\\Projects\\Plan copy.dwg");
+    expect(host.calls.map(({ method }) => method)).not.toContain("save_copy");
+  });
+
   it("sends save_copy with the destination as path", async () => {
     const destination = join(tmpdir(), "Copy.skp");
     const { cad, host } = await service();

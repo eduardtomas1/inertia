@@ -20,6 +20,8 @@ const MAX_OPTION_LABEL_CHARS = 512;
 const MAX_OPTION_DESCRIPTION_CHARS = 4_096;
 const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
+const OPENCODE_PLAN_EXIT_HEADER = "Build Agent";
+const OPENCODE_PLAN_EXIT_PROMPT = /switch to the build agent/iu;
 
 export interface OwnedOpenCodeCredentials {
   username: string;
@@ -175,6 +177,7 @@ export function openCodeQuestions(
   return {
     requestId,
     autoResolutionMs: null,
+    ...(questions.some(openCodePlanExitQuestion) ? { grantsPermission: true as const } : {}),
     questions: questions.map((question, index) => ({
       id: openCodeQuestionId(index),
       header: question.header,
@@ -189,6 +192,10 @@ export function openCodeQuestions(
       })),
     })),
   };
+}
+
+function openCodePlanExitQuestion(question: QuestionInfo): boolean {
+  return question.header === OPENCODE_PLAN_EXIT_HEADER || OPENCODE_PLAN_EXIT_PROMPT.test(question.question);
 }
 
 export function openCodeQuestionId(index: number): string {

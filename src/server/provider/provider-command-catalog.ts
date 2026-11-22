@@ -73,6 +73,7 @@ export class ProviderCommandCatalog {
     commands: Promise<ProviderSlashCommand[]>;
   }>();
   private readonly claudeFailures = new Map<string, { expiresAt: number; error: unknown }>();
+  private readonly claudeReported = new Map<string, readonly ProviderSlashCommand[]>();
   private readonly conversationCommands = new Map<string, LearnedCommands>();
   private readonly workspaceCommands = new Map<string, LearnedCommands>();
 
@@ -80,7 +81,19 @@ export class ProviderCommandCatalog {
 
   async list(scope: ProviderCommandScope): Promise<ProviderSlashCommand[]> {
     if (scope.providerId === "claude") return await this.claudeCommands(scope.cwd);
-    if (!learnsFromSession(scope.providerId)) return [];
+    return [...(this.learned(scope) ?? [])];
+  }
+
+  reported(scope: ProviderCommandScope): readonly ProviderSlashCommand[] | undefined {
+    if (scope.providerId === "claude") {
+      const executable = this.dependencies.resolvedCommand("claude");
+      return executable === undefined ? undefined : this.claudeReported.get(executable);
+    }
+    return this.learned(scope);
+  }
+
+  private learned(scope: ProviderCommandScope): readonly ProviderSlashCommand[] | undefined {
+    if (!learnsFromSession(scope.providerId)) return undefined;
     const executable = this.dependencies.resolvedCommand(scope.providerId) ?? null;
     const workspace = normalizeIdentityPath(scope.cwd);
     const current = (entry: LearnedCommands | undefined): readonly ProviderSlashCommand[] | undefined =>
@@ -88,11 +101,8 @@ export class ProviderCommandCatalog {
     const conversation = scope.conversationId === null
       ? undefined
       : this.conversationCommands.get(`${scope.providerId}\0${scope.conversationId}`);
-    return [
-      ...(current(conversation)
-        ?? current(this.workspaceCommands.get(`${scope.providerId}\0${workspace}`))
-        ?? []),
-    ];
+    return current(conversation)
+      ?? current(this.workspaceCommands.get(`${scope.providerId}\0${workspace}`));
   }
 
   learn(identity: ProviderCommandRunIdentity, commands: readonly ProviderSlashCommand[]): void {
@@ -122,14 +132,20 @@ export class ProviderCommandCatalog {
     if (failure && failure.expiresAt > now) throw failure.error;
     this.claudeFailures.delete(key);
     const cached = this.claudeCache.get(key);
-    if (cached && cached.expiresAt > now) return [...await cached.commands];
+    if (cached && cached.expiresAt > now) {
+      const commands = await cached.commands;
+      this.claudeReported.set(executable, commands);
+      return [...commands];
+    }
     const entry = {
       expiresAt: now + CLAUDE_COMMAND_CACHE_TTL_MS,
       commands: this.dependencies.trackAuxiliary(async () => await this.readClaude(executable, cwd)),
     };
     this.claudeCache.set(key, entry);
     try {
-      return [...await entry.commands];
+      const commands = await entry.commands;
+      if (this.claudeCache.get(key) === entry) this.claudeReported.set(executable, commands);
+      return [...commands];
     } catch (error) {
       if (this.claudeCache.get(key) === entry) {
         this.claudeCache.delete(key);

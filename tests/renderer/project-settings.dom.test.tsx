@@ -306,6 +306,32 @@ describe("project settings", () => {
     expect(await within(container.querySelector<HTMLElement>('[data-setting-id="project-model"]')!).findByRole("alert"))
       .toHaveTextContent("The project changed in another window. Refresh and try again.");
   });
+  it.each([
+    ["linux", true],
+    ["darwin", false],
+    ["win32", false],
+  ] as const)("offers Agent CAD tools on %s only where CAD tools exist", async (platform, unsupported) => {
+    Object.defineProperty(window, "inertia", { configurable: true, value: { getPlatform: () => platform } });
+    try {
+      const { container, request } = setup({ projects: [{ ...project, preferences: { ...defaultProjectPreferences(), cadAccess: true } }] });
+      const row = container.querySelector<HTMLElement>('[data-setting-id="project-cad-access"]')!;
+      const select = within(row).getByRole("combobox", { name: "Agent CAD tools" });
+      if (unsupported) {
+        expect(select).toBeDisabled();
+        expect(select).toHaveValue("false");
+        expect(row).toHaveTextContent("Unavailable on Linux: AutoCAD and SketchUp run only on Windows and macOS.");
+        expect(row).not.toHaveTextContent("Lets agents read");
+      } else {
+        expect(select).toBeEnabled();
+        expect(select).toHaveValue("true");
+        expect(row).toHaveTextContent("Lets agents read the AutoCAD drawings");
+        fireEvent.change(select, { target: { value: "false" } });
+        await waitFor(() => expect(request).toHaveBeenCalledWith(expect.objectContaining({ type: "project.update" })));
+      }
+    } finally {
+      Reflect.deleteProperty(window, "inertia");
+    }
+  });
   it("says why a project with running chats cannot be removed", () => {
     const { container } = setup({ conversations: [{ ...conversation("busy"), projectId: project.id, status: "running" }] });
     expect(container.querySelector('[data-setting-id="project-remove"]')).toHaveTextContent("Stop this project's running chats first.");

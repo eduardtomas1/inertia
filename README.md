@@ -38,11 +38,12 @@ Inertia is a desktop app for working with coding agents. Each chat belongs to a 
 
 ## Built for the coding loop
 
-- **Give the agent context.** Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets. Type `@` to reference a project file or another chat, and `$` to insert a provider skill.
+- **Give the agent context.** Attach images, PDFs, text, Markdown, CSV, JSON and spreadsheets. Type `@` to reference a project file or another chat, `$` to insert a provider skill, and `/` for Inertia's commands and the provider's own.
 - **Decide how it works.** Choose the model, reasoning level, response speed, work mode and access from the composer. `/plan` and `/build` switch modes; in Plan mode the agent proposes steps before touching anything.
 - **Keep follow-ups moving.** While an agent works, Enter sends a follow-up and Tab queues it for the next turn.
 - **Switch providers without losing the chat.** Pick another provider and the next message continues with the earlier messages as context. The timeline marks the switch with a **Context handoff** divider.
 - **Call your own agents.** Save named agents with their own instructions, skills and character in **Settings → Custom agents**, start from nine presets, and type `/calling` to hand the next message to one. The transcript shows it working beside the answer.
+- **Work in AutoCAD and SketchUp.** Turn on **Agent CAD tools** for a project and the agent can read the drawing or model you have open, preview a change, and apply it as one Undo step. See [AutoCAD and SketchUp](docs/user/cad.md).
 - **Get visual answers.** An agent can reply with a chart, table, diagram or mockup rendered in the chat, themed like the app and sandboxed from the network and your files. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
 - **Spend less on long chats.** Return to a chat of 200K tokens or more on a Claude subscription, an Anthropic key or an OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. Claude chats compact on their own at 400K tokens instead of near 1M, and can compact while idle before their cache expires; Codex chats compact at 300K. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
 - **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** lets the agent act without asking.

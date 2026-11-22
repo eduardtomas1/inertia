@@ -146,6 +146,8 @@ export interface CodexAppServerResult {
    */
   continuationError?: "stale-provider-session" | "resume-rejected" | "thread-in-use";
   sessionInstructionApplied?: false;
+  /** See `ProviderRunResult.providerStopReason`: the hook stop of the turn that ended the run. */
+  providerStopReason?: string;
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;
   cleanupReason?: PosixCleanupFailureReason;

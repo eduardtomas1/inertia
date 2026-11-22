@@ -417,6 +417,8 @@ export interface ActiveTurn {
    * them out of this run's coverage and queues each one by reference.
    */
   unreadFollowUpMessageIds?: readonly string[];
+  /** Why the provider itself stopped this turn without failing it (`ProviderRunResult.providerStopReason`). */
+  providerStopReason?: string;
   runState: AuthoritativeRunStateEngine;
   deferredSettlement: {
     status: AgentTurnTerminalStatus;

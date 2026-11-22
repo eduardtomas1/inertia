@@ -381,13 +381,12 @@ export function startCodexAppServerRun(
         textTruncated: resultText.truncated,
         exitCode: child.exitCode ?? exitCode,
         signal: child.signalCode ?? signal,
-        ...((lastError || diagnostic.toString())
-          ? { diagnostic: lastError ?? diagnostic.toString() }
-          : {}),
+        ...((lastError || diagnostic.toString()) ? { diagnostic: lastError ?? diagnostic.toString() } : {}),
         ...(finalFailure ? { failure: finalFailure } : {}),
         ...(compatibilityError ? { compatibilityError } : {}),
         ...(continuationError ? { continuationError } : {}),
         ...(sessionInstructionDeferred ? { sessionInstructionApplied: false as const } : {}),
+        ...events?.hookStop.resultFields(finalStatus, cancelRequested),
         cleanupConfirmed,
         ...(cleanupConfirmed ? {} : providerUnconfirmedCleanup(child)),
       });

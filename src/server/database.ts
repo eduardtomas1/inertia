@@ -5,6 +5,7 @@ import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
 import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository"; import { IdleCompactionCandidateRepository } from "./persistence/idle-compaction-candidate-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
+import { PROVIDER_STOP_NOTICE_TITLE } from "../shared/activity-display";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
@@ -805,6 +806,7 @@ export class RuntimeStore {
     // Filled by the settlement below before coverage is computed in the same transaction: only a follow-up that
     // a queue row now names stays out of the run's coverage, so one that could not be queued is never hidden.
     const queuedUnread: string[] = [];
+    let providerStopNotice: AgentActivity | undefined;
     const result = this.orchestration.lifecycle(turnId, () => {
       const settled = settleProjectedAgentTurn(this.database, this, update.projection,
         () => this.turnLedgerRepository.settle(turnId, update));
@@ -815,9 +817,35 @@ export class RuntimeStore {
           update.unreadFollowUpMessageIds));
       }
       return settled;
-    }, update.providerDelivery, update.providerFailureCode, queuedUnread);
+    }, update.providerDelivery, update.providerFailureCode, queuedUnread, update.providerStopReason, (settled) => {
+      if (settled.settled && update.providerStopReason) providerStopNotice = this.writeProviderStopNotice(turnId);
+    });
     // Orchestration settlement may drop the restored-history record of a turn its provider never accepted.
-    return result.settled ? { ...result, turn: this.agentTurn(turnId) } : result;
+    return result.settled ? { ...result, turn: this.agentTurn(turnId), ...(providerStopNotice ? { providerStopNotice } : {}) }
+      : result;
+  }
+
+  /**
+   * The "Stopped by the provider" notice of the reason the turn's run just recorded, written in the settlement's
+   * transaction after the run's projection accepted the reason, so a reason and its notice commit together. The
+   * insert runs in a savepoint: an ordinary statement failure loses only the notice, never the settlement. A failure
+   * that ended the whole transaction (a full disk, an I/O error, a trigger's rollback) is rethrown as it was, so
+   * the settlement fails with its real cause and nothing is written outside a transaction.
+   */
+  private writeProviderStopNotice(turnId: string): AgentActivity | undefined {
+    try {
+      const reason = this.orchestration.recordedProviderStopReason(turnId);
+      if (!reason) return undefined;
+      const turn = this.agentTurn(turnId);
+      return this.database.transaction(() => this.executionLedgerRepository.addActivity({
+        conversationId: turn.conversationId, runId: turn.runId, turnId, kind: "status",
+        title: PROVIDER_STOP_NOTICE_TITLE, detail: reason, status: "completed",
+      }))();
+    } catch (error) {
+      if (!this.database.inTransaction) throw error;
+      console.warn("The provider stop notice could not be written.", error instanceof Error ? error.name : "unknown error");
+      return undefined;
+    }
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {

@@ -70,7 +70,7 @@ import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
 import { PromptInstructionDeliveries, recordDeferredSessionInstruction } from "./turn-instruction-delivery";
 import {
-  observeProviderPromptDropped, providerEventMatchesActiveTurn, providerFailureCause, providerTerminalResultMatchesActiveTurn,
+  observeProviderPromptDropped, providerEventMatchesActiveTurn, providerFailureCause, providerTerminalResultMatchesActiveTurn, recordProviderStopReason,
 } from "./turn-provider-result";
 import { recordUnreadFollowUps, TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
@@ -1142,6 +1142,7 @@ export class TurnController {
     }
     if (!outcomeAlreadyRequested) this.streams.reconcileAssistant(active, result);
     if (!outcomeAlreadyRequested) recordUnreadFollowUps(this.store, active, result);
+    recordProviderStopReason(active, result);
     if (result.status === "completed") {
       if (!outcomeAlreadyRequested && active.runState.hasLiveDescendants()) {
         const message = "The provider ended while delegated work was still running.";

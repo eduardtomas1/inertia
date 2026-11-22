@@ -19,7 +19,8 @@ export interface DelegationFixture {
   live: Map<string, number>;
   conversation(title: string): string;
   queue(conversationId: string, content: string): AgentTurn;
-  finish(turn: AgentTurn, result?: { text?: string; status?: "completed" | "failed" }): Promise<AgentTurn>;
+  finish(turn: AgentTurn, result?: { text?: string; status?: "completed" | "failed" | "cancelled"; providerStopReason?: string }):
+    Promise<AgentTurn>;
   turn(turnId: string): AgentTurn;
   crash(turn: AgentTurn, reason?: string): void;
   delegate(sourceTurn: AgentTurn, options?: { wake?: DelegatedCompletionWake; title?: string; parentId?: string }):
@@ -52,7 +53,11 @@ export async function createDelegationFixture(): Promise<DelegationFixture> {
     },
     async finish(turn, result = {}) {
       runtime.controller.start(turn.id);
-      runtime.provider.resolve(result.status === "failed" ? { status: "failed" } : { text: result.text ?? `${turn.id} answer` });
+      runtime.provider.resolve({
+        ...(result.status === "failed" ? { status: "failed" as const }
+          : { status: result.status ?? "completed", text: result.text ?? `${turn.id} answer` }),
+        ...(result.providerStopReason === undefined ? {} : { providerStopReason: result.providerStopReason }),
+      });
       await flushTurnControllerTestPromises();
       return runtime.store.agentTurn(turn.id);
     },

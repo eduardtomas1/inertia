@@ -3575,7 +3575,8 @@ own task finished. Now `DelegationReads.outcome` falls back to `earlierReport`
   and the preview read the report.
 
 T3 also requires that no provider stop notice exists. Inertia has no such
-notice; see the deferral below.
+notice; see the deferral below. (Since resolved: the look-back now skips a
+run with a provider stop reason; see "D.4: the provider's stop reason".)
 
 **Multi-report wake summary groups outcomes** (T3 `f0495f741`). Before,
 `delegatedWakeSummary` applied the worst verb to the whole batch, so one
@@ -3618,7 +3619,7 @@ would need four changes:
 That is more than the small change this row allows, so it is left for the
 D.4 provider polish. Until then, a hook-stopped silent delegated turn still
 reads "(No result text.)" in the wake, unless the look-back finds an earlier
-report.
+report. (Resolved in "D.4: the provider's stop reason", with T3 `c440fd19d`.)
 
 Deliberate differences from T3 Code:
 
@@ -3627,7 +3628,7 @@ Deliberate differences from T3 Code:
 - The wake summary keeps the cohort count and all labels, with the grouped
   outcomes in parentheses.
 - No provider stop notice exists, so the look-back runs for every textless
-  completed result (the Codex hook item is deferred).
+  completed result (the Codex hook item is deferred; since resolved).
 
 Tests (each fails against the unchanged sources unless marked as a guard):
 
@@ -5439,3 +5440,165 @@ Every test added fails without its fix. Main files:
 Not run: the full `npm run check`, the Electron scenarios (the
 `settings-evidence` spec's copy assertion was updated, not run), a packaged
 build, Windows, and real Claude Code, Codex or Cursor accounts.
+
+## D.4: the provider's stop reason — 2026-11-22
+
+Status: committed on top of `799ddb00` (PR #686), macOS arm64, Node 22. T3
+anchors are at `6f49071a3`: `c02b98bb3` (#37738) and `c440fd19d` (#37859),
+on top of `9b7208832` (#27399), which introduced the hook reason.
+
+### T3's rule
+
+- `CodexAdapterV2.ts:5182-5196`: a `hook/completed` notification for the
+  exact active turn and native thread, whose `run.status` is `stopped`, sets
+  the turn's `hookStopReason` to `<eventName> hook (<source>): <stop text>`:
+  the trimmed, non-empty text of the `stop` entries joined by line breaks
+  (no source part when absent). The latest one wins.
+- `CodexAdapterV2.ts:6562-6564`: the reason rides on every non-failed
+  terminal (`c02b98bb3` dropped the interrupted-only condition).
+- `RunExecutionService.ts:947-980`: a completed terminal with a reason gets
+  a warning `system_notice` titled "Stopped by the provider" with the reason
+  as its message; an interrupted one puts the reason on its
+  `run_interrupt_result` ("Run interrupted" row, `:2408-2440`).
+- `subagentProjection.ts:206-234` (`subagentStopNotice`, `withStopNotice`),
+  `:296` and `:360`: every
+  delegated result that is not a failure ends with `\n\n<reason>`, after the
+  report text or after the textless fallback, for both Codex endings; the
+  look-back to an earlier report is skipped when the notice exists.
+- Only Codex sets the reason. T3's Claude adapter treats `stop_hook_prevented`
+  and `hook_stopped` as plain completions (`ClaudeAdapterV2.ts:4714-4745`,
+  test at `ClaudeAdapterV2.test.ts:25228`); the ACP adapters map their
+  `stopReason` to failures. Inertia does the same, so only Codex changes.
+
+### What Inertia does now
+
+- `src/server/codex/app-server-hook-stop.ts`: `codexHookStop` classifies
+  the payload with T3's fields and, like T3's decoder, rejects the whole
+  notification when a field it reads is malformed (a `source` that is not a
+  `HookSource`, an entry kind that is not a `HookOutputEntryKind`, a
+  non-string text or event name). Raw input is bounded before any
+  sanitising and never cut: more than 1,000 entries or an event name over
+  1,000 characters rejects the hook, a stop entry over 256 KiB is refused
+  whole (after kept text it also ends the join), and joining stops at the
+  first later stop entry that would take the joined text over 64 KiB, so no
+  gap is left. `CodexHookStopTracker` keeps
+  the stop for the exact active turn and settles it when that turn
+  completes, so the native turn that ends the run owns the reason and a later
+  turn clears or replaces it. Only then is the whole bounded raw text cleaned
+  (`activity-detail.ts`): terminal escapes, controls and zero-width
+  characters stripped first (`stripInvisibleCharacters`), then
+  `redactCodexErrorHeaders`, then the common encodings of each launch
+  credential redacted (`credential-forms.ts`: raw, JSON escapes with and
+  without `\/`, upper- and lowercase percent and form encoding, upper- and
+  lowercase hex, base64 and base64url padded, unpadded and at all three byte
+  alignments), with overlapping matches merged so no part of either is left,
+  and workspace and home paths shortened with the literal-match helper every
+  provider activity detail, Codex's included, already goes through. A value
+  split by a line break is not matched, and a credential that is a common
+  word also redacts that word in prose (the safe direction). Nothing else is rewritten: the
+  user wrote this text and T3 keeps it as written. Every step is a literal
+  match or one forward scan, so the cost is linear (a 256 KiB adversarial
+  guard covers it). Parsing and cleaning are guarded: a failure records no
+  reason and logs a warning without its message instead of throwing into the
+  `turn/completed` handler. The event
+  name is then cut at 120 and the reason at 2,000 characters, both at a code
+  point boundary (`cutAtCodePointBoundary`, local until a shared helper
+  lands).
+- `app-server-events.ts` shows nothing for the reason itself, because the
+  run's outcome is not known when a native turn ends. A user Stop, a failed
+  turn or a provider interruption with an error records none.
+- `ProviderRunResult.providerStopReason` carries it to the turn controller,
+  which validates it and drops it when a Stop was asked for before the
+  provider's result arrived (the run then settles cancelled). A Stop recorded
+  after the result keeps it. Settlement records it on a completed or
+  cancelled V2 run (`providerStopReason`, an optional field like
+  `failureCode`; the projector refuses it on a failed or non-terminal run).
+  Old rows parse unchanged. The projection version stays 3: existing events
+  project exactly as before, and only new events carry the field.
+- The "Stopped by the provider" activity is written in the settlement
+  transaction, after the run's projection has recorded the reason, from that
+  recorded reason (`database.ts` `writeProviderStopNotice`, via the
+  `afterSynchronize` step of `lifecycle`, its last step). The insert runs in
+  a savepoint: an ordinary statement failure loses only the notice and is
+  logged, never the settlement. A failure that ends the whole transaction (a
+  full disk, an I/O error, a trigger's rollback) is rethrown as it was, so the
+  settlement fails with its real cause and nothing is written outside a
+  transaction. It is broadcast after the commit. T3 adds its
+  notice only at the run's final status. The renderer classes it as a
+  warning by kind and title (`isProviderStopNotice`,
+  `src/shared/activity-display.ts`; `activity-attention.ts`), so it is drawn
+  in the timeline outside the folded work, announced as a warning, with the
+  reason behind its "Details" disclosure.
+- `DelegationReads.outcomeView` appends the reason to every non-failed
+  delegated result, live or frozen: `<report>\n\n<reason>`, or
+  `(No result text.)\n\n<reason>` without text. The reason keeps its own
+  2,000-byte share of the 8,000-byte bound, so a long report cannot push it
+  out. `outcome` skips the look-back when the run has a reason.
+
+### Differences from T3
+
+- Inertia settles a Codex interruption nobody asked for and without an error
+  as `cancelled`, so that ending's result reads `cancelled`, not
+  `interrupted`. The reason is still appended.
+- T3 gives every interrupted run an interrupt result ("Stopped by the
+  provider" when no reason is known, or the user's Stop reason), which its
+  delegated result then appends. Inertia has no interrupt-result item or
+  user Stop reasons, so only the provider's own reason is appended.
+- The textless prefix is Inertia's "(No result text.)", not T3's "Child task
+  completed without an assistant result.".
+- Launch credentials are removed from the reason (an AGENTS.md invariant),
+  terminal controls stripped and local paths shortened; T3 stores it as
+  Codex sent it. Raw input over the bounds above is refused, and the reason
+  is cut at 2,000 characters; T3 has no bounds.
+- T3 shows the notice at the run's final status, after the answer. Inertia
+  draws a turn's attention group with its work, above the final answer;
+  placing it below would restructure the timeline's rows.
+- For the interrupted ending T3 puts the reason on its "Run interrupted"
+  row. Inertia's "Turn interrupted" row comes from the adapter before the
+  run's outcome is known, so the reason has the same separate "Stopped by the
+  provider" notice as the completed ending. Putting it on that row would
+  mean the provider-agnostic settlement finding a Codex adapter row by its
+  Codex activity id.
+- T3's decoder also validates the hook summary fields the reason does not
+  use (`id`, `scope`, `sourcePath` and others); Inertia does not.
+
+### Verification
+
+- New `tests/server/codex-hook-stop-reason.test.ts` (Codex portable fixture
+  `hook-stop-*`): a hook stop that ends completed; one that ends interrupted;
+  malformed stops after a valid one (other thread, no turn, other turn, wrong
+  status, entries not an array, bad text or kind, no event name, `hook/started`);
+  an oversized stop.
+- `tests/server/orchestration-delegation-report.test.ts`: a result with text
+  plus the reason, live and frozen; a textless result that does not look back;
+  the interrupted (cancelled) ending; a long report that keeps the reason.
+- Review fixes (second commit): `codex-hook-stop-tracker.test.ts` (a
+  credential and its encodings straddling each cut, an oversized entry
+  refused whole, an emoji at each cut, user prose kept); Codex fixtures for a
+  user Stop, a goal continuation whose next turn fails, completes or is
+  stopped again, and whole-notification rejection; settlement tests for the
+  notice (completed and cancelled only), a user Stop and a late Stop.
+- Second review fixes (third commit): the notice drawn as a warning
+  (`turn-fold.dom.test.tsx`), a long stop entry kept, joining without gaps,
+  and a real Stop after the provider's completed result.
+- Redesign (fourth commit): the secret-shape patterns are gone (one was
+  quadratic: 256 KiB of `a-` took 38 s); a 256 KiB adversarial guard for the
+  whole cleaning path; a sanitising failure records no reason instead of
+  throwing; a stop entry over 256 KiB is refused; the notice is written after
+  the run records its reason and a failed insert leaves the run completed;
+  the DOM fixture's notice comes after the answer in time and the drawn order
+  is asserted.
+- Fifth commit: a transaction-ending notice failure surfaces as the original
+  error with nothing half-written, and a failed insert statement loses only
+  the notice (both through SQLite triggers on the real insert); no notice when
+  the run records no reason; the join gap after an oversized entry; each added
+  credential encoding and the overlap; invisible characters stripped before
+  credential and header-map matching.
+- Guards: the existing rich-events Codex test (a stopped hook without stop
+  entries) completes without a reason; a failed run and an unbounded reason
+  record none.
+- Every non-guard test fails against the unchanged sources.
+- `typecheck`, `lint` and `check:architecture` passed; 69 related server and
+  renderer test files (970 tests) and `npm run test:portable` passed after
+  the redesign, and 71 files (1,022 tests) after the fifth commit. Not run: the full suite, Electron scenarios, Windows and
+  Linux, and a live Codex with hooks.

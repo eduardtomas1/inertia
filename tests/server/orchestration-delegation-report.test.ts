@@ -494,3 +494,217 @@ describe("waiting for children (T3 b79d277cd)", () => {
     } finally { fixture.close(); }
   });
 });
+
+describe("provider stop reason on delegated results (T3 c02b98bb3, c440fd19d)", () => {
+  const REASON = "Stop hook (project): Tests are still failing.";
+
+  function runPayload(fixture: DelegationFixture, runId: string): Record<string, unknown> {
+    const row = fixture.database.prepare("SELECT payload_json FROM orchestration_v2_entities WHERE kind = 'run' AND id = ?")
+      .get(runId) as { payload_json: string };
+    return JSON.parse(row.payload_json) as Record<string, unknown>;
+  }
+
+  it("ends a completed result that has report text with the stop reason, before and after it is frozen", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childTurn } = fixture.delegate(source);
+      await fixture.finish(childTurn, { text: "I checked the remaining files.", providerStopReason: REASON });
+      expect(runPayload(fixture, childTurn.runId)).toMatchObject({ status: "completed", providerStopReason: REASON });
+      const expected = `I checked the remaining files.\n\n${REASON}`;
+      expect(fixture.delegation.read(task.taskId)!.result).toMatchObject({ status: "completed", text: expected });
+      fixture.delegation.finalizeIfReady(task.taskId);
+      expect(fixture.delegation.reads.resultView(fixture.delegation.get(task.taskId)!)!.text).toBe(expected);
+    } finally { fixture.close(); }
+  });
+
+  it("ends a textless result with the stop reason and does not look back past it", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const { source, task, childId } = await finishedOriginal(fixture);
+      const { task: followUp, childTurn: reporting } = fixture.followUp(task, source);
+      await fixture.finish(reporting, { text: "REPORT-OK" });
+      const stopped = fixture.queue(childId, "Sent after the report");
+      fixture.delegation.attach(followUp.taskId, stopped.id, "send");
+      await fixture.finish(stopped, { text: "", providerStopReason: REASON });
+
+      const read = fixture.delegation.read(followUp.taskId)!;
+      expect(read.result).toMatchObject({ turnId: stopped.id, status: "completed", text: `(No result text.)\n\n${REASON}` });
+      fixture.delegation.finalizeIfReady(followUp.taskId);
+      expect(fixture.delegation.get(followUp.taskId)!.result).toMatchObject({ turnId: stopped.id, messageId: null });
+    } finally { fixture.close(); }
+  });
+
+  it("ends the result of a turn Codex ended interrupted (settled cancelled) with the stop reason", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childTurn } = fixture.delegate(source);
+      const finished = await fixture.finish(childTurn, { status: "cancelled", text: "Partial work", providerStopReason: REASON });
+      expect(finished.status).toBe("cancelled");
+      expect(runPayload(fixture, childTurn.runId)).toMatchObject({ status: "cancelled", providerStopReason: REASON });
+      expect(fixture.delegation.read(task.taskId)!.result).toMatchObject({ status: "cancelled",
+        text: `Partial work\n\n${REASON}` });
+    } finally { fixture.close(); }
+  });
+
+  it("keeps the stop reason when a long report fills the result bound", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childTurn } = fixture.delegate(source);
+      await fixture.finish(childTurn, { text: "R".repeat(20_000), providerStopReason: REASON });
+      const result = fixture.delegation.read(task.taskId)!.result!;
+      expect(result.truncated).toBe(true);
+      expect(result.text!.endsWith(`\n\n${REASON}`)).toBe(true);
+      expect(Buffer.byteLength(result.text!, "utf8")).toBeLessThanOrEqual(8_000);
+    } finally { fixture.close(); }
+  });
+
+  function notices(fixture: DelegationFixture, turnId: string) {
+    return fixture.database.prepare(`SELECT kind, title, detail, status FROM activities
+      WHERE turn_id = ? AND title = 'Stopped by the provider'`).all(turnId);
+  }
+
+  it("adds Stopped by the provider at settlement of a completed or cancelled run only", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const completed = fixture.delegate(source);
+      await fixture.finish(completed.childTurn, { text: "Done", providerStopReason: REASON });
+      expect(notices(fixture, completed.childTurn.id)).toEqual([
+        { kind: "status", title: "Stopped by the provider", detail: REASON, status: "completed" }]);
+      const interrupted = fixture.delegate(source);
+      await fixture.finish(interrupted.childTurn, { status: "cancelled", text: "", providerStopReason: REASON });
+      expect(notices(fixture, interrupted.childTurn.id)).toHaveLength(1);
+      const failed = fixture.delegate(source);
+      await fixture.finish(failed.childTurn, { status: "failed", providerStopReason: REASON });
+      expect(notices(fixture, failed.childTurn.id)).toEqual([]);
+    } finally { fixture.close(); }
+  });
+
+  it("drops the reason when the user's Stop ends the run", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childId, childTurn } = fixture.delegate(source);
+      fixture.runtime.controller.start(childTurn.id);
+      await flushTurnControllerTestPromises();
+      expect(fixture.runtime.controller.cancel(childId)).toBe(true);
+      fixture.runtime.provider.resolve({ status: "cancelled", text: "", providerStopReason: REASON });
+      await flushTurnControllerTestPromises();
+      expect(fixture.turn(childTurn.id).status).toBe("cancelled");
+      expect(runPayload(fixture, childTurn.runId)).not.toHaveProperty("providerStopReason");
+      expect(notices(fixture, childTurn.id)).toEqual([]);
+      expect(fixture.delegation.read(task.taskId)!.result?.text ?? null).toBeNull();
+    } finally { fixture.close(); }
+  });
+
+  it("keeps the reason when the user's Stop comes after the provider ended the run", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childId, childTurn } = fixture.delegate(source);
+      fixture.runtime.provider.deferOwnedStop("settled");
+      fixture.runtime.controller.start(childTurn.id);
+      await flushTurnControllerTestPromises();
+      fixture.runtime.provider.resolve({ status: "completed", text: "Done", providerStopReason: REASON });
+      await flushTurnControllerTestPromises();
+      // The completed result was taken; the Stop arrives while the provider's cleanup is still pending.
+      expect(fixture.turn(childTurn.id).status).not.toBe("completed");
+      fixture.runtime.controller.cancel(childId);
+      fixture.runtime.provider.resolveOwnedStop();
+      await flushTurnControllerTestPromises();
+      expect(fixture.turn(childTurn.id).status).toBe("completed");
+      expect(runPayload(fixture, childTurn.runId)).toMatchObject({ status: "completed", providerStopReason: REASON });
+      expect(notices(fixture, childTurn.id)).toHaveLength(1);
+      expect(fixture.delegation.read(task.taskId)!.result!.text).toBe(`Done\n\n${REASON}`);
+    } finally { fixture.close(); }
+  });
+
+  function failNoticeInsert(fixture: DelegationFixture, raise: "ABORT" | "ROLLBACK"): void {
+    // Fails the notice's INSERT itself, inside its savepoint: ABORT ends the statement, ROLLBACK the transaction.
+    fixture.database.exec(`CREATE TEMP TRIGGER fail_stop_notice BEFORE INSERT ON activities
+      WHEN NEW.title = 'Stopped by the provider' BEGIN SELECT RAISE(${raise}, 'notice insert failed'); END`);
+  }
+
+  it("writes the notice from the reason the run recorded, and none when the run records none", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const together = fixture.delegate(source);
+      await fixture.finish(together.childTurn, { text: "Done", providerStopReason: REASON });
+      const recorded = runPayload(fixture, together.childTurn.runId).providerStopReason;
+      expect(recorded).toBe(REASON);
+      expect(notices(fixture, together.childTurn.id)).toEqual([
+        { kind: "status", title: "Stopped by the provider", detail: recorded, status: "completed" }]);
+
+      // The settlement carries a reason the run's projection does not record: no notice is written for it.
+      const orchestration = fixture.runtime.store.orchestration;
+      const synchronize = orchestration.synchronize.bind(orchestration);
+      const spy = vi.spyOn(orchestration, "synchronize").mockImplementation((turn, observer, delivery, failureCode, unread) =>
+        synchronize(turn, observer, delivery, failureCode, unread));
+      const unrecorded = fixture.delegate(source);
+      await fixture.finish(unrecorded.childTurn, { text: "Done", providerStopReason: REASON });
+      spy.mockRestore();
+      expect(fixture.turn(unrecorded.childTurn.id).status).toBe("completed");
+      expect(runPayload(fixture, unrecorded.childTurn.runId)).not.toHaveProperty("providerStopReason");
+      expect(notices(fixture, unrecorded.childTurn.id)).toEqual([]);
+    } finally { fixture.close(); }
+  });
+
+  it("loses only the notice when its insert statement fails", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childTurn } = fixture.delegate(source);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      failNoticeInsert(fixture, "ABORT");
+      const settled = await fixture.finish(childTurn, { text: "Done", providerStopReason: REASON });
+      expect(settled.status).toBe("completed");
+      expect(runPayload(fixture, childTurn.runId)).toMatchObject({ status: "completed", providerStopReason: REASON });
+      expect(notices(fixture, childTurn.id)).toEqual([]);
+      expect(fixture.delegation.read(task.taskId)!.result!.text).toBe(`Done\n\n${REASON}`);
+      expect(warn).toHaveBeenCalledWith("The provider stop notice could not be written.", "SqliteError");
+    } finally { fixture.close(); }
+  });
+
+  it("surfaces a failure that ends the settlement's transaction, with nothing half-written", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { childTurn } = fixture.delegate(source);
+      const store = fixture.runtime.store;
+      const settle = store.settleAgentTurn.bind(store);
+      const thrown: unknown[] = [];
+      vi.spyOn(store, "settleAgentTurn").mockImplementation((turnId, update) => {
+        try { return settle(turnId, update); } catch (error) { thrown.push(error); throw error; }
+      });
+      failNoticeInsert(fixture, "ROLLBACK");
+      const settled = await fixture.finish(childTurn, { text: "Done", providerStopReason: REASON });
+      // The original error reached the settlement, not a later "no transaction is active".
+      expect(thrown.map((error) => (error as Error).message)).toEqual(["notice insert failed"]);
+      expect(fixture.database.inTransaction).toBe(false);
+      // The completed settlement was rolled back whole; the runtime then settled the turn as failed on its own.
+      expect(settled.status).toBe("failed");
+      expect(runPayload(fixture, childTurn.runId)).not.toHaveProperty("providerStopReason");
+      expect(notices(fixture, childTurn.id)).toEqual([]);
+    } finally { fixture.close(); }
+  });
+
+  it("guard: records no stop reason on a failed run, and none that is not bounded text", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const { task, childTurn } = fixture.delegate(source);
+      await fixture.finish(childTurn, { status: "failed", providerStopReason: REASON });
+      expect(runPayload(fixture, childTurn.runId)).not.toHaveProperty("providerStopReason");
+      expect(fixture.delegation.read(task.taskId)!.result!.text).not.toContain(REASON);
+
+      const second = fixture.delegate(source);
+      await fixture.finish(second.childTurn, { text: "Done", providerStopReason: "x".repeat(2_001) });
+      expect(runPayload(fixture, second.childTurn.runId)).not.toHaveProperty("providerStopReason");
+      expect(fixture.delegation.read(second.task.taskId)!.result!.text).toBe("Done");
+    } finally { fixture.close(); }
+  });
+});

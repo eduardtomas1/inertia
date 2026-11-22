@@ -43,6 +43,13 @@ export const orchestrationRunDeliverySchema = z.enum(["not-delivered", "prompt-n
  * run on that thread starts a fresh one with the portable history (T3 `rejected_native_history`).
  */
 export const orchestrationRunFailureCodeSchema = z.enum(["invalid_encrypted_content"]);
+/** Upper bound of a provider stop reason; provider text, bounded and sanitized before it is recorded. */
+export const MAX_PROVIDER_STOP_REASON_CHARS = 2_000;
+/**
+ * Why the provider itself stopped a run that did not fail (T3 `turn.terminal.reason`, set only by Codex: a hook
+ * whose run ended `stopped` with `stop` entries, as "<eventName> hook (<source>): <entries>").
+ */
+export const orchestrationProviderStopReasonSchema = z.string().min(1).max(MAX_PROVIDER_STOP_REASON_CHARS);
 
 export const orchestrationRunSchema = z.object({
   id: orchestrationIdSchema,
@@ -80,6 +87,11 @@ export const orchestrationRunSchema = z.object({
   promptDropped: z.literal(true).optional(),
   /** Set on a failed run only; absent on runs settled before failure codes were recorded. */
   failureCode: orchestrationRunFailureCodeSchema.optional(),
+  /**
+   * Set on a completed, cancelled or interrupted run that its provider stopped (a Codex hook); absent on other runs
+   * and on runs settled before stop reasons were recorded.
+   */
+  providerStopReason: orchestrationProviderStopReasonSchema.optional(),
 }).strict();
 
 export const orchestrationCleanupReleaseSchema = z.object({
@@ -145,6 +157,8 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
     promptDropped: z.literal(true).optional(),
     /** Failed status only; absent on events written before failure codes were recorded. */
     failureCode: orchestrationRunFailureCodeSchema.optional(),
+    /** A terminal status other than failed only; absent on events written before stop reasons were recorded. */
+    providerStopReason: orchestrationProviderStopReasonSchema.optional(),
   }).strict() }).strict(),
   z.object({ type: z.literal("run.attempt-replaced"), payload: z.object({
     runId: orchestrationIdSchema,

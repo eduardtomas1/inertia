@@ -355,14 +355,27 @@ export class OrchestratedTurnRepository {
     return attempt ? orchestrationAttemptSchema.parse(attempt.value).nativeSessionId : null;
   }
 
-  /** `unreadFollowUpMessageIds` is read after `updateCompatibilityProjection` runs, which may fill it. */
+  /**
+   * `unreadFollowUpMessageIds` is read after `updateCompatibilityProjection` runs, which may fill it.
+   * `afterSynchronize` runs in the same transaction once the run's projection has decided what it records.
+   */
   lifecycle<T>(turnId: string, updateCompatibilityProjection: () => T, delivery?: "not-delivered" | "prompt-dropped",
-    failureCode?: OrchestrationRunFailureCode, unreadFollowUpMessageIds?: readonly string[]): T {
+    failureCode?: OrchestrationRunFailureCode, unreadFollowUpMessageIds?: readonly string[], providerStopReason?: string,
+    afterSynchronize?: (result: T) => void): T {
     return this.database.transaction(() => {
       const result = updateCompatibilityProjection();
-      this.synchronize(this.access.agentTurn(turnId), undefined, delivery, failureCode, unreadFollowUpMessageIds);
+      this.synchronize(this.access.agentTurn(turnId), undefined, delivery, failureCode, unreadFollowUpMessageIds,
+        providerStopReason);
+      // Last, after everything the run records: a failure it swallows leaves nothing of the settlement unwritten.
+      afterSynchronize?.(result);
       return result;
     }).immediate();
+  }
+
+  /** The provider stop reason the turn's V2 run recorded; undefined for none, or for a turn without a V2 run. */
+  recordedProviderStopReason(turnId: string): string | undefined {
+    const row = this.events.projection("run", this.access.agentTurn(turnId).runId);
+    return row ? orchestrationRunSchema.parse(row.value).providerStopReason : undefined;
   }
 
   lifecycleIfCurrent<T>(turnId: string, observer: AttemptObserver, updateCompatibilityProjection: () => T):
@@ -398,10 +411,12 @@ export class OrchestratedTurnRepository {
    * `promptDropped`, its handoff is abandoned even once output delivered it,
    * and its backing returns to its state before dispatch. Only an explicit
    * refusal returns a rollback cursor: the dropped run opened its session.
-   * `failureCode` is recorded on a failed run only.
+   * `failureCode` is recorded on a failed run only, and `providerStopReason` (T3 `turn.terminal.reason`) on a
+   * terminal run that did not fail.
    */
   synchronize(turn: AgentTurn, observer?: AttemptObserver, delivery?: "not-delivered" | "prompt-dropped",
-    failureCode?: OrchestrationRunFailureCode, unreadFollowUpMessageIds: readonly string[] = []): StaleAttemptObservation | null {
+    failureCode?: OrchestrationRunFailureCode, unreadFollowUpMessageIds: readonly string[] = [],
+    providerStopReason?: string): StaleAttemptObservation | null {
     const previous = this.events.projection("run", turn.runId);
     if (!previous) return null; // Imported/pre-V2 history has no invented execution authority.
     const run = orchestrationRunSchema.parse(previous.value);
@@ -429,6 +444,8 @@ export class OrchestratedTurnRepository {
         : unaccepted && injected ? { delivery: "prompt-not-delivered" as const } : {}),
       ...(dropped ? { promptDropped: true as const } : {}),
       ...(failureCode && turn.status === "failed" ? { failureCode } : {}),
+      ...(providerStopReason && isAgentTurnTerminalStatus(turn.status) && turn.status !== "failed"
+        ? { providerStopReason } : {}),
     } };
     const before = { ...event.payload, status: run.status, stateRevision: run.stateRevision,
       executionState: run.executionState, providerState: run.providerState,

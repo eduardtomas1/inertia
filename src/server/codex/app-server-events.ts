@@ -58,6 +58,7 @@ import { codexFailureKind, codexTurnInterruptionFailure, codexUsageLimited } fro
 import type { CodexAppServerEventHost } from "./app-server-event-host";
 export type { CodexAppServerEventHost } from "./app-server-event-host";
 import { CodexApprovalAuthority } from "./app-server-approval-authority";
+import { CodexHookStopTracker } from "./app-server-hook-stop";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -115,6 +116,7 @@ export class CodexAppServerEvents {
   private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
   private readonly latestDiffs = new Map<string, string>();
+  readonly hookStop: CodexHookStopTracker;
   private readonly approvalAuthority: CodexApprovalAuthority;
   private readonly subagentProjection = new Map<
     string,
@@ -139,6 +141,7 @@ export class CodexAppServerEvents {
   private readonly hostTools: CodexHostToolRuntime;
 
   constructor(private readonly host: CodexAppServerEventHost) {
+    this.hookStop = new CodexHookStopTracker(host.options);
     this.subagentContinuation = new CodexSubagentContinuationGate(
       codexSubagentDrainTimeoutMs(host.options.subagentDrainTimeoutMs),
       () => this.completeSubagentContinuation(),
@@ -650,6 +653,7 @@ export class CodexAppServerEvents {
         )
       ) return;
       handleCodexHook(this.host, method, params);
+      if (method === "hook/completed") this.hookStop.observe(params, notificationTurnId, this.host.activeTurnId());
       return;
     }
 
@@ -895,6 +899,10 @@ export class CodexAppServerEvents {
         status, turnError, this.host.cancelRequested(),
       );
       const providerInterrupted = interruptionFailure !== undefined;
+      const interrupted = status === "interrupted" && !providerInterrupted;
+      // Codex ends a hook-stopped turn completed or interrupted, by version (T3 `c440fd19d`). The run's outcome is
+      // not known yet, so its "Stopped by the provider" notice is added at settlement, from the recorded reason.
+      this.hookStop.settle(notificationTurnId, !this.host.cancelRequested() && (status === "completed" || interrupted));
       // T3 classifies a failed turn's own error message (`turn.error.message`) only. A classified error keeps
       // only its code and safe summary (T3 stores no raw text).
       const managed = status === "failed" ? classifyCodexManagedError(stringValue(turnError?.message)) : undefined;
@@ -925,7 +933,7 @@ export class CodexAppServerEvents {
           activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
         },
       );
-      if (this.host.cancelRequested() || (status === "interrupted" && !providerInterrupted)) {
+      if (this.host.cancelRequested() || interrupted) {
         this.completeParentTurn("cancelled", null);
       } else if (status === "failed" || providerInterrupted) {
         this.host.rememberFailure(

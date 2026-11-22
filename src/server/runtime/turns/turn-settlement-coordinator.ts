@@ -8,6 +8,7 @@ import type { AgentTurnSettlementUpdate } from "../../persistence/types";
 import type { TurnFailureKind } from "../../../shared/turn-lifecycle";
 import type { OrchestrationRunFailureCode } from "../../../shared/orchestration-v2";
 import { turnFailureKind } from "./turn-failure-kind";
+import { settledProviderStopReason } from "./turn-provider-result";
 import type {
   ProviderRunFailure,
 } from "../../provider/contracts";
@@ -222,6 +223,8 @@ export class TurnSettlementCoordinator {
     const effects = this.effects(active);
     if (streamPublicationFailed) effects.failed("publication");
     if (settlement.receiptLost) effects.failed("orchestration");
+    const stopNotice = settlement.providerStopNotice;
+    if (stopNotice) effects.run("publication", () => this.options.hooks.broadcast({ type: "agent.activity", activity: stopNotice }));
     effects.run("publication", () => this.options.hooks.testOnlyStreamingTrace
       ?.mark("terminal-persistence-completed"));
     const cleaned = effects.run("lifecycle-cleanup", () => this.options.cleanup(active));
@@ -249,6 +252,7 @@ export class TurnSettlementCoordinator {
     failureCode?: OrchestrationRunFailureCode,
   ): CommittedSettlement {
     const completedAt = this.options.now();
+    const stopReason = settledProviderStopReason(active, status);
     try {
       return this.options.store.settleAgentTurn(active.turn.id, {
         status,
@@ -265,6 +269,7 @@ export class TurnSettlementCoordinator {
         updatedAt: completedAt,
         ...(providerDelivery ? { providerDelivery } : {}),
         ...(failureCode ? { providerFailureCode: failureCode } : {}),
+        ...(stopReason ? { providerStopReason: stopReason } : {}),
         ...(active.unreadFollowUpMessageIds?.length ? { unreadFollowUpMessageIds: active.unreadFollowUpMessageIds } : {}),
         projection: {
           workspaceRunCreated: active.workspaceRunCreated,

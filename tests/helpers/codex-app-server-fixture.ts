@@ -401,6 +401,86 @@ if (message.method === "turn/start") {
     }
     return;
   }
+  // A hook that stops the turn (T3 c02b98bb3, c440fd19d): Codex ends it completed or interrupted, by version.
+  if (String(process.env.INERTIA_APP_SERVER_SCENARIO).startsWith("hook-stop-")) {
+    const scenario = process.env.INERTIA_APP_SERVER_SCENARIO;
+    const stopRun = (id, overrides = {}) => ({
+      id, eventName: "Stop", status: "stopped", source: "project", statusMessage: "Hook stopped the turn.",
+      entries: [{ kind: "feedback", text: "Not a stop entry." }, { kind: "stop", text: "  Tests are still failing.  " }, { kind: "context", text: "Context only." }, { kind: "stop", text: "Fix lint first." }],
+      ...overrides,
+    });
+    const hook = (run, target = { threadId, turnId }) => ({ method: "hook/completed", params: { ...target, run } });
+    const other = stopRun("hook-other", { entries: [{ kind: "stop", text: "MALFORMED_REASON" }] });
+    // The latest hook stop wins, so any malformed stop accepted after the valid one would replace it. As T3's
+    // decoder does, one malformed field rejects the whole notification, even with valid stop text.
+    const report = (id) => [
+      { method: "item/agentMessage/delta", params: { threadId, turnId: id, itemId: "message-" + id, delta: "Partial report" } },
+      { method: "item/completed", params: { completedAtMs: Date.now(), threadId, turnId: id, item: { id: "message-" + id, type: "agentMessage", text: "Partial report", phase: "final_answer" } } },
+    ];
+    const secret = process.env.GITLAB_TOKEN || "";
+    if (scenario === "hook-stop-user-stop") {
+      // The turn waits for the user's Stop; turn/interrupt then ends it interrupted.
+      sendBatch([hook(stopRun("hook-stop")), ...report(turnId)]);
+      return;
+    }
+    if (String(scenario).startsWith("hook-stop-goal-")) {
+      // Turn 1 is hook-stopped while a goal keeps the run going; turn 2 ends the run.
+      const goal = { threadId, objective: "Keep checking", status: "active", tokenBudget: 40000, tokensUsed: 10, timeUsedSeconds: 1, createdAt: 1800000000, updatedAt: 1800000010 };
+      const secondTurn = "turn-2";
+      sendBatch([
+        { method: "thread/goal/updated", params: { threadId, turnId, goal } },
+        hook(stopRun("hook-stop")),
+        ...report(turnId),
+        { method: "turn/completed", params: { threadId, turn: turnShape(turnId, "completed") } },
+        { method: "turn/started", params: { threadId, turn: turnShape(secondTurn, "inProgress") } },
+        ...(scenario === "hook-stop-goal-replaced"
+          ? [hook(stopRun("hook-second", { source: undefined, eventName: "PostToolUse", entries: [{ kind: "stop", text: "Second stop." }] }), { threadId, turnId: secondTurn })]
+          : []),
+        ...report(secondTurn),
+        scenario === "hook-stop-goal-failed"
+          ? { method: "turn/completed", params: { threadId, turn: turnShape(secondTurn, "failed", turnError("The model failed.")) } }
+          : { method: "turn/completed", params: { threadId, turn: turnShape(secondTurn, "completed") } },
+        ...(scenario === "hook-stop-goal-failed" ? [] : [{ method: "thread/goal/cleared", params: { threadId } }]),
+      ]);
+      return;
+    }
+    const events = scenario === "hook-stop-malformed"
+      ? [
+          hook(stopRun("hook-stop")),
+          hook(other, { threadId: "thread-unrelated", turnId }),
+          hook(other, { threadId }),
+          hook(other, { threadId, turnId: "turn-other" }),
+          hook({ ...other, status: "completed" }),
+          hook({ ...other, status: "blocked" }),
+          hook({ ...other, source: "invented" }),
+          hook({ ...other, source: null }),
+          hook({ ...other, entries: [...other.entries, { kind: "invented", text: "x" }] }),
+          hook({ ...other, entries: [...other.entries, { kind: "context", text: 42 }] }),
+          hook({ ...other, entries: [...other.entries, null] }),
+          hook(stopRun("hook-entries-object", { entries: { kind: "stop", text: "NOT_AN_ARRAY" } })),
+          hook({ ...other, eventName: 7 }),
+          hook("stopped"),
+          { method: "hook/started", params: { threadId, turnId, run: other } },
+        ]
+      : scenario === "hook-stop-oversized"
+        ? [hook(stopRun("hook-oversized", {
+            source: undefined,
+            eventName: "E".repeat(300),
+            // The credential straddles the 2,000-character cut of the reason (prefix "E"*120 + " hook: ").
+            entries: [
+              { kind: "stop", text: "\\u001b[31m" + "S".repeat(2000 - 127 - 10) + secret + " tail" },
+              { kind: "stop", text: "T".repeat(16 * 1024 + 1) + secret },
+              ...Array.from({ length: 150 }, (unused, index) => ({ kind: "stop", text: "U".repeat(5000) + "-" + index })),
+            ],
+          }))]
+        : [hook(stopRun("hook-stop"))];
+    sendBatch([
+      ...events,
+      ...report(turnId),
+      { method: "turn/completed", params: { threadId, turn: turnShape(turnId, scenario === "hook-stop-interrupted" ? "interrupted" : "completed") } },
+    ]);
+    return;
+  }
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "rich-item-events") {
     sendBatch([
       { method: "windows/worldWritableWarning", params: { samplePaths: [path.join(process.cwd(), "shared")], extraCount: 2, failedScan: false } },

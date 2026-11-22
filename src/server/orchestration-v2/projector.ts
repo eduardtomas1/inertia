@@ -136,7 +136,10 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         || (payload.delivery !== undefined && (!isAgentTurnTerminalStatus(payload.status) || payload.status === "completed"))
         // A dropped prompt is recorded on a run its provider did not deliver, whatever ended it.
         || (payload.promptDropped !== undefined && payload.delivery === undefined)
-        || (payload.failureCode !== undefined && payload.status !== "failed")) {
+        || (payload.failureCode !== undefined && payload.status !== "failed")
+        // The provider's stop reason belongs to a run it ended without failing (T3 reads it on no failed run).
+        || (payload.providerStopReason !== undefined
+          && (!isAgentTurnTerminalStatus(payload.status) || payload.status === "failed"))) {
         throw new OrchestrationConflict("revision-conflict");
       }
       const terminal = isAgentTurnTerminalStatus(payload.status);
@@ -147,7 +150,8 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
           completedAt: payload.completedAt, terminalMessageId: payload.terminalMessageId,
           ...(payload.delivery ? { delivery: payload.delivery } : {}),
           ...(payload.promptDropped ? { promptDropped: payload.promptDropped } : {}),
-          ...(payload.failureCode ? { failureCode: payload.failureCode } : {}) } },
+          ...(payload.failureCode ? { failureCode: payload.failureCode } : {}),
+          ...(payload.providerStopReason ? { providerStopReason: payload.providerStopReason } : {}) } },
         { kind: "attempt", id: attempt.id, value: { ...attempt, status: payload.status,
           nativeSessionId: payload.nativeSessionId ?? attempt.nativeSessionId } },
       ];

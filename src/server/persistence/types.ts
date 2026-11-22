@@ -217,6 +217,11 @@ export interface AgentTurnSettlementUpdate
   /** A failed turn's provider failure code, recorded on its V2 run for the next turn's preparation. */
   providerFailureCode?: import("../../shared/orchestration-v2").OrchestrationRunFailureCode;
   /**
+   * Why the provider itself stopped a turn that did not fail (a Codex hook), recorded on its V2 run for the
+   * delegated result. Bounded and sanitized provider text.
+   */
+  providerStopReason?: string;
+  /**
    * Accepted follow-ups the provider never read. Their messages never count
    * toward this turn's provider coverage, and settlement queues each one by
    * reference to be sent as its own turn.
@@ -234,6 +239,8 @@ export interface AgentTurnSettlementUpdate
 export interface AgentTurnSettlementResult {
   settled: boolean;
   turn: AgentTurn;
+  /** The "Stopped by the provider" activity written with the settlement, when the run records a provider stop reason. */
+  providerStopNotice?: AgentActivity;
 }
 
 export interface StoredTurnGitArtifact extends TurnGitArtifact {

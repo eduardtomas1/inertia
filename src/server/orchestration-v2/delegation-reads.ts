@@ -15,6 +15,7 @@ import {
   type DelegationMailbox,
 } from "../../shared/orchestration-delegation";
 import { isAgentTurnTerminalStatus, type AgentTurnStatus } from "../../shared/turn-lifecycle";
+import { orchestrationProviderStopReasonSchema } from "../../shared/orchestration-v2";
 import { liveNativeChildCount } from "../persistence/observed-child-repository";
 import { MESSAGE_PROJECTION_COLUMNS } from "../persistence/stream-text-storage";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
@@ -225,8 +226,23 @@ export class DelegationReads {
     const evaluated = evaluation ?? this.evaluate(task);
     if (evaluated.workState !== "result_available" || !evaluated.resultTurn) return null;
     const outcome = this.outcomeFromTurn(evaluated.resultTurn);
-    if (outcome?.status !== "completed" || outcome.messageId !== null) return outcome;
+    // T3 looks back only when no provider stop reason explains the silent turn (`c440fd19d`).
+    if (outcome?.status !== "completed" || outcome.messageId !== null || this.providerStopReason(outcome.runId) !== null) {
+      return outcome;
+    }
     return { ...outcome, messageId: this.earlierReport(task, evaluated.resultTurn) };
+  }
+
+  /**
+   * Why the provider itself stopped the run (T3 `subagentStopNotice`): a Codex hook stop recorded on a completed,
+   * cancelled or interrupted V2 run. Null for any other run, and for runs settled before reasons were recorded.
+   */
+  providerStopReason(runId: string): string | null {
+    const row = this.database.prepare(`SELECT json_extract(payload_json, '$.providerStopReason') AS reason
+      FROM orchestration_v2_entities WHERE kind = 'run' AND id = ? AND json_extract(payload_json, '$.status') <> 'failed'`)
+      .get(runId) as { reason: unknown } | undefined;
+    const reason = orchestrationProviderStopReasonSchema.safeParse(row?.reason);
+    return reason.success ? reason.data : null;
   }
 
   /**
@@ -255,11 +271,13 @@ export class DelegationReads {
     return task.result ? this.outcomeView(task.result) : null;
   }
 
-  outcomeView(outcome: Pick<DelegatedTaskOutcome, "turnId" | "status" | "messageId" | "failureSummary">): DelegatedTaskResultView {
+  outcomeView(outcome: Pick<DelegatedTaskOutcome, "turnId" | "runId" | "status" | "messageId" | "failureSummary">):
+    DelegatedTaskResultView {
     const message = outcome.messageId ? this.messageContent(outcome.messageId) : null;
     const text = [outcome.status === "failed" ? outcome.failureSummary : null, message]
       .filter((part): part is string => Boolean(part?.trim())).join("\n\n");
-    const bounded = delegatedResultText(text || null);
+    // Every result of a run its provider stopped ends with the reason, with or without report text (T3 `c440fd19d`).
+    const bounded = delegatedResultText(text || null, outcome.status === "failed" ? null : this.providerStopReason(outcome.runId));
     return { turnId: outcome.turnId, status: outcome.status, ...bounded };
   }
 

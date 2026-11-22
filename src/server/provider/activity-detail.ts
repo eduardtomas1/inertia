@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { clipCodeUnits, clipTrailingCodeUnits } from "../../shared/code-units";
 import { scrubCommandSecrets } from "./command-secrets";
 import { scrubSubagentSecrets } from "./subagent-trace";
+import { credentialForms, redactCredentialForms } from "./credential-forms";
 
 /** Maximum persisted technical detail for one provider activity. */
 export const MAX_PROVIDER_ACTIVITY_DETAIL_CHARS = 32 * 1024;
@@ -128,6 +129,34 @@ export function sanitizeProviderFailureDetail(
     ),
     options,
   );
+}
+
+/** Zero-width characters, which can split a credential without showing. */
+const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/gu;
+
+/** Terminal escapes, C0/C1 controls and zero-width characters removed: the form literal matching must run on. */
+export function stripInvisibleCharacters(value: string): string {
+  return stripTerminalControlSequences(value).replace(ZERO_WIDTH, "");
+}
+
+/**
+ * The pass for text a user wrote that reaches Inertia through a provider (a Codex hook's stop message), which is
+ * otherwise kept as written, as T3 keeps it. Invisible characters are removed first, so an escape or a zero-width
+ * character cannot split a credential; then the common encodings of Inertia's own launch credentials are redacted
+ * (`credentialForms`; a value split by a line break is not matched, and a credential that is a common word also
+ * redacts that word in prose, the safe direction), and workspace and home paths are shortened as every provider
+ * activity detail's are. Every step is a literal match or a single forward scan, so the cost is linear in the input.
+ * No secret-shape heuristics run here: they rewrite prose and are not linear in general. The caller bounds the
+ * input before this runs and cuts the result after it.
+ */
+export function sanitizeProviderUserText(
+  value: string,
+  launchCredentials: readonly string[],
+  options: { workspaceRoot?: string; homeDirectory?: string } = {},
+): string {
+  const text = redactCredentialForms(stripInvisibleCharacters(value), credentialForms(launchCredentials));
+  return scrubPathPrefix(scrubPathPrefix(text, options.workspaceRoot, "<workspace>"),
+    options.homeDirectory ?? homedir(), "<home>");
 }
 
 export function sanitizeProviderActivityDetail(

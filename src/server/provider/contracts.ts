@@ -730,6 +730,12 @@ export interface ProviderRunResult extends ProviderRunIdentity {
    * Never reported for a run the user stopped: Stop drops them.
    */
   unreadFollowUps?: string[];
+  /**
+   * Why the provider itself stopped a run that did not fail (T3 `turn.terminal.reason`). Only Codex reports it: a
+   * hook that stopped the turn, which Codex ends completed or interrupted. Bounded, sanitized provider text; never
+   * set on a failed run or on one the user stopped.
+   */
+  providerStopReason?: string;
   /** True only after authoritative complete process-tree cleanup. */
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;

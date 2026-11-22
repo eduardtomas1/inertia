@@ -20,6 +20,10 @@ export interface DelegatedWakeCohort {
 }
 
 const NOTICE_LABEL_MAX_CHARS = 80;
+/** What a delegated result without report text reads as. */
+export const DELEGATED_NO_RESULT_TEXT = "(No result text.)";
+/** The share of the result bound a provider stop reason keeps, so a long report cannot push it out. */
+const MAX_DELEGATED_STOP_REASON_BYTES = 2_000;
 
 export function delegatedTaskLabel(title: string): string {
   const line = neutralizeUntrustedAgentText(title.replace(/\s+/gu, " ").trim());
@@ -27,9 +31,22 @@ export function delegatedTaskLabel(title: string): string {
   return bounded || "Untitled task";
 }
 
-export function delegatedResultText(value: string | null): { text: string | null; truncated: boolean; neutralized: boolean } {
-  if (value === null) return { text: null, truncated: false, neutralized: false };
-  return boundedUntrustedAgentText(value, MAX_DELEGATED_RESULT_BYTES);
+/**
+ * A delegated result, bounded and neutralized. A provider stop reason ends every result that has one (T3
+ * `withStopNotice`, `c440fd19d`): after the report, or after the no-text marker, separated by a blank line.
+ */
+export function delegatedResultText(value: string | null, stopReason?: string | null): {
+  text: string | null; truncated: boolean; neutralized: boolean;
+} {
+  if (!stopReason) {
+    return value === null ? { text: null, truncated: false, neutralized: false }
+      : boundedUntrustedAgentText(value, MAX_DELEGATED_RESULT_BYTES);
+  }
+  const reason = boundedUntrustedAgentText(stopReason, MAX_DELEGATED_STOP_REASON_BYTES);
+  const report = boundedUntrustedAgentText(value ?? DELEGATED_NO_RESULT_TEXT,
+    MAX_DELEGATED_RESULT_BYTES - byteLength(reason.text) - 2);
+  return { text: `${report.text}\n\n${reason.text}`, truncated: report.truncated || reason.truncated,
+    neutralized: report.neutralized || reason.neutralized };
 }
 
 export function delegatedResultPreview(value: string | null): string | null {
@@ -64,7 +81,7 @@ export function delegatedWakeText(entries: readonly DelegatedWakeEntry[], cohort
   const reserved = (from: number) => fallbacks.slice(from).reduce((total, line) => total + byteLength(line) + 2, 0);
   for (const [index, entry] of entries.entries()) {
     const result = delegatedResultText(entry.text);
-    const block = `${header(entry)}\n${result.text?.trim() || "(No result text.)"}${result.truncated ? "\n[Result truncated.]" : ""}`;
+    const block = `${header(entry)}\n${result.text?.trim() || DELEGATED_NO_RESULT_TEXT}${result.truncated ? "\n[Result truncated.]" : ""}`;
     const remaining = MAX_DELEGATED_WAKE_BYTES - used - reserved(index + 1);
     const chosen = byteLength(block) + 2 <= remaining ? block : fallbacks[index]!;
     parts.push(chosen);

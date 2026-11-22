@@ -12,6 +12,17 @@ const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done:
   inertia_request_secret: ["Asking for a secret", "Secret saved", "No secret saved"],
 };
 
+/** T3's title for the notice that shows why the provider stopped a run (a Codex hook stop). */
+export const PROVIDER_STOP_NOTICE_TITLE = "Stopped by the provider";
+
+/**
+ * The runtime's provider stop notice, written with the run's settlement. T3 shows it as a visible warning, so it is
+ * classified by kind and title, never by its detail (the provider's reason).
+ */
+export function isProviderStopNotice(activity: Pick<AgentActivity, "kind" | "title">): boolean {
+  return activity.kind === "status" && activity.title === PROVIDER_STOP_NOTICE_TITLE;
+}
+
 export function unwrapShellCommand(command: string): string {
   const trimmed = command.trim();
   const match = SHELL_WRAPPER_PATTERN.exec(trimmed);

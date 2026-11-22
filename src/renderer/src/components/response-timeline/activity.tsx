@@ -81,6 +81,7 @@ import { useTaskCreator } from "../tasks/taskCreation";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { MessageOrigin } from "./MessageOrigin";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
+import { isProviderStopNotice } from "@shared/activity-display";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
@@ -239,7 +240,7 @@ export const ActivityRow = memo(function ActivityRow({
     && !activityTitleConveysSeverity(visibleTitle, attentionSeverity)
     ? spokenState
     : null;
-  const disclosureLabel = activity.kind === "error" || interrupted
+  const disclosureLabel = activity.kind === "error" || interrupted || isProviderStopNotice(activity)
     ? "Details"
     : "Output";
   return (

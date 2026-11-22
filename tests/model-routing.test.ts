@@ -10,7 +10,6 @@ import {
   providerNativeHarnessId,
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
-  sameContinuationIdentity,
   withModelSelectionFastMode,
   type ModelBackendProfile,
 } from "../src/shared/model-routing";
@@ -99,36 +98,6 @@ describe("model routing contracts", () => {
     expect(resolveHarnessBackendCompatibility("cursor-acp", unverifiedGateway).state).toBe("unavailable");
   });
 
-  it("locks continuation to harness, backend revision, endpoint identity, and model", () => {
-    const selection = providerNativeModelSelection({
-      providerId: "codex",
-      modelId: "gpt-5.4",
-    });
-    const identity = versionedContinuationIdentityForSelection(
-      selection,
-      "endpoint:openai",
-      true,
-      "a".repeat(64),
-    );
-
-    expect(sameContinuationIdentity(identity, { ...identity })).toBe(true);
-    const { providerCompatibilityToken: _legacyToken, ...legacyIdentity } =
-      identity;
-    expect(sameContinuationIdentity(
-      legacyIdentity,
-      { ...legacyIdentity },
-    )).toBe(false);
-    expect(sameContinuationIdentity(identity, {
-      ...identity,
-      backendConfigurationRevision: identity.backendConfigurationRevision + 1,
-    })).toBe(false);
-    expect(sameContinuationIdentity(identity, {
-      ...identity,
-      modelIdentity: "gpt-5.5",
-    })).toBe(false);
-    expect(sameContinuationIdentity(identity, null)).toBe(false);
-  });
-
   it("persists Fast mode as a non-secret provider route identity", () => {
     const standard = providerNativeModelSelection({
       providerId: "codex",
@@ -142,20 +111,21 @@ describe("model routing contracts", () => {
     expect(continuationIdentityForSelection(fast)).toMatchObject({
       performanceModeIdentity: "fast:priority",
     });
-    expect(sameContinuationIdentity(
-      versionedContinuationIdentityForSelection(
-        standard,
-        null,
-        true,
-        providerCompatibilityToken,
-      ),
-      versionedContinuationIdentityForSelection(
-        fast,
-        null,
-        true,
-        providerCompatibilityToken,
-      ),
-    )).toBe(false);
+    expect(versionedContinuationIdentityForSelection(
+      standard,
+      null,
+      true,
+      providerCompatibilityToken,
+    ).performanceModeIdentity).toBeUndefined();
+    expect(versionedContinuationIdentityForSelection(
+      fast,
+      null,
+      true,
+      providerCompatibilityToken,
+    )).toMatchObject({
+      performanceModeIdentity: "fast:priority",
+      providerCompatibilityToken,
+    });
     expect(withModelSelectionFastMode(fast, null).providerOptions).toEqual({});
   });
 

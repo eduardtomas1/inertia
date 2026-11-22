@@ -251,22 +251,6 @@ function boundedUtf8(
   };
 }
 
-export function pdfTextItemsToText(items: readonly unknown[]): string {
-  const accumulator = boundedTextAccumulator(MAX_DOCUMENT_CONTEXT_BYTES);
-  for (const item of items) {
-    if (
-      typeof item !== "object"
-      || item === null
-      || !("str" in item)
-      || typeof (item as Partial<TextItem>).str !== "string"
-    ) continue;
-    const textItem = item as TextItem;
-    if (!accumulator.append(textItem.str)) break;
-    if (textItem.hasEOL && !accumulator.append("\n")) break;
-  }
-  return accumulator.content();
-}
-
 function hasMeaningfulPdfText(content: string): boolean {
   // Scanner overlays commonly add only a page number or short footer. Treat
   // that sparse incidental layer as visual content, not as a readable page.
@@ -943,31 +927,5 @@ export async function prepareDocumentAttachments(
     throw error;
   } finally {
     options.signal?.removeEventListener("abort", cancelBatch);
-  }
-}
-
-export async function documentAttachmentContexts(
-  payloads: readonly ResolvedAttachmentPayload[],
-  options: DocumentAttachmentContextOptions = {},
-): Promise<DocumentAttachmentContext[]> {
-  let prepared: PreparedDocumentAttachments;
-  try {
-    prepared = await prepareDocumentAttachments(payloads, options);
-  } catch (error) {
-    if (
-      !options.generatedAttachmentStore
-      && error instanceof ScannedPdfRasterizationError
-    ) {
-      throw new DocumentAttachmentError("Scanned PDF pages require the image-aware turn pipeline.");
-    }
-    throw error;
-  }
-  try {
-    if (prepared.generatedImagePaths.length > 0) {
-      throw new DocumentAttachmentError("Scanned PDF pages require the image-aware turn pipeline.");
-    }
-    return prepared.contexts;
-  } finally {
-    await options.generatedAttachmentStore?.release(prepared.generatedImagePaths);
   }
 }

@@ -124,7 +124,6 @@ export const ARCHITECTURE = {
     terminalSelectionChroma: 0.042,
     syntaxChroma: 0.115,
     syntaxNeutralChroma: 0.012,
-    activeRestL: 0.500,
     activeHighlightL: 0.300,
     activeChromaScale: 0.55,
     ultraSweepL: 0.560,
@@ -166,7 +165,6 @@ export const ARCHITECTURE = {
     terminalSelectionChroma: 0.064,
     syntaxChroma: 0.110,
     syntaxNeutralChroma: 0.014,
-    activeRestL: 0.620,
     activeHighlightL: 0.930,
     activeChromaScale: 0.55,
     ultraSweepL: 0.800,
@@ -296,14 +294,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
     startL: arch.statusStartL,
   }).hex;
 
-  const activeRest = solveLightness({
-    hue: spec.accentHue,
-    chromaCap: arch.statusChroma * arch.activeChromaScale * tint,
-    backgrounds: surfaceList,
-    target: arch.statusTarget,
-    direction: arch.direction,
-    startL: arch.activeRestL,
-  }).hex;
   const activeHighlight = solveLightness({
     hue: spec.accentHue,
     chromaCap: arch.statusChroma * arch.activeChromaScale * tint,
@@ -341,7 +331,6 @@ function buildTokens(spec: FamilySpec, appearance: PaletteAppearance): (readonly
       c: muted(arch.terminalSelectionL, arch.terminalSelectionChroma * chromaScale, spec.accentHue),
       h: spec.accentHue,
     })],
-    ["active-work-text-rest", activeRest],
     ["active-work-text-highlight", activeHighlight],
     ["syntax-keyword", syntaxOn(spec.accentHue, arch.syntaxChroma * 1.25 * tint)],
     ["syntax-string", syntaxOn(SEMANTIC_HUES.success)],

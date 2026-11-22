@@ -28,7 +28,6 @@ export {
   type WorktreeFilesystemIdentityDependencies,
   type RegisteredWorktreeIdentity,
   removeOwnedWorktree,
-  removeWorktree,
 } from "./git/worktrees";
 export {
   parseWorktreeFilesystemReceipt,

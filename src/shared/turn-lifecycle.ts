@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 export const AGENT_TURN_STATUSES = [
   "queued",
   "starting",
@@ -27,9 +25,6 @@ export type AgentTurnTerminalStatus = Extract<
   "completed" | "failed" | "cancelled" | "interrupted"
 >;
 export type AgentTurnAssociation = "authoritative" | "inferred";
-
-export const agentTurnStatusSchema = z.enum(AGENT_TURN_STATUSES);
-export const agentTurnAssociationSchema = z.enum(["authoritative", "inferred"]);
 
 const AGENT_TURN_TERMINAL_STATUSES: ReadonlySet<AgentTurnStatus> = new Set([
   "completed",

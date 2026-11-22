@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
+import { backendSecretReferenceForProfile } from "../../src/node/backend-secret-reference";
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
+import {
+  modelSelectionForBackendProfile,
+  type PersistedModelBackendProfile,
+} from "../../src/shared/backend-profile-settings";
 import {
   claudeHarnessBackendCompatibility,
   claudeCompatibleBackendProfileSchema,
@@ -14,13 +20,14 @@ import {
   continuationIdentityForSelection,
   modelSelectionSchema,
 } from "../../src/shared/model-routing";
+import { BackendProfileRuntime } from "../../src/server/runtime/backends/backend-profile-runtime";
 import {
-  claudeBackendProfileRegistrations,
   ClaudeBackendLaunchConfigurationError,
   createClaudeBackendLaunchResolver as createPrivilegedClaudeBackendLaunchResolver,
   resolveClaudeCompatibleLaunch,
 } from "../../src/server/runtime/backends/claude-compatible-adapter";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
+import { ProviderManager } from "../../src/server/providers";
 
 const SECRET_REFERENCE = "secret:kimi-code-key";
 const SECRET_VALUE = "sensitive-test-value";
@@ -154,31 +161,63 @@ describe("Claude-compatible process adapter", () => {
       secretReference: SECRET_REFERENCE,
       primaryModelId: "k3-256k",
     });
-    const custom = createCustomClaudeBackendProfile({
+    const baseUrl = "https://gateway.example.test/v1";
+    const timestamp = "2026-09-20T08:00:00.000Z";
+    const custom: PersistedModelBackendProfile = {
       id: "custom:registered",
       displayName: "Custom",
-      baseUrl: "https://gateway.example.test",
+      harnessId: "claude-agent-sdk",
+      protocol: "anthropic-messages",
       authenticationMode: "api-key",
-      secretReference: "secret:custom-registered",
-      primaryModelId: "custom-model",
-    });
-    const registrations = claudeBackendProfileRegistrations([kimi, custom]);
+      source: "custom",
+      enabled: true,
+      configurationRevision: 1,
+      endpointIdentity: backendEndpointIdentity(baseUrl),
+      preset: "custom",
+      baseUrl,
+      allowInsecureLocalhost: false,
+      allowPrivateNetwork: false,
+      credentialGeneration: "generation:registered",
+      models: [{
+        id: "custom-model",
+        displayName: "Custom model",
+        contextWindowTokens: null,
+        reasoningOptions: [],
+        capabilities: [],
+      }],
+      routing: { mode: "simple", primaryModelId: "custom-model" },
+      capabilityHints: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const registrations = new BackendProfileRuntime(undefined, [kimi]).providerManagerOptions([{
+      profile: custom,
+      probeResults: [],
+      probeAdmissionHighWater: [],
+      latestProbe: null,
+    }]);
 
-    expect(registrations.backendProfiles).toHaveLength(2);
-    expect(JSON.stringify(registrations.backendProfiles)).not.toContain(SECRET_REFERENCE);
-    expect(JSON.stringify(registrations.backendProfiles)).not.toContain("api.kimi.com");
+    expect(registrations.backendProfiles?.map(({ id }) => id)).toEqual([custom.id, kimi.id]);
+    const serialized = JSON.stringify(registrations.backendProfiles);
+    expect(serialized).not.toContain(SECRET_REFERENCE);
+    expect(serialized).not.toContain(backendSecretReferenceForProfile(custom.id));
+    expect(serialized).not.toContain("api.kimi.com");
+    expect(serialized).not.toContain("gateway.example.test");
     expect(registrations.backendCompatibilities).toEqual([
       expect.objectContaining({
         backendProfileId: kimi.id,
         state: "partially-compatible",
         provenance: "built-in",
       }),
-      expect.objectContaining({
-        backendProfileId: custom.id,
-        state: "unknown",
-        provenance: "unknown",
-      }),
     ]);
+    const manager = ProviderManager.createForTests(registrations);
+    expect(manager.resolveModelRoute(
+      modelSelectionForBackendProfile(custom, "custom-model"),
+    ).compatibility).toMatchObject({
+      backendProfileId: custom.id,
+      state: "unknown",
+      provenance: "unknown",
+    });
   });
 
   it("materializes an opaque reference only inside the privileged launch resolver", async () => {

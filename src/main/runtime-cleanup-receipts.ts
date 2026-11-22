@@ -216,21 +216,6 @@ function publishReceipt(
   }
 }
 
-export function publishRuntimeCleanupReceipt(
-  dataDirectory: string,
-  runtimeGenerationId: string,
-): boolean {
-  if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
-  try {
-    return publishReceipt(
-      pinDirectRuntimeJournalRoot(dataDirectory),
-      runtimeGenerationId,
-    );
-  } catch {
-    return false;
-  }
-}
-
 function consumeReceipt(
   root: DirectRuntimeJournalRoot,
   runtimeGenerationId: string,
@@ -276,21 +261,6 @@ function consumeReceipt(
       consuming,
       moved.identity,
       hooks,
-    );
-  } catch {
-    return false;
-  }
-}
-
-export function consumeRuntimeCleanupReceipt(
-  dataDirectory: string,
-  runtimeGenerationId: string,
-): boolean {
-  if (!GENERATION_PATTERN.test(runtimeGenerationId)) return false;
-  try {
-    return consumeReceipt(
-      pinDirectRuntimeJournalRoot(dataDirectory),
-      runtimeGenerationId,
     );
   } catch {
     return false;

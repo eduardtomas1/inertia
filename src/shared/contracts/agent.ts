@@ -22,8 +22,6 @@ import type { AgentConversationContextRequest } from "../conversation-context";
 
 export {
   AGENT_TURN_STATUSES,
-  agentTurnAssociationSchema,
-  agentTurnStatusSchema,
   canTransitionAgentTurnStatus,
   isAgentTurnTerminalStatus,
   type AgentTurnAssociation,

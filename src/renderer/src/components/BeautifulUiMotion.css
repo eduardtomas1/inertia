@@ -7,7 +7,6 @@
 @keyframes beautiful-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes beautiful-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes beautiful-pop-in { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
-@keyframes beautiful-spin { to { transform: rotate(1turn); } }
 
 .agent-input-question { animation: beautiful-fade-in var(--dur-slow) var(--ease-fade) both; }
 .agent-input-question[hidden] { display: none; }
@@ -230,7 +229,7 @@
   .agent-input-options input, .agent-input-options input::before,
   .agent-input-page-arrow, .agent-input-page-dots > button,
   .diff-filter-row, .diff-review-filter button, .diff-hunk, .diff-code .diff-line,
-  .turn-work-chevron, .turn-changed-files-toggle svg, .plan-progress > span { transition: none; }
+  .turn-work-chevron, .turn-changed-files-toggle svg { transition: none; }
   .turn-reasoning-step { opacity: 1; transform: none; animation: none; }
   .turn-reasoning-step.is-active::before { animation: none; }
   [data-active-work-region] .turn-work-log .agent-activity.is-running svg {

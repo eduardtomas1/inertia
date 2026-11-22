@@ -320,11 +320,11 @@ describe("detached chat window manager", () => {
         }]);
       }
       fixture.manager.close(conversationId(1));
-      fixture.manager.broadcast("inertia:theme", "dark");
+      fixture.manager.sendToAll("inertia:runtime-ready", { generation: 3 });
       expect(fixture.windows[0]!.webContents.sent).toHaveLength(1);
       expect(fixture.windows[1]!.webContents.sent.at(-1)).toEqual({
-        channel: "inertia:theme",
-        args: ["dark"],
+        channel: "inertia:runtime-ready",
+        args: [{ generation: 3 }],
       });
     } finally {
       await fixture.manager.closeAll();

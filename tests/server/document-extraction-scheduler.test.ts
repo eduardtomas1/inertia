@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
 import {
-  documentAttachmentContexts,
+  prepareDocumentAttachments,
 } from "../../src/server/runtime/attachments/document-attachment-context";
 import {
   DocumentExtractionBudgetError,
@@ -232,7 +232,7 @@ describe("document extraction scheduling", () => {
   });
 
   it("reports the first document failure deterministically and enforces aggregate caps", async () => {
-    await expect(documentAttachmentContexts([
+    await expect(prepareDocumentAttachments([
       {
         attachment: attachment(1, "first.txt"),
         bytes: new Uint8Array([0xff]),
@@ -247,7 +247,7 @@ describe("document extraction scheduling", () => {
       attachment: attachment(index + 1, `${index + 1}.txt`),
       bytes: Buffer.from("bounded"),
     }));
-    await expect(documentAttachmentContexts(tooMany))
+    await expect(prepareDocumentAttachments(tooMany))
       .rejects.toThrow(/shared extraction budget/u);
   });
 });

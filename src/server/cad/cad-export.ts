@@ -33,8 +33,6 @@ import { CadError, type CadDocument } from "./cad-hosts";
 
 export {
   DWG_NEXT,
-  EXPORT_FORMATS,
-  PAPER_SIZES,
   TEMPLATE_NOTE,
   type Bounds,
   type CadExportInput,

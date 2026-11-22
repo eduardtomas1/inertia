@@ -36,9 +36,9 @@ describe("custom appearance palettes", () => {
   it("keeps the preset palettes byte-identical and pins the vivid custom palettes", () => {
     const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
     expect(digest(PALETTE_FAMILIES.flatMap((family) => modes.map((mode) => [family, mode, buildPaletteTokens(family, mode)]))))
-      .toBe("d6f1a41f75bbca7be8b6ae70116e53e26819926a7c8ff474185826379d8fa7a7");
+      .toBe("4ea80b5880ccd91ccfba1a19ebf65def4522db27f8fc8652dc81b13aa6397994");
     expect(digest([...colors, "#0d9488", "#f97316"].flatMap((color) => modes.map((mode) => [color, mode, buildCustomPaletteTokens(color, mode)]))))
-      .toBe("b85d11ca399469a929de3d2ea63ad0589d08216948277bd02004e2e5a6ef90cf");
+      .toBe("00bdfaa2e72d98d3de6d6beceb8091488a8800f98a8c08598016bdaae6ee02ca");
   });
 
   it.each(modes)("uses the picked colour as the %s accent and moves it only as far as contrast requires", (mode) => {

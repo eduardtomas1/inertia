@@ -14,8 +14,18 @@ const MAX_DRAG_ITEM_CHARS = 1_048_576;
 
 type Point = { x: number; y: number };
 
-/** How the page took the drag: its own pointer handlers, native HTML drag and drop, or the guard refused the press. */
-export type AgentPageDragOutcome = "pointer" | "native" | "refused";
+/**
+ * How the page took the drag: its own pointer handlers, native HTML drag and
+ * drop, the guard refused the press, or the drop target changed during the
+ * drag and nothing was dropped on it.
+ */
+export type AgentPageDragOutcome = "pointer" | "native" | "refused" | "retargeted";
+
+/**
+ * Checks the drop target again just before the drop and returns where it is
+ * now, or null when it is gone, out of view or no longer the approved one.
+ */
+export type AgentPageDropCheck = (native: boolean) => Promise<Point | null>;
 
 interface AgentPageDragItem {
   mimeType: string;
@@ -139,6 +149,7 @@ export async function performAgentPageDrag(
   from: Point,
   to: Point,
   map: AgentPagePointMap,
+  confirmDrop: AgentPageDropCheck,
   signal?: AbortSignal,
 ): Promise<AgentPageDragOutcome> {
   stopForAbort(signal);
@@ -184,13 +195,30 @@ export async function performAgentPageDrag(
       }
     }
     stopForAbort(signal);
+    // The page may have moved or replaced the target while it took the drag.
+    const drop = await confirmDrop(data !== null);
+    stopForAbort(signal);
+    const moved = drop !== null && (drop.x !== last.x || drop.y !== last.y);
     if (data) {
-      await dragEvent("drop", to);
+      if (!drop) return "retargeted";
+      if (moved) await dragEvent("dragOver", drop);
+      await dragEvent("drop", drop);
       data = null;
       pressed = false;
       return "native";
     }
-    release(to);
+    if (!drop) {
+      // Give the element back where it came from rather than drop it elsewhere.
+      release(from);
+      return "retargeted";
+    }
+    if (moved) {
+      sendAgentPageInput(contents, {
+        type: "mouseMove", x: drop.x, y: drop.y, button: "left", modifiers: ["leftbuttondown"],
+      }, map);
+      await waitForAgentPageHover(contents);
+    }
+    release(drop);
     return "pointer";
   } finally {
     // Never leave the page mid-drag or holding the button, and give real

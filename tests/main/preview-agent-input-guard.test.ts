@@ -96,6 +96,27 @@ describe("agent input guard for double clicks and drags", () => {
     await expect(agentPageInputRefusal(page.contents as never)).resolves.toBe("file");
   });
 
+  it("delivers a native drop only onto the approved target", async () => {
+    const page = await guardedPage();
+    await setAgentPageInputGuard(page.contents as never, true, "e1", true, "e2");
+    expect(page.listeners.has("drop")).toBe(true);
+    expect(page.fire("drop", [element("SPAN"), page.column, page.board])).toBe(false);
+    await expect(agentPageInputRefusal(page.contents as never)).resolves.toBeNull();
+    expect(page.fire("drop", [page.board])).toBe(true);
+    await expect(agentPageInputRefusal(page.contents as never)).resolves.toBe("retargeted");
+
+    await setAgentPageInputGuard(page.contents as never, true, "e1", true, "e2");
+    page.column.isConnected = false;
+    expect(page.fire("drop", [page.column, page.board])).toBe(true);
+    await expect(agentPageInputRefusal(page.contents as never)).resolves.toBe("retargeted");
+  });
+
+  it("leaves drops alone outside a drag", async () => {
+    const page = await guardedPage();
+    await setAgentPageInputGuard(page.contents as never, true, "e1");
+    expect(page.fire("drop", [page.board])).toBe(false);
+  });
+
   it("matches every press again once the drag guard is replaced by a click guard", async () => {
     const page = await guardedPage();
     await setAgentPageInputGuard(page.contents as never, true, "e1", true);

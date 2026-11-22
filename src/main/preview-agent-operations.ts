@@ -65,8 +65,10 @@ type ScrollTarget = { deltaX?: number; deltaY?: number } | { ref: string };
 export interface AgentInputExpectation {
   /** The ref every press must land on. */
   pressRef?: string;
-  /** A drag: only the press is matched; the release and drop go where the page moved the pointer. */
+  /** A drag: the press is matched; a pointer release goes where the page moved the pointer. */
   drag?: boolean;
+  /** During a drag, the ref a native drop must land on. */
+  dropRef?: string;
 }
 
 const CLICK_VERBS = ["Click", "Double-click", "Triple-click"] as const;
@@ -1059,7 +1061,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     try {
       await this.rendererOperation(
         contents,
-        () => setAgentPageInputGuard(contents, true, expected.pressRef, expected.drag === true),
+        () => setAgentPageInputGuard(contents, true, expected.pressRef, expected.drag === true, expected.dropRef),
         { scope, phase: "input-guard" },
       );
       beginAgentPageInputRefusalCapture(contents);

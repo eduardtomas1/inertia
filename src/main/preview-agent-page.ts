@@ -789,6 +789,7 @@ export async function setAgentPageInputGuard(
   active: boolean,
   expectedClickRef?: string,
   drag = false,
+  expectedDropRef?: string,
 ): Promise<void> {
   const updated = await execute(contents, `(() => {
     const state = globalThis.__inertiaAgentBrowser;
@@ -798,6 +799,7 @@ export async function setAgentPageInputGuard(
     state.blockedAgentActivationKey = undefined;
     state.expectedAgentClickRef = ${active && expectedClickRef ? JSON.stringify(expectedClickRef) : "undefined"};
     state.agentDragActive = ${active && drag ? "true" : "false"};
+    state.expectedAgentDropRef = ${active && drag && expectedDropRef ? JSON.stringify(expectedDropRef) : "undefined"};
     state.agentInputRefused = undefined;
     state.agentInputActive = ${active ? "true" : "false"};
     return true;
@@ -806,6 +808,41 @@ export async function setAgentPageInputGuard(
 }
 
 export type AgentPageInputRefusal = "disabled" | "file" | "nested" | "retargeted";
+
+/**
+ * Where a pointer drag may release onto `ref`: the centre of its visible part,
+ * while it is still connected and in view and no frame lies over it there.
+ * Unlike locateAgentPageRef it does not need the element on top, because drag
+ * libraries keep the dragged element under the pointer.
+ */
+export async function agentPageDropPoint(
+  contents: WebContents,
+  ref: string,
+): Promise<{ x: number; y: number } | null> {
+  const value = await execute(contents, `(() => {
+    const element = globalThis.__inertiaAgentBrowser?.refs?.get(${JSON.stringify(ref)});
+    if (!element || !element.isConnected) return null;
+    const style = getComputedStyle(element);
+    if (style.visibility === "hidden" || style.display === "none") return null;
+    const rect = element.getBoundingClientRect();
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    const right = Math.min(innerWidth, rect.right);
+    const bottom = Math.min(innerHeight, rect.bottom);
+    if (right <= left || bottom <= top) return null;
+    const x = left + (right - left) / 2;
+    const y = top + (bottom - top) / 2;
+    const stack = document.elementsFromPoint(x, y).slice(0, 64);
+    const index = stack.findIndex((hit) => hit === element || element.contains(hit));
+    if (index < 0) return null;
+    const frames = new Set(["IFRAME", "FRAME", "OBJECT", "EMBED", "PORTAL"]);
+    if (stack.slice(0, index).some((hit) => frames.has(hit.tagName))) return null;
+    return { x, y };
+  })()`);
+  if (typeof value !== "object" || value === null) return null;
+  const { x, y } = value as { x?: unknown; y?: unknown };
+  return typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
 
 export async function agentPageInputRefusal(
   contents: WebContents,

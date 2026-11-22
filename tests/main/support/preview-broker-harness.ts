@@ -360,6 +360,7 @@ export function createPreviewBrokerPageTools() {
     agentPageNestedScreenshotEvidence: vi.fn<() => Promise<"clear" | "sensitive" | "unreadable">>(async () => "clear"),
     agentPageInnerSize: vi.fn<() => Promise<{ width: number; height: number }>>(async () => ({ width: 1_280, height: 800 })),
     agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
+    agentPageDropPoint: vi.fn<(contents: unknown, ref: string) => Promise<{ x: number; y: number } | null>>(async () => null),
     agentPageRefHasFocus: vi.fn(async () => true),
     installAgentPagePrivacyGuard: vi.fn(async () => undefined),
     locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({

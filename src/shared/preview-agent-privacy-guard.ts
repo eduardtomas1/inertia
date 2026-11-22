@@ -17,6 +17,8 @@ interface AgentBrowserPrivacyState {
   blockedAgentActivationKey?: "Enter" | "Space";
   expectedAgentClickRef?: string;
   agentDragActive?: boolean;
+  /** During a drag, the ref a native drop must land on. */
+  expectedAgentDropRef?: string;
   agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
   evidenceWithheld?: PreviewAgentWithheldReason;
   framesObserved?: boolean;
@@ -1039,6 +1041,20 @@ export function installPreviewAgentPrivacyGuard(
       stopActivationEvent(event);
     }, true);
   }
+  // A native drop is delivered to the approved target or not at all, even if
+  // the page moves or replaces it after the last check.
+  activationTarget.addEventListener("drop", (event) => {
+    if (!state.agentInputActive || state.agentDragActive !== true || event.isTrusted !== true) return;
+    const expectedRef = state.expectedAgentDropRef;
+    if (!expectedRef) return;
+    const expected = state.refs.get(expectedRef);
+    const path = boundedEventPath(event);
+    const refusal = activationEventRefusal(event, path)
+      || (!expected?.isConnected || path === null || !path.includes(expected) ? "retargeted" : null);
+    if (!refusal) return;
+    recordRefusal(refusal);
+    stopActivationEvent(event);
+  }, true);
   activationTarget.addEventListener("keydown", (event) => {
     if (!state.agentInputActive || event.isTrusted !== true) return;
     const key = activationKey(event);

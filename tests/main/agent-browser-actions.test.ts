@@ -99,7 +99,7 @@ describe("Browser clicks with a count and held keys", () => {
       { type: "mouseUp", x: 100, y: 200, button: "left", clickCount: 2 },
     ]);
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledWith(contents, 100, 200, "Agent double-click");
-    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(contents, true, "e1", false);
+    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(contents, true, "e1", false, undefined);
   });
 
   it("triple-clicks holding modifiers on every press and release", async () => {
@@ -208,6 +208,8 @@ describe("Browser drag", () => {
 
   beforeEach(() => {
     locateByRef((ref) => (ref === "e2" ? { ...column } : { ...button }));
+    pageTools.agentPageDropPoint.mockReset();
+    pageTools.agentPageDropPoint.mockImplementation(async (_contents, ref) => (ref === "e2" ? { x: 600, y: 300 } : null));
   });
 
   it("drags with the pointer: press on the element, five moves, release on the target", async () => {
@@ -239,7 +241,7 @@ describe("Browser drag", () => {
       ["Input.setInterceptDrags", { enabled: false }],
     ]);
     expect(scripts).toEqual(["watch", "started", "started", "started", "started", "started", "stop"]);
-    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(contents, true, "e1", true);
+    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(contents, true, "e1", true, "e2");
     expect(pageTools.setAgentPageInputGuard).toHaveBeenLastCalledWith(contents, false);
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledWith(contents, 100, 200, "Agent drag");
   });
@@ -277,6 +279,53 @@ describe("Browser drag", () => {
     expect(contents.sentInputs.map(({ type }) => type)).toEqual(["mouseMove", "mouseDown", "mouseMove", "mouseMove"]);
   });
 
+  it("re-aims a pointer release at a drop target the page moved during the drag", async () => {
+    const { broker, contents } = await loadedBroker();
+    isolatedWorld(contents);
+    pageTools.agentPageDropPoint.mockResolvedValue({ x: 640, y: 320 });
+    const result = await broker.perform(runIdentity, drag);
+    expect(result).toMatchObject({ ok: true, state: { activity: { x: 640, y: 320 } } });
+    expect(contents.sentInputs.slice(-2)).toEqual([
+      { type: "mouseMove", x: 640, y: 320, button: "left", modifiers: ["leftbuttondown"] },
+      { type: "mouseUp", x: 640, y: 320, button: "left", clickCount: 1 },
+    ]);
+  });
+
+  it("gives the element back instead of dropping it when the target left during a pointer drag", async () => {
+    const { broker, contents } = await loadedBroker();
+    isolatedWorld(contents);
+    pageTools.agentPageDropPoint.mockResolvedValue(null);
+    const result = await broker.perform(runIdentity, drag);
+    expect(result).toMatchObject({ ok: false, code: "not-found", message: expect.stringContaining("nothing was dropped") });
+    expect(contents.sentInputs.at(-1)).toEqual({ type: "mouseUp", x: 100, y: 200, button: "left", clickCount: 1 });
+    expect(contents.sentInputs.some((input) => input.type === "mouseUp" && input.x === 600)).toBe(false);
+  });
+
+  it("cancels a native drag without a drop when the target no longer passes its check", async () => {
+    const { broker, contents } = await loadedBroker();
+    let lookups = 0;
+    locateByRef((ref) => {
+      if (ref !== "e2") return { ...button };
+      lookups += 1;
+      // Located, revalidated and found again after the hover; replaced while the page took the drag.
+      return lookups <= 3 ? { ...column } : { found: false };
+    });
+    isolatedWorld(contents, {
+      dragStarted: () => {
+        contents.debugger.emitMessage("Input.dragIntercepted", { data: { items: [], dragOperationsMask: 1 } });
+        return true;
+      },
+    });
+    const result = await broker.perform(runIdentity, drag);
+    expect(result).toMatchObject({ ok: false, code: "not-found", message: expect.stringContaining("nothing was dropped") });
+    const drops = commands(contents, "Input.").filter(([, params]) => (params as { type?: string } | undefined)?.type === "drop");
+    expect(drops).toEqual([]);
+    expect(commands(contents, "Input.").slice(-2)).toEqual([
+      ["Input.dispatchDragEvent", { type: "dragCancel", x: 600, y: 300, data: { items: [], dragOperationsMask: 1 } }],
+      ["Input.setInterceptDrags", { enabled: false }],
+    ]);
+  });
+
   it("cancels an intercepted drag and gives drags back to the user when the drop fails", async () => {
     const { broker, contents } = await loadedBroker();
     isolatedWorld(contents, {
@@ -304,7 +353,7 @@ describe("Browser drag", () => {
     await expect(broker.perform(runIdentity, drag)).resolves.toEqual({
       ok: false,
       code: "not-found",
-      message: "The dragged element changed under the pointer. Take a new inertia_browser_snapshot for current refs.",
+      message: "The dragged element or its drop target changed under the pointer. Take a new inertia_browser_snapshot for current refs.",
     });
     expect(contents.sentInputs.map(({ type, x }) => `${String(type)}@${String(x)}`))
       .toEqual(["mouseMove@100", "mouseDown@100", "mouseUp@100"]);

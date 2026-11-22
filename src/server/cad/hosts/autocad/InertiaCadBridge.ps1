@@ -109,6 +109,18 @@ namespace InertiaCad {
     int IOleMessageFilter.MessagePending(IntPtr callee, int tickCount, int pendingType) { return 2; }
   }
 
+  [ComImport, Guid("00020400-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+  public interface IDispatchObject { }
+
+  public static class Com {
+    // AcadHatch.AppendOuterLoop refuses an array of VARIANTs (what PowerShell sends); it needs VT_ARRAY | VT_DISPATCH.
+    public static void AppendOuterLoop(object hatch, object[] items) {
+      IDispatchObject[] loop = new IDispatchObject[items.Length];
+      for (int i = 0; i < items.Length; i++) loop[i] = (IDispatchObject)items[i];
+      hatch.GetType().InvokeMember("AppendOuterLoop", System.Reflection.BindingFlags.InvokeMethod, null, hatch, new object[] { loop });
+    }
+  }
+
   public static class Window {
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect { public int Left, Top, Right, Bottom; }
@@ -283,13 +295,17 @@ function Get-Coordinate($Value, [string]$Name) {
   return , $result
 }
 
-function Get-Radians($Value, [string]$Name) {
+function Get-Number($Value, [string]$Name, [string]$Unit = 'number') {
   $number = 0.0
   if ($null -eq $Value -or -not [double]::TryParse([string]$Value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or
     [double]::IsNaN($number) -or [double]::IsInfinity($number)) {
-    Fail 'INVALID_REQUEST' "$Name must be a finite number of degrees."
+    Fail 'INVALID_REQUEST' "$Name must be a finite $Unit."
   }
-  return $number * [Math]::PI / 180
+  return $number
+}
+
+function Get-Radians($Value, [string]$Name) {
+  return (Get-Number $Value $Name 'number of degrees') * [Math]::PI / 180
 }
 
 $MTextCodes = [regex]'\\(?:U\+([0-9A-Fa-f]{4})|S([^;]*);|([\\{}])|[PN~]|[fFHCcATQWp][^;]*;|[LlOoKk])|[{}]'
@@ -920,6 +936,7 @@ function Assert-InTime {
 
 function Get-WritableEntity($Doc, [string]$Handle, $LayoutMap, $Plan) {
   Assert-InTime
+  if ($Plan.gone.ContainsKey($Handle)) { Fail 'TARGET_NOT_FOUND' "Handle $Handle is erased earlier in this change." }
   try { $entity = $Doc.HandleToObject($Handle) } catch { Fail 'TARGET_NOT_FOUND' "No object with handle $Handle in this drawing. Read the selection again." }
   $layerName = $null
   try { $layerName = [string]$entity.Layer } catch { }
@@ -932,13 +949,80 @@ function Get-WritableEntity($Doc, [string]$Handle, $LayoutMap, $Plan) {
   $layer = Get-Layer $Doc $layerName
   if ($null -ne $layer -and [bool]$layer.Lock) { Fail 'LOCKED' "$(Get-Label $entity) is on locked layer $layerName. Unlock it in AutoCAD first." }
   $Plan.fingerprints['entity:' + $Handle] = Get-Fingerprint $entity
+  [void](Get-TargetCorners $Plan $Handle $entity)
   return $entity
+}
+
+function Assert-NotDimension($Entity, [string]$Kind) {
+  if ((Get-ShortType ([string]$Entity.ObjectName)) -eq 'DIMENSION') { Fail 'UNSUPPORTED_TARGET' "$(Get-Label $Entity) is a dimension; $Kind would falsify it. Add a new dimension instead." }
+}
+
+function Get-Block($Doc, [string]$Name) {
+  if ($Name.StartsWith('*') -or $Name.Contains('|')) { Fail 'UNSUPPORTED_TARGET' "`"$Name`" is an anonymous or xref block; insert a named block from inertia_cad_document_info." }
+  $block = $null
+  if ($Name -and $Name -notmatch '[<>/\\":;?,=`]') { try { $block = $Doc.Blocks.Item($Name) } catch { } }
+  if ($null -eq $block) { Fail 'BLOCK_NOT_FOUND' "No block named `"$Name`" in this drawing; inertia_cad_document_info lists its blocks." }
+  if ([bool]$block.IsXRef -or [bool]$block.IsLayout) { Fail 'UNSUPPORTED_TARGET' "`"$Name`" is an xref or layout block, not one to insert." }
+  # A block definition enumerates its entities, so a bare return would hand back those instead.
+  return , $block
+}
+
+# --- Preview bounds -----------------------------------------------------
+# Only previews track bounds: the union of what each change touches, before and (where cheap) after.
+
+function Add-Bounds($Plan, $Points) {
+  if ($null -eq $Plan.bounds) { return }
+  foreach ($point in $Points) {
+    for ($i = 0; $i -lt 2; $i++) {
+      $value = [double]$point[$i]
+      if ($value -lt $Plan.bounds.min[$i]) { $Plan.bounds.min[$i] = $value }
+      if ($value -gt $Plan.bounds.max[$i]) { $Plan.bounds.max[$i] = $value }
+    }
+  }
+}
+
+function Get-Corners($Extent) {
+  if ($null -eq $Extent) { return , @() }
+  $a = $Extent.min; $b = $Extent.max
+  return , @(@([double]$a[0], [double]$a[1]), @([double]$b[0], [double]$a[1]), @([double]$b[0], [double]$b[1]), @([double]$a[0], [double]$b[1]))
+}
+
+# A target's bounding-box corners as earlier operations in this batch leave them.
+function Get-TargetCorners($Plan, [string]$Handle, $Entity) {
+  if ($null -eq $Plan.bounds) { return , @() }
+  if (-not $Plan.corners.ContainsKey($Handle)) {
+    $Plan.corners[$Handle] = Get-Corners (Get-Extent $Entity)
+    Add-Bounds $Plan $Plan.corners[$Handle]
+  }
+  return , $Plan.corners[$Handle]
+}
+
+# -Keep adds the mapped box (a copy) without moving the target's own box.
+function Update-Corners($Plan, [string]$Handle, [scriptblock]$Map, [switch]$Keep) {
+  if ($null -eq $Plan.bounds) { return }
+  $mapped = @(foreach ($corner in $Plan.corners[$Handle]) { , (& $Map $corner) })
+  Add-Bounds $Plan $mapped
+  if (-not $Keep) { $Plan.corners[$Handle] = $mapped }
+}
+
+function Get-PlanBox($Plan) {
+  $bounds = $Plan.bounds
+  if ($null -eq $bounds -or -not ($bounds.min[0] -le $bounds.max[0])) { return $null }
+  return [ordered]@{ min = @((Get-Rounded $bounds.min[0]), (Get-Rounded $bounds.min[1])); max = @((Get-Rounded $bounds.max[0]), (Get-Rounded $bounds.max[1])) }
+}
+
+function Get-Mirrored($Point, $A, $B) {
+  $dx = $B[0] - $A[0]; $dy = $B[1] - $A[1]
+  $t = (($Point[0] - $A[0]) * $dx + ($Point[1] - $A[1]) * $dy) / ($dx * $dx + $dy * $dy)
+  return , @((2 * ($A[0] + $t * $dx) - $Point[0]), (2 * ($A[1] + $t * $dy) - $Point[1]))
 }
 
 function Add-Change($Plan, [string]$Op, [string]$Target, [string]$Field, $Before, $After) {
   [void]$Plan.changes.Add([ordered]@{ op = $Op; target = $Target; field = $Field; before = $Before; after = $After })
 }
 
+$OffsetTypes = @('AcDbLine', 'AcDbArc', 'AcDbCircle', 'AcDbPolyline', 'AcDbEllipse', 'AcDbSpline')
+$LoopTypes = $OffsetTypes + 'AcDb2dPolyline'
 $RotatableTypes = @('AcDbBlockReference', 'AcDbMInsertBlock', 'AcDbText', 'AcDbMText')
 # The points a move or rotate row shows, named as query rows name them.
 $ShapePoints = @{
@@ -974,7 +1058,25 @@ function Format-Vector($Vector) {
   return "[$($parts -join ', ')]"
 }
 
-function New-Plan($Acad, $Doc, $Operations) {
+function Get-Count($Value) {
+  $count = 0
+  if (-not [int]::TryParse([string]$Value, [ref]$count) -or $count -lt 1 -or $count -gt 50) { Fail 'INVALID_REQUEST' 'count must be a whole number from 1 to 50.' }
+  return $count
+}
+
+function Get-Flat($Points, [int]$Min, [string]$Name) {
+  $items = @($Points)
+  if ($items.Count -lt $Min -or $items.Count -gt 1000) { Fail 'INVALID_REQUEST' "$Name needs $Min to 1000 [x, y] pairs." }
+  $flat = New-Object 'double[]' ($items.Count * 2)
+  for ($i = 0; $i -lt $items.Count; $i++) { $point = Get-Coordinate $items[$i] "$Name[$i]"; $flat[2 * $i] = $point[0]; $flat[2 * $i + 1] = $point[1] }
+  return , $flat
+}
+
+function Get-FlatPoints($Flat) {
+  return , @(for ($i = 0; $i -lt $Flat.Count; $i += 2) { , @($Flat[$i], $Flat[$i + 1]) })
+}
+
+function New-Plan($Acad, $Doc, $Operations, [switch]$Bounds) {
   $operations = @($Operations)
   if ($operations.Count -eq 0) { Fail 'INVALID_REQUEST' 'Give at least one operation.' }
   if ($operations.Count -gt $MaxOperations) { Fail 'INVALID_REQUEST' "At most $MaxOperations operations per change." }
@@ -986,7 +1088,12 @@ function New-Plan($Acad, $Doc, $Operations) {
     fingerprints = [ordered]@{}
     steps        = New-Object System.Collections.ArrayList
     warnings     = New-Object System.Collections.ArrayList
+    gone         = @{}
+    corners      = @{}
+    bounds       = $null
+    creates      = 0
   }
+  if ($Bounds) { $plan.bounds = @{ min = [double[]]@([double]::PositiveInfinity, [double]::PositiveInfinity); max = [double[]]@([double]::NegativeInfinity, [double]::NegativeInfinity) } }
   $layoutMap = Get-LayoutMap $Doc
   $newLayers = @{}
   # Layers as earlier operations in this batch leave them, so a later one is never skipped as a no-op.
@@ -1063,6 +1170,7 @@ function New-Plan($Acad, $Doc, $Operations) {
             foreach ($point in $shape.points.Values) { for ($i = 0; $i -lt 3; $i++) { $point[$i] += $vector[$i] } }
             Add-Change $plan $kind (Get-Label $entity) 'position' $before (Get-ShapeRow $shape)
           }
+          Update-Corners $plan $handle { param($p) @(($p[0] + $vector[0]), ($p[1] + $vector[1])) }
           [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; vector = $vector })
         }
       }
@@ -1101,6 +1209,7 @@ function New-Plan($Acad, $Doc, $Operations) {
             if ($null -ne $shape.rotation) { $shape.rotation += $angle }
             Add-Change $plan $kind (Get-Label $entity) 'placement' $before (Get-ShapeRow $shape -Rotation)
           }
+          Update-Corners $plan $handle { param($p) @(($base[0] + ($p[0] - $base[0]) * $cos - ($p[1] - $base[1]) * $sin), ($base[1] + ($p[0] - $base[0]) * $sin + ($p[1] - $base[1]) * $cos)) }
           [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; base = $base; angle = $angle })
         }
       }
@@ -1110,10 +1219,73 @@ function New-Plan($Acad, $Doc, $Operations) {
           $definition = Get-BlockDefinitionDigest $Doc $entity
           if ($null -ne $definition) { $plan.fingerprints['block:' + $handle] = $definition }
           Add-Change $plan $kind (Get-Label $entity) 'entity' 'present' 'erased'
+          $plan.gone[$handle] = $true
           [void]$plan.steps.Add(@{ kind = $kind; entity = $entity })
         }
       }
-      { @('acad.add_line', 'acad.add_polyline', 'acad.add_circle', 'acad.add_text') -contains $_ } {
+      'acad.copy' {
+        $vector = Get-Coordinate $op.vector 'vector'
+        $count = 1
+        if ($null -ne $op.count) { $count = Get-Count $op.count }
+        foreach ($handle in (Get-Targets $op)) {
+          $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+          $plan.creates += $count
+          if ($plan.creates -gt $MaxPlanTargets) { Fail 'INVALID_REQUEST' "At most $MaxPlanTargets copies per change. Split it into smaller changes." }
+          Update-Corners $plan $handle { param($p) @(($p[0] + $vector[0] * $count), ($p[1] + $vector[1] * $count)) } -Keep
+          Add-Change $plan $kind (Get-Label $entity) 'copies' $null $(if ($count -eq 1) { "1 copy offset by $(Format-Vector $vector)" } else { "$count copies, offset by $(Format-Vector $vector) each" })
+          [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; vector = $vector; count = $count })
+        }
+      }
+      'acad.mirror' {
+        $p1 = Get-Coordinate $op.p1 'p1'
+        $p2 = Get-Coordinate $op.p2 'p2'
+        if ($p1[0] -eq $p2[0] -and $p1[1] -eq $p2[1]) { Fail 'INVALID_REQUEST' 'p1 and p2 must be different points.' }
+        $keep = $op.keepSource -ne $false
+        foreach ($handle in (Get-Targets $op)) {
+          $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+          Assert-NotDimension $entity $kind
+          Update-Corners $plan $handle { param($p) Get-Mirrored $p $p1 $p2 } -Keep
+          if (-not $keep) { $plan.gone[$handle] = $true }
+          Add-Change $plan $kind (Get-Label $entity) 'mirror' $null "mirrored copy about $(Format-Vector $p1) to $(Format-Vector $p2)$(if (-not $keep) { ', original erased' })"
+          [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; p1 = $p1; p2 = $p2; keep = $keep })
+        }
+      }
+      'acad.scale' {
+        $base = Get-Coordinate $op.basePoint 'basePoint'
+        $factor = Get-Number $op.factor 'factor'
+        if (-not ($factor -gt 0)) { Fail 'INVALID_REQUEST' 'factor must be greater than 0.' }
+        foreach ($handle in (Get-Targets $op)) {
+          $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+          Assert-NotDimension $entity $kind
+          $shape = Get-Shape $entity $handle $shapes
+          if ($null -eq $shape) {
+            Add-Change $plan $kind (Get-Label $entity) 'scale' $null "scaled x$(Get-Rounded $factor 6) about $(Format-Vector $base)"
+          } else {
+            $before = Get-ShapeRow $shape
+            foreach ($point in $shape.points.Values) { for ($i = 0; $i -lt 3; $i++) { $point[$i] = $base[$i] + ($point[$i] - $base[$i]) * $factor } }
+            Add-Change $plan $kind (Get-Label $entity) 'scale' $before (Get-ShapeRow $shape)
+          }
+          Update-Corners $plan $handle { param($p) @(($base[0] + ($p[0] - $base[0]) * $factor), ($base[1] + ($p[1] - $base[1]) * $factor)) }
+          [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; base = $base; factor = $factor })
+        }
+      }
+      'acad.offset' {
+        $handles = Get-Targets $op
+        if ($handles.Count -ne 1) { Fail 'INVALID_REQUEST' 'acad.offset takes one handle.' }
+        $distance = Get-Number $op.distance 'distance'
+        if ($distance -eq 0 -or [Math]::Abs($distance) -gt $MaxCoordinate) { Fail 'INVALID_REQUEST' 'distance must be a non-zero length; its sign picks the side.' }
+        $entity = Get-WritableEntity $Doc $handles[0] $layoutMap $plan
+        if ($OffsetTypes -notcontains [string]$entity.ObjectName) { Fail 'UNSUPPORTED_TARGET' "$(Get-Label $entity) cannot be offset; use a LINE, ARC, CIRCLE, LWPOLYLINE, ELLIPSE or SPLINE." }
+        $corners = Get-TargetCorners $plan $handles[0] $entity
+        if ($corners.Count -gt 0) {
+          $xs = $corners | ForEach-Object { $_[0] }; $ys = $corners | ForEach-Object { $_[1] }
+          $d = [Math]::Abs($distance)
+          Add-Bounds $plan @(@((($xs | Measure-Object -Minimum).Minimum - $d), (($ys | Measure-Object -Minimum).Minimum - $d)), @((($xs | Measure-Object -Maximum).Maximum + $d), (($ys | Measure-Object -Maximum).Maximum + $d)))
+        }
+        Add-Change $plan $kind (Get-Label $entity) 'offset' $null "offset copy at $(Get-Rounded $distance)"
+        [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; distance = $distance })
+      }
+      { @('acad.add_line', 'acad.add_polyline', 'acad.add_circle', 'acad.add_text', 'acad.add_arc', 'acad.add_hatch', 'acad.add_dimension', 'acad.insert_block') -contains $_ } {
         $layer = $null
         if ($op.layer) {
           $layer = [string]$op.layer
@@ -1124,19 +1296,70 @@ function New-Plan($Acad, $Doc, $Operations) {
           'acad.add_line' {
             $step.start = Get-Coordinate $op.start 'start'; $step.end = Get-Coordinate $op.end 'end'
             $summary = "line from $(($step.start | ForEach-Object { Get-Rounded $_ }) -join ', ') to $(($step.end | ForEach-Object { Get-Rounded $_ }) -join ', ')"
+            Add-Bounds $plan @($step.start, $step.end)
           }
           'acad.add_polyline' {
-            $points = @($op.points)
-            if ($points.Count -lt 2 -or $points.Count -gt 1000) { Fail 'INVALID_REQUEST' 'points needs 2 to 1000 [x, y] pairs.' }
-            $flat = New-Object 'double[]' ($points.Count * 2)
-            for ($i = 0; $i -lt $points.Count; $i++) { $point = Get-Coordinate $points[$i] "points[$i]"; $flat[2 * $i] = $point[0]; $flat[2 * $i + 1] = $point[1] }
-            $step.coordinates = $flat; $step.closed = ($op.closed -eq $true)
-            $summary = "polyline with $($points.Count) vertices$(if ($step.closed) { ', closed' })"
+            $step.coordinates = Get-Flat $op.points 2 'points'; $step.closed = ($op.closed -eq $true)
+            $summary = "polyline with $($step.coordinates.Count / 2) vertices$(if ($step.closed) { ', closed' })"
+            Add-Bounds $plan (Get-FlatPoints $step.coordinates)
           }
-          'acad.add_circle' {
+          { @('acad.add_circle', 'acad.add_arc') -contains $_ } {
             $step.center = Get-Coordinate $op.center 'center'; $step.radius = [double]$op.radius
             if (-not ($step.radius -gt 0 -and $step.radius -lt $MaxCoordinate)) { Fail 'INVALID_REQUEST' 'radius must be greater than 0.' }
             $summary = "circle r=$(Get-Rounded $step.radius) at $(($step.center | ForEach-Object { Get-Rounded $_ }) -join ', ')"
+            if ($kind -eq 'acad.add_arc') {
+              $step.start = Get-Radians $op.startDeg 'startDeg'; $step.end = Get-Radians $op.endDeg 'endDeg'
+              $summary = "arc r=$(Get-Rounded $step.radius) at $(Format-Vector $step.center) from $(Get-Degrees $step.start) to $(Get-Degrees $step.end) degrees"
+            }
+            $c = $step.center; $r = $step.radius
+            Add-Bounds $plan @(@(($c[0] - $r), ($c[1] - $r)), @(($c[0] + $r), ($c[1] + $r)))
+          }
+          'acad.insert_block' {
+            $step.name = [string](Get-Block $Doc ([string]$op.name)).Name
+            $step.position = Get-Coordinate $op.position 'position'
+            $step.rotation = 0.0
+            if ($null -ne $op.rotationDeg) { $step.rotation = Get-Radians $op.rotationDeg 'rotationDeg' }
+            $step.scale = 1.0
+            if ($null -ne $op.scale) { $step.scale = Get-Number $op.scale 'scale'; if (-not ($step.scale -gt 0)) { Fail 'INVALID_REQUEST' 'scale must be greater than 0.' } }
+            $summary = "$($step.name) at $(Format-Vector $step.position)$(if ($step.rotation -ne 0) { ", rotated $(Get-RotationDeg $step.rotation) degrees" })$(if ($step.scale -ne 1) { ", scale $(Get-Rounded $step.scale 6)" })"
+            Add-Bounds $plan @(, $step.position)
+          }
+          'acad.add_hatch' {
+            $step.pattern = 'SOLID'
+            if ($op.pattern) { $step.pattern = ([string]$op.pattern).ToUpperInvariant() }
+            if ($step.pattern -notmatch '^[A-Z0-9_-]{1,64}$') { Fail 'INVALID_REQUEST' 'pattern must be SOLID or a hatch pattern name (letters, digits, _ and -).' }
+            $step.scale = 1.0
+            if ($null -ne $op.scale) { $step.scale = Get-Number $op.scale 'scale'; if (-not ($step.scale -gt 0)) { Fail 'INVALID_REQUEST' 'scale must be greater than 0.' } }
+            $step.angle = 0.0
+            if ($null -ne $op.angleDeg) { $step.angle = Get-Radians $op.angleDeg 'angleDeg' }
+            $boundary = @($op.boundary | Where-Object { $null -ne $_ })
+            if ($boundary.Count -gt 0 -and @($boundary | Where-Object { $_ -is [string] }).Count -eq $boundary.Count) {
+              if ($boundary.Count -gt $MaxTargets) { Fail 'INVALID_REQUEST' "boundary accepts at most $MaxTargets handles." }
+              $step.loop = @(foreach ($handle in $boundary) {
+                  $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
+                  if ($LoopTypes -notcontains [string]$entity.ObjectName) { Fail 'UNSUPPORTED_TARGET' "$(Get-Label $entity) cannot bound a hatch; use closed polylines, circles, ellipses, splines, or lines and arcs that form a loop." }
+                  $entity
+                })
+              $where = "inside $($boundary.Count) boundary object$(if ($boundary.Count -gt 1) { 's' })"
+            } else {
+              $step.coordinates = Get-Flat $op.boundary 3 'boundary'
+              Add-Bounds $plan (Get-FlatPoints $step.coordinates)
+              $where = "inside a $($step.coordinates.Count / 2)-point boundary"
+            }
+            $summary = "$($step.pattern) hatch $where$(if ($step.pattern -ne 'SOLID') { ", scale $(Get-Rounded $step.scale 6), angle $(Get-Degrees $step.angle)" })"
+          }
+          'acad.add_dimension' {
+            $step.linear = [string]$op.kind -eq 'linear'
+            if (-not $step.linear -and [string]$op.kind -ne 'aligned') { Fail 'INVALID_REQUEST' 'kind must be aligned or linear.' }
+            $step.p1 = Get-Coordinate $op.p1 'p1'; $step.p2 = Get-Coordinate $op.p2 'p2'; $step.textPosition = Get-Coordinate $op.textPosition 'textPosition'
+            if ($step.p1[0] -eq $step.p2[0] -and $step.p1[1] -eq $step.p2[1]) { Fail 'INVALID_REQUEST' 'p1 and p2 must be different points.' }
+            $step.rotation = 0.0
+            if ($null -ne $op.rotationDeg) {
+              if (-not $step.linear) { Fail 'INVALID_REQUEST' 'rotationDeg applies to linear dimensions only.' }
+              $step.rotation = Get-Radians $op.rotationDeg 'rotationDeg'
+            }
+            $summary = "$([string]$op.kind) dimension from $(Format-Vector $step.p1) to $(Format-Vector $step.p2)$(if ($step.rotation -ne 0) { ", rotated $(Get-RotationDeg $step.rotation) degrees" }), current dim style"
+            Add-Bounds $plan @($step.p1, $step.p2, $step.textPosition)
           }
           'acad.add_text' {
             $step.position = Get-Coordinate $op.position 'position'; $step.height = [double]$op.height; $step.text = [string]$op.text
@@ -1145,11 +1368,12 @@ function New-Plan($Acad, $Doc, $Operations) {
             $step.rotation = 0.0
             if ($null -ne $op.rotationDeg) { $step.rotation = [double]$op.rotationDeg * [Math]::PI / 180 }
             $summary = "text `"$(Limit-Text $step.text 60)`""
+            Add-Bounds $plan @(, $step.position)
           }
         }
         $where = 'model space'
         if ($layer) { $where += " on layer $layer" }
-        Add-Change $plan $kind "new $($kind.Substring(9))" 'geometry' $null "$summary, $where"
+        Add-Change $plan $kind "new $($kind -replace '^acad\.(add|insert)_', '')" 'geometry' $null "$summary, $where"
         [void]$plan.steps.Add($step)
       }
       default { Fail 'UNSUPPORTED_OPERATION' "AutoCAD does not support `"$kind`"." }
@@ -1182,21 +1406,78 @@ function Invoke-Step($Doc, $Step, $Created) {
     'acad.set_rotation' { $Step.entity.Rotation = $Step.value }
     'acad.rotate' { $Step.entity.Rotate($Step.base, $Step.angle) }
     'acad.erase' { $Step.entity.Delete() }
+    'acad.scale' { $Step.entity.ScaleEntity($Step.base, $Step.factor) }
     default {
-      $space = $Doc.ModelSpace
-      switch ($Step.kind) {
-        'acad.add_line' { $entity = $space.AddLine($Step.start, $Step.end) }
-        'acad.add_polyline' { $entity = $space.AddLightWeightPolyline($Step.coordinates) }
-        'acad.add_circle' { $entity = $space.AddCircle($Step.center, $Step.radius) }
-        'acad.add_text' { $entity = $space.AddText($Step.text, $Step.position, $Step.height) }
-      }
       # A step either completes or leaves nothing behind, so a failure in the first step changed nothing.
-      try {
-        if ($Step.kind -eq 'acad.add_polyline' -and $Step.closed) { $entity.Closed = $true }
-        if ($Step.kind -eq 'acad.add_text' -and $Step.rotation -ne 0) { $entity.Rotation = $Step.rotation }
-        if ($Step.layer) { $entity.Layer = (Get-Layer $Doc $Step.layer).Name }
-      } catch { Undo-Creation $entity; throw }
-      [void]$Created.Add([ordered]@{ handle = [string]$entity.Handle; type = (Get-ShortType ([string]$entity.ObjectName)) })
+      $made = New-Object System.Collections.ArrayList
+      try { New-StepObjects $Doc $Step $made } catch { foreach ($object in $made) { Undo-Creation $object }; throw }
+      foreach ($object in $made) { [void]$Created.Add([ordered]@{ handle = [string]$object.Handle; type = (Get-ShortType ([string]$object.ObjectName)) }) }
+    }
+  }
+}
+
+function Add-OuterLoop($Hatch, $Objects) {
+  if ($Hatch -is [System.__ComObject]) { [InertiaCad.Com]::AppendOuterLoop($Hatch, [object[]]$Objects) } else { $Hatch.AppendOuterLoop([object[]]$Objects) }
+}
+
+# Adds each object to $Made as soon as it exists, so a failure can remove it again.
+function New-StepObjects($Doc, $Step, $Made) {
+  switch ($Step.kind) {
+    'acad.copy' {
+      $origin = New-Object 'double[]' 3
+      for ($i = 1; $i -le $Step.count; $i++) {
+        $copy = $Step.entity.Copy()
+        [void]$Made.Add($copy)
+        $copy.Move($origin, [double[]]@(($Step.vector[0] * $i), ($Step.vector[1] * $i), ($Step.vector[2] * $i)))
+      }
+      return
+    }
+    'acad.mirror' {
+      [void]$Made.Add($Step.entity.Mirror($Step.p1, $Step.p2))
+      if (-not $Step.keep) { $Step.entity.Delete() }
+      return
+    }
+    'acad.offset' {
+      foreach ($object in @($Step.entity.Offset($Step.distance))) { [void]$Made.Add($object) }
+      return
+    }
+  }
+  $space = $Doc.ModelSpace
+  switch ($Step.kind) {
+    'acad.add_line' { $entity = $space.AddLine($Step.start, $Step.end) }
+    'acad.add_polyline' { $entity = $space.AddLightWeightPolyline($Step.coordinates) }
+    'acad.add_circle' { $entity = $space.AddCircle($Step.center, $Step.radius) }
+    'acad.add_arc' { $entity = $space.AddArc($Step.center, $Step.radius, $Step.start, $Step.end) }
+    'acad.add_text' { $entity = $space.AddText($Step.text, $Step.position, $Step.height) }
+    'acad.insert_block' { $entity = $space.InsertBlock($Step.position, $Step.name, $Step.scale, $Step.scale, $Step.scale, $Step.rotation) }
+    'acad.add_hatch' { $entity = $space.AddHatch(1, $Step.pattern, $false) }
+    'acad.add_dimension' {
+      if ($Step.linear) { $entity = $space.AddDimRotated($Step.p1, $Step.p2, $Step.textPosition, $Step.rotation) }
+      else { $entity = $space.AddDimAligned($Step.p1, $Step.p2, $Step.textPosition) }
+    }
+  }
+  [void]$Made.Add($entity)
+  if ($Step.kind -eq 'acad.add_polyline' -and $Step.closed) { $entity.Closed = $true }
+  if ($Step.kind -eq 'acad.add_text' -and $Step.rotation -ne 0) { $entity.Rotation = $Step.rotation }
+  if ($Step.layer) { $entity.Layer = (Get-Layer $Doc $Step.layer).Name }
+  # New objects otherwise take CECOLOR, CELTYPE and CELWEIGHT, which may hold a one-off override.
+  $entity.Color = 256
+  $entity.Linetype = 'ByLayer'
+  $entity.Lineweight = -1
+  if ($Step.kind -eq 'acad.add_hatch') {
+    if ($Step.pattern -ne 'SOLID') { $entity.PatternScale = $Step.scale; $entity.PatternAngle = $Step.angle }
+    $loop = $Step.loop
+    $temporary = $null
+    try {
+      if ($null -ne $Step.coordinates) {
+        $temporary = $space.AddLightWeightPolyline($Step.coordinates)
+        $temporary.Closed = $true
+        $loop = @($temporary)
+      }
+      Add-OuterLoop $entity $loop
+      $entity.Evaluate()
+    } finally {
+      if ($null -ne $temporary) { try { $temporary.Delete() } catch { $script:StepLeftChanges = $true; throw } }
     }
   }
 }
@@ -1212,13 +1493,16 @@ function Get-StaleKeys($Expected, $Actual) {
 
 function Get-Preview($Acad, $Params) {
   $doc = Resolve-Document $Acad ([string]$Params.documentId)
-  $plan = New-Plan $Acad $doc $Params.operations
-  return [ordered]@{
+  $plan = New-Plan $Acad $doc $Params.operations -Bounds
+  $result = [ordered]@{
     documentId   = Get-DocumentId $doc
     changes      = $plan.changes.ToArray()
     fingerprints = $plan.fingerprints
     warnings     = @($plan.warnings | Select-Object -Unique)
   }
+  $box = Get-PlanBox $plan
+  if ($null -ne $box) { $result.bbox = $box }
+  return $result
 }
 
 function Invoke-Apply($Acad, $Params) {

@@ -136,11 +136,28 @@ async function requestElectronQuit(
           .map(([name, total]) => `${name}:${total}`).join(",") || "none";
       } catch { return "unavailable"; }
     };
+    const contentsTypes = (): string => {
+      try {
+        const read = <T>(operation: () => T): T | null => {
+          try { return operation(); } catch { return null; }
+        };
+        const entries = webContents.getAllWebContents().map((contents) => {
+          const destroyed = read(() => contents.isDestroyed()) !== false;
+          const type = read(() => contents.getType());
+          const name = typeof type === "string" && /^[A-Za-z]{1,20}$/u.test(type) ? type : "other";
+          return { destroyed, label: destroyed ? `${name}-destroyed` : name };
+        });
+        entries.sort((left, right) => Number(right.destroyed) - Number(left.destroyed)
+          || (left.label < right.label ? -1 : left.label > right.label ? 1 : 0));
+        return entries.slice(0, 4).map((entry) => entry.label).join(",") || "none";
+      } catch { return "unavailable"; }
+    };
     try {
       const exit = process.exit;
       process.exit = function (...args): never {
         mark(`exit-inventory windows=${count(() => BrowserWindow.getAllWindows().length)} `
-          + `webContents=${count(() => webContents.getAllWebContents().length)} resources=${resources()}`);
+          + `webContents=${count(() => webContents.getAllWebContents().length)} `
+          + `webContentsTypes=${contentsTypes()} resources=${resources()}`);
         // Node waits for attached debuggers inside process.exit. Detach the
         // test inspector here, after privileged cleanup and window destruction,
         // so Playwright's debugger cannot keep the clean process resident.

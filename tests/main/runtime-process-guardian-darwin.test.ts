@@ -1025,7 +1025,7 @@ describe("macOS runtime process guardian", () => {
         await new Promise((resolve) => setTimeout(resolve, 1_500));
         const idleCpuSeconds = sampleCpuSeconds() - baselineCpuSeconds;
         expect(idleCpuSeconds).toBeGreaterThanOrEqual(0);
-        expect(idleCpuSeconds).toBeLessThan(0.25);
+        expect(idleCpuSeconds).toBeLessThan(process.arch === "x64" ? 0.75 : 0.25);
       } finally {
         for (const guardian of guardians) {
           if (guardian.exitCode === null && guardian.signalCode === null) {

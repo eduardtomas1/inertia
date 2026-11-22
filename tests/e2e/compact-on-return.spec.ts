@@ -313,6 +313,7 @@ test("offers Compact and send on a stale API-key chat, then shows the compaction
   await capture(testInfo, "usage-meter-cache-expired-dark");
   await page.keyboard.press("Escape");
   await expect(meter).toBeHidden();
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   await expect(usageTrigger).toBeFocused();
 
   const fullHistory = page.getByRole("button", { name: "Full history" });

@@ -29,7 +29,9 @@ import { previewAgentPhaseTimeoutMessage, type PreviewAgentOperationFailure, typ
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import { agentHistoryNavigation, agentHistoryRefusal, withLoopbackScheme, type AgentHistoryDirection } from "./preview-agent-history.js";
 import { agentPageScreenshotPrivacy, captureAgentPageScreenshot, capturedAgentScreenshotResult, type AgentPageCapture } from "./preview-agent-screenshot.js";
-import { agentPageRefOutsideViewport, agentPageRefRendered, describeAgentPageRef, scrollAgentPageRefIntoView } from "./preview-agent-scroll.js";
+import {
+  agentPageRefOutsideViewport, agentPageRefRendered, describeAgentPageRef, retainAgentPageRef, scrollAgentPageRefIntoView,
+} from "./preview-agent-scroll.js";
 import { AgentBrowserTimeout, agentOperationDelay, type AgentOperationScope } from "./preview-agent-scope.js";
 import type { PreviewTab } from "./preview-tab.js";
 import {
@@ -324,6 +326,7 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
         let reached = command.path === undefined
           || agentBrowserPathMatches(contents.getURL(), command.path) === expected;
         if (reached && (needle !== undefined || command.ref !== undefined)) {
+          if (command.ref !== undefined) await this.#retainRef(contents, command.ref, scope);
           const page = await this.#pollPage(session, tab, scope);
           if (page && !page.ok) return page.result;
           reached = page !== null
@@ -860,6 +863,14 @@ export class PreviewAgentOperations<Session extends AgentOperationSession> {
     } catch (error) {
       if (scope.signal.aborted || error instanceof AgentBrowserRefusal) throw error;
       return null;
+    }
+  }
+
+  async #retainRef(contents: PreviewContents, ref: string, scope: AgentOperationScope): Promise<void> {
+    try {
+      await this.rendererOperation(contents, () => retainAgentPageRef(contents, ref), { scope, phase: "element-lookup" });
+    } catch (error) {
+      if (scope.signal.aborted || error instanceof AgentBrowserRefusal) throw error;
     }
   }
 

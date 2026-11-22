@@ -111,6 +111,14 @@ export class TurnSettlementCoordinator {
         }
       }
     }
+    // Order: after the final stream flush, before any settlement write (notices, the terminal message), so nothing
+    // written at settlement can attach to an emptied open segment.
+    try {
+      this.options.streams.dropEmptyOpenAssistantMessage(active);
+    } catch (error) {
+      streamPersistenceFailed = true;
+      notePersistenceError(error);
+    }
     if (streamPersistenceFailed) {
       active.runState.repairSettlementFailure("stream-persistence-failed");
       status = "failed";

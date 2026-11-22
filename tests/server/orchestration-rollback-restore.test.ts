@@ -57,18 +57,19 @@ function read(runtime: TurnControllerTestRuntime, name: string): string {
 }
 
 async function finish(runtime: TurnControllerTestRuntime, label: string, files: Record<string, string>,
-  conversationId = runtime.conversationId, artifacts = true) {
+  conversationId = runtime.conversationId, artifacts = true,
+  nativeId = conversationId === runtime.conversationId ? "source-native" : `${label}-native`) {
   const runs = runtime.provider.runCount;
   const queued = runtime.controller.queue({ conversationId, content: `${label} request`, turnCheckpoint: artifacts });
   runtime.controller.start(queued.turn.id);
   await vi.waitFor(() => expect(runtime.provider.runCount).toBe(runs + 1), wait);
   if (conversationId === runtime.conversationId) {
     for (const phase of ["started", "settled"] as const) runtime.provider.emit({ ...turnControllerTestIdentity(runtime),
-      type: "native-boundary", nativeConversationId: "source-native", nativeSessionId: null, nativeTurnId: label,
+      type: "native-boundary", nativeConversationId: nativeId, nativeSessionId: null, nativeTurnId: label,
       persistedHeadId: phase === "settled" ? label : null, phase });
   }
   for (const [name, content] of Object.entries(files)) writeFileSync(join(runtime.workspace, name), content);
-  runtime.provider.resolve({ text: `${label} answer`, sessionId: conversationId === runtime.conversationId ? "source-native" : `${label}-native` });
+  runtime.provider.resolve({ text: `${label} answer`, sessionId: nativeId });
   await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), wait);
   if (artifacts) await vi.waitFor(() => expect(runtime.store.turnGitArtifact(queued.turn.id)?.status).toBe("ready"), wait);
   return queued.turn;
@@ -315,7 +316,9 @@ describe("chat rollback with file restore", () => {
       expect(read(runtime, "notes.txt")).toBe("rolled back\n");
       expect(read(runtime, "base.txt")).toBe("manual edit\n");
       expect(runtime.store.orchestration.history.rolledBack(second.id)).toBe(true);
-      await finish(runtime, "quiet", {});
+      // The rollback retired the native session, which still holds the rolled-back turns: the next turn starts a
+      // fresh one, and a provider that answered with the retired session would fail honestly (T3 d32df2d34).
+      await finish(runtime, "quiet", {}, runtime.conversationId, true, "fresh-native");
       await expect(rollback(deps, runtime.conversationId, first.id)).resolves.toMatchObject({ transfer: "portable",
         files: { outcome: "unchanged", message: "The rolled-back turns recorded no file changes." } });
     } finally { runtime.store.close(); }

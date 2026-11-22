@@ -437,10 +437,21 @@ export interface ActiveTurn {
   /** This turn's restored history for native delivery; absent or null when it has none to deliver. */
   nativeHistory?: AssembledTurnRequest["nativeHistory"] | null;
   freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
+  /**
+   * The native sessions this turn's fresh start replaced (a rejected resume, an exhausted or rejected-history
+   * session, a session left in another checkout, a retired session). A fresh session that comes back under one of
+   * them is the old session with the restored history added: the turn fails and never adopts it (T3 d32df2d34).
+   */
+  replacedSessionIds?: readonly string[];
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;
   assistantPendingHighSurrogate: string;
   assistantSegmentText: string;
+  /**
+   * Where each closed assistant segment ends in `assistantText`, in order. The final result maps onto them, so a
+   * harness that joins its messages with blank lines (Pi, Grok, OpenCode) corrects only the open segment.
+   */
+  closedAssistantSegmentEnds?: number[];
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
   followUpBoundary: { at: string; text: string; messageId: string | null } | null;

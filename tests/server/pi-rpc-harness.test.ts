@@ -12,9 +12,18 @@ import { openPiRpcConnection } from "../../src/server/provider/pi-rpc";
 import * as piResources from "../../src/server/provider/pi-resources";
 import { portableFixtureRoot, removePortableFixture, waitFor, writeNodeFlagExecutable } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+import { providerCallbacksFromHarness, createProviderEmitter } from "../../src/server/provider/emitter";
+import type { ProviderRunResult } from "../../src/server/provider/contracts";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import {
+  cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
+  turnControllerTestIdentity,
+} from "../support/turn-controller-runtime";
 
 const roots: string[] = [];
-afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(removePortableFixture)); });
+afterEach(async () => {
+  vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(removePortableFixture)); await cleanupTurnControllerTestDirectories();
+});
 
 function fixture(body: string, options: { images?: boolean; sessionId?: string; headId?: string;
   fork?: "copy" | "same-session" | "hang" | "secret" | "existing" | "ignored" | "crash" | "metadata" | "grown"; resumeExits?: boolean } = {}) {
@@ -400,5 +409,103 @@ describe("Pi RPC production harness", () => {
     const connection = openPiRpcConnection({executable:test.executable,args:[],environment:process.env,cwd:test.root,timeoutMs:30});
     await expect(connection.request("hang")).rejects.toThrow("timed out");
     await connection.close();
+  });
+});
+
+// T3 4ecbe5508 end to end: what the Pi harness emitted, replayed into a turn controller.
+const piLine = (event: Record<string, unknown>) => `emit(${JSON.stringify(event)});`;
+const piText = (type: string, extra: Record<string, unknown> = {}) =>
+  piLine({ type: "message_update", assistantMessageEvent: { type, contentIndex: 0, ...extra } });
+const piMessage = (...lines: string[]) => [piLine({ type: "message_start", message: { role: "assistant" } }), ...lines,
+  piLine({ type: "message_end", message: { role: "assistant", stopReason: "stop", content: [] } })].join("");
+const piTool = (id: string) => piLine({ type: "tool_execution_start", toolCallId: id, toolName: "read", args: { path: "a.ts" } })
+  + piLine({ type: "tool_execution_end", toolCallId: id, toolName: "read", result: { content: [] } });
+const piPrompt = (...lines: string[]) => `if(request.type === "prompt") { streaming=true; reply(request,{disposition:"started"});
+  ${lines.join("")} streaming=false; emit({type:"agent_settled"}); }`;
+
+async function intoRuntime(events: readonly AgentHarnessEvent[], result: ProviderRunResult) {
+  const runtime = await createTurnControllerTestRuntime({}, {
+    modelSelection: providerNativeModelSelection({ providerId: "pi", modelId: "provider-default" }) });
+  const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Hello" });
+  runtime.controller.start(queued.turn.id);
+  const identity = turnControllerTestIdentity(runtime);
+  const callbacks = providerCallbacksFromHarness(createProviderEmitter("pi", identity.conversationId,
+    { onEvent: (event) => runtime.provider.emit(event) }, identity.runId, identity.turnId));
+  for (const event of events) {
+    callbacks.onEvent?.({ ...event, conversationId: identity.conversationId, runId: identity.runId, turnId: identity.turnId } as AgentHarnessEvent);
+  }
+  // What the turn showed while it streamed, before the final result could correct the open segment.
+  for (const [id, flush] of runtime.scheduler.callbacks) {
+    if ((runtime.scheduler.delays.get(id) ?? Infinity) < 1_000) { runtime.scheduler.clearTimeout(id); flush(); }
+  }
+  const assistant = () => runtime.store.snapshot().messages.filter((message) => message.turnId === queued.turn.id && message.role === "assistant");
+  const streamed = assistant().map(({ content }) => content);
+  runtime.provider.resolve({ status: result.status, text: result.text, textTruncated: result.textTruncated });
+  await flushTurnControllerTestPromises();
+  const turn = runtime.store.agentTurn(queued.turn.id);
+  expect(turn.status).toBe("completed");
+  const messages = assistant();
+  const activities = runtime.store.conversationDetail(runtime.conversationId)!.activities.filter((activity) => activity.turnId === turn.id);
+  runtime.store.close();
+  return { turn, messages, streamed, activities, events: runtime.events };
+}
+
+async function piTurn(...lines: string[]) {
+  const test = fixture(piPrompt(...lines));
+  const result = await test.start().result;
+  expect(result.status).toBe("completed");
+  return { result, ...await intoRuntime(test.events, result) };
+}
+
+const before = (left: { createdAt: string }, right: { createdAt: string }) => Date.parse(left.createdAt) <= Date.parse(right.createdAt);
+
+describe("Pi restarted content blocks through the harness and the turn controller", () => {
+  it("keeps text an extension notice split off, and shows only the rest of the restarted block after it", async () => {
+    const { result, messages, streamed, activities, turn } = await piTurn(piMessage(
+      piText("text_start"), piText("text_delta", { delta: "Hello " }),
+      piLine({ type: "extension_ui_request", id: "n-1", method: "notify", message: "Indexing" }),
+      piText("text_delta", { delta: "wor" }), piText("text_start"),
+      piText("text_delta", { delta: "Hello world" }), piText("text_end", { content: "Hello world" })));
+    expect(result.text).toBe("Hello world");
+    expect(streamed).toEqual(["Hello ", "world"]);
+    expect(messages.map(({ content }) => content)).toEqual(["Hello ", "world"]);
+    const notice = activities.find(({ title }) => title === "Pi extension")!;
+    expect(before(messages[0]!, notice) && before(notice, messages[1]!)).toBe(true);
+    expect(turn.terminalAssistantMessageId).toBe(messages[1]!.id);
+  });
+
+  it("replaces only the restarted message after a tool, keeping each message in its place", async () => {
+    const { messages, streamed, activities, turn } = await piTurn(
+      piMessage(piText("text_delta", { delta: "Let me read the file." })), piTool("read-1"),
+      piMessage(piText("text_delta", { delta: "Abandoned" }), piText("text_start"), piText("text_delta", { delta: "Final answer" })));
+    expect(streamed).toEqual(["Let me read the file.", "Final answer"]);
+    expect(messages.map(({ content }) => content)).toEqual(["Let me read the file.", "Final answer"]);
+    const tool = activities.find(({ title }) => title === "read")!;
+    expect(before(messages[0]!, tool) && before(tool, messages[1]!)).toBe(true);
+    expect(turn.terminalAssistantMessageId).toBe(messages[1]!.id);
+  });
+
+  it("keeps each of three messages its own text at the end of the turn", async () => {
+    const { result, messages, turn } = await piTurn(piMessage(piText("text_delta", { delta: "A" })), piTool("t-1"),
+      piMessage(piText("text_delta", { delta: "B" })), piTool("t-2"), piMessage(piText("text_delta", { delta: "C" })));
+    expect(result.text).toBe("A\n\nB\n\nC");
+    expect(messages.map(({ content }) => content)).toEqual(["A", "B", "C"]);
+    expect(turn.terminalAssistantMessageId).toBe(messages[2]!.id);
+  });
+
+  it("drops a message the restart emptied, so text after the next tool is its own message after that tool", async () => {
+    const { messages, activities, turn } = await piTurn(
+      piMessage(piText("text_delta", { delta: "Abandoned" }), piText("text_start"), piText("text_end")), piTool("t-1"),
+      piMessage(piText("text_delta", { delta: "Answer." })));
+    expect(messages.map(({ content }) => content)).toEqual(["Answer."]);
+    expect(before(activities.find(({ title }) => title === "read")!, messages[0]!)).toBe(true);
+    expect(turn.terminalAssistantMessageId).toBe(messages[0]!.id);
+  });
+
+  it("never makes an emptied message the turn's terminal message", async () => {
+    const { messages, turn } = await piTurn(piMessage(piText("text_delta", { delta: "Intro." })), piTool("t-1"),
+      piMessage(piText("text_delta", { delta: "Abandoned" }), piText("text_start"), piText("text_end")));
+    expect(messages.map(({ content }) => content)).toEqual(["Intro."]);
+    expect(turn.terminalAssistantMessageId).toBe(messages[0]!.id);
   });
 });

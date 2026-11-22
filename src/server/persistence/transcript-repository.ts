@@ -366,6 +366,19 @@ export class TranscriptRepository {
     })();
   }
 
+  /**
+   * Deletes one assistant message of the turn (an open segment the provider emptied) and returns the turn's latest
+   * remaining assistant message, so an emptied segment never becomes the turn's terminal message.
+   */
+  deleteAssistantMessage(turnId: string, messageId: string): string | null {
+    return this.context.database.transaction(() => {
+      this.context.database.prepare("DELETE FROM messages WHERE id = ? AND turn_id = ? AND role = 'assistant'").run(messageId, turnId);
+      const latest = this.context.database.prepare(`SELECT id FROM messages WHERE turn_id = ? AND role = 'assistant'
+        ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(turnId) as { id: string } | undefined;
+      return latest?.id ?? null;
+    })();
+  }
+
   appendMessageContent(messageId: string, delta: string): void {
     if (!delta) return;
     if (!appendMessageContentChunks(this.context.database, messageId, delta)) {

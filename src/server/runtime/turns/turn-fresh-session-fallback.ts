@@ -5,6 +5,7 @@ import type {
   ProviderFreshSessionFallback,
   ProviderEvent,
   ProviderFreshSessionPrior,
+  ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
 import { broadcastTurnConversationShell } from "./turn-controller-support";
@@ -19,6 +20,24 @@ import { turnHistoryInjection } from "./turn-history-injection";
 function importedSessionFailingClosed(store: RuntimeStore, active: ActiveTurn, storedElsewhere: boolean | undefined) {
   const imported = importedSession(store, active.conversation.id, active.providerInput.sessionId);
   return imported && !(imported.providerId === "claude" && storedElsewhere === true) ? imported : null;
+}
+
+/** T3 d32df2d34 (`ProviderTurnStartService`): the provider's session reuse, said honestly. */
+export const REUSED_PROVIDER_SESSION_MESSAGE = "The provider returned its existing session when asked for a fresh one, so the conversation context could not be moved to a new session.";
+
+/**
+ * Whether a session the harness reports is one this turn's fresh start replaced. Never adopted: it holds the old
+ * history and has just received the restored history again. The turn fails without a retry, and the replaced
+ * session stays retired, so the next turn starts fresh again (and fails the same way if the provider still reuses).
+ */
+export function reportsReplacedSession(active: Pick<ActiveTurn, "providerInput" | "replacedSessionIds">,
+  sessionId: string): boolean {
+  return (active.replacedSessionIds?.includes(sessionId) ?? false) && active.providerInput.sessionId === undefined;
+}
+
+export function reusedProviderSessionFailure(active: Pick<ActiveTurn, "turn">): ProviderRunFailure {
+  return { reason: "malformed-protocol", message: REUSED_PROVIDER_SESSION_MESSAGE, phase: active.turn.status,
+    terminalEvent: "session/replaced-session-reused" };
 }
 
 export function providerSessionUnavailable(result: ProviderRunResult): boolean {
@@ -135,6 +154,7 @@ export function applyFreshSessionFallback(
   active.sessionAfter = null;
   active.lastUsage = null;
   active.freshSessionRequest = null;
+  active.replacedSessionIds = [...new Set([...active.replacedSessionIds ?? [], expectedSessionId])];
   // The replacement's restored history, prepared and dispatching under the replacement attempt (T3 injects into the
   // fresh thread too); the rejected attempt's authority can no longer write.
   active.nativeHistory = request.contextHandoff ? request.nativeHistory ?? null : null;

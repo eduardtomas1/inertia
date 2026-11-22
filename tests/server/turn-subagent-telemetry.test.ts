@@ -88,6 +88,7 @@ async function projectorFixture() {
     now: () => new Date().toISOString(),
     transition: () => false,
     observeSubagent,
+    failReusedSession: () => undefined,
   });
   const active = { conversation, turn } as unknown as ActiveTurn;
   const emit = (

@@ -928,7 +928,8 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       && optionalTerminalAssistantMessage(value);
     case "agent.text":
     case "agent.reasoning":
-      return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
+      return recordWithStrings(value, "conversationId", "runId", "turnId", "text")
+        && (value.replace === undefined || value.replace === true);
     case "agent.text.replaced": return recordWithStrings(value, "conversationId", "runId", "turnId") && optionalStringField(value, "after") && (value.message === null || (chatMessage(value.message) && record(value.message) && value.message.role === "assistant" && value.message.conversationId === value.conversationId && value.message.turnId === value.turnId));
     case "agent.usage":
       return threadUsage(value.usage);

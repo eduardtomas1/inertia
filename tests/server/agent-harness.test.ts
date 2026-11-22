@@ -189,6 +189,21 @@ describe("agent harness architecture", () => {
     expect([first.length, second.length]).toEqual([1, 1]);
   });
 
+  it("keeps a Pi reasoning replacement a replacement across the harness boundary (T3 4ecbe5508)", () => {
+    const events: ProviderEvent[] = [];
+    const providerEmitter = createProviderEmitter("pi", "conversation-1", {
+      onEvent: (event) => events.push(event),
+    }, "run-1", "turn-1");
+    const emitter = createAgentHarnessEmitter("pi", "conversation-1", providerCallbacksFromHarness(providerEmitter), "run-1", "turn-1");
+    emitter.rich({ type: "reasoning-summary", text: "Appended" });
+    emitter.rich({ type: "reasoning-summary", text: "Replaced", replace: true });
+    expect(events).toEqual([
+      expect.not.objectContaining({ replace: expect.anything() }),
+      expect.objectContaining({ type: "reasoning-summary", text: "Replaced", replace: true }),
+    ]);
+    expect(events[0]).toMatchObject({ type: "reasoning-summary", text: "Appended" });
+  });
+
   it("forwards delegated task telemetry from the harness to the provider event", () => {
     const events: ProviderEvent[] = [];
     const providerEmitter = createProviderEmitter("codex", "conversation-1", {

@@ -294,6 +294,30 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
     } finally { runtime.store.close(); }
   });
 
+  it("fails honestly when a fresh session in the moved checkout comes back as the session left behind (T3 d32df2d34)", async () => {
+    const { runtime, original, moved, moveTo } = await movableRuntime();
+    try {
+      runtime.store.updateConversation(runtime.conversationId, { providerId: "kimi", modelSelection: kimiSelection });
+      await completeTurn(runtime, "Kimi request in A", "kimi-native", "Kimi answer in A");
+      const a1 = runtime.store.orchestration.backings.find(lookup(runtime, "kimi", original))!;
+
+      moveTo(moved);
+      const inB = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Kimi request in B" });
+      runtime.controller.start(inB.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "kimi-native" });
+      runtime.provider.resolve({ sessionId: "kimi-native", text: "Kimi answer in B" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(inB.turn.id)).toMatchObject({ status: "failed", providerSessionAfter: null });
+      expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.failed", turnId: inB.turn.id,
+        message: "The provider returned its existing session when asked for a fresh one, so the conversation context could not be moved to a new session." }));
+      // The session left in A is not taken over by B: it keeps its backing there, and B has none.
+      expect(runtime.store.orchestration.backings.get(a1.id)?.status).toBe("ready");
+      expect(runtime.store.orchestration.backings.find(lookup(runtime, "kimi", moved))).toBeNull();
+      expect(events(runtime).some(({ type }) => type === "provider.backing-invalidated")).toBe(false);
+    } finally { runtime.store.close(); }
+  });
+
   it("refuses to relocate while the replaced session reports background work, writing nothing", async () => {
     const { runtime, original, moved, moveTo } = await movableRuntime();
     try {

@@ -277,7 +277,7 @@ export type AgentInteractiveHarnessEvent =
   | { type: "input"; request: AgentInputRequest }
   | { type: "input-resolved"; requestId: string }
   | { type: "plan"; explanation: string | null; steps: AgentPlanStep[]; handoff?: true }
-  | { type: "reasoning-summary"; text: string }
+  | { type: "reasoning-summary"; text: string; replace?: true }
   | { type: "usage"; usage: ProviderUsageEvent["usage"] }
   | Omit<ProviderMetadataEvent, "providerId" | "conversationId" | "runId" | "turnId">;
 
@@ -432,7 +432,8 @@ export interface AgentHarnessEmitter {
     available: boolean,
   ) => void;
   text: (text: string, itemId?: string) => void;
-  textSnapshot: (itemId: string, text: string) => void;
+  /** `scope`: see `ProviderTextSnapshotEvent.scope`. */
+  textSnapshot: (itemId: string, text: string, scope?: "segment") => void;
   textBoundary: () => void;
   activity: (
     kind: ProviderActivityEvent["kind"],
@@ -488,11 +489,12 @@ export function createAgentHarnessEmitter(
       text,
       ...(itemId ? { itemId } : {}),
     }),
-    textSnapshot: (itemId, text) => emit({
+    textSnapshot: (itemId, text, scope) => emit({
       ...base,
       type: "text-snapshot",
       itemId,
       text,
+      ...(scope ? { scope } : {}),
     }),
     textBoundary: () => emit({ ...base, type: "text-boundary" }),
     activity: (kind, phase, label, detail = {}) => {

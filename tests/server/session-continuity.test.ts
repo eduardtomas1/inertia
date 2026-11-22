@@ -7,6 +7,7 @@ import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conver
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
 import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { reportsReplacedSession } from "../../src/server/runtime/turns/turn-fresh-session-fallback";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import type { ProviderInfo } from "../../src/shared/contracts";
 import { DEFAULT_PORTABLE_HISTORY_BUDGET } from "../../src/server/orchestration-v2/portable-history";
@@ -562,6 +563,16 @@ describe("a saved session that keeps failing to open", () => {
       sessionRecovery: { restoredMessageCount: 4, omittedMessageCount: 0 },
     });
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
+  });
+
+  it("never adopts the failing session if the fresh start comes back under it (T3 d32df2d34)", async () => {
+    const f = await failedResumes(2);
+    const resolved = f.resolve(f.store, { content: "Third attempt." });
+    const { active } = resolved.adopt(f.store.beginAgentTurn(resolved.input));
+    expect(active.providerInput.sessionId).toBeUndefined();
+    expect(active.replacedSessionIds).toEqual(["before-update"]);
+    expect(reportsReplacedSession(active, "before-update")).toBe(true);
+    expect(reportsReplacedSession(active, "fresh-session")).toBe(false);
   });
 
   it("starts fresh after two failed resumes that each recorded a missing checkpoint", async () => {

@@ -136,6 +136,14 @@ export class RecoveryRepository {
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
     `);
+    // An open segment a provider replacement emptied keeps an empty message until it closes; a crash leaves it.
+    // Follow-up placements live only in the dead runtime (follow-ups are ordered by time), so none can point at it.
+    const deleteEmptyAssistantMessages = this.database.prepare(`
+      DELETE FROM messages
+      WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant' AND content = ''
+        AND id NOT IN (SELECT terminal_assistant_message_id FROM agent_turns
+          WHERE id = ? AND terminal_assistant_message_id IS NOT NULL)
+    `);
     this.database.transaction(() => {
       markWorkspaceRuns.run(now);
       markSubagents.run(now, now);
@@ -160,6 +168,7 @@ export class RecoveryRepository {
           markTurnReasonings.run(id, turn.id);
           markInterruptedTurn.run(now, now, turn.id);
           compactMessageContentForTurn(this.database, turn.id, turn.conversation_id);
+          deleteEmptyAssistantMessages.run(turn.conversation_id, turn.id, turn.id);
           compactReasoningContentForTurn(this.database, turn.id, turn.conversation_id);
         } else {
           // Preserve recovery for databases that predate authoritative turn ownership.

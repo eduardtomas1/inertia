@@ -176,7 +176,10 @@ export class TurnStreamProjection {
   }
 
   private closeOpenAssistantSegment(active: ActiveTurn): boolean {
-    if (!active.assistantSegmentText) return false;
+    if (!active.assistantSegmentText) {
+      this.dropEmptyOpenAssistantMessage(active);
+      return false;
+    }
     this.flush(active, "assistant");
     const messageId = active.assistantMessageId;
     if (!messageId) {
@@ -186,9 +189,55 @@ export class TurnStreamProjection {
       type: "agent.commentary.persisted",
       message: this.options.store.message(messageId),
     });
+    (active.closedAssistantSegmentEnds ??= []).push(active.assistantText.length);
     active.assistantSegmentText = "";
     active.assistantMessageId = null;
     return true;
+  }
+
+  /**
+   * An open segment the provider emptied keeps its message, and its id, while it may still stream: a follow-up
+   * placed after it stays placed. It is deleted only when the segment closes or the turn settles still empty, and
+   * a follow-up placed after it then follows the message before it, so no placement points at a deleted message
+   * and nothing empty is kept or becomes the turn's terminal message.
+   */
+  dropEmptyOpenAssistantMessage(active: ActiveTurn): void {
+    const messageId = active.assistantMessageId;
+    if (!messageId || active.assistantSegmentText) return;
+    active.assistantStream.replacePending("");
+    const latest = this.options.store.transcriptRepository.deleteAssistantMessage(active.turn.id, messageId);
+    active.assistantMessageId = null;
+    if (active.latestAssistantMessageId === messageId) active.latestAssistantMessageId = latest;
+    if (active.pendingFollowUpBoundary?.messageId === messageId) {
+      active.pendingFollowUpBoundary = { ...active.pendingFollowUpBoundary, messageId: latest };
+    }
+    if (active.followUpBoundary?.messageId === messageId) {
+      active.followUpBoundary = { ...active.followUpBoundary, messageId: latest };
+    }
+    this.options.hooks.broadcast({ type: "conversation.detail.invalidated", conversationId: active.conversation.id });
+  }
+
+  /**
+   * The open segment's text in a final result that holds the closed segments first, in order, each optionally
+   * after blank lines: Codex and Claude concatenate their messages, Pi, Grok and OpenCode join them with a blank
+   * line. Null when the result does not cover the closed segments (a harness that returns only its last message).
+   */
+  private finalOpenSegment(active: ActiveTurn, result: string): string | null {
+    const ends = active.closedAssistantSegmentEnds ?? [];
+    if (ends.length === 0) return null;
+    let at = 0;
+    let start = 0;
+    for (const end of ends) {
+      const segment = active.assistantText.slice(start, end);
+      start = end;
+      while (!result.startsWith(segment, at)) {
+        if (!result.startsWith("\n\n", at)) return null;
+        at += 2;
+      }
+      at += segment.length;
+    }
+    const open = result.slice(at);
+    return active.assistantSegmentText.startsWith("\n\n") ? open : open.replace(/^(?:\n\n)+/u, "");
   }
 
   private assistantCreatedAt(active: ActiveTurn): string {
@@ -201,6 +250,64 @@ export class TurnStreamProjection {
   appendReasoning(active: ActiveTurn, text: string): void {
     const normalized = this.normalizeIngress(active, "reasoning", text, false);
     this.appendNormalizedReasoning(active, normalized);
+  }
+
+  /**
+   * The provider's whole reasoning for the run replaces what streamed (Pi starting a thinking block again, T3
+   * 4ecbe5508). Unflushed deltas belong to the replaced text and are dropped; the record and renderers take the
+   * replacement at once.
+   */
+  replaceReasoning(active: ActiveTurn, text: string): void {
+    const replacement = normalizedPrefix(normalizeStreamText(text), MAX_REASONING_TEXT);
+    // Unsaved deltas are part of `reasoningText`: an equal replacement leaves them to flush as usual.
+    if (replacement === active.reasoningText) return;
+    active.reasoningPendingHighSurrogate = "";
+    active.reasoningStream.replacePending("");
+    active.reasoningText = replacement;
+    if (!active.reasoningId && !replacement) return;
+    active.reasoningId ??= this.options.store.createReasoning(active.conversation.id, active.turn.runId, active.turn.id).id;
+    this.options.store.updateReasoning(active.reasoningId, { content: replacement });
+    try {
+      this.options.hooks.onStreamingPersisted?.({ turnId: active.turn.id, kind: "reasoning", recordId: active.reasoningId });
+    } catch {
+      // Optional downstream hooks cannot invalidate durable stream storage.
+    }
+    this.options.hooks.broadcast({ type: "agent.reasoning", conversationId: active.conversation.id,
+      runId: active.turn.runId, turnId: active.turn.id, text: replacement, replace: true });
+  }
+
+  /**
+   * The provider's text for the open assistant segment replaces what it streamed there (Pi starting a text block
+   * again, T3 4ecbe5508). Closed segments, and their order around activity, stay untouched; like the terminal
+   * correction in `reconcileAssistant`, only the open segment moves.
+   */
+  replaceAssistantSegment(active: ActiveTurn, text: string): void {
+    const completedPrefix = active.assistantText.slice(0, active.assistantText.length - active.assistantSegmentText.length);
+    const segment = normalizedPrefix(normalizeStreamText(text), Math.max(0, MAX_ASSISTANT_TEXT - completedPrefix.length));
+    // Unsaved deltas are part of the segment: an equal replacement leaves them to flush as usual.
+    if (segment === active.assistantSegmentText) return;
+    active.assistantPendingHighSurrogate = "";
+    active.assistantText = `${completedPrefix}${segment}`;
+    active.assistantSegmentText = segment;
+    active.assistantStream.replacePending("");
+    if (active.assistantMessageId) {
+      this.options.store.updateMessageContent(active.assistantMessageId, segment);
+    } else if (segment) {
+      active.assistantMessageId = this.options.store.createMessage(active.conversation.id, segment, "assistant", [],
+        active.turn.id, this.assistantCreatedAt(active)).id;
+      active.latestAssistantMessageId = active.assistantMessageId;
+    }
+    if (active.assistantMessageId) {
+      try {
+        this.options.hooks.onStreamingPersisted?.({ turnId: active.turn.id, kind: "assistant", recordId: active.assistantMessageId });
+      } catch {
+        // Optional downstream hooks cannot invalidate durable stream storage.
+      }
+    }
+    this.options.hooks.broadcast({ type: "agent.text", conversationId: active.conversation.id,
+      runId: active.turn.runId, turnId: active.turn.id, text: segment, replace: true });
+    // A detail loaded before the replacement holds the abandoned text as the open segment's persisted message.
+    this.options.hooks.broadcast({ type: "conversation.detail.invalidated", conversationId: active.conversation.id });
   }
 
   private appendNormalizedReasoning(active: ActiveTurn, text: string): void {
@@ -219,9 +326,31 @@ export class TurnStreamProjection {
     result: ProviderRunResult,
   ): void {
     if (!result.text) return;
-    const normalizedResult = normalizeStreamText(result.text);
+    // A harness that joins messages with a blank line starts its result with one when an earlier message had no text.
+    const joined = normalizeStreamText(result.text);
+    const normalizedResult = active.assistantText.startsWith("\n\n") ? joined : joined.replace(/^(?:\n\n)+/u, "");
     active.assistantPendingHighSurrogate = "";
     if (normalizedResult === active.assistantText) return;
+    const finalSegment = this.finalOpenSegment(active, normalizedResult);
+    if (finalSegment !== null) {
+      const completed = active.assistantText.slice(0, active.assistantText.length - active.assistantSegmentText.length);
+      const corrected = normalizedPrefix(finalSegment, Math.max(0, MAX_ASSISTANT_TEXT - completed.length));
+      if (corrected === active.assistantSegmentText
+        || (result.textTruncated && active.assistantSegmentText.startsWith(corrected))) return;
+      if (corrected.startsWith(active.assistantSegmentText)) {
+        this.appendNormalizedAssistant(active, corrected.slice(active.assistantSegmentText.length));
+        return;
+      }
+      // An emptied segment is told to renderers like a live replacement; settlement then drops its message.
+      if (!corrected) {
+        this.replaceAssistantSegment(active, "");
+        return;
+      }
+      active.assistantText = `${completed}${corrected}`;
+      active.assistantSegmentText = corrected;
+      active.assistantStream.replacePending(corrected);
+      return;
+    }
     const finalText = normalizedPrefix(
       this.rebasedOnFollowUp(active, normalizedResult),
       MAX_ASSISTANT_TEXT,
@@ -276,6 +405,7 @@ export class TurnStreamProjection {
     const boundary = active.followUpBoundary ?? null;
     const preservedText = boundary?.text ?? "";
     const finalText = snapshotText.slice(preservedText.length);
+    active.closedAssistantSegmentEnds = (active.closedAssistantSegmentEnds ?? []).filter((end) => end <= preservedText.length);
     const latestAfterBoundary = active.latestAssistantMessageId !== boundary?.messageId
       ? active.latestAssistantMessageId
       : null;

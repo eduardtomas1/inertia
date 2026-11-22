@@ -357,6 +357,11 @@ export interface ProviderTextSnapshotEvent extends ProviderEventBase {
   type: "text-snapshot";
   itemId: string;
   text: string;
+  /**
+   * `segment`: `text` replaces only the open assistant segment (the provider message being streamed), as when
+   * Pi starts a text block again (T3 4ecbe5508). Earlier segments and their place in the turn stay as they are.
+   */
+  scope?: "segment";
 }
 
 export interface ProviderTextBoundaryEvent extends ProviderEventBase {
@@ -481,6 +486,11 @@ export interface ProviderGoalClearedEvent extends ProviderEventBase {
 export interface ProviderReasoningEvent extends ProviderEventBase {
   type: "reasoning-summary";
   text: string;
+  /**
+   * `text` is the run's whole reasoning so far and replaces what streamed, as when Pi starts a thinking block
+   * again (T3 4ecbe5508). Without it, `text` is appended.
+   */
+  replace?: true;
 }
 
 export interface ProviderUsageEvent extends ProviderEventBase {

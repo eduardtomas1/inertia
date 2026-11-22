@@ -114,7 +114,8 @@ export type RuntimeMutationEvent =
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
   | { type: "agent.started"; conversationId: string; runId: string; turnId: string }
-  | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string }
+  /** `replace`: `text` is the open assistant segment's whole text and replaces what streamed in it. */
+  | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string; replace?: true }
   | {
       type: "agent.text.replaced";
       conversationId: string;
@@ -124,7 +125,8 @@ export type RuntimeMutationEvent =
       message: ChatMessage | null;
       after?: string;
     }
-  | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
+  /** `replace` on reasoning: `text` is the turn's whole reasoning so far and replaces what streamed. */
+  | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string; replace?: true }
   | { type: "agent.commentary.persisted"; message: ChatMessage }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }
   | { type: "agent.activity"; activity: AgentActivity }

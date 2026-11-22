@@ -112,6 +112,25 @@ describe("Codex rejecting a native session's encrypted history (T3 rejected_nati
     } finally { runtime.store.close(); }
   });
 
+  it("fails honestly when the fresh session comes back as the rejected one, and never adopts it (T3 d32df2d34)", async () => {
+    const { runtime, lookup, original } = await failedOnNativeSession(REJECTED);
+    try {
+      const recovered = runtime.controller.queue({ conversationId: runtime.conversationId, content: "huh" });
+      runtime.controller.start(recovered.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+      runtime.provider.resolve({ sessionId: "codex-native", text: "Answer on the rejected session" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(recovered.turn.id)).toMatchObject({ status: "failed", providerSessionAfter: null });
+      expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.failed", turnId: recovered.turn.id,
+        message: "The provider returned its existing session when asked for a fresh one, so the conversation context could not be moved to a new session." }));
+      expect(runtime.store.orchestration.backings.find(lookup)).toMatchObject({ id: original.id, status: "retired" });
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).not.toBe("codex-native");
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "ok" });
+      expect(next.turn.providerSessionBefore).toBeNull();
+    } finally { runtime.store.close(); }
+  });
+
   it("refuses with T3's message while the rejected session still has background work", async () => {
     const { runtime, lookup, original } = await failedOnNativeSession(REJECTED);
     try {

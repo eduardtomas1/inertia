@@ -93,6 +93,28 @@ describe("context exhaustion on a resumed native session", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("fails honestly when the fresh session comes back as the exhausted one, and never adopts it (T3 d32df2d34)", async () => {
+    const { runtime, lookup, original } = await exhaustedRuntime({ usedTokens: 120_000 });
+    try {
+      const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });
+      runtime.controller.start(returned.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+      runtime.provider.resolve({ sessionId: "codex-native", text: "Answer on the exhausted session" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(returned.turn.id)).toMatchObject({ status: "failed", providerSessionAfter: null });
+      expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.failed", turnId: returned.turn.id,
+        message: "The provider returned its existing session when asked for a fresh one, so the conversation context could not be moved to a new session." }));
+      expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
+      expect(runtime.store.orchestration.backings.find(lookup)).toMatchObject({ id: original.id, status: "retired" });
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).not.toBe("codex-native");
+
+      // The next turn starts fresh again rather than resuming the exhausted session.
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try Codex again" });
+      expect(next.turn.providerSessionBefore).toBeNull();
+    } finally { runtime.store.close(); }
+  });
+
   it("refuses with a typed error while the exhausted session still has background work", async () => {
     const { runtime, lookup, original } = await exhaustedRuntime({ usedTokens: 120_000 });
     try {

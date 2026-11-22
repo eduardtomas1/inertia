@@ -12,7 +12,7 @@ import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { trackNativeConversationRun } from "./native-conversation-run-tracking";
 import { createPiNativeConversationOperations, forkPiSessionIntoCheckout, piActiveEntries, PiForkCleanupError, PiForkRefusedError } from "./pi-native-conversation";
 import { PiDialogs } from "./pi-dialogs";
-import { PiEvents } from "./pi-events";
+import { PiEvents, segmentClosingEmitter } from "./pi-events";
 import { piLaunchConfiguration, piNativeTools, piRpcArguments, validatePiLaunchResources } from "./pi-launch";
 import { piModels, piUsage } from "./pi-models";
 import { piImages, stagePiBridge } from "./pi-resources";
@@ -47,7 +47,10 @@ export function createPiRpcHarness(dependencies: PiRpcHarnessOptions = {}): Agen
 
 function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnessOptions): AgentHarnessRun {
   const { input } = options;
-  const emit = createAgentHarnessEmitter("pi", input.conversationId, options.callbacks, input.runId, input.turnId, input.cwd);
+  // Every emission that closes the runtime's open assistant segment (Pi's own activity, the extension UI, dialogs,
+  // host approvals) tells the run's Pi projection first, so a block Pi restarts replaces only the open segment.
+  const emit = segmentClosingEmitter(createAgentHarnessEmitter("pi", input.conversationId, options.callbacks, input.runId,
+    input.turnId, input.cwd), () => events.closeSegment());
   let connection: PiRpcConnection | undefined;
   let dialogs: PiDialogs | undefined;
   let host: ProviderHostToolRuntime | undefined;

@@ -28,7 +28,9 @@ import { announceRuntimeQueueChanged, useRuntimeQueuedFollowUps } from "../compo
 import type { StreamingAgentChannel } from "../utils/responseTimeline";
 import {
   appendStreamingReasoning,
+  replaceStreamingReasoning,
   appendStreamingText,
+  replaceStreamingText,
   applyTerminalTurnProjections,
   closeStreamingChannelState,
   closeTextStreamState,
@@ -806,10 +808,10 @@ export function useConversationProjection({
       const hydration = freshHydrationRef.current;
       if (hydration) {
         hydration.text = `${
-          hydration.text ?? ""
+          event.replace ? "" : hydration.text ?? ""
         }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
       }
-      setStreaming((current) => appendStreamingText(
+      setStreaming((current) => (event.replace ? replaceStreamingText : appendStreamingText)(
         current,
         event.text,
         MAX_STREAMING_CHARACTERS,
@@ -876,10 +878,10 @@ export function useConversationProjection({
       const hydration = freshHydrationRef.current;
       if (hydration) {
         hydration.reasoning = `${
-          hydration.reasoning ?? ""
+          event.replace ? "" : hydration.reasoning ?? ""
         }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
       }
-      setStreaming((current) => appendStreamingReasoning(
+      setStreaming((current) => (event.replace ? replaceStreamingReasoning : appendStreamingReasoning)(
         current,
         event.text,
         MAX_STREAMING_CHARACTERS,

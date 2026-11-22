@@ -81,6 +81,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -128,7 +129,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       hooks: { broadcast: vi.fn(), broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
       agentPlans: new Map(), streams: {} as never, activities: {} as never, interactions: {} as never,
       scheduler: defaultTurnScheduler(), now: () => "2030-01-01T00:00:01.000Z",
-      transition: () => false, observeSubagent: () => false,
+      transition: () => false, observeSubagent: () => false, failReusedSession: () => undefined,
     });
     const active = { conversation: { id: "conversation-1" }, sessionAfter: null, lastUsage: null,
       turn: { id: "turn-1", runId: "run-1", providerId: "codex", continuationIdentity: {} } } as unknown as ActiveTurn;
@@ -171,6 +172,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       now: () => "2030-01-01T00:00:02.000Z",
       transition: () => false,
       observeSubagent,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -214,6 +216,7 @@ describe("TurnProviderEventProjector delegated-task timeline link", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     return { projector, upsertSubagentTrace };
   }
@@ -341,6 +344,7 @@ describe("TurnProviderEventProjector reasoning order", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -404,6 +408,7 @@ describe("TurnProviderEventProjector plan updates", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -534,6 +539,7 @@ describe("TurnProviderEventProjector read-only watcher turns", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },

@@ -713,6 +713,14 @@ export function resolveTurnRequest(
     throw error;
   }
   const { contextHandoff } = assembled;
+  // The route's sessions this fresh start replaces (T3 d32df2d34): a fresh session reported under one of them is
+  // that session with the restored history added, so the turn fails instead of adopting it.
+  const replacedSessionIds = canResume ? [] : [...new Set([
+    replacedBacking?.backing.nativeSessionId,
+    movedBacking?.nativeSessionId,
+    localBacking?.status === "retired" ? localBacking.nativeSessionId : undefined,
+    continuation.reasonCode === "stale-provider-session" ? resumeSessionId : undefined,
+  ].filter((sessionId): sessionId is string => typeof sessionId === "string"))];
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
     : undefined;
@@ -911,6 +919,7 @@ export function resolveTurnRequest(
           freshSessionRequest: canResume && request.goalStart === undefined
             ? assembleOnFreshSession
             : null,
+          ...(replacedSessionIds.length > 0 ? { replacedSessionIds } : {}),
           lastUsage: null,
           assistantText: "",
           assistantPendingHighSurrogate: "",

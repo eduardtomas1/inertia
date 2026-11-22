@@ -34,6 +34,7 @@ import type { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import { CustomAgentTraceAttribution } from "./turn-custom-agent-traces";
 import { isReadOnlyWriteActivity } from "./turn-read-only-watcher";
+import { reportsReplacedSession } from "./turn-fresh-session-fallback";
 
 export interface TurnProviderEventProjectorOptions {
   store: RuntimeStore;
@@ -54,6 +55,8 @@ export interface TurnProviderEventProjectorOptions {
     active: ActiveTurn,
     trace: SubagentTrace,
   ): boolean;
+  /** Ends the turn because its fresh start came back on a session it replaced (`reportsReplacedSession`). */
+  failReusedSession(active: ActiveTurn): void;
 }
 
 function projectedNativeGoalMatches(
@@ -106,6 +109,10 @@ export class TurnProviderEventProjector {
         this.options.streams.appendAssistant(active, event.text);
         break;
       case "text-snapshot": {
+        if (event.scope === "segment") {
+          this.options.streams.replaceAssistantSegment(active, event.text);
+          break;
+        }
         const message = this.options.streams.replaceAssistantSnapshot(
           active,
           event.text,
@@ -129,7 +136,8 @@ export class TurnProviderEventProjector {
         this.options.streams.closeAssistantSegment(active);
         break;
       case "reasoning-summary":
-        this.options.streams.appendReasoning(active, event.text);
+        if (event.replace) this.options.streams.replaceReasoning(active, event.text);
+        else this.options.streams.appendReasoning(active, event.text);
         break;
       case "usage": {
         const usage = this.options.store.upsertUsage({
@@ -146,6 +154,10 @@ export class TurnProviderEventProjector {
         break;
       }
       case "session":
+        if (reportsReplacedSession(active, event.sessionId)) {
+          this.options.failReusedSession(active);
+          break;
+        }
         // A stale attempt's session must not become the turn's or the chat's. A session the harness forked from the
         // resumed one into this checkout takes over the resumed session's backing first.
         if (event.forkedFrom !== undefined

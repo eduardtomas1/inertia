@@ -68,7 +68,8 @@ export interface ProviderEmitter {
   input: (request: AgentInputRequest) => void;
   inputResolved: (requestId: string) => void;
   plan: (explanation: string | null, steps: AgentPlanStep[], handoff?: true) => void;
-  reasoning: (text: string) => void;
+  /** `replace`: `text` is the run's whole reasoning so far (see `ProviderReasoningEvent.replace`). */
+  reasoning: (text: string, replace?: true) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
   metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;
   subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type" | "activityId">) => void;
@@ -204,7 +205,7 @@ export function createProviderEmitter(
     input: (request) => event({ ...base, type: "input", request }),
     inputResolved: (requestId) => event({ ...base, type: "input-resolved", requestId }),
     plan: (explanation, steps, handoff) => event({ ...base, type: "plan", explanation, steps, ...(handoff ? { handoff } : {}) }),
-    reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
+    reasoning: (text, replace) => event({ ...base, type: "reasoning-summary", text, ...(replace ? { replace } : {}) }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
     metadata: (metadata, source, complete) => event({ ...base, type: "metadata", metadata, source, complete }),
     subagent: (subagent) => event({ ...subagent, ...base, type: "subagent" }),
@@ -261,7 +262,7 @@ function emitInteractiveExtension(
       emitter.plan(event.explanation, event.steps, event.handoff);
       break;
     case "reasoning-summary":
-      emitter.reasoning(event.text);
+      emitter.reasoning(event.text, event.replace);
       break;
     case "usage":
       emitter.usage(event.usage);

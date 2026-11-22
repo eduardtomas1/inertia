@@ -234,8 +234,9 @@ function buildTurn(
   const terminalAssistantMessage = agentTurn.terminalAssistantMessageId === null
     ? null
     : assistantMessages.find(({ id }) => id === agentTurn.terminalAssistantMessageId) ?? null;
-  const commentaryMessages = assistantMessages.filter(({ id }) =>
-    id !== terminalAssistantMessage?.id);
+  // An open segment the provider emptied keeps an empty message until more text arrives; it is not an update.
+  const commentaryMessages = assistantMessages.filter(({ id, content, attachments }) =>
+    id !== terminalAssistantMessage?.id && (content !== "" || attachments.length > 0));
   // Visual replies are split out first so they never read as system notices
   // or keep clean settled work from consolidating into Run details.
   const htmlRenders = scopedMessages.filter(({ role, htmlRender }) =>

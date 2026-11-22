@@ -27,6 +27,15 @@ export function closeTextStreamState(
   return ["", reasoning, null];
 }
 
+/** The open segment's whole text, replacing what streamed in it (a provider that started a block again). */
+export function replaceStreamingText(
+  [, reasoning]: StreamingAgentState,
+  text: string,
+  limit: number,
+): StreamingAgentState {
+  return [text.slice(-limit), reasoning, "text"];
+}
+
 export function appendStreamingText(
   [text, reasoning]: StreamingAgentState,
   chunk: string,
@@ -41,6 +50,15 @@ export function appendStreamingReasoning(
   limit: number,
 ): StreamingAgentState {
   return [text, `${reasoning}${chunk}`.slice(-limit), "reasoning"];
+}
+
+/** The turn's whole reasoning so far, replacing what streamed (a provider that started a block again). */
+export function replaceStreamingReasoning(
+  [text]: StreamingAgentState,
+  reasoning: string,
+  limit: number,
+): StreamingAgentState {
+  return [text, reasoning.slice(-limit), "reasoning"];
 }
 
 export function sameAgentPlan(

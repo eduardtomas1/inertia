@@ -91,7 +91,7 @@ import { updateInterruptionMessage } from "./turn-update-interruption";
 import { resolveTurnHostTools } from "./turn-provider-host-tools";
 import { TurnSecretRequests } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
-import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession } from "./turn-fresh-session-fallback";
+import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession, reportsReplacedSession, REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure } from "./turn-fresh-session-fallback";
 import { turnHistoryInjection } from "./turn-history-injection";
 
 export type {
@@ -260,12 +260,7 @@ export class TurnController {
       streams: this.streams,
       now: () => this.now(),
       transition: (active, status) => this.transition(active, status),
-      settle: (active, status, cause, message) => this.settle(
-        active,
-        status,
-        cause,
-        message,
-      ),
+      settle: (active, status, cause, message) => this.settle(active, status, cause, message),
     });
     this.providerEvents = new TurnProviderEventProjector({
       store: this.store,
@@ -278,6 +273,10 @@ export class TurnController {
       now: () => this.now(),
       transition: (active, status, providerState, observer) => this.transition(active, status, providerState, observer),
       observeSubagent: (active, event) => this.observeSubagent(active, event),
+      failReusedSession: (active) => {
+        requestProviderCancellation(this.providers, active.conversation.id);
+        this.settle(active, "failed", "provider-error", REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure(active));
+      },
     });
     this.secretRequests = new TurnSecretRequests({
       filter: () => this.hooks.secretOutput?.(),
@@ -1130,6 +1129,9 @@ export class TurnController {
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     const outcomeAlreadyRequested = active.deferredSettlement !== null;
+    if (!outcomeAlreadyRequested && result.sessionId && reportsReplacedSession(active, result.sessionId)) {
+      return void this.settle(active, "failed", "provider-error", REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure(active));
+    }
     if (!outcomeAlreadyRequested) recordRejectedProviderResume(this.store, active, result);
     if (!outcomeAlreadyRequested && providerSessionUnavailable(result)) {
       releaseUnavailableProviderSession(this.store, active, result);

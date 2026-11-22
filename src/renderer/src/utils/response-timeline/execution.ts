@@ -7,6 +7,7 @@ import {
 } from "./activity-attention";
 import type { ResponseTurn } from "./model";
 import type { SubagentCallEntry } from "./subagentCalls";
+import type { SubagentGroupEntry } from "./subagentGroups";
 import type { SecretRequestMessage } from "./secretRequests";
 
 export {
@@ -123,7 +124,8 @@ export type TurnWorkStreamEntry =
       createdAt: string;
       message: SecretRequestMessage;
     }
-  | SubagentCallEntry;
+  | SubagentCallEntry
+  | SubagentGroupEntry;
 
 function mergeChronologically(
   stream: TurnWorkStreamEntry[],

@@ -52,12 +52,15 @@ describe("packaging file selection with the pinned builder", () => {
     const includes = (path: string) => filter(join(root, "node_modules", path), fileMetadata);
     for (const path of ["pdfjs-dist/legacy/build/pdf.mjs", "pdfjs-dist/standard_fonts/FoxitSans.pfb",
       "xlsx/xlsx.mjs", "electron-updater/out/main.js", "better-sqlite3/build/Release/better_sqlite3.node",
-      `node-pty/prebuilds/${own}-arm64/pty.node`, `better-sqlite3/prebuilds/${own}-x64.node`]) {
+      `node-pty/prebuilds/${own}-arm64/pty.node`, `better-sqlite3/prebuilds/${own}-x64.node`,
+      "@anthropic-ai/claude-agent-sdk/sdk.mjs", "@anthropic-ai/claude-agent-sdk/package.json"]) {
       expect(includes(path), path).toBe(true);
     }
     for (const path of ["pdfjs-dist/build/pdf.mjs.map", "xlsx/types/index.d.ts",
       "sample/types/index.d.mts", "sample/types/index.d.cts",
-      "better-sqlite3/src/better_sqlite3.cpp", "better-sqlite3/deps/sqlite3/sqlite3.c"]) {
+      "better-sqlite3/src/better_sqlite3.cpp", "better-sqlite3/deps/sqlite3/sqlite3.c",
+      `@anthropic-ai/claude-agent-sdk-${own}-x64/claude`, `@anthropic-ai/claude-agent-sdk-${own}-arm64/package.json`,
+      "@anthropic-ai/claude-agent-sdk-win32-x64/claude.exe", "@anthropic-ai/claude-agent-sdk-linux-x64-musl/claude"]) {
       expect(includes(path), path).toBe(false);
     }
     for (const system of foreign) {

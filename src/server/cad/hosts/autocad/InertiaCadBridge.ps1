@@ -1005,10 +1005,21 @@ function Update-Corners($Plan, [string]$Handle, [scriptblock]$Map, [switch]$Keep
   if (-not $Keep) { $Plan.corners[$Handle] = $mapped }
 }
 
-function Get-PlanBox($Plan) {
+# A capture needs a width and a height, so a point (an insert, a text) or a straight line gets a square-ish
+# margin: the box's other side, or a tenth of the current view for a single point.
+function Get-PlanBox($Plan, $Doc) {
   $bounds = $Plan.bounds
   if ($null -eq $bounds -or -not ($bounds.min[0] -le $bounds.max[0])) { return $null }
-  return [ordered]@{ min = @((Get-Rounded $bounds.min[0]), (Get-Rounded $bounds.min[1])); max = @((Get-Rounded $bounds.max[0]), (Get-Rounded $bounds.max[1])) }
+  $min = @([double]$bounds.min[0], [double]$bounds.min[1]); $max = @([double]$bounds.max[0], [double]$bounds.max[1])
+  $size = [Math]::Max($max[0] - $min[0], $max[1] - $min[1])
+  if (-not ($size -gt 0)) {
+    $size = 1.0
+    try { $view = [double]$Doc.GetVariable('VIEWSIZE'); if ($view -gt 0) { $size = $view / 10 } } catch { }
+  }
+  for ($i = 0; $i -lt 2; $i++) {
+    if (-not ($max[$i] -gt $min[$i])) { $min[$i] -= $size / 2; $max[$i] += $size / 2 }
+  }
+  return [ordered]@{ min = @((Get-Rounded $min[0]), (Get-Rounded $min[1])); max = @((Get-Rounded $max[0]), (Get-Rounded $max[1])) }
 }
 
 function Get-Mirrored($Point, $A, $B) {
@@ -1245,7 +1256,12 @@ function New-Plan($Acad, $Doc, $Operations, [switch]$Bounds) {
           $entity = Get-WritableEntity $Doc $handle $layoutMap $plan
           Assert-NotDimension $entity $kind
           Update-Corners $plan $handle { param($p) Get-Mirrored $p $p1 $p2 } -Keep
-          if (-not $keep) { $plan.gone[$handle] = $true }
+          if (-not $keep) {
+            # Erasing the source is destructive, so a block's definition must not change after the preview either.
+            $definition = Get-BlockDefinitionDigest $Doc $entity
+            if ($null -ne $definition) { $plan.fingerprints['block:' + $handle] = $definition }
+            $plan.gone[$handle] = $true
+          }
           Add-Change $plan $kind (Get-Label $entity) 'mirror' $null "mirrored copy about $(Format-Vector $p1) to $(Format-Vector $p2)$(if (-not $keep) { ', original erased' })"
           [void]$plan.steps.Add(@{ kind = $kind; entity = $entity; p1 = $p1; p2 = $p2; keep = $keep })
         }
@@ -1500,7 +1516,7 @@ function Get-Preview($Acad, $Params) {
     fingerprints = $plan.fingerprints
     warnings     = @($plan.warnings | Select-Object -Unique)
   }
-  $box = Get-PlanBox $plan
+  $box = Get-PlanBox $plan $doc
   if ($null -ne $box) { $result.bbox = $box }
   return $result
 }

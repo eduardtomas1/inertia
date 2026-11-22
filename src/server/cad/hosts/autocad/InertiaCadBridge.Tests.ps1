@@ -682,6 +682,14 @@ Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $docume
 Assert-Equal $undoBefore $doc.Undo.Count 'a stale erase never reaches the drawing'
 Assert-Equal $false $doc.Registry['5F'].Deleted 'the changed insert is still there'
 $doc.Registry['5F'].XScaleFactor = 1.0
+$mirrorBlockOps = @(@{ op = 'acad.mirror'; handles = @('5F'); p1 = @(0, 0); p2 = @(0, 1); keepSource = $false })
+$mirrorBlock = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $mirrorBlockOps }).result
+Assert-Equal $true ($null -ne $mirrorBlock.fingerprints.'block:5F') 'a mirror that erases a block insert fingerprints its definition'
+Assert-Equal $true ($null -eq (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.mirror'; handles = @('5F'); p1 = @(0, 0); p2 = @(0, 1) }) }).result.fingerprints.'block:5F') 'a mirror that keeps its source does not'
+$doc.Blocks.Item('TITLE').Items[0].EndPoint = @(597.0, 0.0, 0.0)
+$undoBefore = $doc.Undo.Count
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $mirrorBlockOps; expectedFingerprints = $mirrorBlock.fingerprints }).error.code 'a block whose definition changed after the preview is not mirrored away'
+Assert-Equal @($undoBefore, $false) @($doc.Undo.Count, $doc.Registry['5F'].Deleted) 'a stale mirror never reaches the drawing'
 
 $lineOps = @(@{ op = 'acad.add_line'; start = @(0, 0); end = @(100, 0, 0); layer = 'A-DEMO' })
 $linePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $lineOps }).result
@@ -807,7 +815,7 @@ Assert-Equal @('UNSUPPORTED_TARGET', 'INVALID_REQUEST', 'INVALID_REQUEST', 'LOCK
 
 $insert = Invoke-EditApply @(@{ op = 'acad.insert_block'; name = 'door'; position = @(5, 5); rotationDeg = 90; scale = 2; layer = 'A-ANNO' }) 'insert_block'
 $door = $editDoc.Registry[$insert.result.created[0].handle]
-Assert-Equal @('new block', 'DOOR at [5, 5], rotated 90 degrees, scale 2, model space on layer A-ANNO', [ordered]@{ min = @(5, 5); max = @(5, 5) }) @($insert.preview.changes[0].target, $insert.preview.changes[0].after, $insert.preview.bbox) 'insert_block previews the block, placement and layer'
+Assert-Equal @('new block', 'DOOR at [5, 5], rotated 90 degrees, scale 2, model space on layer A-ANNO', [ordered]@{ min = @(4, 4); max = @(6, 6) }) @($insert.preview.changes[0].target, $insert.preview.changes[0].after, $insert.preview.bbox) 'insert_block previews the block, placement and a box a tenth of the view wide around it'
 Assert-Equal @('INSERT', 'DOOR', @(5, 5, 0), 90, 2, 'A-ANNO', 256, 'ByLayer', -1) (@($insert.result.created[0].type, $door.Name, @($door.InsertionPoint), (Get-RotationDeg $door.Rotation), $door.XScaleFactor, $door.Layer) + (Get-Style $door)) 'insert_block places an existing block ByLayer'
 Assert-Equal @('BLOCK_NOT_FOUND', 'BLOCK_NOT_FOUND', 'UNSUPPORTED_TARGET', 'UNSUPPORTED_TARGET', 'UNSUPPORTED_TARGET', 'UNSUPPORTED_TARGET') @('WINDOW', 'C:\blocks\door.dwg', '*U12', 'SITE', 'SITE|TREE', 'A1-LAYOUT' | ForEach-Object { Get-EditError @(@{ op = 'acad.insert_block'; name = $_; position = @(0, 0) }) }) 'insert_block refuses unknown names, files, and anonymous, xref and layout blocks'
 Assert-Equal 'INVALID_REQUEST' (Get-EditError @(@{ op = 'acad.insert_block'; name = 'DOOR'; position = @(0, 0); scale = 0 })) 'insert_block refuses a zero scale'
@@ -838,7 +846,9 @@ $linear = Invoke-EditApply @(@{ op = 'acad.add_dimension'; kind = 'linear'; p1 =
 Assert-Equal @('DIMENSION', 50, 'AcDbAlignedDimension', 'DIMENSION', 30, 'AcDbRotatedDimension') @($aligned.result.created[0].type, $editDoc.Registry[$aligned.result.created[0].handle].Measurement, $editDoc.Registry[$aligned.result.created[0].handle].ObjectName, $linear.result.created[0].type, $editDoc.Registry[$linear.result.created[0].handle].Measurement, $editDoc.Registry[$linear.result.created[0].handle].ObjectName) 'add_dimension draws aligned and linear dimensions'
 Assert-Equal ([ordered]@{ min = @(0, 0); max = @(30, 40) }) $aligned.preview.bbox 'a dimension previews its points box'
 Assert-Equal @('INVALID_REQUEST', 'INVALID_REQUEST', 'INVALID_REQUEST') @((Get-EditError @(@{ op = 'acad.add_dimension'; kind = 'aligned'; p1 = @(0, 0); p2 = @(1, 0); textPosition = @(0, 1); rotationDeg = 10 })), (Get-EditError @(@{ op = 'acad.add_dimension'; kind = 'radial'; p1 = @(0, 0); p2 = @(1, 0); textPosition = @(0, 1) })), (Get-EditError @(@{ op = 'acad.add_dimension'; kind = 'linear'; p1 = @(1, 1); p2 = @(1, 1); textPosition = @(0, 1) }))) 'add_dimension refuses a rotated aligned dimension, unknown kinds and zero length'
-Assert-Equal ([ordered]@{ min = @(0, 0); max = @(1000, 0) }) (Invoke-EditPreview @(@{ op = 'acad.set_color'; handles = @('1A'); color = 1 })).result.bbox 'property edits preview the box of what they touch'
+$lineBox = (Invoke-EditPreview @(@{ op = 'acad.set_color'; handles = @('1A'); color = 1 })).result.bbox
+Assert-Equal ([ordered]@{ min = @(0, -500); max = @(1000, 500) }) $lineBox 'property edits preview the box of what they touch, with a height for a flat line'
+foreach ($box in $insert.preview.bbox, $lineBox, $aligned.preview.bbox) { Assert-Equal $true ($null -ne (Get-CaptureRegion @{ bbox = $box })) 'every preview box can frame a capture' }
 
 # Guards around the apply.
 $guard = New-FakeAutoCAD

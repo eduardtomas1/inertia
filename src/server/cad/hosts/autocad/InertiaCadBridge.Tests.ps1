@@ -99,8 +99,14 @@ function Get-FakeExtent($Entity) {
   return @{ min = $min; max = $max }
 }
 
+function Assert-FakePoint($Point, [string]$Name) {
+  if (-not ($Point -is [double[]] -and $Point.Length -eq 3)) { throw "Invalid argument $Name" }
+}
+
+$FakeBaseProperties = @('Handle', 'ObjectName', 'Layer', 'Color', 'OwnerID', 'Deleted', 'Doc', 'Linetype', 'Lineweight')
+
 function New-FakeEntity([string]$Handle, [string]$ObjectName, [string]$Layer, [string]$Owner, [hashtable]$Properties = @{}) {
-  $entity = [pscustomobject]@{ Handle = $Handle; ObjectName = $ObjectName; Layer = $Layer; Color = 256; OwnerID = $Owner; Deleted = $false; Doc = $null }
+  $entity = [pscustomobject]@{ Handle = $Handle; ObjectName = $ObjectName; Layer = $Layer; Color = 256; OwnerID = $Owner; Deleted = $false; Doc = $null; Linetype = 'ByLayer'; Lineweight = -1 }
   foreach ($key in $Properties.Keys) { Add-Member -InputObject $entity -NotePropertyName $key -NotePropertyValue $Properties[$key] }
   Add-Member -InputObject $entity -MemberType ScriptMethod -Name Move -Value {
     param($From, $To)
@@ -120,6 +126,56 @@ function New-FakeEntity([string]$Handle, [string]$ObjectName, [string]$Layer, [s
       }
     }
     if ($null -ne $this.PSObject.Properties['Rotation']) { $this.Rotation = (($this.Rotation + $Angle) % (2 * [Math]::PI) + 2 * [Math]::PI) % (2 * [Math]::PI) }
+  }
+  # Like AcadEntity.Copy: a new object in the same place with the same properties.
+  Add-Member -InputObject $entity -MemberType ScriptMethod -Name Copy -Value {
+    $properties = @{}
+    foreach ($property in $this.PSObject.Properties) {
+      if ($property.MemberType -ne 'NoteProperty' -or $FakeBaseProperties -contains $property.Name) { continue }
+      $value = $property.Value
+      if ($value -is [System.Array]) { $value = [double[]]@($value) }
+      $properties[$property.Name] = $value
+    }
+    $this.Doc.NextHandle++
+    $copy = New-FakeEntity ('{0:X}' -f $this.Doc.NextHandle) $this.ObjectName $this.Layer $this.OwnerID $properties
+    $copy.Color = $this.Color; $copy.Linetype = $this.Linetype; $copy.Lineweight = $this.Lineweight
+    return Add-FakeEntity $this.Doc $copy
+  }
+  Add-Member -InputObject $entity -MemberType ScriptMethod -Name Mirror -Value {
+    param($P1, $P2)
+    Assert-FakePoint $P1 'Point1'; Assert-FakePoint $P2 'Point2'
+    $copy = $this.Copy()
+    foreach ($name in 'StartPoint', 'EndPoint', 'InsertionPoint', 'Center') {
+      if ($null -ne $copy.$name) { $mirrored = Get-Mirrored $copy.$name $P1 $P2; $copy.$name = @($mirrored[0], $mirrored[1], $copy.$name[2]) }
+    }
+    return $copy
+  }
+  Add-Member -InputObject $entity -MemberType ScriptMethod -Name ScaleEntity -Value {
+    param($Base, $Factor)
+    Assert-FakePoint $Base 'BasePoint'
+    foreach ($name in 'StartPoint', 'EndPoint', 'InsertionPoint', 'Center') {
+      if ($null -ne $this.$name) { $point = $this.$name; $this.$name = @(0..2 | ForEach-Object { $Base[$_] + ($point[$_] - $Base[$_]) * $Factor }) }
+    }
+    # PSObject.Properties, because PowerShell 7 gives every object an intrinsic Length of 1.
+    foreach ($name in 'Radius', 'Height', 'Length') { if ($null -ne $this.PSObject.Properties[$name]) { $this.$name = $this.$name * $Factor } }
+  }
+  # Lines offset to their left for a positive distance; circles and arcs grow.
+  Add-Member -InputObject $entity -MemberType ScriptMethod -Name Offset -Value {
+    param($Distance)
+    $copy = $this.Copy()
+    switch ($this.ObjectName) {
+      'AcDbLine' {
+        $dx = $this.EndPoint[0] - $this.StartPoint[0]; $dy = $this.EndPoint[1] - $this.StartPoint[1]; $length = [Math]::Sqrt($dx * $dx + $dy * $dy)
+        $nx = -$dy / $length * $Distance; $ny = $dx / $length * $Distance
+        $copy.StartPoint = @(($this.StartPoint[0] + $nx), ($this.StartPoint[1] + $ny), 0.0); $copy.EndPoint = @(($this.EndPoint[0] + $nx), ($this.EndPoint[1] + $ny), 0.0)
+      }
+      { @('AcDbCircle', 'AcDbArc') -contains $_ } {
+        if ($this.Radius + $Distance -le 0) { $copy.Delete(); throw 'eInvalidInput' }
+        $copy.Radius = $this.Radius + $Distance
+      }
+      default { $copy.Delete(); throw 'eNotImplemented' }
+    }
+    return , @($copy)
   }
   Add-Member -InputObject $entity -MemberType ScriptMethod -Name Delete -Value { $this.Deleted = $true; if ($null -ne $this.Doc) { $this.Doc.Dbmod = $this.Doc.Dbmod -bor 1 } }
   Add-Member -InputObject $entity -MemberType ScriptMethod -Name GetBoundingBox -Value {
@@ -272,14 +328,71 @@ function New-FakeAutoCAD([string]$Name = 'Plan.dwg', [switch]$Empty) {
   }
   $space = [pscustomobject]@{ Doc = $doc }
   Add-Member -InputObject $space -MemberType ScriptProperty -Name Count -Value { @($this.Doc.Registry.Values | Where-Object { -not $_.Deleted -and $_.OwnerID -eq 1 }).Count }
+  # New objects take the current color, linetype and lineweight, here a red DASHED 0.30 mm override.
   $addEntity = {
     param($Space, $ObjectName, $Properties)
     $Space.Doc.NextHandle++
-    Add-FakeEntity $Space.Doc (New-FakeEntity ('{0:X}' -f $Space.Doc.NextHandle) $ObjectName '0' 1 $Properties)
+    $entity = Add-FakeEntity $Space.Doc (New-FakeEntity ('{0:X}' -f $Space.Doc.NextHandle) $ObjectName '0' 1 $Properties)
+    $entity.Color = 1; $entity.Linetype = 'DASHED'; $entity.Lineweight = 30
+    return $entity
   }
   Add-Member -InputObject $space -MemberType NoteProperty -Name AddEntity -Value $addEntity
   Add-Member -InputObject $space -MemberType ScriptMethod -Name AddLine -Value { param($Start, $End) & $this.AddEntity $this 'AcDbLine' @{ StartPoint = $Start; EndPoint = $End } }
   Add-Member -InputObject $space -MemberType ScriptMethod -Name AddCircle -Value { param($Center, $Radius) & $this.AddEntity $this 'AcDbCircle' @{ Center = $Center; Radius = $Radius } }
+  Add-Member -InputObject $space -MemberType ScriptMethod -Name AddArc -Value {
+    param($Center, $Radius, $Start, $End)
+    Assert-FakePoint $Center 'Center'
+    & $this.AddEntity $this 'AcDbArc' @{ Center = $Center; Radius = $Radius; StartAngle = $Start; EndAngle = $End }
+  }
+  Add-Member -InputObject $space -MemberType ScriptMethod -Name AddLightWeightPolyline -Value {
+    param($Coordinates)
+    if ($Coordinates -isnot [double[]]) { throw 'Invalid argument VerticesList' }
+    & $this.AddEntity $this 'AcDbPolyline' @{ Coordinates = $Coordinates; Closed = $false; Length = 0.0 }
+  }
+  Add-Member -InputObject $space -MemberType ScriptMethod -Name InsertBlock -Value {
+    param($Point, $Name, $X, $Y, $Z, $Rotation)
+    Assert-FakePoint $Point 'InsertionPoint'
+    $block = $this.Doc.Blocks.Item($Name)
+    & $this.AddEntity $this 'AcDbBlockReference' @{ Name = $block.Name; EffectiveName = $block.Name; HasAttributes = $false; InsertionPoint = $Point; Rotation = $Rotation; XScaleFactor = $X; YScaleFactor = $Y; ZScaleFactor = $Z }
+  }
+  Add-Member -InputObject $space -MemberType ScriptMethod -Name AddDimAligned -Value {
+    param($P1, $P2, $Text)
+    Assert-FakePoint $P1 'ExtLine1Point'; Assert-FakePoint $P2 'ExtLine2Point'; Assert-FakePoint $Text 'TextPosition'
+    & $this.AddEntity $this 'AcDbAlignedDimension' @{ ExtLine1Point = $P1; ExtLine2Point = $P2; TextPosition = $Text; TextOverride = ''; Measurement = [Math]::Sqrt([Math]::Pow($P2[0] - $P1[0], 2) + [Math]::Pow($P2[1] - $P1[1], 2)) }
+  }
+  Add-Member -InputObject $space -MemberType ScriptMethod -Name AddDimRotated -Value {
+    param($P1, $P2, $Line, $Rotation)
+    Assert-FakePoint $P1 'ExtLine1Point'; Assert-FakePoint $P2 'ExtLine2Point'; Assert-FakePoint $Line 'DimLineLocation'
+    & $this.AddEntity $this 'AcDbRotatedDimension' @{ TextPosition = $Line; Rotation = $Rotation; TextOverride = ''; Measurement = [Math]::Abs(($P2[0] - $P1[0]) * [Math]::Cos($Rotation) + ($P2[1] - $P1[1]) * [Math]::Sin($Rotation)) }
+  }
+  # Like AcadHatch: AutoCAD knows only the patterns in its .pat files, and Evaluate needs a closed outer loop.
+  Add-Member -InputObject $space -MemberType ScriptMethod -Name AddHatch -Value {
+    param($PatternType, $PatternName, $Associative)
+    if (@('SOLID', 'ANSI31', 'AR-CONC') -notcontains $PatternName) { throw 'eInvalidInput' }
+    $hatch = & $this.AddEntity $this 'AcDbHatch' @{ PatternType = $PatternType; PatternName = $PatternName; AssociativeHatch = $Associative; PatternScale = 1.0; PatternAngle = 0.0; Loop = $null; LoopObjects = $null; Area = 0.0 }
+    Add-Member -InputObject $hatch -MemberType ScriptMethod -Name AppendOuterLoop -Value {
+      param($Objects)
+      if ($Objects -isnot [System.Array]) { throw 'Invalid object array' }
+      foreach ($object in $Objects) { if ($object.Deleted) { throw 'eWasErased' } }
+      $this.Loop = @($Objects | ForEach-Object Handle); $this.LoopObjects = $Objects
+    }
+    Add-Member -InputObject $hatch -MemberType ScriptMethod -Name Evaluate -Value {
+      $objects = @($this.LoopObjects)
+      if ($objects.Count -ne 1) { throw 'eInvalidInput' }
+      $object = $objects[0]
+      switch ($object.ObjectName) {
+        'AcDbCircle' { $this.Area = [Math]::PI * $object.Radius * $object.Radius }
+        'AcDbPolyline' {
+          if (-not $object.Closed) { throw 'eNotClosed' }
+          $c = $object.Coordinates; $n = $c.Count / 2; $sum = 0.0
+          for ($i = 0; $i -lt $n; $i++) { $j = ($i + 1) % $n; $sum += $c[2 * $i] * $c[2 * $j + 1] - $c[2 * $j] * $c[2 * $i + 1] }
+          $this.Area = [Math]::Abs($sum) / 2
+        }
+        default { throw 'eNotClosed' }
+      }
+    }
+    return $hatch
+  }
   Add-Member -InputObject $doc -MemberType NoteProperty -Name ModelSpace -Value $space
 
   if (-not $Empty) {
@@ -569,6 +682,14 @@ Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $docume
 Assert-Equal $undoBefore $doc.Undo.Count 'a stale erase never reaches the drawing'
 Assert-Equal $false $doc.Registry['5F'].Deleted 'the changed insert is still there'
 $doc.Registry['5F'].XScaleFactor = 1.0
+$mirrorBlockOps = @(@{ op = 'acad.mirror'; handles = @('5F'); p1 = @(0, 0); p2 = @(0, 1); keepSource = $false })
+$mirrorBlock = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $mirrorBlockOps }).result
+Assert-Equal $true ($null -ne $mirrorBlock.fingerprints.'block:5F') 'a mirror that erases a block insert fingerprints its definition'
+Assert-Equal $true ($null -eq (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = @(@{ op = 'acad.mirror'; handles = @('5F'); p1 = @(0, 0); p2 = @(0, 1) }) }).result.fingerprints.'block:5F') 'a mirror that keeps its source does not'
+$doc.Blocks.Item('TITLE').Items[0].EndPoint = @(597.0, 0.0, 0.0)
+$undoBefore = $doc.Undo.Count
+Assert-Equal 'TARGET_CHANGED' (Invoke-Fake $acad 'apply' @{ documentId = $documentId; operations = $mirrorBlockOps; expectedFingerprints = $mirrorBlock.fingerprints }).error.code 'a block whose definition changed after the preview is not mirrored away'
+Assert-Equal @($undoBefore, $false) @($doc.Undo.Count, $doc.Registry['5F'].Deleted) 'a stale mirror never reaches the drawing'
 
 $lineOps = @(@{ op = 'acad.add_line'; start = @(0, 0); end = @(100, 0, 0); layer = 'A-DEMO' })
 $linePreview = (Invoke-Fake $acad 'preview' @{ documentId = $documentId; operations = $lineOps }).result
@@ -640,6 +761,94 @@ Assert-Equal 'applied' (Invoke-RotApply $turn).result.status 'rotate applies'
 Assert-Equal @(@(10, 0, 0), 0, @(0, 10, 0), 0, @(1000, 0, 0), @('start', 'end')) @((Get-Near $chair.InsertionPoint), [Math]::Round($chair.Rotation, 9), (Get-Near $label.InsertionPoint), [Math]::Round($label.Rotation, 9), (Get-Near $rotDoc.Registry['1A'].EndPoint), @($rotDoc.Undo)) 'rotating there and back in one batch round-trips in one undo group'
 [void](Invoke-RotApply @(@{ op = 'acad.rotate'; handles = @('60'); basePoint = @(0, 0); angleDeg = 90 }))
 Assert-Equal @(@(0, 10, 0), 90) @((Get-Near $chair.InsertionPoint), (Get-RotationDeg $chair.Rotation)) 'rotate turns an insert about the base point'
+
+# Copy, mirror, scale, offset, blocks, arcs, hatches and dimensions.
+$edit = New-FakeAutoCAD
+$editDoc = $edit.ActiveDocument
+$ring = Add-FakeEntity $editDoc (New-FakeEntity '70' 'AcDbCircle' 'A-WALL' 1 @{ Center = @(100.0, 100.0, 0.0); Radius = 10.0 })
+$ring.Color = 3
+[void](Add-FakeEntity $editDoc (New-FakeEntity '71' 'AcDbRotatedDimension' 'A-ANNO' 1 @{ Measurement = 5.0; TextOverride = ''; TextPosition = @(2.0, 1.0, 0.0); Rotation = 0.0 }))
+[void](Add-FakeEntity $editDoc (New-FakeEntity '73' 'AcDbPolyline' 'A-WALL' 1 @{ Coordinates = [double[]]@(0, 0, 20, 0, 20, 10, 0, 10); Closed = $true; Length = 60.0 }))
+function Invoke-EditPreview($Ops) { return Invoke-FakeRead $edit 'preview' @{ documentId = $documentId; operations = $Ops } }
+function Invoke-EditApply($Ops, [string]$Name, [switch]$Fails) {
+  $preview = (Invoke-EditPreview $Ops).result
+  $editDoc.Undo.Clear()
+  $response = Invoke-Fake $edit 'apply' @{ documentId = $documentId; operations = $Ops; expectedFingerprints = $preview.fingerprints }
+  Assert-Equal @('start', 'end') @($editDoc.Undo) "$Name applies as one undo group"
+  if (-not $Fails) { Assert-Equal $null $response.error "$Name applies" }
+  return @{ preview = $preview; result = $response.result; error = $response.error }
+}
+function Get-EditError($Ops) { return (Invoke-EditPreview $Ops).error.code }
+function Get-Style($Entity) { return @($Entity.Color, $Entity.Linetype, $Entity.Lineweight) }
+$liveCount = { @($editDoc.Registry.Values | Where-Object { -not $_.Deleted }).Count }
+
+$copy = Invoke-EditApply @(@{ op = 'acad.copy'; handles = @('70'); vector = @(50, 0); count = 2 }) 'copy'
+Assert-Equal @('2 copies, offset by [50, 0] each', [ordered]@{ min = @(90, 90); max = @(210, 110) }) @($copy.preview.changes[0].after, $copy.preview.bbox) 'a copy previews its count and the box it will cover'
+Assert-Equal @('CIRCLE', 'CIRCLE') @($copy.result.created | ForEach-Object type) 'copies report their handles'
+Assert-Equal @(@(150, 100, 0), @(200, 100, 0), @(100, 100, 0)) @(@($copy.result.created | ForEach-Object { , @($editDoc.Registry[$_.handle].Center) }) + , @($ring.Center)) 'copies step by the vector and leave the source'
+Assert-Equal @(3, 'ByLayer', -1, 'A-WALL') @((Get-Style $editDoc.Registry[$copy.result.created[0].handle]) + $editDoc.Registry[$copy.result.created[0].handle].Layer) 'copies keep the source''s properties'
+foreach ($count in 0, 51, 2.5) { Assert-Equal 'INVALID_REQUEST' (Get-EditError @(@{ op = 'acad.copy'; handles = @('70'); vector = @(1, 0); count = $count })) "copy refuses count $count" }
+Assert-Equal @('NESTED_TARGET', 'LOCKED') @((Get-EditError @(@{ op = 'acad.copy'; handles = @('3D'); vector = @(1, 0) })), (Get-EditError @(@{ op = 'acad.copy'; handles = @('4E'); vector = @(1, 0) }))) 'copy refuses nested and locked objects'
+
+$mirrorOps = @(@{ op = 'acad.mirror'; handles = @('1B'); p1 = @(10, 0); p2 = @(10, 1); keepSource = $false })
+Assert-Equal 'TARGET_NOT_FOUND' (Get-EditError ($mirrorOps + @{ op = 'acad.set_color'; handles = @('1B'); color = 1 })) 'a later op sees that a mirror erased its source'
+$mirror = Invoke-EditApply $mirrorOps 'mirror'
+Assert-Equal @('mirrored copy about [10, 0] to [10, 1], original erased', [ordered]@{ min = @(0, 0); max = @(20, 500) }) @($mirror.preview.changes[0].after, $mirror.preview.bbox) 'a mirror previews the copy and the box'
+$mirrored = $editDoc.Registry[$mirror.result.created[0].handle]
+Assert-Equal @('LINE', @(20, 0, 0), @(20, 500, 0), $true) @($mirror.result.created[0].type, @($mirrored.StartPoint), @($mirrored.EndPoint), $editDoc.Registry['1B'].Deleted) 'mirror reflects a copy and erases the source when asked'
+Assert-Equal @('UNSUPPORTED_TARGET', 'INVALID_REQUEST', 'LOCKED') @((Get-EditError @(@{ op = 'acad.mirror'; handles = @('71'); p1 = @(0, 0); p2 = @(0, 1) })), (Get-EditError @(@{ op = 'acad.mirror'; handles = @('70'); p1 = @(1, 1); p2 = @(1, 1) })), (Get-EditError @(@{ op = 'acad.mirror'; handles = @('4E'); p1 = @(0, 0); p2 = @(0, 1) }))) 'mirror refuses dimensions, a zero-length axis and locked objects'
+$kept = Invoke-EditApply @(@{ op = 'acad.mirror'; handles = @('70'); p1 = @(0, 0); p2 = @(1, 0) }) 'mirror keeping the source'
+Assert-Equal @(@(100, -100, 0), $false) @(@($editDoc.Registry[$kept.result.created[0].handle].Center), $ring.Deleted) 'mirror keeps the source by default'
+
+$scaleOps = @(@{ op = 'acad.scale'; handles = @('70'); basePoint = @(0, 0); factor = 2 }, @{ op = 'acad.move'; handles = @('70'); vector = @(1, 0) })
+$scale = Invoke-EditApply $scaleOps 'scale'
+Assert-Equal @([ordered]@{ center = @(100, 100, 0) }, [ordered]@{ center = @(200, 200, 0) }, [ordered]@{ center = @(200, 200, 0) }) @($scale.preview.changes[0].before, $scale.preview.changes[0].after, $scale.preview.changes[1].before) 'scale previews points before and after, and a later move sees it'
+Assert-Equal ([ordered]@{ min = @(90, 90); max = @(221, 220) }) $scale.preview.bbox 'the preview box follows scale then move'
+Assert-Equal @(@(201, 200, 0), 20) @(@($ring.Center), $ring.Radius) 'scale applies about the base point'
+foreach ($factor in 0, -1, 'Infinity') { Assert-Equal 'INVALID_REQUEST' (Get-EditError @(@{ op = 'acad.scale'; handles = @('70'); basePoint = @(0, 0); factor = $factor })) "scale refuses factor $factor" }
+Assert-Equal @('UNSUPPORTED_TARGET', 'NESTED_TARGET') @((Get-EditError @(@{ op = 'acad.scale'; handles = @('71'); basePoint = @(0, 0); factor = 2 })), (Get-EditError @(@{ op = 'acad.scale'; handles = @('3D'); basePoint = @(0, 0); factor = 2 }))) 'scale refuses dimensions and nested objects'
+
+$offset = Invoke-EditApply @(@{ op = 'acad.offset'; handle = '1A'; distance = 10 }) 'offset'
+$offsetLine = $editDoc.Registry[$offset.result.created[0].handle]
+Assert-Equal @('LINE', @(0, 10, 0), @(1000, 10, 0), [ordered]@{ min = @(-10, -10); max = @(1010, 10) }) @($offset.result.created[0].type, @($offsetLine.StartPoint), @($offsetLine.EndPoint), $offset.preview.bbox) 'offset reports the new curve and previews a box around both sides'
+Assert-Equal @('UNSUPPORTED_TARGET', 'INVALID_REQUEST', 'INVALID_REQUEST', 'LOCKED') @((Get-EditError @(@{ op = 'acad.offset'; handle = '2C'; distance = 1 })), (Get-EditError @(@{ op = 'acad.offset'; handles = @('1A', '70'); distance = 1 })), (Get-EditError @(@{ op = 'acad.offset'; handle = '1A'; distance = 0 })), (Get-EditError @(@{ op = 'acad.offset'; handle = '4E'; distance = 1 }))) 'offset refuses text, several handles, a zero distance and locked curves'
+
+$insert = Invoke-EditApply @(@{ op = 'acad.insert_block'; name = 'door'; position = @(5, 5); rotationDeg = 90; scale = 2; layer = 'A-ANNO' }) 'insert_block'
+$door = $editDoc.Registry[$insert.result.created[0].handle]
+Assert-Equal @('new block', 'DOOR at [5, 5], rotated 90 degrees, scale 2, model space on layer A-ANNO', [ordered]@{ min = @(4, 4); max = @(6, 6) }) @($insert.preview.changes[0].target, $insert.preview.changes[0].after, $insert.preview.bbox) 'insert_block previews the block, placement and a box a tenth of the view wide around it'
+Assert-Equal @('INSERT', 'DOOR', @(5, 5, 0), 90, 2, 'A-ANNO', 256, 'ByLayer', -1) (@($insert.result.created[0].type, $door.Name, @($door.InsertionPoint), (Get-RotationDeg $door.Rotation), $door.XScaleFactor, $door.Layer) + (Get-Style $door)) 'insert_block places an existing block ByLayer'
+Assert-Equal @('BLOCK_NOT_FOUND', 'BLOCK_NOT_FOUND', 'UNSUPPORTED_TARGET', 'UNSUPPORTED_TARGET', 'UNSUPPORTED_TARGET', 'UNSUPPORTED_TARGET') @('WINDOW', 'C:\blocks\door.dwg', '*U12', 'SITE', 'SITE|TREE', 'A1-LAYOUT' | ForEach-Object { Get-EditError @(@{ op = 'acad.insert_block'; name = $_; position = @(0, 0) }) }) 'insert_block refuses unknown names, files, and anonymous, xref and layout blocks'
+Assert-Equal 'INVALID_REQUEST' (Get-EditError @(@{ op = 'acad.insert_block'; name = 'DOOR'; position = @(0, 0); scale = 0 })) 'insert_block refuses a zero scale'
+
+$arc = Invoke-EditApply @(@{ op = 'acad.add_arc'; center = @(0, 0); radius = 5; startDeg = 0; endDeg = 90 }) 'add_arc'
+$arcEntity = $editDoc.Registry[$arc.result.created[0].handle]
+Assert-Equal @('ARC', 0, 90, 5, '0', [ordered]@{ min = @(-5, -5); max = @(5, 5) }) @($arc.result.created[0].type, (Get-Degrees $arcEntity.StartAngle), (Get-Degrees $arcEntity.EndAngle), $arcEntity.Radius, $arcEntity.Layer, $arc.preview.bbox) 'add_arc draws on the current layer from degrees'
+Assert-Equal @(256, 'ByLayer', -1) (Get-Style $arcEntity) 'new objects are ByLayer even when the current color, linetype and lineweight are not'
+
+$before = & $liveCount
+$solid = Invoke-EditApply @(@{ op = 'acad.add_hatch'; boundary = @(@(0, 0), @(10, 0), @(10, 10), @(0, 10)); layer = 'A-ANNO' }) 'add_hatch'
+$hatch = $editDoc.Registry[$solid.result.created[0].handle]
+$temporary = $editDoc.Registry[$hatch.Loop[0]]
+Assert-Equal @(1, 'HATCH', 'SOLID', 100, $false, 'A-ANNO') @(@($solid.result.created).Count, $solid.result.created[0].type, $hatch.PatternName, $hatch.Area, $hatch.AssociativeHatch, $hatch.Layer) 'a point-bounded hatch reports only the hatch'
+Assert-Equal @('AcDbPolyline', $true, $true, ($before + 1)) @($temporary.ObjectName, $temporary.Closed, $temporary.Deleted, (& $liveCount)) 'the temporary boundary is closed, then erased'
+Assert-Equal @('SOLID hatch inside a 4-point boundary, model space on layer A-ANNO', [ordered]@{ min = @(0, 0); max = @(10, 10) }) @($solid.preview.changes[0].after, $solid.preview.bbox) 'a hatch previews its boundary box'
+$pattern = Invoke-EditApply @(@{ op = 'acad.add_hatch'; boundary = @('73'); pattern = 'ansi31'; scale = 2; angleDeg = 45 }) 'patterned add_hatch'
+$patterned = $editDoc.Registry[$pattern.result.created[0].handle]
+Assert-Equal @('ANSI31', 2, 45, @('73'), 200, $false, [ordered]@{ min = @(0, 0); max = @(20, 10) }) @($patterned.PatternName, $patterned.PatternScale, (Get-Degrees $patterned.PatternAngle), @($patterned.Loop), $patterned.Area, $editDoc.Registry['73'].Deleted, $pattern.preview.bbox) 'a handle-bounded hatch keeps its boundary'
+Assert-Equal @('INVALID_REQUEST', 'INVALID_REQUEST', 'LOCKED', 'UNSUPPORTED_TARGET', 'INVALID_REQUEST') @((Get-EditError @(@{ op = 'acad.add_hatch'; boundary = @('73'); pattern = 'ANSI31;(command)' })), (Get-EditError @(@{ op = 'acad.add_hatch'; boundary = @('73'); scale = 0 })), (Get-EditError @(@{ op = 'acad.add_hatch'; boundary = @('4E') })), (Get-EditError @(@{ op = 'acad.add_hatch'; boundary = @('2C') })), (Get-EditError @(@{ op = 'acad.add_hatch'; boundary = @(@(0, 0), @(1, 1)) }))) 'add_hatch refuses unsafe patterns, bad scales, locked or unsuitable boundaries and too few points'
+$before = & $liveCount
+Assert-Equal 'APPLY_FAILED' (Invoke-EditApply @(@{ op = 'acad.add_hatch'; boundary = @(@(0, 0), @(10, 0), @(10, 10)); pattern = 'NOPE' }) 'unknown pattern' -Fails).error.code 'AutoCAD refusing a pattern changes nothing'
+Assert-Equal 'APPLY_FAILED' (Invoke-EditApply @(@{ op = 'acad.add_hatch'; boundary = @('1A') }) 'open boundary' -Fails).error.code 'a hatch that cannot evaluate is removed and reported as nothing changed'
+Assert-Equal $before (& $liveCount) 'failed hatches leave nothing behind'
+
+$aligned = Invoke-EditApply @(@{ op = 'acad.add_dimension'; kind = 'aligned'; p1 = @(0, 0); p2 = @(30, 40); textPosition = @(0, 10) }) 'aligned add_dimension'
+$linear = Invoke-EditApply @(@{ op = 'acad.add_dimension'; kind = 'linear'; p1 = @(0, 0); p2 = @(30, 40); textPosition = @(15, -5); rotationDeg = 0 }) 'linear add_dimension'
+Assert-Equal @('DIMENSION', 50, 'AcDbAlignedDimension', 'DIMENSION', 30, 'AcDbRotatedDimension') @($aligned.result.created[0].type, $editDoc.Registry[$aligned.result.created[0].handle].Measurement, $editDoc.Registry[$aligned.result.created[0].handle].ObjectName, $linear.result.created[0].type, $editDoc.Registry[$linear.result.created[0].handle].Measurement, $editDoc.Registry[$linear.result.created[0].handle].ObjectName) 'add_dimension draws aligned and linear dimensions'
+Assert-Equal ([ordered]@{ min = @(0, 0); max = @(30, 40) }) $aligned.preview.bbox 'a dimension previews its points box'
+Assert-Equal @('INVALID_REQUEST', 'INVALID_REQUEST', 'INVALID_REQUEST') @((Get-EditError @(@{ op = 'acad.add_dimension'; kind = 'aligned'; p1 = @(0, 0); p2 = @(1, 0); textPosition = @(0, 1); rotationDeg = 10 })), (Get-EditError @(@{ op = 'acad.add_dimension'; kind = 'radial'; p1 = @(0, 0); p2 = @(1, 0); textPosition = @(0, 1) })), (Get-EditError @(@{ op = 'acad.add_dimension'; kind = 'linear'; p1 = @(1, 1); p2 = @(1, 1); textPosition = @(0, 1) }))) 'add_dimension refuses a rotated aligned dimension, unknown kinds and zero length'
+$lineBox = (Invoke-EditPreview @(@{ op = 'acad.set_color'; handles = @('1A'); color = 1 })).result.bbox
+Assert-Equal ([ordered]@{ min = @(0, -500); max = @(1000, 500) }) $lineBox 'property edits preview the box of what they touch, with a height for a flat line'
+foreach ($box in $insert.preview.bbox, $lineBox, $aligned.preview.bbox) { Assert-Equal $true ($null -ne (Get-CaptureRegion @{ bbox = $box })) 'every preview box can frame a capture' }
 
 # Guards around the apply.
 $guard = New-FakeAutoCAD

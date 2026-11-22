@@ -45,10 +45,10 @@
       "opencode": 978
     },
     "inertia_cad_preview_changes": {
-      "claude": 8642,
-      "codex": 8538,
-      "cursorKimi": 8642,
-      "opencode": 8642
+      "claude": 12351,
+      "codex": 12247,
+      "cursorKimi": 12351,
+      "opencode": 12351
     },
     "inertia_cad_apply_changes": {
       "claude": 748,
@@ -297,22 +297,22 @@
     "claude": {
       "withBrowser": 25709,
       "withoutBrowser": 14288,
-      "withCad": 44364
+      "withCad": 48073
     },
     "codex": {
       "withBrowser": 21902,
       "withoutBrowser": 12158,
-      "withCad": 39408
+      "withCad": 43117
     },
     "cursorKimi": {
       "withBrowser": 25680,
       "withoutBrowser": 14250,
-      "withCad": 44336
+      "withCad": 48045
     },
     "opencode": {
       "withBrowser": 25671,
       "withoutBrowser": 14250,
-      "withCad": 44326
+      "withCad": 48035
     }
   }
 }

@@ -1,5 +1,6 @@
 import { createContext } from "react";
 import type { SubagentTrace } from "@shared/contracts";
+import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type { SubagentCallMemory } from "./subagentCallMemory";
 
 export interface SubagentCallContextValue {
@@ -10,6 +11,8 @@ export interface SubagentCallContextValue {
   defaultCodeWrap: boolean;
   onOpenProjectFile: (path: string) => void;
   onStopSubagent?: (trace: SubagentTrace) => Promise<void>;
+  /** Opens Background tasks from a subagent group's agent rows. */
+  onOpenSurface?: (surface: WorkspacePanelTab) => void;
   memory?: SubagentCallMemory;
 }
 

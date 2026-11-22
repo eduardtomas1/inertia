@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useRef } from "react";
+import { memo, useContext, useEffect, useId, useMemo, useRef } from "react";
 import { ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import type { SubagentTrace } from "@shared/contracts";
@@ -20,10 +20,13 @@ import {
   turnAgentStatusParts,
   turnAgentStatusText,
 } from "../../utils/turnAgentStatus";
+import type { SubagentGroupEntry } from "../../utils/response-timeline/subagentGroups";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { ProviderBrandIcon } from "../ProviderBrandIcon";
 import { SubagentElapsed, subscribeLiveElapsed } from "../SubagentElapsed";
 import { useLatestTurnSubagents } from "./subagent-trace-store";
+import { UnlinkedSubagentRows } from "./SubagentActivityRow";
+import { SubagentCallContext } from "./subagentCallContext";
 import { setSubagentGroupOpen, useSubagentGroupOpen } from "./turn-fold-store";
 import "./SubagentGroup.css";
 
@@ -145,6 +148,8 @@ function SubagentRow({
 interface SubagentGroupProps {
   conversationId: string;
   turnId: string;
+  /** Keeps the open choice for one of a turn's groups; defaults to the turn. */
+  groupId?: string;
   subagents: readonly SubagentTrace[];
   onOpenSurface?: (surface: WorkspacePanelTab) => void;
   onBeforeToggle?: () => void;
@@ -154,13 +159,14 @@ interface SubagentGroupProps {
 function SubagentGroupComponent({
   conversationId,
   turnId,
+  groupId = turnId,
   subagents: renderedSubagents,
   onOpenSurface,
   onBeforeToggle,
   onAfterToggle,
 }: SubagentGroupProps): React.JSX.Element | null {
   const panelId = useId();
-  const open = useSubagentGroupOpen(turnId);
+  const open = useSubagentGroupOpen(groupId);
   const subagents = useLatestTurnSubagents(turnId, renderedSubagents, open);
   const status = turnAgentStatus(subagents);
   if (!status) return null;
@@ -169,7 +175,7 @@ function SubagentGroupComponent({
   const hidden = status.total - MAX_AVATARS;
   const toggle = (): void => {
     onBeforeToggle?.();
-    setSubagentGroupOpen(turnId, !open);
+    setSubagentGroupOpen(groupId, !open);
     if (onAfterToggle) window.requestAnimationFrame(onAfterToggle);
   };
   const openTrace = onOpenSurface
@@ -230,6 +236,7 @@ function SubagentGroupComponent({
 function sameSubagentGroupProps(previous: SubagentGroupProps, next: SubagentGroupProps): boolean {
   return previous.conversationId === next.conversationId
     && previous.turnId === next.turnId
+    && previous.groupId === next.groupId
     && previous.onOpenSurface === next.onOpenSurface
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle
@@ -237,3 +244,32 @@ function sameSubagentGroupProps(previous: SubagentGroupProps, next: SubagentGrou
 }
 
 export const SubagentGroup = memo(SubagentGroupComponent, sameSubagentGroupProps);
+
+interface SubagentGroupBlockProps {
+  entry: SubagentGroupEntry;
+  onBeforeToggle?: () => void;
+  onAfterToggle?: () => void;
+}
+
+/** The delegated tasks a turn started at one point of its transcript, drawn in that place. */
+export function SubagentGroupBlock({
+  entry,
+  onBeforeToggle,
+  onAfterToggle,
+}: SubagentGroupBlockProps): React.JSX.Element {
+  const { conversationId, onOpenSurface } = useContext(SubagentCallContext);
+  return (
+    <div data-subagent-group-block={entry.id}>
+      <UnlinkedSubagentRows traces={entry.compact} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
+      <SubagentGroup
+        conversationId={conversationId}
+        turnId={entry.turnId}
+        groupId={entry.id}
+        subagents={entry.traces}
+        onOpenSurface={onOpenSurface}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
+    </div>
+  );
+}

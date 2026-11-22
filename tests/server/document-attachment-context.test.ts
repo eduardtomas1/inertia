@@ -149,6 +149,36 @@ function attachment(
   };
 }
 
+function streamedTextPdfModule(items: readonly unknown[]) {
+  return {
+    OPS: {},
+    getDocument() {
+      return {
+        promise: Promise.resolve({
+          numPages: 1,
+          getPage: async () => ({
+            cleanup: () => undefined,
+            getOperatorList: async () => ({ fnArray: [] }),
+            streamTextContent: () => {
+              let read = false;
+              return new ReadableStream({
+                pull(streamController) {
+                  if (read) streamController.close();
+                  else {
+                    read = true;
+                    streamController.enqueue({ items });
+                  }
+                },
+              });
+            },
+          }),
+        }),
+        destroy: async () => undefined,
+      };
+    },
+  };
+}
+
 function spreadsheetBytes(bookType: "xlsx" | "xls"): Uint8Array {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
@@ -430,6 +460,73 @@ describe("document attachment execution context", () => {
         total + Buffer.byteLength(JSON.stringify(content).slice(1, -1), "utf8"),
       0,
     )).toBeLessThanOrEqual(96 * 1024);
+  });
+
+  it("joins streamed PDF text items and their line ends as PDF.js reports them", async () => {
+    const { contexts } = await prepareDocumentAttachments([{
+      attachment: attachment({}),
+      bytes: new Uint8Array([1]),
+    }], {
+      pdfModuleLoader: async () => streamedTextPdfModule([
+        { str: "exam", hasEOL: false },
+        { str: "ple", hasEOL: false },
+        { str: " ", hasEOL: false },
+        { str: "word", hasEOL: false },
+        { str: ",", hasEOL: true },
+        { str: "next line", hasEOL: true },
+        { type: "beginMarkedContent" },
+        { str: "carries enough readable words", hasEOL: false },
+      ]) as never,
+    });
+
+    expect(contexts).toEqual([{
+      attachmentId: attachment({}).id,
+      label: "PDF · notes.pdf",
+      content: "[Page 1]\nexample word,\nnext line\ncarries enough readable words",
+      truncated: false,
+    }]);
+  });
+
+  it("stops a streamed PDF page at the per-document text boundary", async () => {
+    const { contexts } = await prepareDocumentAttachments([{
+      attachment: attachment({}),
+      bytes: new Uint8Array([1]),
+    }], {
+      pdfModuleLoader: async () => streamedTextPdfModule(Array.from(
+        { length: 100_000 },
+        (_, index) => ({ str: `token-${index} `, hasEOL: false }),
+      )) as never,
+    });
+
+    const context = contexts[0]!;
+    expect(context.truncated).toBe(true);
+    expect(Buffer.byteLength(context.content, "utf8")).toBeLessThanOrEqual(64 * 1024);
+    expect(context.content).toContain("token-0 ");
+    expect(context.content).not.toContain("token-99999");
+  });
+
+  it("stops reading a streamed PDF page once the turn deadline passes mid-chunk", async () => {
+    const read = new Set<number>();
+    let expired = false;
+    const deadlineAt = Date.now() + 60_000;
+    const items = Array.from({ length: 600 }, (_, index) => ({
+      get str() {
+        read.add(index);
+        if (index === 100) expired = true;
+        return "word ";
+      },
+      hasEOL: false,
+    }));
+
+    await expect(prepareDocumentAttachments([{
+      attachment: attachment({}),
+      bytes: new Uint8Array([1]),
+    }], {
+      deadlineAt,
+      now: () => expired ? deadlineAt + 1 : Date.now(),
+      pdfModuleLoader: async () => streamedTextPdfModule(items) as never,
+    })).rejects.toThrow("Document extraction timed out.");
+    expect(Math.max(...read)).toBe(255);
   });
 
   it.skipIf(hostedWindowsCi)(

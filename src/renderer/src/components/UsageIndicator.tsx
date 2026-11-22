@@ -255,17 +255,14 @@ export function UsageIndicator({
     return remaining !== null && (lowest === null || remaining < lowest) ? remaining : lowest;
   }, null);
 
-  const closePopover = useCallback((restoreFocus: "always" | "unless-moved" | "never"): void => {
+  const closePopover = useCallback((restoreFocus: boolean, unlessFocusMoved = false): void => {
     setOpen(false);
-    if (restoreFocus !== "never" && typeof window !== "undefined") {
+    if (restoreFocus && typeof window !== "undefined") {
       window.requestAnimationFrame(() => {
         const active = document.activeElement;
-        const focusMovedAway = restoreFocus === "unless-moved"
-          && active !== null
-          && active !== document.body
-          && active.isConnected
-          && !document.getElementById(detailsId)?.contains(active);
-        if (!focusMovedAway) triggerRef.current?.focus();
+        if (unlessFocusMoved && active && active !== document.body
+          && !document.getElementById(detailsId)?.contains(active)) return;
+        triggerRef.current?.focus();
       });
     }
   }, [detailsId]);
@@ -293,14 +290,14 @@ export function UsageIndicator({
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target;
       if (target instanceof Node && !anchorRef.current?.contains(target)) {
-        closePopover(outsidePointerShouldRestoreFocus(target) ? "always" : "never");
+        closePopover(outsidePointerShouldRestoreFocus(target));
       }
     };
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      closePopover("unless-moved");
+      closePopover(true, true);
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -369,7 +366,7 @@ export function UsageIndicator({
               type="button"
               className="usage-popover-close"
               aria-label="Close usage and context"
-              onClick={() => closePopover("always")}
+              onClick={() => closePopover(true)}
             >
               <X size={14} aria-hidden="true" />
             </button>
@@ -460,7 +457,7 @@ export function UsageIndicator({
               <button
                 type="button"
                 className="usage-limits-shortcut"
-                onClick={() => { closePopover("never"); limitsContext.open(triggerRef.current, "limits"); }}
+                onClick={() => { closePopover(false); limitsContext.open(triggerRef.current, "limits"); }}
               >
                 All provider limits
                 <ChevronRight size={14} aria-hidden="true" />

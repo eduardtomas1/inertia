@@ -390,7 +390,7 @@ describe("authoritative response timeline", () => {
       "activity-group",
     ]);
     const stream = buildTurnExecutionStream(response, { includeCompactions: true });
-    expect(stream.map((entry) => entry.kind === "commentary" || entry.kind === "follow-up"
+    expect(stream.map((entry) => entry.kind === "commentary" || entry.kind === "follow-up" || entry.kind === "sent-message"
       ? entry.kind
       : `${entry.kind}:${entry.activities.map(({ id }) => id).join("+")}`)).toEqual([
       "activity-group:call-before",
@@ -438,7 +438,7 @@ describe("authoritative response timeline", () => {
     }), turn.id);
 
     const stream = buildTurnExecutionStream(response, { includeCompactions: true });
-    expect(stream.map((entry) => entry.kind === "commentary" || entry.kind === "follow-up"
+    expect(stream.map((entry) => entry.kind === "commentary" || entry.kind === "follow-up" || entry.kind === "sent-message"
       ? entry.kind
       : `${entry.kind}:${entry.activities.map(({ id }) => id).join("+")}`)).toEqual([
       "compaction:first",

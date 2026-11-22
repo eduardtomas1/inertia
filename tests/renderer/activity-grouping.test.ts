@@ -76,8 +76,8 @@ describe("Minimal Workstream adjacent call grouping", () => {
     expect(stream.map((entry) =>
       entry.kind === "commentary"
         ? `commentary:${entry.id}`
-        : entry.kind === "follow-up"
-          ? `follow-up:${entry.id}`
+        : entry.kind === "follow-up" || entry.kind === "sent-message"
+          ? `${entry.kind}:${entry.id}`
           : entry.activities.map(({ id }) => id).join(","))).toEqual([
       "old-success,new-success",
       "commentary:commentary",

@@ -1477,7 +1477,7 @@ describe("runtime migration catalog", () => {
       expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'messages_created_id_idx'").get()).toBeUndefined();
       migrateRuntimeDatabase(database);
       expect(database.prepare("SELECT * FROM messages ORDER BY id").all())
-        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, custom_agent_call_json: null, secret_request_json: null })));
+        .toEqual(messages.map((message) => ({ ...message, compaction_json: null, html_render_json: null, private_connect_device_id: null, watcher_note_json: null, duo_comparison_json: null, custom_agent_call_json: null, secret_request_json: null, sent_to_user: 0 })));
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= 69 ORDER BY version").all()).toEqual(history);
       expect(database.pragma("index_xinfo(messages_created_id_idx)")).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: "created_at", desc: 1, key: 1 }),

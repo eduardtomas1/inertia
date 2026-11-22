@@ -261,12 +261,13 @@ export class PrivateConnectRuntimeGateway {
           generatedAt: this.now().toISOString(),
           conversation: projectedConversation,
           messages: detail.messages
-            .filter(({ role, htmlRender, secretRequest }) => role === "user" || role === "assistant" || htmlRender || secretRequest)
+            .filter(({ role, htmlRender, secretRequest, sentToUser }) =>
+              role === "user" || role === "assistant" || htmlRender || secretRequest || sentToUser)
             .slice(-PRIVATE_CONNECT_RUNTIME_LIMITS.transcriptMessages)
             .map((message) => ({
               id: message.id,
               turnId: message.turnId,
-              role: message.htmlRender || message.secretRequest ? "assistant" as const : message.role as "user" | "assistant",
+              role: message.role === "system" ? "assistant" as const : message.role,
               content: this.transcriptCache.content(
                 request.conversationId,
                 message.id,

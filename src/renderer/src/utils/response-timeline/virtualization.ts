@@ -126,6 +126,10 @@ function estimateResponseTurnRenderWeight(turn: ResponseTurn): number {
       + turn.systemMessages.reduce(
         (total, message) => total + message.content.length,
         0,
+      )
+      + turn.sentMessages.reduce(
+        (total, message) => total + message.content.length,
+        0,
       ),
   ) + turn.reasonings.reduce(
     (total, reasoning) => total + reasoning.content.length,
@@ -561,6 +565,8 @@ function estimateExpandedWorkHeight(
         if (entry.kind === "follow-up") {
           return total + 14 + estimatedWrappedLines(entry.message.content, columns - 6) * 18;
         }
+        // A settled turn shows its messages to the user outside the fold.
+        if (entry.kind === "sent-message") return total;
         return total + estimateActivityGroupHeight(entry.activities, expandActivityGroups);
       }, 0);
   const reasoningHeight = includeReasoning && turn.reasoning
@@ -629,6 +635,9 @@ function estimateTurnRowSize(
     total + 12 + estimatedWrappedLines(message.content, answerColumns) * 18, 0);
   const activeFollowUpHeight = turn.followUpMessages.reduce((total, message) =>
     total + 14 + estimatedWrappedLines(message.content, answerColumns - 6) * 18, 0);
+  // The "Sent mid-turn" label, the row's margins, and the Markdown.
+  const sentMessageHeight = turn.sentMessages.reduce((total, message) =>
+    total + 38 + estimateMarkdownHeight(message.content, answerColumns), 0);
   const includesReasoning = options.showThinking !== false && Boolean(turn.reasoning);
   const hasSupplementalWork = turn.plans.length > 0 || includesReasoning;
   const importantHeight = estimateActivityGroupHeight(
@@ -659,7 +668,7 @@ function estimateTurnRowSize(
       total + estimateFailurePanelHeight(activity, availableWidth), 0);
   let settledExchangeHeight = 0;
   if (!turn.isActive) {
-    settledExchangeHeight = activeFollowUpHeight;
+    settledExchangeHeight = activeFollowUpHeight + sentMessageHeight;
     for (const answer of followUpAnswers(turn)) {
       settledExchangeHeight += 18 + estimateMarkdownHeight(answer.content, answerColumns);
     }
@@ -668,6 +677,7 @@ function estimateTurnRowSize(
     ? 43
       + activeCommentaryHeight
       + activeFollowUpHeight
+      + sentMessageHeight
       + collapsedActivityHeight
       + (hasSupplementalWork ? 27 : 0)
     : consolidatesSettledWork

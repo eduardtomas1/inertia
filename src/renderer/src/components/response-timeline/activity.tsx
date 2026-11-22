@@ -59,6 +59,7 @@ import {
   type TurnExecutionStreamEntry,
 } from "../../utils/responseTimeline";
 import {
+  isSettledExchangeEntry,
   withHtmlRenders,
   withSecretRequests,
   withLiveCommentary,
@@ -85,6 +86,7 @@ import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
 import { SubagentCallBlock } from "./SubagentCallBlock";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { SentMessageRow } from "./SentMessageRow";
 import { NO_DELEGATED_WORK, withDelegatedWork, type DelegatedWork } from "../../utils/response-timeline/subagentGroups";
 import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import { SubagentActivityRow } from "./SubagentActivityRow";
@@ -639,6 +641,7 @@ function ExecutionStream({
 }): React.JSX.Element | null {
   if (entries.length === 0) return null;
   const lastIndex = entries.reduce((last, entry, index) => entry.kind === "subagent-group" ? last : index, -1);
+  const markdown = { projectRoot, projectId, conversationId, defaultCodeWrap, onOpenProjectFile };
   return (
     <div className="turn-execution-stream" role="list" aria-label={label}>
       {entries.map((entry, index) => {
@@ -655,6 +658,9 @@ function ExecutionStream({
         if (entry.kind === "secret-request") {
           return <div role="listitem" key={entry.id}><SecretRequestCard message={entry.message} /></div>;
         }
+        if (entry.kind === "sent-message") {
+          return <div role="listitem" key={entry.id}><SentMessageRow message={entry.message} {...markdown} showTime={showTimes} /></div>;
+        }
         if (entry.kind === "subagent-call" || entry.kind === "subagent-group") {
           return (
             <div role="listitem" key={entry.id}>
@@ -667,15 +673,7 @@ function ExecutionStream({
         if (entry.kind === "commentary") {
           return (
             <div role="listitem" key={entry.id}>
-              <CommentaryRow
-                entry={entry}
-                projectRoot={projectRoot}
-                projectId={projectId}
-                conversationId={conversationId}
-                defaultCodeWrap={defaultCodeWrap}
-                onOpenProjectFile={onOpenProjectFile}
-                showTime={showTimes}
-              />
+              <CommentaryRow entry={entry} {...markdown} showTime={showTimes} />
             </div>
           );
         }
@@ -1027,11 +1025,7 @@ export function WorkLog({
     );
   }
 
-  const exchange = stream.filter((entry) =>
-    entry.kind === "follow-up"
-    || entry.kind === "html-render" || entry.kind === "subagent-call" || entry.kind === "secret-request"
-    || (entry.kind === "subagent-group" && !entry.foldable)
-    || (entry.kind === "commentary" && entry.answer));
+  const exchange = stream.filter(isSettledExchangeEntry);
   const workStream = exchange.length > 0
     ? stream.filter((entry) => !exchange.includes(entry))
     : stream;

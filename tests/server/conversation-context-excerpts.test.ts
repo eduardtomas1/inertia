@@ -270,3 +270,49 @@ describe("conversation context notes", () => {
     expect(restored.format).toBe(format);
   });
 });
+
+describe("messages the agent showed mid-turn", () => {
+  it("travel as the agent's words in shared context and continuation history, bounded and never as the final answer", () => {
+    const f = fixture();
+    const turn = f.store.beginAgentTurn({
+      id: "44444444-4444-4444-8444-444444444444",
+      conversationId: f.source.id,
+      runId: "55555555-5555-4555-8555-555555555555",
+      content: "Draft the release note.",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+      requestedAt: f.at(),
+    }).turn;
+    // 4,000 code points of three UTF-8 bytes each: over the 8 KiB bound for a non-final message.
+    const draft = `SHOWN_DRAFT ${"€".repeat(3_988)}`;
+    f.store.sentToUser.create({
+      conversationId: f.source.id, runId: turn.runId, turnId: turn.id, content: draft, createdAt: f.at(),
+    });
+    f.say("FINAL_REPLY Should I publish it?", "assistant", f.at());
+    const completedAt = f.at();
+    f.store.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      terminalAssistantMessageId: f.store.conversationDetail(f.source.id)!.messages.at(-1)!.id,
+      startedAt: turn.requestedAt,
+      completedAt,
+      updatedAt: completedAt,
+      terminalReason: "provider-completed",
+    });
+
+    const packet = f.packet();
+    const shown = packet.excerpts.find(({ content }) => content.startsWith("SHOWN_DRAFT"))!;
+    expect(shown).toMatchObject({ role: "assistant", sourceTurnId: turn.id, truncated: true });
+    expect(Buffer.byteLength(shown.content, "utf8")).toBeLessThanOrEqual(8 * 1024);
+    expect(packet.excerpts.map(({ content }) => content.split(" ")[0])).toEqual(["Draft", "SHOWN_DRAFT", "FINAL_REPLY"]);
+
+    const { messages } = f.restored();
+    expect(messages.map(([, content]) => String(content).split(" ")[0])).toEqual(["Draft", "SHOWN_DRAFT", "FINAL_REPLY"]);
+  });
+});

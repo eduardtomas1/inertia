@@ -6,6 +6,7 @@ import {
   RETIRED_AGENT_BROWSER_TOOL_DEFINITIONS,
 } from "./agent-browser-host-tools";
 import { HTML_RENDER_TOOL_DEFINITION } from "./html-render-host-tool";
+import { SEND_TO_USER_TOOL_DEFINITION } from "./send-to-user-host-tool";
 import { WORKSPACE_TOOL_DEFINITIONS } from "./workspace-host-tools";
 import type { ProjectPreferences } from "../../shared/project-preferences";
 import { SECRET_REQUEST_TOOL_DEFINITION } from "./agent-secrets/secret-request-host-tool";
@@ -154,15 +155,18 @@ export function createInertiaHarnessCapabilities(
   });
   packs.push({
     id: "inertia.visual-replies",
-    revision: 2,
+    revision: 3,
     title: "Inertia visual replies",
-    summary: "One sandboxed, self-contained HTML page per call, shown inline above the turn's written reply.",
+    summary: "What the agent shows the user inside its own turn: a sandboxed, self-contained HTML page above the written reply, or a Markdown message exactly as written mid-turn.",
     instructions: [],
-    tools: [{ definition: HTML_RENDER_TOOL_DEFINITION, invoke: input.invoke }],
+    tools: [
+      { definition: HTML_RENDER_TOOL_DEFINITION, invoke: input.invoke },
+      { definition: SEND_TO_USER_TOOL_DEFINITION, invoke: input.invoke },
+    ],
     evaluation: {
       tags: ["frontend", "visual-replies"],
       evidenceKinds: ["host-tool-result"],
-      scenarioIds: ["inline-rendered-page", "exact-turn-render"],
+      scenarioIds: ["inline-rendered-page", "exact-turn-render", "mid-turn-message"],
     },
   });
   packs.push({

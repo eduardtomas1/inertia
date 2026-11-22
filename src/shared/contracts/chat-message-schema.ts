@@ -53,6 +53,9 @@ export function chatMessageSchema(value: unknown): value is ChatMessage {
       || (value.role === "system" && typeof value.turnId === "string" && isHtmlRenderReference(value.htmlRender)))
     && (value.secretRequest === undefined
       || (value.role === "system" && typeof value.turnId === "string" && isSecretRequestReference(value.secretRequest)))
+    && (value.sentToUser === undefined
+      || (value.sentToUser === true && value.role === "system" && typeof value.turnId === "string"
+        && value.htmlRender === undefined && value.secretRequest === undefined))
     && (value.privateConnectDeviceId === undefined
       || (value.role === "user" && isMessageOriginDeviceId(value.privateConnectDeviceId)))
     && (value.watcherNote === undefined

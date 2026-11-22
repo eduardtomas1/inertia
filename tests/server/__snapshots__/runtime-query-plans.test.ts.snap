@@ -620,7 +620,7 @@ exports[`hot query plans on a seeded runtime database > snapshots every message 
     ],
   },
   {
-    "query": "SELECT m.id AS messageId, m.conversation_id AS conversationId, c.project_id AS projectId, m.turn_id AS turnId, m.role, m.created_at AS createdAt FROM messages m…",
+    "query": "SELECT m.id AS messageId, m.conversation_id AS conversationId, c.project_id AS projectId, m.turn_id AS turnId, CASE WHEN m.role = 'system' THEN 'assistant' ELSE…",
     "withStatistics": "same",
     "withoutStatistics": [
       "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",

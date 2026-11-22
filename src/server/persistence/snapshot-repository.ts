@@ -301,7 +301,7 @@ export class SnapshotRepository {
       ...EMPTY_CONVERSATION_RECORDS,
       conversation: conversationDetailFromRow(conversationRow),
       messages: newest<MessageRow>(`SELECT id, conversation_id, turn_id, role, substr(content, 1, ?) AS content,
-          attachments_json, compaction_json, html_render_json, secret_request_json, private_connect_device_id, watcher_note_json, created_at
+          attachments_json, compaction_json, html_render_json, secret_request_json, sent_to_user, private_connect_device_id, watcher_note_json, created_at
         FROM (SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
           WHERE messages.conversation_id = ? AND (${CONVERSATION_CONTEXT_MESSAGE_SQL}
             OR (messages.role = 'system' AND messages.secret_request_json IS NOT NULL AND messages.turn_id IS NOT NULL))

@@ -9,6 +9,7 @@ import type { ResponseTurn } from "./model";
 import type { SubagentCallEntry } from "./subagentCalls";
 import type { SubagentGroupEntry } from "./subagentGroups";
 import type { SecretRequestMessage } from "./secretRequests";
+import type { SentToUserMessage } from "@shared/send-to-user";
 
 export {
   activityAttentionSeverity,
@@ -98,6 +99,13 @@ export type TurnExecutionStreamEntry =
       message: ChatMessage;
     }
   | {
+      /** Markdown the agent showed the user mid-turn, at its place among the work. */
+      kind: "sent-message";
+      id: string;
+      createdAt: string;
+      message: SentToUserMessage;
+    }
+  | {
       kind: "activity-group";
       id: string;
       createdAt: string;
@@ -126,6 +134,18 @@ export type TurnWorkStreamEntry =
     }
   | SubagentCallEntry
   | SubagentGroupEntry;
+
+/**
+ * What a settled turn keeps in view when its work folds: the exchange with the
+ * user (follow-ups and their answers, messages and pages the agent showed,
+ * secret cards, called agents) rather than the work itself.
+ */
+export function isSettledExchangeEntry(entry: TurnWorkStreamEntry): boolean {
+  return entry.kind === "follow-up" || entry.kind === "sent-message"
+    || entry.kind === "html-render" || entry.kind === "subagent-call" || entry.kind === "secret-request"
+    || (entry.kind === "subagent-group" && !entry.foldable)
+    || (entry.kind === "commentary" && entry.answer === true);
+}
 
 function mergeChronologically(
   stream: TurnWorkStreamEntry[],
@@ -226,7 +246,7 @@ export function buildTurnExecutionStream(
   turn: Pick<
     ResponseTurn,
     "id" | "agentTurn" | "followUpMessages" | "commentaryMessages" | "activities"
-  >,
+  > & Partial<Pick<ResponseTurn, "sentMessages">>,
   options: BuildTurnExecutionStreamOptions = {},
 ): TurnExecutionStreamEntry[] {
   const includeImportant = options.includeImportantActivities ?? true;
@@ -247,6 +267,13 @@ export function buildTurnExecutionStream(
         id: string;
         createdAt: string;
         message: ChatMessage;
+        order: number;
+      }
+    | {
+        kind: "sent-message";
+        id: string;
+        createdAt: string;
+        message: SentToUserMessage;
         order: number;
       }
     | {
@@ -278,6 +305,17 @@ export function buildTurnExecutionStream(
       createdAt: message.createdAt,
       message,
       order: 1,
+    });
+  }
+  // A message is stored while its tool call runs, so on a tie it follows the
+  // call's activity, and like prose it ends the work group before it.
+  for (const message of turn.sentMessages ?? []) {
+    items.push({
+      kind: "sent-message",
+      id: `sent-message:${message.id}`,
+      createdAt: message.createdAt,
+      message,
+      order: 3,
     });
   }
   let episode = 0;
@@ -322,7 +360,7 @@ export function buildTurnExecutionStream(
   const stream: TurnExecutionStreamEntry[] = [];
   let streamEpisode = 0;
   for (const item of items) {
-    if (item.kind === "commentary" || item.kind === "follow-up") {
+    if (item.kind === "commentary" || item.kind === "follow-up" || item.kind === "sent-message") {
       stream.push(item);
       continue;
     }

@@ -29,13 +29,15 @@ export function searchMessages(
   `);
   const eligible = database.prepare(`
     SELECT m.id AS messageId, m.conversation_id AS conversationId,
-      c.project_id AS projectId, m.turn_id AS turnId, m.role, m.created_at AS createdAt
+      c.project_id AS projectId, m.turn_id AS turnId,
+      CASE WHEN m.role = 'system' THEN 'assistant' ELSE m.role END AS role, m.created_at AS createdAt
     FROM messages m
     JOIN conversations c ON c.id = m.conversation_id
     JOIN projects p ON p.id = c.project_id
     LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
     WHERE m.id = ? AND c.archived_at IS NULL AND (
       m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
+      OR (m.role = 'system' AND t.id IS NOT NULL AND m.sent_to_user = 1)
     )
   `);
   // Bound each native read: never aggregate an entire chunk history inside

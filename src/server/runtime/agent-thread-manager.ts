@@ -70,6 +70,8 @@ import {
 import { CachedThreadToolRegistrations } from "./thread-tool-registrations";
 import { HTML_RENDER_TOOL_NAME } from "../../shared/html-render";
 import { HtmlRenderHostTool } from "./html-render-host-tool";
+import { SEND_TO_USER_TOOL_NAME } from "../../shared/send-to-user";
+import { SendToUserHostTool } from "./send-to-user-host-tool";
 import { WORKSPACE_TOOL_NAMES, WorkspaceHostTools, type WorkspaceHostToolDependencies } from "./workspace-host-tools";
 import { SECRET_REQUEST_TOOL_NAME, SECRET_VALUE_EXPOSURE_MESSAGE } from "../../node/agent-secrets";
 import type { AgentSecretHostToolSource } from "./agent-secrets/agent-secret-service";
@@ -91,7 +93,9 @@ const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = 32_768;
 const MAX_LATEST_RESULT_BYTES = 8_000;
 const MAX_ACTIVE_CHILDREN = 3;
-const STORED_CONTENT_TOOLS = new Set([HTML_RENDER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation", "inertia_send_message"]);
+const STORED_CONTENT_TOOLS = new Set([
+  HTML_RENDER_TOOL_NAME, SEND_TO_USER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation", "inertia_send_message",
+]);
 const LATEST_RESULT_RUNNING_NEXT = "Still running; wait for it with inertia_wait_for_conversation, then call inertia_get_latest_result again.";
 const TERMINAL_TURN_STATUSES = new Set([
   "completed",
@@ -365,6 +369,7 @@ export class AgentThreadManager {
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
   private readonly capabilities: HarnessCapabilityRegistry;
   private readonly htmlRenders: HtmlRenderHostTool;
+  private readonly sentToUser: SendToUserHostTool;
   private readonly workspaceTools: WorkspaceHostTools;
   private readonly contextTool: AgentContextTool;
 
@@ -374,6 +379,7 @@ export class AgentThreadManager {
       ? new AgentBrowserHostTools(dependencies.agentBrowser)
       : undefined;
     this.htmlRenders = new HtmlRenderHostTool(dependencies);
+    this.sentToUser = new SendToUserHostTool(dependencies);
     this.workspaceTools = new WorkspaceHostTools(dependencies);
     this.contextTool = new AgentContextTool({
       ...dependencies,
@@ -473,6 +479,7 @@ export class AgentThreadManager {
         return failure("secret_value_not_allowed", SECRET_VALUE_EXPOSURE_MESSAGE);
       }
       if (call.tool === HTML_RENDER_TOOL_NAME) return this.htmlRenders.invoke({ conversation: current, turn: source.turn }, call);
+      if (call.tool === SEND_TO_USER_TOOL_NAME) return this.sentToUser.invoke({ conversation: current, turn: source.turn }, call);
       if (WORKSPACE_TOOL_NAMES.has(call.tool)) return await this.workspaceTools.invoke({ conversation: current, turn: source.turn }, call);
       if (call.tool === SECRET_REQUEST_TOOL_NAME && this.dependencies.agentSecrets) {
         return await this.dependencies.agentSecrets.invoke({ conversation: current, turn: source.turn }, call);

@@ -247,6 +247,8 @@ export interface ChatMessage {
   /** A visual reply the agent published in this turn; system role, always turn-scoped. */
   htmlRender?: import("../html-render").HtmlRenderReference;
   secretRequest?: import("../agent-secrets").SecretRequestReference;
+  /** Markdown the agent showed the user mid-turn with `inertia_send_to_user`; system role, always turn-scoped, never the final reply. */
+  sentToUser?: true;
   customAgentCall?: import("../custom-agents").CustomAgentCallAttribution;
   id: string;
   conversationId: string;

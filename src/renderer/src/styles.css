@@ -9013,6 +9013,12 @@ button.sent-attachment-open:hover {
   padding-bottom: 3px;
 }
 
+.turn-sent-message-label {
+  margin: 0 0 2px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .turn-follow-up-row {
   width: fit-content;
   max-width: min(620px, 78%);

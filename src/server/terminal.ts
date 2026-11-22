@@ -19,7 +19,10 @@ import {
 } from "./process-lifecycle";
 import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
 import { waitForTerminalExit } from "./terminal-exit";
-import { terminalCloseTimeoutMs, terminalShutdownTimeoutMs } from "./terminal-shutdown-deadline";
+import {
+  terminalCloseTimeoutMs,
+  terminalShutdownTimeoutMs,
+} from "./terminal-shutdown-deadline";
 import {
   waitForBooleanWithinTerminalDeadline,
   waitForGuardianStopWithinDeadline,
@@ -35,9 +38,9 @@ import { sendTerminalSocketEvent as send } from "./terminal-socket";
 import { terminalCleanupFailureOptions } from "./terminal-cleanup-failure";
 import { applyPendingPtyResize, resizePty } from "./terminal-pty-resize";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./runtime/update-hold";
+import { withUserWindowsCurrentDirectorySearch } from "../node/windows-current-directory-search";
 import { spawnWindowsManagedTerminal } from "./windows-managed-terminal";
 import type { WindowsTerminalAuthority } from "../node/windows-terminal-authority";
-import { liveTerminalSessionScopes, type TerminalSessionScope } from "./terminal-session-scopes";
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const OUTPUT_FLUSH_MS = 8;
@@ -236,7 +239,7 @@ export class TerminalManager {
       cwd,
       shell.executable,
       shell.args,
-      process.env,
+      withUserWindowsCurrentDirectorySearch(process.env, this.platform),
       cols,
       rows,
       onExit,
@@ -266,7 +269,7 @@ export class TerminalManager {
       cwd,
       shell.executable,
       shell.args,
-      process.env,
+      withUserWindowsCurrentDirectorySearch(process.env, this.platform),
       cols,
       rows,
       onExit,
@@ -603,7 +606,6 @@ export class TerminalManager {
       || this.closingFailures.size > 0;
   }
 
-  liveSessionScopes(): TerminalSessionScope[] { return liveTerminalSessionScopes(this.sessions.values()); }
   ownedResourceCount(): number {
     return new Set([
       ...this.sessions.keys(),

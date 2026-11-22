@@ -5,15 +5,14 @@ import type { MessageSearchTarget } from "../../shared/message-search";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
 import { isSecretRequestReference } from "../../shared/agent-secrets";
+import { isSendToUserContent } from "../../shared/send-to-user";
 import { isMessageOriginDeviceId } from "../../shared/contracts/chat-message-schema";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
-import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { DUO_COMPARISON_BRIEF_MAX_BYTES, duoComparisonBriefSchema, type DuoComparisonBrief } from "../../shared/duo-comparison-brief";
 import { customAgentCallAttributionSchema, type CustomAgentCallAttribution } from "../../shared/custom-agents";
 import { AGENT_TURN_STATUSES, isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import { randomUUID } from "node:crypto";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
-import { pendingMissedRunAttachmentSql } from "../orchestration-v2/missed-run-attachments";
 
 import type {
   ChatAttachment,
@@ -57,15 +56,6 @@ function projectAttachments(
 function validWatcherNote(role: ChatMessage["role"], note: WatcherNoteAttribution): WatcherNoteAttribution {
   const parsed = watcherNoteAttributionSchema.safeParse(note);
   if (role !== "user" || !parsed.success) throw new Error("Invalid watcher note attribution.");
-  return parsed.data;
-}
-
-function validDelegatedCompletion(role: ChatMessage["role"], attribution: DelegatedCompletionAttribution,
-  conversationId: string, watcherNote: WatcherNoteAttribution | undefined): DelegatedCompletionAttribution {
-  const parsed = delegatedCompletionAttributionSchema.safeParse(attribution);
-  if (role !== "user" || watcherNote !== undefined || !parsed.success || parsed.data.parentConversationId !== conversationId) {
-    throw new Error("Invalid delegated result attribution.");
-  }
   return parsed.data;
 }
 
@@ -202,22 +192,21 @@ export class TranscriptRepository {
     if (options.compaction && (role !== "system" || turnId !== null || !isContextCompaction(options.compaction))) throw new Error("Invalid compaction receipt.");
     if (options.htmlRender && (role !== "system" || turnId === null || !isHtmlRenderReference(options.htmlRender))) throw new Error("Invalid rendered page reference.");
     if (options.secretRequest && (role !== "system" || turnId === null || !isSecretRequestReference(options.secretRequest))) throw new Error("Invalid secret request reference.");
+    if (options.sentToUser !== undefined && (options.sentToUser !== true || role !== "system" || turnId === null
+      || options.htmlRender || options.secretRequest || !isSendToUserContent(content))) throw new Error("Invalid message to the user.");
     if (options.privateConnectDeviceId !== undefined
       && (role !== "user" || !isMessageOriginDeviceId(options.privateConnectDeviceId))) throw new Error("Invalid remote message origin.");
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote(role, options.watcherNote);
     const duoComparison = options.duoComparison === undefined ? undefined : validDuoComparison(role, turnId, options.duoComparison);
-    const delegatedCompletion = options.delegatedCompletion === undefined ? undefined
-      : validDelegatedCompletion(role, options.delegatedCompletion, conversationId, watcherNote);
-    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}), ...(options.secretRequest ? { secretRequest: { ...options.secretRequest } } : {}) };
+    const message: ChatMessage = { id, conversationId, turnId, role, content, attachments, createdAt: now, ...(options.compaction ? { compaction: options.compaction } : {}), ...(options.htmlRender ? { htmlRender: { ...options.htmlRender } } : {}), ...(options.secretRequest ? { secretRequest: { ...options.secretRequest } } : {}), ...(options.sentToUser ? { sentToUser: true as const } : {}) };
     if (options.privateConnectDeviceId !== undefined) message.privateConnectDeviceId = options.privateConnectDeviceId;
     if (watcherNote) message.watcherNote = watcherNote;
     if (duoComparison) message.duoComparison = duoComparison;
-    if (delegatedCompletion) message.delegatedCompletion = delegatedCompletion;
     const customAgentCall = options.customAgentCall === undefined ? undefined : validCustomAgentCall(role, options.customAgentCall);
     if (customAgentCall) message.customAgentCall = customAgentCall;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json, delegated_completion_json) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson, @delegatedCompletionJson)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null, delegatedCompletionJson: delegatedCompletion ? JSON.stringify(delegatedCompletion) : null });
+      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json, sent_to_user) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson, @sentToUserFlag)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null, sentToUserFlag: message.sentToUser ? 1 : 0 });
       if (options.touchConversation !== false) {
         this.context.database.prepare(`
           UPDATE conversations
@@ -253,12 +242,10 @@ export class TranscriptRepository {
     acknowledgedAt?: string,
     attachments: readonly ChatAttachment[] = [],
     queuedMessageId?: string,
-    options: { watcherNote?: WatcherNoteAttribution; delegatedCompletion?: DelegatedCompletionAttribution } = {},
+    options: { watcherNote?: WatcherNoteAttribution } = {},
   ): ChatMessage {
     const conversation = this.context.requireConversation(conversationId);
     const watcherNote = options.watcherNote === undefined ? undefined : validWatcherNote("user", options.watcherNote);
-    const delegatedCompletion = options.delegatedCompletion === undefined ? undefined
-      : validDelegatedCompletion("user", options.delegatedCompletion, conversationId, watcherNote);
     const turn = agentTurnFromRow(this.context.requireAgentTurn(turnId));
     if (turn.conversationId !== conversationId) {
       throw new Error("The follow-up turn belongs to a different conversation.");
@@ -278,20 +265,17 @@ export class TranscriptRepository {
       attachments: rendererSafeAttachments(attachments),
       createdAt: submittedAt,
       ...(watcherNote ? { watcherNote } : {}),
-      ...(delegatedCompletion ? { delegatedCompletion } : {}),
     };
     this.context.database.transaction(() => {
       this.context.database.prepare(`
         INSERT INTO messages (
           id, conversation_id, turn_id, role, content,
-          attachments_json, created_at, watcher_note_json, delegated_completion_json
-        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt, @watcherNoteJson,
-          @delegatedCompletionJson)
+          attachments_json, created_at, watcher_note_json
+        ) VALUES (@id, @conversationId, @turnId, 'user', @content, @attachmentsJson, @createdAt, @watcherNoteJson)
       `).run({
         ...message,
         attachmentsJson: JSON.stringify(message.attachments),
         watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null,
-        delegatedCompletionJson: delegatedCompletion ? JSON.stringify(delegatedCompletion) : null,
       });
       this.context.database.prepare(`
         UPDATE conversations
@@ -366,19 +350,6 @@ export class TranscriptRepository {
     })();
   }
 
-  /**
-   * Deletes one assistant message of the turn (an open segment the provider emptied) and returns the turn's latest
-   * remaining assistant message, so an emptied segment never becomes the turn's terminal message.
-   */
-  deleteAssistantMessage(turnId: string, messageId: string): string | null {
-    return this.context.database.transaction(() => {
-      this.context.database.prepare("DELETE FROM messages WHERE id = ? AND turn_id = ? AND role = 'assistant'").run(messageId, turnId);
-      const latest = this.context.database.prepare(`SELECT id FROM messages WHERE turn_id = ? AND role = 'assistant'
-        ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(turnId) as { id: string } | undefined;
-      return latest?.id ?? null;
-    })();
-  }
-
   appendMessageContent(messageId: string, delta: string): void {
     if (!delta) return;
     if (!appendMessageContentChunks(this.context.database, messageId, delta)) {
@@ -403,18 +374,13 @@ export class TranscriptRepository {
     return projectAttachments(rows);
   }
 
-  /**
-   * Attachments eviction may delete, oldest first. Never one of a chat with a run in flight, nor an image a run its
-   * provider never received still owes the next prompt (`pendingMissedRunAttachmentSql`).
-   */
   evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] {
     const rows = this.context.database.prepare(`
-      SELECT messages.conversation_id, messages.attachments_json, (EXISTS (
+      SELECT messages.conversation_id, messages.attachments_json, EXISTS (
         SELECT 1 FROM agent_turns
         WHERE agent_turns.conversation_id = messages.conversation_id
           AND agent_turns.status IN (SELECT value FROM json_each(?))
-      ) OR (messages.role = 'user' AND messages.turn_id IS NOT NULL
-        AND ${pendingMissedRunAttachmentSql("messages")})) AS active
+      ) AS active
       FROM messages
       WHERE messages.attachments_json <> '[]'
       ORDER BY messages.created_at ASC, messages.id ASC
@@ -494,7 +460,7 @@ export class TranscriptRepository {
       LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
       WHERE m.id = ? AND c.archived_at IS NULL AND (
         m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
-        OR (m.role = 'system' AND t.id IS NOT NULL AND m.html_render_json IS NOT NULL)
+        OR (m.role = 'system' AND t.id IS NOT NULL AND (m.html_render_json IS NOT NULL OR m.sent_to_user = 1))
       )
     `).get(messageId) as MessageSearchTarget | undefined ?? null;
   }

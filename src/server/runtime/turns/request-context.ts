@@ -15,6 +15,7 @@ import type {
   TurnRequestContext,
   TurnSessionRecovery,
 } from "../../../shared/contracts";
+import { PROVIDER_SLASH_COMMAND_NAME } from "../../../shared/contracts/agent-workflows";
 import { MAX_ATTACHMENT_COUNT, MAX_IMAGE_ATTACHMENT_BYTES, MAX_IMAGE_ATTACHMENT_TOTAL_BYTES, chatAttachmentKind } from "../../../shared/attachments";
 import { readContainedFileSync } from "../../contained-file-read";
 import { INTERNAL_PROVIDER_INSTRUCTIONS_HEADER } from "../../internal-provider-instructions";
@@ -25,7 +26,6 @@ import {
 } from "../../../shared/conversation-context";
 import { byteLength } from "../../persistence/bounded-message-text";
 import type { ConversationContextDelivery } from "../../persistence/conversation-context-transport";
-import type { ProviderHistoryResponseItem } from "../../provider/contracts";
 import {
   MAX_DOCUMENT_CONTEXT_TOTAL_BYTES,
   type DocumentAttachmentContext,
@@ -78,6 +78,13 @@ export function chatInstruction(conversationId: string): HiddenProviderInstructi
   return { label: "inertia-chat", text: `This chat's id is ${conversationId}.` };
 }
 
+export function isProviderCommandText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("/")) return false;
+  const [name = ""] = trimmed.slice(1).split(/\s/u, 1);
+  return PROVIDER_SLASH_COMMAND_NAME.test(name);
+}
+
 export interface TurnExecutionContextBlob {
   reference: string;
   digest: string;
@@ -120,20 +127,12 @@ export interface PersistedTurnExecutionContext {
 }
 
 export interface AssembledTurnRequest {
-  contextHandoff?: import("../../../shared/orchestration-backings").PreparedContextHandoff;
   visibleContent: string;
   executionPrompt: string;
   imagePaths: string[];
   persistence: PersistedTurnExecutionContext;
   conversationContextDeliveries: ConversationContextDelivery[];
   sessionRecovery: TurnSessionRecovery | null;
-  restoredItemIds?: readonly string[];
-  /**
-   * The restored history for native delivery: its items, and the prompt with
-   * everything but the restored-history block. `executionPrompt` keeps the
-   * block, for a harness that delivers it inline.
-   */
-  nativeHistory?: { items: readonly ProviderHistoryResponseItem[]; prompt: string };
 }
 
 export interface RestoredChatHistory {
@@ -141,10 +140,6 @@ export interface RestoredChatHistory {
   messageCount: number;
   omittedMessageCount: number;
   withheldMessageCount?: number;
-  itemIds?: readonly string[];
-  omittedItemIds?: readonly string[];
-  /** The first block's history as Responses API items, when it can be delivered natively instead. */
-  injectionItems?: readonly ProviderHistoryResponseItem[];
 }
 
 export interface ConversationContextMaterialization {
@@ -170,7 +165,8 @@ export interface AssembleTurnRequestInput {
   internalInstructions?: readonly HiddenProviderInstruction[];
   sessionInstructionDigest?: string;
   promptWithheld?: true;
-  restoredHistory?: (capacityBytes: number, currentPromptBytes: number) => RestoredChatHistory | null;
+  providerCommand?: true;
+  restoredHistory?: (capacityBytes: number) => RestoredChatHistory | null;
   /**
    * The chat's tracked Inertia-local goal as one bounded, neutralized line
    * from `trackedGoalContextLine`. It travels as execution context, never as a
@@ -721,6 +717,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     input.attachments ?? [],
     input.imagePaths,
   );
+  const providerCommand = input.providerCommand === true;
+  if (providerCommand && !isProviderCommandText(visibleContent)) {
+    throw new Error("The provider command is invalid.");
+  }
   const modeInstructions: readonly HiddenProviderInstruction[] =
     input.interactionMode === "build"
       ? [{
@@ -746,6 +746,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   if (internalInstructionBytes > MAX_INTERNAL_INSTRUCTION_BYTES) {
     throw new Error("Internal provider instructions exceed the turn limit.");
   }
+  const promptInstructions = providerCommand ? [] : internalInstructions;
 
   const providerContext = (context: MaterializedContext) => ({
     kind: context.kind,
@@ -764,6 +765,15 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     "Attached files are saved on disk. Read or search them with your file tools as needed; their contents are not included here.",
     JSON.stringify(files.map(({ name, path, size }) => ({ name, path: boundedText(path, "Attachment path", 4096), size }))),
   ].join("\n");
+  if (providerCommand && (
+    contexts.length > 0
+    || fileReferences !== ""
+    || input.conversationContexts !== undefined
+    || (input.carriedConversationContexts?.length ?? 0) > 0
+    || input.restoredHistory !== undefined
+  )) {
+    throw new Error("A provider command is sent on its own, without attachments, context, or restored history.");
+  }
   const buildPrompt = (selectedContexts: typeof providerContexts): string => {
     const sections = [visibleContent];
     if (fileReferences) sections.push(fileReferences);
@@ -773,10 +783,10 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         JSON.stringify({ version: 1, attachments: selectedContexts.map(promptContext) }),
       ].join("\n"));
     }
-    if (internalInstructions.length > 0) {
+    if (promptInstructions.length > 0) {
       sections.push([
         INTERNAL_PROVIDER_INSTRUCTIONS_HEADER,
-        ...internalInstructions.map(({ label, text }) => `[${label}]\n${text}`),
+        ...promptInstructions.map(({ label, text }) => `[${label}]\n${text}`),
       ].join("\n"));
     }
     return sections.join("\n\n");
@@ -818,7 +828,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   }
   let executionPrompt = buildPrompt(providerContexts);
   let assembledPayloadBytes = byteLength(executionPrompt) + imageReferenceBytes;
-  let executionSegmentCount = 1 + providerContexts.length + internalInstructions.length;
+  let executionSegmentCount = 1 + providerContexts.length + promptInstructions.length;
   if (executionSegmentCount > MAX_EXECUTION_MESSAGE_SEGMENTS) {
     throw new Error(
       `Execution payload exceeds the ${MAX_EXECUTION_MESSAGE_SEGMENTS} segment limit.`,
@@ -849,7 +859,7 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     executionSegmentCount += appended.length;
   };
 
-  if (input.trackedGoalLine) {
+  if (input.trackedGoalLine && !providerCommand) {
     const goal = [providerContext({
       kind: "attachment",
       label: TRACKED_GOAL_CONTEXT_LABEL,
@@ -879,15 +889,13 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   if (carriedFit) append(carried, carriedFit);
 
   let sessionRecovery: TurnSessionRecovery | null = null;
-  let restoredItemIds: readonly string[] | undefined;
-  let injected: { items: readonly ProviderHistoryResponseItem[]; block: (typeof providerContexts)[number] } | undefined;
   if (input.restoredHistory) {
     const history = input.restoredHistory(Math.min(
       MAX_CONVERSATION_CONTEXT_TURN_BYTES,
       MAX_EXECUTION_PAYLOAD_BYTES - assembledPayloadBytes
         - (providerContexts.length === 0 ? EXECUTION_CONTEXT_SECTION_OVERHEAD_BYTES : 0)
         - MAX_CONVERSATION_CONTEXT_BLOCKS_PER_PACKET * CONVERSATION_CONTEXT_BLOCK_OVERHEAD_BYTES,
-    ), assembledPayloadBytes);
+    ));
     if (history) {
       const fitRestored = (blocks: RestoredChatHistory["blocks"]) => {
         const restored = blocks.map((block) => providerContext({
@@ -908,11 +916,6 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
           ?? (required.length < history.blocks.length ? fitRestored(required) : null);
       const fits = selected !== null;
       if (selected) append(selected.restored, selected.fit);
-      if (selected && history.itemIds) restoredItemIds = [...history.itemIds];
-      // The first block is the required history; optional supplements stay in the prompt either way.
-      if (selected && history.itemIds && history.injectionItems) {
-        injected = { items: history.injectionItems, block: selected.restored[0]! };
-      }
       sessionRecovery = {
         ...(fits
           ? {
@@ -955,9 +958,6 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
     imagePaths,
     conversationContextDeliveries,
     sessionRecovery,
-    ...(restoredItemIds ? { restoredItemIds } : {}),
-    ...(injected ? { nativeHistory: { items: injected.items,
-      prompt: buildPrompt(providerContexts.filter((context) => context !== injected!.block)) } } : {}),
     persistence: {
       manifest: {
         version: 1,
@@ -967,12 +967,14 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
         contextReferenceCount: references.length,
         uniqueContextBlobCount: blobsByDigest.size,
         contextBytes: references.reduce((total, reference) => total + reference.byteSize, 0),
-        internalInstructionCount: internalInstructions.length,
-        internalInstructionBytes,
+        internalInstructionCount: promptInstructions.length,
+        internalInstructionBytes: providerCommand ? 0 : internalInstructionBytes,
         ...(input.sessionInstructionDigest === undefined
           ? {}
           : { sessionInstructionDigest: requiredSessionInstructionDigest(input.sessionInstructionDigest) }),
-        ...(input.promptWithheld ? { promptWithheld: true as const } : {}),
+        ...(input.promptWithheld || promptInstructions.length < internalInstructions.length
+          ? { promptWithheld: true as const }
+          : {}),
         executionSegmentCount,
         assembledPayloadBytes,
         references,

@@ -1,5 +1,6 @@
 import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
 import type { DraftSkillsProjection } from "../../hooks/useDraftSkills";
+import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import type {
@@ -15,7 +16,6 @@ import type {
   CheckpointSummary,
   Conversation,
   ConversationLatestTurnSummary,
-  GitStatusSnapshot,
   Project,
   ProviderId,
   ProviderMaintenanceProviderId,
@@ -153,12 +153,12 @@ function unsavedChatQueueRunner(run: QueueCommandRunner): QueueCommandRunner {
   return unsaved;
 }
 
-export function savedChatRunner<Runner>(
-  run: Runner | undefined,
-  draft: Pick<Conversation, "id"> | null,
-  conversations: readonly Pick<Conversation, "id">[] | undefined,
-): Runner | undefined {
-  return !draft || conversations?.some(({ id }) => id === draft.id) ? run : undefined;
+function providerCommandsLoader(
+  actions: Pick<WorkspaceSceneActions, "listProviderCommands" | "previewProviderCommands">,
+  draft: boolean,
+): { onListProviderCommands?: ProviderCommandsLoader } {
+  const load = draft ? actions.previewProviderCommands : actions.listProviderCommands;
+  return load ? { onListProviderCommands: load } : {};
 }
 
 interface StableSceneCallbacks {
@@ -209,13 +209,8 @@ export function chatQueueRunner(
   draft: Conversation | null,
   conversations: readonly Pick<Conversation, "id">[] | undefined,
 ): QueueCommandRunner | undefined {
-  return savedChatRunner(run, draft, conversations) ?? (run && unsavedChatQueueRunner(run));
-}
-
-export function chatCheckoutBranch(
-  gitStatus: Pick<GitStatusSnapshot, "isRepository" | "branch"> | null,
-): string | null | undefined {
-  return gitStatus?.isRepository ? gitStatus.branch : undefined;
+  if (!run || !draft || conversations?.some(({ id }) => id === draft.id)) return run;
+  return unsavedChatQueueRunner(run);
 }
 
 export function visibleChatConversation(
@@ -255,9 +250,7 @@ export function visibleChatProjection(
       ? projection.usage
       : null,
     contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
-    rolledBackTurnIds: detailOwned ? projection.detail?.rolledBackTurnIds : undefined,
     watcherWakes: detailOwned ? projection.detail?.watcherWakes : undefined,
-    delegation: detailOwned ? projection.detail?.delegation : undefined,
     history: projectionOwned ? projection.history : undefined,
   };
 }
@@ -294,6 +287,8 @@ export interface WorkspaceSceneActions {
     context?: TurnRequestContext,
   ) => Promise<ConversationCompactAndSendResult>;
   listSkills: (forceReload?: boolean) => Promise<void>;
+  listProviderCommands?: ProviderCommandsLoader;
+  previewProviderCommands?: ProviderCommandsLoader;
   setGoal: (input: {
     source: AgentGoalSource;
     objective?: string;
@@ -731,7 +726,7 @@ export function createWorkspaceSceneModel({
           onChange: actions.selectGlobalChatProject,
         },
       } : {}),
-      checkoutBranch: chatCheckoutBranch(workspaceTools.gitStatus),
+      checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
       latestTurnSummary: visibleConversationLatestTurnSummary(
         persistedConversation,
         conversation,
@@ -785,16 +780,14 @@ export function createWorkspaceSceneModel({
       promptContext: workspaceTools.pendingDiffContext,
       contextSources: workspaceOptions.contextSources,
       contextPackets: chatProjection.contextPackets,
-      rolledBackTurnIds: chatProjection.rolledBackTurnIds,
       watcherWakes: chatProjection.watcherWakes,
-      delegation: chatProjection.delegation,
-      conversations: connection.snapshot?.conversations,
-      onDelegationCommand: actions.run,
-      onOpenConversation: actions.openConversation,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
-      onForkCommand: savedChatRunner(actions.run, draftConversation, snapshotConversations),
       onSecretRequestCommand: actions.run,
-      onQueueCommand: chatQueueRunner(actions.runQueueCommand, draftConversation, snapshotConversations),
+      onQueueCommand: chatQueueRunner(
+        actions.runQueueCommand,
+        draftConversation,
+        connection.snapshot?.conversations,
+      ),
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
@@ -814,6 +807,7 @@ export function createWorkspaceSceneModel({
         ? { onCompactAndSendMessage: actions.compactAndSendMessage }
         : {}),
       onListSkills: draftConversation && draftSkills ? draftSkills.list : actions.listSkills,
+      ...providerCommandsLoader(actions, draftConversation !== null),
       onPromptPresetCommand: actions.run,
       onRespondToApproval: actions.respondToApproval,
       onRespondToInput: actions.respondToInput,
@@ -1144,7 +1138,6 @@ export function createWorkspaceSceneModel({
           Boolean(conversationIsRunning
             && canStopSubagentTrace(trace, projection.turns)),
         onStopSubagent: stopSubagent,
-        onObservedChildCommand: actions.run,
       },
       plan: {
         steps: panelPlanSteps,

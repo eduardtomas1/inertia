@@ -14,8 +14,7 @@ import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../mo
 import { isContinuationReasonCode, isTurnSessionRecovery } from "../continuation-policy";
 import { backendDefault, backendProfile, backendProfileResultValidators, optionalProviderAccountKind, optionalTurnFailureKind } from "./backend-profile-result-schema";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
-import { AGENT_GOAL_STATUSES } from "./agent-workflows";
-import { agentSkill, workflowSkillsCapability } from "./agent-skill-schema";
+import { AGENT_GOAL_STATUSES, PROVIDER_SLASH_COMMAND_LIMITS, PROVIDER_SLASH_COMMAND_NAME } from "./agent-workflows";
 import { providerMaintenanceProviderIdSchema } from "../provider-maintenance";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
@@ -31,18 +30,11 @@ import { subagentTrace } from "./subagent-trace-schema";
 import { watcherMutationEvent, watcherRequestResultValidators, watcherWakeSummariesCoherent } from "./watcher-schema";
 import { validProviderUpdateRequirement } from "./provider-update-requirement-schema";
 import { compactOnReturnResultValidators, isConversationCompactionState, isPromptCacheFacts, validCompactOnReturnSetting } from "./compact-on-return-schema";
-import { forkHistoryResultSchema } from "../orchestration-forks";
-import { conversationRollbackResultSchema, rolledBackTurnIdsCoherent } from "../orchestration-history";
-import { mergeBackResultSchema } from "../orchestration-merge-back";
-import { conversationDelegationSchema } from "../orchestration-delegation";
-import { observedChildReadResultSchema } from "../observed-child-thread";
-import { delegationCancelResultSchema, delegationDeliveryResultSchema, delegationTaskResultSchema } from "./client-command/delegation";
-import { cursorSdkLoginEventSchema, cursorSdkStatusResultSchema, cursorSdkModelsResultSchema } from "./cursor-sdk-auth-schema";
 import { workspaceToolResultValidators } from "./workspace-tool-results-schema";
 import { duoResultValidators } from "./duo-results-schema";
 import { syncCursor } from "./server-event-discriminants";
 import { record, stringField, nonemptyStringField, nullableStringField, booleanField, numberField, integerField, integerFieldAtLeast, nullableNumberField, optionalStringField, optionalNullableStringField, optionalBooleanField, oneOf, recordWithStrings, arrayOf, type UnknownRecord } from "./server-event-fields";
-const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
+const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function providerId(value: UnknownRecord, key: string): boolean {
   return oneOf(value, key, PROVIDER_IDS);
@@ -324,8 +316,7 @@ function appSettings(value: unknown): boolean {
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
     && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
-    && validNotificationSettings(value) && validCompactOnReturnSetting(value)
-    && (value.delegationAutomaticWakes === undefined || typeof value.delegationAutomaticWakes === "boolean");
+    && validNotificationSettings(value) && validCompactOnReturnSetting(value);
 }
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
@@ -489,6 +480,34 @@ function agentGoal(value: unknown): boolean {
     && nullableStringField(value, "synchronizedAt");
 }
 
+function agentSkill(value: unknown): boolean {
+  return recordWithStrings(
+    value,
+    "id",
+    "conversationId",
+    "name",
+    "description",
+    "scope",
+    "source",
+  )
+    && nullableStringField(value, "shortDescription")
+    && booleanField(value, "enabled")
+    && oneOf(value, "scope", ["user", "repo", "system", "admin", "provider"])
+    && oneOf(value, "source", ["codex-native", "claude-native"]);
+}
+
+function codePointsAtMost(value: unknown, limit: number): boolean {
+  return typeof value === "string" && value.length <= limit * 2 && [...value].length <= limit;
+}
+
+function providerSlashCommand(value: unknown): boolean {
+  return recordWithStrings(value, "name", "description")
+    && nullableStringField(value, "argumentHint")
+    && PROVIDER_SLASH_COMMAND_NAME.test(value.name as string)
+    && codePointsAtMost(value.description, PROVIDER_SLASH_COMMAND_LIMITS.description)
+    && (value.argumentHint === null || codePointsAtMost(value.argumentHint, PROVIDER_SLASH_COMMAND_LIMITS.argumentHint));
+}
+
 function workflowGoalCapability(value: unknown): boolean {
   if (!recordWithStrings(value, "kind", "label")) return false;
   if (value.kind === "unavailable") {
@@ -496,6 +515,16 @@ function workflowGoalCapability(value: unknown): boolean {
   }
   return value.available === true && (value.kind === "codex-native"
     || (value.kind === "inertia-local" && stringField(value, "reason")));
+}
+
+function workflowSkillsCapability(value: unknown): boolean {
+  if (!recordWithStrings(value, "kind", "label")
+    || typeof value.available !== "boolean") return false;
+  if (value.kind === "unavailable") {
+    return value.available === false && stringField(value, "reason");
+  }
+  return value.available === true
+    && (value.kind === "codex-native" || value.kind === "claude-native");
 }
 
 function skillDiscovery(value: unknown): boolean {
@@ -881,11 +910,7 @@ function conversationDetail(
     && (value.contextPackets === undefined
       || arrayOf(value.contextPackets, conversationContextPacketSummary))
     && (value.contextReads === undefined || arrayOf(value.contextReads, agentContextReadSummary))
-    && rolledBackTurnIdsCoherent(value.rolledBackTurnIds, value.agentTurns)
-    && (value.rollbackRevision === undefined
-      || (typeof value.rollbackRevision === "number" && Number.isSafeInteger(value.rollbackRevision) && value.rollbackRevision >= 0))
     && watcherWakeSummariesCoherent(value.watcherWakes, value.agentTurns)
-    && (value.delegation === undefined || conversationDelegationSchema.safeParse(value.delegation).success)
     && conversationDetailCollectionsCoherent(value, conversationId);
 }
 
@@ -928,8 +953,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       && optionalTerminalAssistantMessage(value);
     case "agent.text":
     case "agent.reasoning":
-      return recordWithStrings(value, "conversationId", "runId", "turnId", "text")
-        && (value.replace === undefined || value.replace === true);
+      return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
     case "agent.text.replaced": return recordWithStrings(value, "conversationId", "runId", "turnId") && optionalStringField(value, "after") && (value.message === null || (chatMessage(value.message) && record(value.message) && value.message.role === "assistant" && value.message.conversationId === value.conversationId && value.message.turnId === value.turnId));
     case "agent.usage":
       return threadUsage(value.usage);
@@ -997,15 +1021,6 @@ const REQUEST_RESULT_VALIDATORS = {
   "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
   "conversation.created": (value) => stringField(value, "conversationId"),
-  "conversation.fork.history": (value) => forkHistoryResultSchema.safeParse(value).success,
-  "conversation.rollback": (value) => conversationRollbackResultSchema.safeParse(value).success,
-  "conversation.merge-back": (value) => mergeBackResultSchema.safeParse(value).success,
-  "delegation.task": (value) => delegationTaskResultSchema.safeParse(value).success,
-  "delegation.task.cancel": (value) => delegationCancelResultSchema.safeParse(value).success,
-  "delegation.delivery": (value) => delegationDeliveryResultSchema.safeParse(value).success,
-  "observed-child.read": (value) => observedChildReadResultSchema.safeParse(value).success,
-  "provider.cursor-sdk.status": (value) => cursorSdkStatusResultSchema.safeParse(value).success,
-  "provider.cursor-sdk.models": (value) => cursorSdkModelsResultSchema.safeParse(value).success,
   "todo.started": (value) => stringField(value, "conversationId"),
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),
   "conversation.context.packet": (value) => conversationContextPacket(value.packet),
@@ -1028,6 +1043,12 @@ const REQUEST_RESULT_VALIDATORS = {
       && entry.conversationId === value.conversationId)
     && uniqueRecordField(value.skills as unknown[], "id")
     && skillDiscovery(value.skillDiscovery),
+  "agent.commands": (value) => stringField(value, "conversationId")
+    && providerId(value, "providerId")
+    && Array.isArray(value.commands)
+    && value.commands.length <= PROVIDER_SLASH_COMMAND_LIMITS.commands
+    && arrayOf(value.commands, providerSlashCommand)
+    && uniqueRecordField(value.commands as unknown[], "name"),
   "conversation.detail": (value) => stringField(value, "conversationId")
     && oneOf(value, "state", ["ready", "missing", "deleted", "failed"])
     && (value.sync === undefined || syncCursor(value.sync))
@@ -1058,8 +1079,6 @@ function isServerEvent(value: unknown): value is ServerEvent {
   if (!record(value) || typeof value.type !== "string") return false;
   const type = value.type as Exclude<ServerEvent["type"], RuntimeMutationEvent["type"]>;
   switch (type) {
-    case "provider.cursor-sdk.login.updated":
-      return cursorSdkLoginEventSchema.safeParse(value).success;
     case "conversation.message.focus":
       return messageSearchTargetSchema.safeParse(value.target).success;
     case "server.welcome":
@@ -1097,7 +1116,7 @@ function isServerEvent(value: unknown): value is ServerEvent {
                 "sessionId",
               )
               && oneOf(value.providerResume, "providerId", [
-                "codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi",
+                "codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok",
               ])
               && nonemptyStringField(value.providerResume, "providerLabel")
               && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(

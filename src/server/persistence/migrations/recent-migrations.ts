@@ -1,11 +1,4 @@
-import { cursorSdkProviderMigration } from "./cursor-sdk-provider";
-import { conversationContextSupplementBoundMigration } from "./conversation-context-supplement-bound";
-import { delegatedTasksMigration } from "./delegated-tasks";
-import { delegationAutomaticWakesMigration } from "./delegation-automatic-wakes";
-import { orchestrationV2ReceiptStatusMigration } from "./orchestration-v2-receipt-status";
 import { limitResetMigration } from "./limit-reset";
-import { orchestrationV2Migration } from "./orchestration-v2";
-import { nativePiProviderMigration } from "./native-pi-provider";
 import type { DatabaseMigrationDefinition } from "./catalog";
 import { cliConversationImportsMigration } from "./cli-conversation-imports";
 import { agentThreadTargetOwnershipMigration } from "./agent-thread-target-ownership";
@@ -47,6 +40,9 @@ import { subagentTaskShapeMigration } from "./subagent-task-shape";
 import { nativeGrokProviderMigration } from "./native-grok-provider";
 import { customAgentsMigration } from "./custom-agents";
 import { agentSecretRequestsMigration } from "./agent-secret-requests";
+import { extendColorThemesMigration } from "./extend-color-themes";
+import { sentToUserMessagesMigration } from "./sent-to-user-messages";
+import { agentThreadQuestionAnswersMigration } from "./agent-thread-question-answers";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -90,11 +86,7 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   codexCompactionLimitMigration,
   customAgentsMigration,
   agentSecretRequestsMigration,
-  orchestrationV2Migration,
-  nativePiProviderMigration,
-  cursorSdkProviderMigration,
-  conversationContextSupplementBoundMigration,
-  delegatedTasksMigration,
-  delegationAutomaticWakesMigration,
-  orchestrationV2ReceiptStatusMigration,
+  extendColorThemesMigration,
+  sentToUserMessagesMigration,
+  agentThreadQuestionAnswersMigration,
 ];

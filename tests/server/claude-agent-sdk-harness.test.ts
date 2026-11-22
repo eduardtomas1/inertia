@@ -46,10 +46,8 @@ import {
   discoverClaudeFilesystemSkills,
   stageClaudeSkillPlugin,
 } from "../../src/server/provider/claude-skill-plugin";
-import {
-  claudeBackendProfileRegistrations,
-  createClaudeBackendLaunchResolver,
-} from "../../src/server/runtime/backends/claude-compatible-adapter";
+import { BackendProfileRuntime } from "../../src/server/runtime/backends/backend-profile-runtime";
+import { createClaudeBackendLaunchResolver } from "../../src/server/runtime/backends/claude-compatible-adapter";
 import { portableFixtureRoot, removePortableFixture } from "../helpers/portable-provider-fixture";
 import {
   claudeBackgroundTasks,
@@ -1279,7 +1277,7 @@ describe("Claude Agent SDK harness", () => {
         }) as unknown as Query;
       },
     });
-    const registrations = claudeBackendProfileRegistrations([profile]);
+    const registrations = new BackendProfileRuntime(undefined, [profile]).providerManagerOptions([]);
     const manager = ProviderManager.createForTests({
       commands: { claude: "/fake/claude" },
       ...registrations,
@@ -2392,7 +2390,7 @@ describe("Claude Agent SDK harness", () => {
         }) as unknown as Query;
       },
     });
-    const registrations = claudeBackendProfileRegistrations([profile]);
+    const registrations = new BackendProfileRuntime(undefined, [profile]).providerManagerOptions([]);
     const manager = ProviderManager.createForTests({
       commands: { claude: process.execPath },
       ...registrations,

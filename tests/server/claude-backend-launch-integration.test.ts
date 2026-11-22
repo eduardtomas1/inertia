@@ -22,10 +22,8 @@ import {
   type ProviderRunInput,
   type ProviderRunResult,
 } from "../../src/server/provider/contracts";
-import {
-  claudeBackendProfileRegistrations,
-  createClaudeBackendLaunchResolver,
-} from "../../src/server/runtime/backends/claude-compatible-adapter";
+import { BackendProfileRuntime } from "../../src/server/runtime/backends/backend-profile-runtime";
+import { createClaudeBackendLaunchResolver } from "../../src/server/runtime/backends/claude-compatible-adapter";
 import { providerChildEnvironment } from "../../src/server/environment";
 import { ProviderManager } from "../../src/server/providers";
 
@@ -122,7 +120,7 @@ describe("Claude backend launch integration", () => {
       secretReference: SECRET_REFERENCE,
       primaryModelId: "k3-256k",
     });
-    const registrations = claudeBackendProfileRegistrations([profile]);
+    const registrations = new BackendProfileRuntime(undefined, [profile]).providerManagerOptions([]);
     const privilegedResolver = createClaudeBackendLaunchResolver({
       profiles: [profile],
       resolveSecret: async (reference) =>
@@ -187,7 +185,7 @@ describe("Claude backend launch integration", () => {
       primaryModelId: "k3",
     });
     const native = nativeAnthropicBackendProfile();
-    const registrations = claudeBackendProfileRegistrations([kimi]);
+    const registrations = new BackendProfileRuntime(undefined, [kimi]).providerManagerOptions([]);
     const environments = new Map<string, NodeJS.ProcessEnv>();
     const completions = new Map<
       string,
@@ -258,7 +256,7 @@ describe("Claude backend launch integration", () => {
       primaryModelId: "k3",
     });
     const native = nativeAnthropicBackendProfile();
-    const registrations = claudeBackendProfileRegistrations([kimi]);
+    const registrations = new BackendProfileRuntime(undefined, [kimi]).providerManagerOptions([]);
     const starts: string[] = [];
     const harness = capturingHarness(
       (options) => starts.push(options.input.backendProfile.id),
@@ -295,7 +293,7 @@ describe("Claude backend launch integration", () => {
       secretReference: SECRET_REFERENCE,
       primaryModelId: "k3",
     });
-    const registrations = claudeBackendProfileRegistrations([profile]);
+    const registrations = new BackendProfileRuntime(undefined, [profile]).providerManagerOptions([]);
     const start = vi.fn();
     const harness: AgentHarness = {
       ...capturingHarness(() => undefined, async (input) => completedResult(input)),
@@ -326,7 +324,7 @@ describe("Claude backend launch integration", () => {
       secretReference: SECRET_REFERENCE,
       primaryModelId: "k3",
     });
-    const registrations = claudeBackendProfileRegistrations([profile]);
+    const registrations = new BackendProfileRuntime(undefined, [profile]).providerManagerOptions([]);
     const releaseAfterStart = vi.fn();
     const dispose = vi.fn();
     const harness = capturingHarness(

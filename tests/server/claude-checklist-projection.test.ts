@@ -188,6 +188,16 @@ describe("Claude checklist projection", () => {
     expect(plan?.steps.at(-1)).toEqual({ step: `Step ${MAX_AGENT_PLAN_STEPS - 1}`, status: "pending" });
   });
 
+  it("cuts an oversized step on a code point boundary", () => {
+    const claude = projector();
+    for (const message of todoWrite("todo-emoji", [{
+      content: `${"x".repeat(999)}\u{1F680} launch`,
+      status: "pending",
+      activeForm: "Launching",
+    }])) claude.observe(message);
+    expect(claude.plans()[0]?.steps[0]).toEqual({ step: "x".repeat(999), status: "pending" });
+  });
+
   it("reads only the bounded prefix of an oversized malformed checklist", () => {
     const claude = projector();
     const read = (length: number, valid: (index: number) => unknown) => {

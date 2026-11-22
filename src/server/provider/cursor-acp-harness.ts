@@ -101,6 +101,7 @@ import {
   waitForProviderNaturalClose,
 } from "./provider-natural-close";
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED, acpFileMutation, acpReadOnlyWatcher } from "./acp-watcher";
+import { clipCodeUnits } from "../../shared/code-units";
 export { findCursorAdvertisedConfigValue } from "./cursor-acp-session";
 
 export {
@@ -1185,8 +1186,8 @@ function failedCursorRun(
   };
 }
 
-function bounded(value: string): string { return value.slice(0, MAX_EVENT_TEXT_CHARS); }
-function boundedToolStateText(value: string): string { return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS); }
+function bounded(value: string): string { return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS); }
+function boundedToolStateText(value: string): string { return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS); }
 function boundedToolActivityId(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.length > MAX_TOOL_ACTIVITY_ID_CHARS) {
     throw new Error("Cursor ACP sent an invalid tool call identity.");

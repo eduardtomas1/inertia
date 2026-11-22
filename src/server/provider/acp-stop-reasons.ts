@@ -1,3 +1,5 @@
+import { clipCodeUnits } from "../../shared/code-units";
+
 const MAX_STOP_REASON_CHARS = 64;
 
 /**
@@ -14,6 +16,6 @@ export function acpStopReasonMessage(agentLabel: string, stopReason: string): st
     case "max_turn_requests":
       return `${agentLabel} hit its request limit for this turn. Ask it to continue.`;
     default:
-      return `${agentLabel} stopped with reason: ${stopReason.slice(0, MAX_STOP_REASON_CHARS)}.`;
+      return `${agentLabel} stopped with reason: ${clipCodeUnits(stopReason, MAX_STOP_REASON_CHARS)}.`;
   }
 }

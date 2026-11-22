@@ -16,6 +16,7 @@ import {
 } from "./activity-detail";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer } from "./io";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const DEFAULT_OPENCODE_SESSION_TITLE = /^(?:New session|Child session) - /u;
@@ -157,7 +158,7 @@ export function isOpenCodeIdleEvent(event: Event): boolean {
 }
 
 export function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 export function openCodeRequestRefused(error: unknown): boolean {

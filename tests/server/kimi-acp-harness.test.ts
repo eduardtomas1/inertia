@@ -352,6 +352,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan_removed", planId: "plan-1" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Run checks", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "completed", rawOutput: "green" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-long", title: "Run long", kind: "execute", status: "in_progress", rawInput: { command: "k".repeat(4095) + "\u{1F680}" + "k".repeat(100) } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-long", status: "completed", rawOutput: "done" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 125, size: 1000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Kimi response" } } } });
     return send({
@@ -484,6 +486,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       activityId: "tool-1",
       phase: "completed",
       detail: "Command:\nnpm test\n\nOutput:\ngreen",
+    }));
+    // The 4 KiB tool-state cut lands inside the rocket; the high half is dropped.
+    expect(activities).toContainEqual(expect.objectContaining({
+      activityId: "tool-long",
+      phase: "completed",
+      detail: `Command:\n${"k".repeat(4095)}\n\nOutput:\ndone`,
     }));
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
       id?: number;

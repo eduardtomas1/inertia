@@ -218,6 +218,20 @@ describe("Claude permission broker", () => {
     await expect(result).resolves.toMatchObject({ behavior: "allow" });
   });
 
+  it("cuts an oversized request summary on a code point boundary", async () => {
+    const events: AgentHarnessEvent[] = [];
+    const permissions = broker(true, "build", events);
+    // The serialized input is cut at 1 MiB, which lands between the rocket's
+    // two surrogates: `{"query":"` is ten code units.
+    const query = `${"x".repeat(1024 * 1024 - 11)}\u{1F680}${"y".repeat(20)}`;
+    const result = permissions.canUseTool("mcp__acme__query", { query }, callbackOptions());
+    await expect.poll(() => approvalRequests(events).length).toBe(1);
+    const [request] = approvalRequests(events) as Array<{ requestId: string; kind: string; detail?: string }>;
+    expect(request!.detail).toBe(`{"query":"${"x".repeat(1024 * 1024 - 11)}`);
+    expect(permissions.settleApproval(request!.requestId, "approve")).toBe(true);
+    await expect(result).resolves.toMatchObject({ behavior: "allow" });
+  });
+
   async function declinedThroughRuntime(
     toolName: string,
     input: Record<string, unknown>,

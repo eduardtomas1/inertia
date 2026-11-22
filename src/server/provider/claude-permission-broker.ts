@@ -3,6 +3,7 @@ import { stripVTControlCharacters } from "node:util";
 
 import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
@@ -313,7 +314,7 @@ function planSteps(markdown: string): AgentPlanStep[] {
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function summarizeInput(input: Record<string, unknown>): string {

@@ -2,6 +2,7 @@ import { providerActivityDetailSections } from "./activity-detail";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { CappedProviderBuffer } from "./io";
 import { bounded, finite, objectValue, stringValue } from "./opencode-sdk-support";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_TRACKED_MESSAGES = 2_048;
 const MAX_TRACKED_PARTS = 4_096;
@@ -473,7 +474,7 @@ export function openCodeCanonicalResult(
     const value = emittedParts.get(partId) ?? "";
     const available = MAX_CANONICAL_TEXT_CHARS - text.length;
     if (value.length > available) truncated = true;
-    if (available > 0) text += value.slice(0, available);
+    if (available > 0) text += clipCodeUnits(value, available);
   }
   return { text, truncated };
 }
@@ -727,6 +728,6 @@ function appendSettledText(
 ): void {
   const available = MAX_CANONICAL_TEXT_CHARS - state.settledText.length;
   if (value.length > available) state.settledTextTruncated = true;
-  if (available > 0) state.settledText += value.slice(0, available);
+  if (available > 0) state.settledText += clipCodeUnits(value, available);
 }
 

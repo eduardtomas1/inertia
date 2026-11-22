@@ -6,6 +6,7 @@ import { AcpSecretRedactor } from "./acp-redaction";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { openCode2Id } from "./opencode2-history";
 import { openCode2Usage } from "./opencode2-support";
+import { clipCodeUnits } from "../../shared/code-units";
 
 interface Block { raw: string; redactor: AcpSecretRedactor; ended: boolean; reasoning: boolean }
 interface Tool { name: string; activityId: string; called: boolean; settled: boolean }
@@ -104,15 +105,15 @@ export class OpenCode2Events {
     if (type === "session.tool.called") {
       if (tool.called) throw new Error("OpenCode 2 repeated a tool call.");
       tool.called = true;
-      this.emit.activity("tool", "started", tool.name, { activityId: tool.activityId, detail: JSON.stringify(safe.input ?? {}).slice(0, 16_384) });
+      this.emit.activity("tool", "started", tool.name, { activityId: tool.activityId, detail: clipCodeUnits(JSON.stringify(safe.input ?? {}), 16_384) });
     } else if (type === "session.tool.success" || type === "session.tool.failed") {
       const success = type === "session.tool.success";
       if (success && !tool.called) throw new Error("OpenCode 2 completed an uncalled tool.");
       tool.settled = true;
       const error = objectValue(safe.error)?.message;
-      const detail = Array.isArray(safe.content) ? safe.content.flatMap((part) => {
+      const detail = Array.isArray(safe.content) ? clipCodeUnits(safe.content.flatMap((part) => {
         const content = objectValue(part); return content?.type === "text" && typeof content.text === "string" ? [content.text] : [];
-      }).join("\n").slice(0, 16_384) : typeof error === "string" ? error.slice(0, 16_384) : undefined;
+      }).join("\n"), 16_384) : typeof error === "string" ? clipCodeUnits(error, 16_384) : undefined;
       this.emit.activity("tool", success ? "completed" : "failed", tool.name, { activityId: tool.activityId, detail,
         ...(success && ["edit", "write", "apply_patch"].includes(tool.name) ? { fileMutation: true as const } : {}) });
     }

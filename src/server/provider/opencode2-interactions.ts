@@ -3,6 +3,7 @@ import type { AgentHarnessEmitter } from "./agent-harness";
 import type { AgentApprovalDecision, AgentInputQuestion } from "./interactions";
 import type { AcpSecretRedactor } from "./acp-redaction";
 import { openCode2SessionPath, type OpenCode2Api } from "./opencode2-history";
+import { clipCodeUnits } from "../../shared/code-units";
 
 interface Pending { nativeId: string; sessionId: string; kind: "permission" | "form"; fields?: JsonObject[]; timer: NodeJS.Timeout; responding: boolean }
 export class OpenCode2Interactions {
@@ -40,7 +41,7 @@ export class OpenCode2Interactions {
         || safe.resources.length > 64 || safe.resources.some((value) => typeof value !== "string" || value.length > 8192)) throw new Error("Invalid OpenCode 2 permission payload.");
       this.emit.rich({ type: "approval", request: { requestId: id,
         kind: safe.action === "shell" ? "command" : safe.action === "edit" ? "file-change" : "permissions",
-        title: `OpenCode: ${safe.action}`, detail: safe.resources.join("\n").slice(0, 32_768),
+        title: `OpenCode: ${safe.action}`, detail: clipCodeUnits(safe.resources.join("\n"), 32_768),
         permissionRoots: [], availableDecisions: ["approve", "deny", "cancel"] } });
       return true;
     }
@@ -53,13 +54,13 @@ export class OpenCode2Interactions {
     const questions = entry.fields.map((field): AgentInputQuestion => {
       const options = field.type === "boolean" ? [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] : field.options ?? [];
       if (!Array.isArray(options) || options.length > 64) throw new Error("Invalid OpenCode 2 form options.");
-      return { id: field.key as string, header: this.redact.payload(String(field.title ?? record.title ?? "OpenCode").slice(0, 240)),
-        question: this.redact.payload(String(field.description ?? field.title ?? record.title ?? "OpenCode question").slice(0, 32_768)),
+      return { id: field.key as string, header: this.redact.payload(clipCodeUnits(String(field.title ?? record.title ?? "OpenCode"), 240)),
+        question: this.redact.payload(clipCodeUnits(String(field.description ?? field.title ?? record.title ?? "OpenCode question"), 32_768)),
         isSecret: false, isOther: field.type !== "boolean" && (options.length === 0 || field.custom === true), allowMultiple: field.type === "multiselect",
         options: options.map((rawOption, index) => {
           const option = objectValue(rawOption);
           if (!option || typeof option.value !== "string" || option.value.length > 8192 || typeof option.label !== "string" || option.label.length > 512) throw new Error("Invalid OpenCode 2 form option.");
-          return { id: String(index), label: this.redact.payload(option.label), description: this.redact.payload(String(option.description ?? "").slice(0, 4096)) };
+          return { id: String(index), label: this.redact.payload(option.label), description: this.redact.payload(clipCodeUnits(String(option.description ?? ""), 4096)) };
         }) };
     });
     this.emit.rich({ type: "input", request: { requestId: id, questions, autoResolutionMs: 300_000 } });

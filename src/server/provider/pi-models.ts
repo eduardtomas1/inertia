@@ -4,6 +4,7 @@ import type { ProviderUsageEvent } from "./contracts";
 import { piLaunchConfiguration, piRpcArguments } from "./pi-launch";
 import { openPiRpcConnection } from "./pi-rpc";
 import { AcpSecretRedactor } from "./acp-redaction";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -23,7 +24,7 @@ export function piModels(value: unknown, selected?: unknown): ProviderModel[] {
     const levels = model.reasoning === true ? LEVELS.filter((level) => map?.[level] !== null
       && (!["xhigh", "max"].includes(level) || map?.[level] !== undefined)) : ["off"];
     return {
-      id, label: typeof model.name === "string" ? model.name.slice(0, 200) : id,
+      id, label: typeof model.name === "string" ? clipCodeUnits(model.name, 200) : id,
       description: `Pi · ${model.provider}`, isDefault: current?.provider === model.provider && current.id === model.id,
       inputModalities: Array.isArray(model.input) && model.input.includes("image") ? ["text", "image"] : ["text"],
       reasoningOptions: levels.map((level) => ({ value: level, label: level, description: "" })),

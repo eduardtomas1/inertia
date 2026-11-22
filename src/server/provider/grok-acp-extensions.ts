@@ -3,6 +3,7 @@ import {
   interactionDisplayIdentity,
   isSafeInteractionDisplayText,
 } from "./approval-display";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_QUESTIONS = 4;
 const MAX_OPTIONS = 20;
@@ -149,7 +150,7 @@ export function parseGrokExitPlanRequest(value: unknown): GrokExitPlanRequest {
   if (content !== undefined && content !== null && typeof content !== "string") {
     throw new Error("Grok sent a plan that is not text.");
   }
-  const plan = typeof content === "string" ? content.trim().slice(0, MAX_PLAN_CHARS) : "";
+  const plan = typeof content === "string" ? clipCodeUnits(content.trim(), MAX_PLAN_CHARS) : "";
   return {
     sessionId: requireId(record.sessionId, "sessionId"),
     toolCallId: requireId(record.toolCallId, "toolCallId"),

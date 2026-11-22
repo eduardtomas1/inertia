@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 
+import { clipCodeUnits, clipTrailingCodeUnits } from "../../shared/code-units";
 import { scrubCommandSecrets } from "./command-secrets";
 import { scrubSubagentSecrets } from "./subagent-trace";
 
@@ -48,10 +49,10 @@ export function boundProviderActivityDetail(
   if (value.length <= limit) return value;
   if (limit === 0) return "";
   const marker = `\n… [${value.length - limit} or more characters omitted] …\n`;
-  if (marker.length >= limit) return value.slice(0, limit);
+  if (marker.length >= limit) return clipCodeUnits(value, limit);
   const retained = limit - marker.length;
   const headLength = Math.ceil(retained * 0.65);
-  return `${value.slice(0, headLength)}${marker}${value.slice(-(retained - headLength))}`;
+  return `${clipCodeUnits(value, headLength)}${marker}${clipTrailingCodeUnits(value, retained - headLength)}`;
 }
 
 /**
@@ -204,9 +205,8 @@ export function sanitizeProviderFailureSummary(
   const summary = sanitized
     ?.split("\n")
     .map((line) => line.replace(/\s+/gu, " ").trim())
-    .find(Boolean)
-    ?.slice(0, MAX_PROVIDER_FAILURE_SUMMARY_CHARS);
-  return summary || fallback;
+    .find(Boolean);
+  return (summary && clipCodeUnits(summary, MAX_PROVIDER_FAILURE_SUMMARY_CHARS)) || fallback;
 }
 
 const FAILURE_METADATA_LINE = /^(?:Reason|Phase|Exit code|Signal|Terminal event|Turn|Activity|Cleanup):/iu;

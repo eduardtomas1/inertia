@@ -578,6 +578,36 @@ describe("Grok ACP harness", { concurrent: false }, () => {
     expect(events.join("")).toBe("text:Checkingtext: now.boundarytext:Done.");
   });
 
+  it("cuts an oversized tool command on a code point boundary", async () => {
+    const root = portableFixtureRoot("grok ACP tool bound");
+    roots.push(root);
+    const command = writeNodeFlagExecutable(root, "grok", grokAgent(null, `
+      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
+      if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-tool-bound", configOptions: [] } });
+      if (message.method === "session/prompt") {
+        send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-tool-bound", update: { sessionUpdate: "tool_call", toolCallId: "call-long", title: "Run long", kind: "execute", status: "completed", rawInput: { command: "g".repeat(4095) + "\\u{1F680}" + "g".repeat(100) }, rawOutput: "done" } } });
+        return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      }
+    `));
+    const details: string[] = [];
+    const result = await managerFor(root, command).run(nativeProviderRunInput({
+      providerId: "grok",
+      conversationId: "grok-tool-bound",
+      cwd: root,
+      prompt: "Run",
+      interactionMode: "build",
+      access: "supervised",
+    }), {
+      onEvent: (event) => {
+        if (event.type === "activity" && event.activityId === "call-long" && event.detail) details.push(event.detail);
+      },
+    });
+    expect(result).toMatchObject({ status: "completed" });
+    // The 4 KiB tool-state cut lands inside the rocket; the high half is dropped.
+    expect(details).toEqual([`Command:\n${"g".repeat(4095)}\n\nOutput:\ndone`]);
+  });
+
   it("sets only advertised model and reasoning effort values", async () => {
     const root = portableFixtureRoot("grok ACP config");
     roots.push(root);

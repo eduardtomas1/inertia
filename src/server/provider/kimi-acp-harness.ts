@@ -97,6 +97,7 @@ import {
   kimiPlanReviseOptionId,
   type KimiInputOptions,
 } from "./kimi-input-options";
+import { clipCodeUnits } from "../../shared/code-units";
 
 export { kimiInputOptions };
 
@@ -1172,11 +1173,11 @@ function failedKimiRun(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function boundedToolStateText(value: string): string {
-  return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS);
 }
 
 function boundedId(value: string, label: string): string {

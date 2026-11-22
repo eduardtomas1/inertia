@@ -98,6 +98,7 @@ import {
   parseGrokQuestionRequest,
 } from "./grok-acp-extensions";
 import { markdownPlanSteps } from "./markdown-plan-steps";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -1169,11 +1170,11 @@ function failedGrokRun(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function boundedToolStateText(value: string): string {
-  return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS);
 }
 
 function boundedId(value: string, label: string): string {

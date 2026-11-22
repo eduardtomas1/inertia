@@ -34,6 +34,7 @@ import type { ProviderCapabilityId } from "./capability-manifest";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { contractActivityPhase } from "./activity-lifecycle";
 import type { NativeConversationContinuation, NativeConversationOperations } from "./native-conversation-operations";
+import { clipCodeUnits } from "../../shared/code-units";
 
 /** @deprecated Prefer the shared harness identity contract. */
 export type AgentHarnessId = KnownHarnessId;
@@ -495,11 +496,13 @@ export function createAgentHarnessEmitter(
     }),
     textBoundary: () => emit({ ...base, type: "text-boundary" }),
     activity: (kind, phase, label, detail = {}) => {
-      const safeLabel = label
-        .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
-        .replace(/\s+/gu, " ")
-        .trim()
-        .slice(0, 240) || "Activity";
+      const safeLabel = clipCodeUnits(
+        label
+          .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
+          .replace(/\s+/gu, " ")
+          .trim(),
+        240,
+      ) || "Activity";
       const activityId = detail.activityId
         ?.replace(/\0/gu, "")
         .trim()

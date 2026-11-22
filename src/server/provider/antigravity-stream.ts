@@ -9,6 +9,7 @@ import type {
   ProviderRunInput,
   ProviderUsageEvent,
 } from "./contracts";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_TECHNICAL_DETAIL_CHARS = 16 * 1024;
 const MAX_LABEL_CHARS = 200;
@@ -192,7 +193,7 @@ export function parseAntigravityLine(
     events.push({
       kind: "tool",
       id: stepIndex === null ? toolName : String(stepIndex),
-      label: toolName.slice(0, MAX_LABEL_CHARS),
+      label: clipCodeUnits(toolName, MAX_LABEL_CHARS),
       phase: error ? "failed" : payload.state === "DONE" ? "completed" : "started",
       ...(error ? { detail: error } : {}),
     });

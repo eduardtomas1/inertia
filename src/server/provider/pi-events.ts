@@ -4,6 +4,7 @@ import { objectValue, type JsonObject } from "../codex/protocol";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { AcpSecretRedactor } from "./acp-redaction";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
+import { clipCodeUnits } from "../../shared/code-units";
 
 /** Projects only supported Pi events. Provider transcripts and error payloads stay private. */
 export class PiEvents {
@@ -75,15 +76,15 @@ export class PiEvents {
       const tool = { activityId: `pi-tool:${randomUUID()}`, name: raw.toolName, label: String(event.toolName) };
       this.tools.set(raw.toolCallId, tool); this.toolCount++;
       this.emit.activity("tool", "started", tool.label,
-        { activityId: tool.activityId, detail: event.args ? JSON.stringify(event.args).slice(0, 16_384) : undefined });
+        { activityId: tool.activityId, detail: event.args ? clipCodeUnits(JSON.stringify(event.args), 16_384) : undefined });
     } else if (event.type === "tool_execution_end") {
       const tool = typeof raw.toolCallId === "string" ? this.tools.get(raw.toolCallId) : undefined;
       if (!tool || tool.name !== raw.toolName) throw new Error("Pi completed an unknown or mismatched tool.");
       this.tools.delete(raw.toolCallId as string);
       const content = objectValue(event.result)?.content;
-      const detail = Array.isArray(content) ? content.flatMap((part) => {
+      const detail = Array.isArray(content) ? clipCodeUnits(content.flatMap((part) => {
         const block = objectValue(part); return block?.type === "text" && typeof block.text === "string" ? [block.text] : [];
-      }).join("\n").slice(0, 16_384) : undefined;
+      }).join("\n"), 16_384) : undefined;
       this.emit.activity("tool", event.isError === true ? "failed" : "completed", tool.label,
         { activityId: tool.activityId, detail, ...(event.isError !== true && ["edit", "write"].includes(tool.name) ? { fileMutation: true as const } : {}) });
     } else if (event.type === "auto_retry_start") this.emit.status("retrying", "Pi is retrying the request");

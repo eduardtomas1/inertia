@@ -1,4 +1,5 @@
 import type { SubagentTaskStep, SubagentTraceStatus } from "../../shared/contracts";
+import { clipCodeUnits } from "../../shared/code-units";
 import {
   MAX_SUBAGENT_LABEL_CHARS,
   MAX_SUBAGENT_STEP_LABEL_CHARS,
@@ -70,7 +71,7 @@ export function boundedSubagentText(
   if (typeof value !== "string") return null;
   const text = value.replace(/\0/gu, "").trim();
   if (!text) return null;
-  return scrubSubagentSecrets(text).slice(0, maxChars);
+  return clipCodeUnits(scrubSubagentSecrets(text), maxChars);
 }
 
 export function boundedSubagentIdentifier(
@@ -101,9 +102,7 @@ export function boundedSubagentLabel(
   const text = value?.trim();
   if (!text) return null;
   if (text.length <= maxChars) return text;
-  const lastUnit = text.charCodeAt(maxChars - 1);
-  const end = lastUnit >= 0xd800 && lastUnit <= 0xdbff ? maxChars - 1 : maxChars;
-  return text.slice(0, end).trim() || null;
+  return clipCodeUnits(text, maxChars).trim() || null;
 }
 
 const SUBAGENT_STEP_STATUSES = new Set<SubagentTaskStep["status"]>([

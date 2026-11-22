@@ -10,6 +10,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
+import { clipCodeUnits } from "../../shared/code-units";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
 import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
@@ -924,7 +925,7 @@ function startClaudeRun(
   ): ProviderRunResult {
     const resultText = textOverride === undefined
       ? text.toString()
-      : textOverride.slice(0, MAX_RESULT_TEXT_CHARS);
+      : clipCodeUnits(textOverride, MAX_RESULT_TEXT_CHARS);
     const settledFailure = failure && status === "failed" && messageProjector.rateLimitRejected
       ? { ...failure, usageLimited: true as const }
       : failure;
@@ -1126,7 +1127,7 @@ function claudeRuntimeFailure(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function claudeReadableRuntimeError(rawError: string): string {

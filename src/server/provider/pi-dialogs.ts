@@ -4,6 +4,7 @@ import type { JsonObject } from "../codex/protocol";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { AgentApprovalDecision } from "./interactions";
 import type { AcpSecretRedactor } from "./acp-redaction";
+import { clipCodeUnits } from "../../shared/code-units";
 
 interface Dialog { nativeId: string; method: string; approval: boolean; options: string[]; timer: NodeJS.Timeout }
 
@@ -30,9 +31,9 @@ export class PiDialogs {
       ? Math.max(1, Math.min(300_000, event.timeout)) : 300_000;
     const timer = setTimeout(() => this.finish(id, { cancelled: true }), timeout); timer.unref();
     this.pending.set(id, { nativeId: event.id, method: String(method), approval, options: choices as string[], timer });
-    const title = this.redact.payload(typeof event.title === "string" ? event.title.slice(0, 240) : "Pi extension");
-    const message = this.redact.payload(typeof event.message === "string" ? event.message.slice(0, 32_768)
-      : typeof event.prefill === "string" ? event.prefill.slice(0, 32_768) : "");
+    const title = this.redact.payload(typeof event.title === "string" ? clipCodeUnits(event.title, 240) : "Pi extension");
+    const message = this.redact.payload(typeof event.message === "string" ? clipCodeUnits(event.message, 32_768)
+      : typeof event.prefill === "string" ? clipCodeUnits(event.prefill, 32_768) : "");
     if (approval) this.emit.rich({ type: "approval", request: {
       requestId: id, kind: "permissions", title: "Pi tool approval", detail: message,
       permissionRoots: [], availableDecisions: ["approve", "deny", "cancel"],

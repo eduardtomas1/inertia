@@ -5,6 +5,7 @@ import type { AgentHarnessStartOptions } from "./agent-harness";
 import type { ProviderUsageEvent } from "./contracts";
 import { openCode2Data } from "./opencode2-history";
 import { imageMediaType, MAX_PROVIDER_REQUEST_IMAGE_COUNT, readBoundedProviderImage } from "./provider-image-read";
+import { clipCodeUnits } from "../../shared/code-units";
 
 export function openCode2Models(value: unknown, defaultModel?: unknown): ProviderModel[] {
   const models = openCode2Data(value); const selected = objectValue(defaultModel);
@@ -21,7 +22,7 @@ export function openCode2Models(value: unknown, defaultModel?: unknown): Provide
       return { value: variant.id, label: variant.id, description: "Model variant" };
     });
     if (model.enabled !== true) return [];
-    return [{ id, label: typeof model.name === "string" ? model.name.slice(0, 200) : id, description: `OpenCode 2 · ${model.providerID}`,
+    return [{ id, label: typeof model.name === "string" ? clipCodeUnits(model.name, 200) : id, description: `OpenCode 2 · ${model.providerID}`,
       isDefault: selected?.providerID === model.providerID && selected.id === model.id,
       inputModalities: Array.isArray(objectValue(model.capabilities)?.input) && (objectValue(model.capabilities)!.input as unknown[]).includes("image") ? ["text", "image"] : ["text"],
       reasoningOptions: variants, defaultReasoningEffort: "", reasoningObserved: true }];

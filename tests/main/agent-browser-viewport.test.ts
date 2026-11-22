@@ -309,7 +309,8 @@ describe("agent Browser viewport in the broker", () => {
     const { broker, contents } = await shownBrowser();
     await broker.perform(runIdentity, { action: "resize", preset: "desktop" });
     await expect(broker.perform(runIdentity, { action: "scroll", deltaY: 300 })).resolves.toMatchObject({ ok: true });
-    expect(contents.sentInputs).toEqual([{ type: "mouseWheel", x: 300, y: 187, deltaX: 0, deltaY: 300 }]);
+    // Chromium wheel deltas point up and left, so scrolling down sends a negative delta.
+    expect(contents.sentInputs).toEqual([{ type: "mouseWheel", x: 300, y: 187, deltaX: 0, deltaY: -300 }]);
   });
 
   it("lays a parked chat's page out at the chosen size with no scaling", async () => {

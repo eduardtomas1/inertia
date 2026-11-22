@@ -338,7 +338,7 @@ describe("AgentThreadManager", () => {
       const browserTools = (offer: typeof offered) => manager.bridgeFor({ conversation: source, turn: sourceTurn }, offer.offer)
         .definitions.filter(({ name }) => name.startsWith("inertia_browser_")).length;
       expect(offered.instructions.map(({ label }) => label)).toContain("inertia-frontend-workbench");
-      expect(browserTools(offered)).toBe(16);
+      expect(browserTools(offered)).toBe(17);
       expect(withheld.instructions.map(({ label }) => label)).toEqual(["inertia-orchestration", "inertia-workspace"]);
       expect(browserTools(withheld)).toBe(0);
     } finally { store.close(); }

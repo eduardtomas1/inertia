@@ -7,6 +7,13 @@ export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
 export const MAX_AGENT_BROWSER_SELECT_CHARS = 200;
 export const MAX_AGENT_BROWSER_URL_CHARS = 4_096;
 export const MAX_AGENT_BROWSER_WAIT_TEXT_CHARS = 200;
+export const MAX_AGENT_BROWSER_SCROLL_DELTA = 2_000;
+export const MAX_AGENT_BROWSER_CLICK_COUNT = 3;
+/**
+ * A wait path: "/" segments, each literal or "*" for exactly one segment, with
+ * no query, fragment, whitespace or control characters.
+ */
+export const AGENT_BROWSER_WAIT_PATH_PATTERN = "^(?:/(?:\\*|[^\\u0000-\\u0020?#*/]+))*/?$";
 export const MIN_AGENT_BROWSER_VIEWPORT_WIDTH = 320;
 export const MAX_AGENT_BROWSER_VIEWPORT_WIDTH = 2_560;
 export const MIN_AGENT_BROWSER_VIEWPORT_HEIGHT = 240;
@@ -40,13 +47,14 @@ export type AgentBrowserActionKind =
   | "resize"
   | "hover"
   | "select"
+  | "drag"
   | "tab-open"
   | "tab-activate"
   | "tab-close";
 
 export const AGENT_BROWSER_ACTION_KINDS = [
   "navigate", "click", "type", "press", "scroll", "snapshot", "screenshot",
-  "resize", "hover", "select", "tab-open", "tab-activate", "tab-close",
+  "resize", "hover", "select", "drag", "tab-open", "tab-activate", "tab-close",
 ] as const satisfies readonly AgentBrowserActionKind[];
 
 export type AgentBrowserViewportPreset = "fit" | "desktop" | "tablet" | "mobile";
@@ -112,14 +120,22 @@ export type AgentBrowserCommand =
   | { action: "logs" }
   | { action: "navigate"; url: string }
   | { action: "history"; direction: "back" | "forward" | "reload" }
-  | { action: "click"; ref: string; dialog?: "accept" }
+  | { action: "click"; ref: string; dialog?: "accept"; clickCount?: 2 | 3; modifiers?: AgentBrowserModifier[] }
   | { action: "hover"; ref: string }
   | { action: "type"; ref: string; text: string; replace: boolean }
   | { action: "select"; ref: string; value: string }
-  | { action: "press"; key: AgentBrowserKey; dialog?: "accept" }
-  | { action: "scroll"; deltaY: number }
+  | { action: "drag"; ref: string; targetRef: string }
+  | { action: "press"; key: AgentBrowserKey; dialog?: "accept"; modifiers?: AgentBrowserModifier[] }
+  | { action: "scroll"; deltaX?: number; deltaY?: number }
   | { action: "scroll"; ref: string }
-  | { action: "wait"; text?: string; state: "present" | "absent"; timeoutMs: number }
+  | {
+      action: "wait";
+      text?: string;
+      path?: string;
+      ref?: string;
+      state: "present" | "absent";
+      timeoutMs: number;
+    }
   | { action: "resize"; preset?: AgentBrowserViewportPreset; width?: number; height?: number; colorScheme?: AgentBrowserColorScheme }
   | { action: "tabs" }
   | { action: "tab-open"; url?: string }
@@ -150,6 +166,68 @@ export const AGENT_BROWSER_KEYS = [
   "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Space",
   "Shift+Tab", "Shift+Enter", "Control+Enter", "Meta+Enter",
 ] as const satisfies readonly AgentBrowserKey[];
+
+/** Keys an agent may hold during a click or key press, in canonical order. */
+export type AgentBrowserModifier = "Control" | "Alt" | "Shift" | "Meta";
+
+export const AGENT_BROWSER_MODIFIERS = [
+  "Control", "Alt", "Shift", "Meta",
+] as const satisfies readonly AgentBrowserModifier[];
+
+/**
+ * Validates a list of held keys: each one known and listed once. Returns them
+ * in canonical order, or null when the list is not acceptable.
+ */
+export function agentBrowserModifiers(value: unknown): AgentBrowserModifier[] | null {
+  if (!Array.isArray(value) || value.length > AGENT_BROWSER_MODIFIERS.length) return null;
+  if (!value.every((entry) => (AGENT_BROWSER_MODIFIERS as readonly unknown[]).includes(entry))) return null;
+  if (new Set(value).size !== value.length) return null;
+  return AGENT_BROWSER_MODIFIERS.filter((modifier) => value.includes(modifier));
+}
+
+/** The chord a key press sends: the key's own modifier merged with the held ones. */
+export function agentBrowserKeyChord(
+  key: AgentBrowserKey,
+  modifiers: readonly AgentBrowserModifier[] = [],
+): { key: string; modifiers: AgentBrowserModifier[]; label: string } {
+  const [prefix, base] = key.split("+") as [string, string | undefined];
+  const held = new Set<AgentBrowserModifier>(modifiers);
+  if (base !== undefined) held.add(prefix as AgentBrowserModifier);
+  const ordered = AGENT_BROWSER_MODIFIERS.filter((modifier) => held.has(modifier));
+  const keyName = base ?? prefix;
+  return { key: keyName, modifiers: ordered, label: [...ordered, keyName].join("+") };
+}
+
+const WAIT_PATH = new RegExp(AGENT_BROWSER_WAIT_PATH_PATTERN, "u");
+
+function waitPathSegments(path: string): string[] {
+  const trimmed = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  return trimmed.split("/").slice(1);
+}
+
+/**
+ * Whether a page address has the given path. A "*" segment matches exactly
+ * one non-empty segment; the query, fragment and origin are never compared,
+ * and one trailing slash is ignored. Only a whole-path comparison is offered,
+ * so a hidden path cannot be read back one character at a time.
+ */
+export function agentBrowserPathMatches(url: string, path: string): boolean {
+  if (!WAIT_PATH.test(path)) return false;
+  let actual: string;
+  let expected: string;
+  try {
+    actual = new URL(url).pathname;
+    expected = new URL(path, "http://localhost").pathname;
+  } catch {
+    return false;
+  }
+  const actualSegments = waitPathSegments(actual);
+  const expectedSegments = waitPathSegments(expected);
+  return actualSegments.length === expectedSegments.length
+    && expectedSegments.every((segment, index) => segment === "*"
+      ? actualSegments[index]!.length > 0
+      : segment === actualSegments[index]);
+}
 
 export type AgentBrowserResult =
   | {
@@ -234,6 +312,31 @@ function safeUrl(value: unknown): value is string {
 
 function safeDialog(value: unknown): boolean {
   return value === undefined || value === "accept" || value === "dismiss";
+}
+
+function safeRef(value: unknown): value is string {
+  return typeof value === "string" && SAFE_REF_PATTERN.test(value);
+}
+
+function safeScrollDelta(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value !== 0
+    && Math.abs(value) <= MAX_AGENT_BROWSER_SCROLL_DELTA;
+}
+
+function safeClickCount(value: unknown): value is number {
+  return value === undefined || (typeof value === "number" && Number.isSafeInteger(value)
+    && value >= 1 && value <= MAX_AGENT_BROWSER_CLICK_COUNT);
+}
+
+function heldModifiers(value: unknown): { modifiers?: AgentBrowserModifier[] } | null {
+  if (value === undefined) return {};
+  const modifiers = agentBrowserModifiers(value);
+  if (!modifiers) return null;
+  return modifiers.length > 0 ? { modifiers } : {};
+}
+
+export function safeAgentBrowserWaitPath(value: unknown): value is string {
+  return safeCommandText(value, MAX_AGENT_BROWSER_WAIT_TEXT_CHARS) && WAIT_PATH.test(value);
 }
 
 function safeTabId(value: unknown): value is string {
@@ -321,12 +424,28 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
         && (value.direction === "back" || value.direction === "forward" || value.direction === "reload")
         ? { action: "history", direction: value.direction }
         : null;
-    case "click":
-      return exactKeys(value, ["action", "ref"], ["dialog"])
-        && typeof value.ref === "string"
-        && SAFE_REF_PATTERN.test(value.ref)
+    case "click": {
+      const held = heldModifiers(value.modifiers);
+      return exactKeys(value, ["action", "ref"], ["dialog", "clickCount", "modifiers"])
+        && safeRef(value.ref)
         && safeDialog(value.dialog)
-        ? { action: "click", ref: value.ref, ...(value.dialog === "accept" ? { dialog: "accept" as const } : {}) }
+        && safeClickCount(value.clickCount)
+        && held
+        ? {
+            action: "click",
+            ref: value.ref,
+            ...(value.dialog === "accept" ? { dialog: "accept" as const } : {}),
+            ...(value.clickCount === 2 || value.clickCount === 3 ? { clickCount: value.clickCount } : {}),
+            ...held,
+          }
+        : null;
+    }
+    case "drag":
+      return exactKeys(value, ["action", "ref", "targetRef"])
+        && safeRef(value.ref)
+        && safeRef(value.targetRef)
+        && value.ref !== value.targetRef
+        ? { action: "drag", ref: value.ref, targetRef: value.targetRef }
         : null;
     case "type":
       return exactKeys(value, ["action", "ref", "text", "replace"])
@@ -343,33 +462,39 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
             replace: value.replace,
           }
         : null;
-    case "press":
-      return exactKeys(value, ["action", "key"], ["dialog"])
+    case "press": {
+      const held = heldModifiers(value.modifiers);
+      return exactKeys(value, ["action", "key"], ["dialog", "modifiers"])
         && typeof value.key === "string"
         && SAFE_KEYS.has(value.key as AgentBrowserKey)
         && safeDialog(value.dialog)
+        && held
         ? {
             action: "press",
             key: value.key as AgentBrowserKey,
             ...(value.dialog === "accept" ? { dialog: "accept" as const } : {}),
+            ...held,
           }
         : null;
+    }
     case "scroll":
       if (exactKeys(value, ["action", "ref"])) {
-        return typeof value.ref === "string" && SAFE_REF_PATTERN.test(value.ref)
+        return safeRef(value.ref)
           ? { action: "scroll", ref: value.ref }
           : null;
       }
-      return exactKeys(value, ["action", "deltaY"])
-        && typeof value.deltaY === "number"
-        && Number.isSafeInteger(value.deltaY)
-        && value.deltaY >= -2_000
-        && value.deltaY <= 2_000
-        && value.deltaY !== 0
-        ? { action: "scroll", deltaY: value.deltaY }
+      return exactKeys(value, ["action"], ["deltaX", "deltaY"])
+        && (value.deltaX !== undefined || value.deltaY !== undefined)
+        && (value.deltaX === undefined || safeScrollDelta(value.deltaX))
+        && (value.deltaY === undefined || safeScrollDelta(value.deltaY))
+        ? {
+            action: "scroll",
+            ...(value.deltaX === undefined ? {} : { deltaX: value.deltaX as number }),
+            ...(value.deltaY === undefined ? {} : { deltaY: value.deltaY as number }),
+          }
         : null;
     case "wait":
-      return exactKeys(value, ["action", "state", "timeoutMs"], ["text"])
+      return exactKeys(value, ["action", "state", "timeoutMs"], ["text", "path", "ref"])
         && (value.state === "present" || value.state === "absent")
         && typeof value.timeoutMs === "number"
         && Number.isSafeInteger(value.timeoutMs)
@@ -377,9 +502,13 @@ export function parseAgentBrowserCommand(value: unknown): AgentBrowserCommand | 
         && value.timeoutMs <= MAX_AGENT_BROWSER_WAIT_MS
         && (value.text === undefined
           || (safeCommandText(value.text, MAX_AGENT_BROWSER_WAIT_TEXT_CHARS) && value.text.trim().length > 0))
+        && (value.path === undefined || safeAgentBrowserWaitPath(value.path))
+        && (value.ref === undefined || safeRef(value.ref))
         ? {
             action: "wait",
             ...(typeof value.text === "string" ? { text: value.text } : {}),
+            ...(typeof value.path === "string" ? { path: value.path } : {}),
+            ...(typeof value.ref === "string" ? { ref: value.ref } : {}),
             state: value.state,
             timeoutMs: value.timeoutMs,
           }

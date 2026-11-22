@@ -17,6 +17,7 @@ export const PREVIEW_AGENT_OPERATION_PHASES = [
   "page-scroll",
   "page-viewport",
   "option-select",
+  "page-drag",
 ] as const;
 
 export const PREVIEW_AGENT_FAILURE_CATEGORIES = ["timeout", "failed"] as const;
@@ -48,6 +49,7 @@ const PHASE_DESCRIPTIONS: Readonly<Record<PreviewAgentOperationPhase, string>> =
   "page-scroll": "scrolling to an element",
   "page-viewport": "the page viewport check",
   "option-select": "choosing an option",
+  "page-drag": "the drag",
 };
 
 export function isPreviewAgentOperationPhase(value: unknown): value is PreviewAgentOperationPhase {

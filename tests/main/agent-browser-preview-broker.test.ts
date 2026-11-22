@@ -448,7 +448,7 @@ describe("agent-owned native Browser", () => {
       expect.objectContaining({ type: "mouseDown", x: 42, y: 28 }),
       expect.objectContaining({ type: "mouseUp", x: 42, y: 28 }),
     ]));
-    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), true, "e1");
+    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), true, "e1", false);
     expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), false);
     expect(electronState.contents[contentsOffset]!.debugger.sendCommand).toHaveBeenCalledWith(
       "Page.setInterceptFileChooserDialog",

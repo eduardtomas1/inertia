@@ -302,7 +302,11 @@ export function createPreviewBrokerElectronMock(electronState: PreviewBrokerElec
     sendInputEvent(input: Record<string, unknown>): void {
       this.sentInputs.push(input);
       electronState.interactionTimeline.push(String(input.type));
-      this.emit("input-event", {}, typeof input.keyCode === "string" ? { ...input, key: input.keyCode } : input);
+      // Chromium reports the DOM key for Electron's accelerator names.
+      const domKeys: Record<string, string> = { Up: "ArrowUp", Down: "ArrowDown", Left: "ArrowLeft", Right: "ArrowRight" };
+      this.emit("input-event", {}, typeof input.keyCode === "string"
+        ? { ...input, key: domKeys[input.keyCode] ?? input.keyCode }
+        : input);
     }
     async insertText(text: string): Promise<void> { this.insertedText.push(text); }
     readonly throttling: boolean[] = [];

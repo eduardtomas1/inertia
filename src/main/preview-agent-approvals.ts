@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { AgentBrowserRequest } from "../shared/agent-browser-approval.js";
-import { AGENT_BROWSER_VIEWPORT_SIZES, type AgentBrowserCommand, type AgentBrowserRunIdentity } from "../shared/agent-browser.js";
+import {
+  AGENT_BROWSER_VIEWPORT_SIZES,
+  agentBrowserKeyChord,
+  type AgentBrowserCommand,
+  type AgentBrowserModifier,
+  type AgentBrowserRunIdentity,
+} from "../shared/agent-browser.js";
 import { sanitizeBrowserEvidenceText } from "../shared/browser-evidence.js";
 import type { PreviewAgentTarget } from "./preview-agent-page.js";
 import type { PreviewTab } from "./preview-tab.js";
@@ -19,10 +25,13 @@ interface PreparedAction {
   documentSequence: number;
   url: string;
   target: PreviewAgentTarget | null;
+  /** The element a drag drops onto, bound like the dragged one. */
+  dropTarget: PreviewAgentTarget | null;
   timer: ReturnType<typeof setTimeout>;
 }
 
-export type BrowserApprovalGuard = (target?: PreviewAgentTarget) => void;
+/** Re-checks the approved page and, when given, a delivered target: the drop target when `drop` is set. */
+export type BrowserApprovalGuard = (target?: PreviewAgentTarget, drop?: "drop") => void;
 interface ApprovedAction { command: AgentBrowserCommand; validate: BrowserApprovalGuard }
 
 const EXPIRY_MS = 5 * 60_000;
@@ -35,6 +44,17 @@ function safeLabel(value: string): string {
 
 function acceptsDialog(command: { dialog?: "accept" }): string {
   return command.dialog === "accept" ? " and accept the page's confirmation dialog" : "";
+}
+
+function holding(modifiers: readonly AgentBrowserModifier[] | undefined): string {
+  return modifiers && modifiers.length > 0 ? ` holding ${modifiers.join("+")}` : "";
+}
+
+function scrollDetail(command: { deltaX?: number; deltaY?: number }): string {
+  return [
+    ...(command.deltaY === undefined ? [] : [`${command.deltaY > 0 ? "down" : "up"} ${Math.abs(command.deltaY)}`]),
+    ...(command.deltaX === undefined ? [] : [`${command.deltaX > 0 ? "right" : "left"} ${Math.abs(command.deltaX)}`]),
+  ].join(" and ");
 }
 
 function historyTarget(tab: PreviewTab, direction: "back" | "forward" | "reload"): string {
@@ -61,17 +81,40 @@ function inspectedTarget(
   inspect: (tab: PreviewTab, ref: string, purpose?: "scroll") => Promise<PreviewAgentTarget>,
 ): Promise<PreviewAgentTarget> | null {
   if (command.action === "click" || command.action === "type") return inspect(tab, command.ref);
-  if (command.action === "hover" || command.action === "select") return inspect(tab, command.ref);
+  if (command.action === "hover" || command.action === "select" || command.action === "drag") {
+    return inspect(tab, command.ref);
+  }
   return command.action === "scroll" && "ref" in command ? inspect(tab, command.ref, "scroll") : null;
 }
 
-function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: PreviewAgentTarget | null): string {
+function inspectedDropTarget(
+  command: AgentBrowserCommand,
+  tab: PreviewTab,
+  inspect: (tab: PreviewTab, ref: string, purpose?: "scroll") => Promise<PreviewAgentTarget>,
+): Promise<PreviewAgentTarget> | null {
+  return command.action === "drag" ? inspect(tab, command.targetRef) : null;
+}
+
+function controlName(target: PreviewAgentTarget | null): string {
+  return `${safeLabel(target?.role || "control")}: ${safeLabel(target?.label ?? "page control")}`;
+}
+
+function actionDetail(
+  command: AgentBrowserCommand,
+  tab: PreviewTab,
+  target: PreviewAgentTarget | null,
+  dropTarget: PreviewAgentTarget | null,
+): string {
   // Page titles can echo arbitrary passwords. A stable tab number identifies
   // the inspected page without copying its untrusted title into an approval.
   const page = `Browser tab ${tab.pageNumber}`;
-  const control = `${safeLabel(target?.role || "control")}: ${safeLabel(target?.label ?? "page control")}`;
+  const control = controlName(target);
   switch (command.action) {
-    case "click": return `${page}\nClick ${control}${acceptsDialog(command)}`;
+    case "click": {
+      const verb = command.clickCount === 3 ? "Triple-click" : command.clickCount === 2 ? "Double-click" : "Click";
+      return `${page}\n${verb} ${control}${holding(command.modifiers)}${acceptsDialog(command)}`;
+    }
+    case "drag": return `${page}\nDrag ${control}\nonto ${controlName(dropTarget)}`;
     case "type": {
       // The evidence sanitizer is deliberately bounded. Show an explicitly
       // labelled preview; never silently claim an excerpt is the complete text.
@@ -84,10 +127,10 @@ function actionDetail(command: AgentBrowserCommand, tab: PreviewTab, target: Pre
     case "navigate": return `${page}\nNavigate: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}`;
     case "history": return `${page}\n${command.direction === "back" ? "Go back to"
       : command.direction === "forward" ? "Go forward to" : "Reload"} ${historyTarget(tab, command.direction)}`;
-    case "press": return `${page}\nPress: ${command.key}${acceptsDialog(command)}`;
+    case "press": return `${page}\nPress: ${agentBrowserKeyChord(command.key, command.modifiers).label}${acceptsDialog(command)}`;
     case "scroll": return "ref" in command
       ? `${page}\nScroll ${control} into view`
-      : `${page}\nScroll ${command.deltaY > 0 ? "down" : "up"}: ${Math.abs(command.deltaY)} pixels`;
+      : `${page}\nScroll ${scrollDetail(command)} pixels`;
     case "resize": return viewportDetail(command);
     case "screenshot": return `${page}\nSend a screenshot of the Browser page to the agent`;
     case "tab-open": return `Open a browser tab${command.url ? `: ${sanitizeBrowserEvidenceText(command.url, "[private address hidden]", 600).text}` : ""}`;
@@ -136,18 +179,20 @@ export class PreviewAgentApprovalRegistry {
       const target = await inspectedTarget(command, tab, inspect);
       if (target && (!target.found || target.blocked || target.disabled
         || (command.action === "type" && !target.editable))) throw stale();
+      const dropTarget = await inspectedDropTarget(command, tab, inspect);
+      if (dropTarget && (!dropTarget.found || dropTarget.blocked || dropTarget.disabled)) throw stale();
       if (signal?.aborted || scope.activeTabId !== activeTabId
         || scope.tabs.get(tab.id) !== tab || tab.documentSequence !== documentSequence
         || tab.view.webContents.isDestroyed() || tab.view.webContents.isLoadingMainFrame()
         || tab.view.webContents.getURL() !== url) throw stale();
-      const detail = actionDetail(command, tab, target);
+      const detail = actionDetail(command, tab, target, dropTarget);
       // Other chat slots can finish inspection while this slot is awaiting it.
       if (this.#pending.size >= MAX_PREPARED_ACTIONS) throw new Error("Too many Browser approvals are pending.");
       const token = randomUUID();
       const timer = setTimeout(() => this.#pending.delete(token), EXPIRY_MS);
       timer.unref();
       this.#pending.set(token, { identity: { ...identity }, command, scope, tab,
-        activeTabId, documentSequence, url, target, timer });
+        activeTabId, documentSequence, url, target, dropTarget, timer });
       return JSON.stringify({ token, detail });
     }
     const prepared = this.#pending.get(request.token);
@@ -166,8 +211,11 @@ export class PreviewAgentApprovalRegistry {
     if (!current()) throw stale();
     const target = await inspectedTarget(command, tab, inspect);
     if (!current() || !sameTarget(prepared.target, target)) throw stale();
-    return { command, validate: (deliveredTarget) => {
-      if (!current() || (deliveredTarget && !sameTarget(prepared.target, deliveredTarget))) throw stale();
+    const dropTarget = await inspectedDropTarget(command, tab, inspect);
+    if (!current() || !sameTarget(prepared.dropTarget, dropTarget)) throw stale();
+    return { command, validate: (deliveredTarget, drop) => {
+      const approved = drop === "drop" ? prepared.dropTarget : prepared.target;
+      if (!current() || (deliveredTarget && !sameTarget(approved, deliveredTarget))) throw stale();
     } };
   }
 }

@@ -16,6 +16,7 @@ interface AgentBrowserPrivacyState {
   agentActivationTarget?: EventTarget;
   blockedAgentActivationKey?: "Enter" | "Space";
   expectedAgentClickRef?: string;
+  agentDragActive?: boolean;
   agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
   evidenceWithheld?: PreviewAgentWithheldReason;
   framesObserved?: boolean;
@@ -1006,9 +1007,23 @@ export function installPreviewAgentPrivacyGuard(
     state.agentActivationTarget !== undefined
     && (path === null || !path.includes(state.agentActivationTarget))
   );
-  for (const eventName of ["mousedown", "mouseup", "click"] as const) {
+  for (const eventName of ["mousedown", "mouseup", "click", "dblclick"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
       if (!state.agentInputActive || event.isTrusted !== true) return;
+      if (state.agentDragActive === true && eventName !== "mousedown") {
+        // A drag presses the named element and releases wherever the page
+        // has moved the pointer, often onto the dragged element itself.
+        // The release is never matched, so a drag cannot get stuck; the
+        // click a browser then sends to the common ancestor is stopped only
+        // for a file input or a target Inertia cannot inspect.
+        if (eventName === "mouseup") return;
+        const refusal = activationEventRefusal(event);
+        const blocked = refusal === "file" || refusal === "nested";
+        if (!blocked && !state.agentInputRefused) return;
+        if (blocked) recordRefusal(refusal);
+        stopActivationEvent(event);
+        return;
+      }
       const expectedRef = state.expectedAgentClickRef;
       if (!expectedRef && state.agentActivationTarget === undefined) return;
       const expected = expectedRef ? state.refs.get(expectedRef) : undefined;

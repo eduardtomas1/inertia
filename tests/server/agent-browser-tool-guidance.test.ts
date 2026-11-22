@@ -60,7 +60,7 @@ describe("Browser tool guidance", () => {
     expect(pack.text).toContain("Use these tools, not Playwright.");
     expect(pack.text).toContain(PACK_SECRET_GUIDANCE);
     expect(Buffer.byteLength(pack.text, "utf8")).toBeLessThanOrEqual(550);
-    expect(pack.revision).toBe(5);
+    expect(pack.revision).toBe(6);
   });
 
   it("describes the viewport and when screenshots reach the model", () => {
@@ -78,7 +78,7 @@ describe("Browser tool guidance", () => {
     const advertised = AGENT_BROWSER_TOOL_DEFINITIONS.map(({ name, description, inputSchema }) => ({
       name, description, inputSchema,
     }));
-    expect(Buffer.byteLength(JSON.stringify(advertised), "utf8")).toBeLessThanOrEqual(9_250);
+    expect(Buffer.byteLength(JSON.stringify(advertised), "utf8")).toBeLessThanOrEqual(10_700);
     for (const definition of AGENT_BROWSER_TOOL_DEFINITIONS) {
       expect(definition.description.length, definition.name).toBeLessThanOrEqual(300);
     }

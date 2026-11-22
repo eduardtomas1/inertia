@@ -81,10 +81,10 @@
       "opencode": 527
     },
     "inertia_browser_click": {
-      "claude": 767,
-      "codex": 662,
-      "cursorKimi": 768,
-      "opencode": 767
+      "claude": 1019,
+      "codex": 914,
+      "cursorKimi": 1020,
+      "opencode": 1019
     },
     "inertia_browser_type": {
       "claude": 811,
@@ -93,22 +93,22 @@
       "opencode": 811
     },
     "inertia_browser_press": {
-      "claude": 809,
-      "codex": 704,
-      "cursorKimi": 810,
-      "opencode": 809
+      "claude": 955,
+      "codex": 850,
+      "cursorKimi": 956,
+      "opencode": 955
     },
     "inertia_browser_scroll": {
-      "claude": 743,
-      "codex": 637,
-      "cursorKimi": 743,
-      "opencode": 743
+      "claude": 887,
+      "codex": 781,
+      "cursorKimi": 887,
+      "opencode": 887
     },
     "inertia_browser_wait_for": {
-      "claude": 854,
-      "codex": 750,
-      "cursorKimi": 854,
-      "opencode": 854
+      "claude": 1228,
+      "codex": 1124,
+      "cursorKimi": 1228,
+      "opencode": 1228
     },
     "inertia_browser_screenshot": {
       "claude": 495,
@@ -133,6 +133,12 @@
       "codex": 688,
       "cursorKimi": 794,
       "opencode": 793
+    },
+    "inertia_browser_drag": {
+      "claude": 660,
+      "codex": 555,
+      "cursorKimi": 661,
+      "opencode": 660
     },
     "inertia_browser_logs": {
       "claude": 477,
@@ -283,24 +289,24 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 24589,
+      "withBrowser": 26165,
       "withoutBrowser": 13168,
-      "withCad": 43244
+      "withCad": 44820
     },
     "codex": {
-      "withBrowser": 21028,
+      "withBrowser": 22499,
       "withoutBrowser": 11284,
-      "withCad": 38534
+      "withCad": 40005
     },
     "cursorKimi": {
-      "withBrowser": 24598,
+      "withBrowser": 26175,
       "withoutBrowser": 13168,
-      "withCad": 43254
+      "withCad": 44831
     },
     "opencode": {
-      "withBrowser": 24589,
+      "withBrowser": 26165,
       "withoutBrowser": 13168,
-      "withCad": 43244
+      "withCad": 44820
     }
   }
 }

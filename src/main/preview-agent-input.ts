@@ -1,5 +1,6 @@
 import type { WebContents } from "electron";
 
+import { agentBrowserKeyChord, type AgentBrowserKey, type AgentBrowserModifier } from "../shared/agent-browser.js";
 import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-guard.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, agentPageActivationTargetStillFocused, agentPageInputRefusal, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
@@ -106,19 +107,43 @@ async function dispatchAgentPageHover(
   });
 }
 
-export type AgentPageKeyModifier = "shift" | "control" | "meta";
+export type AgentPageKeyModifier = "shift" | "control" | "alt" | "meta";
 
 function keyModifiers(modifiers: readonly AgentPageKeyModifier[]): { modifiers?: AgentPageKeyModifier[] } {
   return modifiers.length > 0 ? { modifiers: [...modifiers] } : {};
 }
 
-export function agentPageKeyInput(key: string): { keyCode: string; modifiers: AgentPageKeyModifier[] } {
-  const [prefix, keyCode] = key.split("+");
-  if (keyCode === undefined) return { keyCode: key, modifiers: [] };
+/** Electron's names for the keys an agent holds. */
+export function agentPageModifiers(modifiers: readonly AgentBrowserModifier[] = []): AgentPageKeyModifier[] {
+  return modifiers.map((modifier) => modifier.toLowerCase() as AgentPageKeyModifier);
+}
+
+/**
+ * Electron takes accelerator key names: an arrow is "Left", not the DOM's
+ * "ArrowLeft", which it would deliver as an unidentified key.
+ */
+const ELECTRON_KEY_CODES: Readonly<Record<string, string>> = {
+  ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+};
+
+export function agentPageKeyInput(
+  key: AgentBrowserKey,
+  held: readonly AgentBrowserModifier[] = [],
+): { keyCode: string; modifiers: AgentPageKeyModifier[]; label: string } {
+  const chord = agentBrowserKeyChord(key, held);
   return {
-    keyCode,
-    modifiers: [prefix === "Shift" ? "shift" : prefix === "Control" ? "control" : "meta"],
+    keyCode: ELECTRON_KEY_CODES[chord.key] ?? chord.key,
+    modifiers: agentPageModifiers(chord.modifiers),
+    label: chord.label,
   };
+}
+
+/**
+ * Chords with Control, Alt or Meta are shortcuts: real keyboards send no
+ * character for them, so the activation path sends key down and key up only.
+ */
+function shortcutChord(modifiers: readonly AgentPageKeyModifier[]): boolean {
+  return modifiers.includes("control") || modifiers.includes("meta") || modifiers.includes("alt");
 }
 
 /**
@@ -176,7 +201,7 @@ export async function deliverAgentPageActivation(
   const refusal = guardRefusal ?? postKeydownBlocked
     ?? (targetStillFocused ? null : "retargeted");
   if (refusal) return refusal;
-  if (!modifiers.includes("control") && !modifiers.includes("meta")) {
+  if (!shortcutChord(modifiers)) {
     sendAgentPageInput(contents, { type: "char", keyCode: key === "Enter" ? "\r" : " ", ...keyModifiers(modifiers) });
   }
   sendAgentPageInput(contents, { type: "keyUp", keyCode, ...keyModifiers(modifiers) });

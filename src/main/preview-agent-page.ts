@@ -788,6 +788,7 @@ export async function setAgentPageInputGuard(
   contents: WebContents,
   active: boolean,
   expectedClickRef?: string,
+  drag = false,
 ): Promise<void> {
   const updated = await execute(contents, `(() => {
     const state = globalThis.__inertiaAgentBrowser;
@@ -796,6 +797,7 @@ export async function setAgentPageInputGuard(
     state.agentActivationTarget = undefined;
     state.blockedAgentActivationKey = undefined;
     state.expectedAgentClickRef = ${active && expectedClickRef ? JSON.stringify(expectedClickRef) : "undefined"};
+    state.agentDragActive = ${active && drag ? "true" : "false"};
     state.agentInputRefused = undefined;
     state.agentInputActive = ${active ? "true" : "false"};
     return true;

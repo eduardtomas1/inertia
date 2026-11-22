@@ -18,7 +18,6 @@ export {
   hostToolActivityTitle,
   resolveActivityGroupWindow,
   summarizeActivities,
-  type ActivitySentencePhrase,
   type ActivityWorkKind,
 } from "./response-timeline/activity-summary";
 export {

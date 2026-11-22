@@ -58,21 +58,21 @@ The useful changes in each Inertia release, in plain language.
   Code from reading the managed settings Inertia sends at start-up, the chat
   now says so instead of showing a generic failure. The Claude Code it
   bundles is about 22 MB larger on every platform.
-- Updated Electron to 45.3.1, with Chromium 156.0.8078.96 and Node 24.22.2.
+- Updated Electron to 45.4.1, with Chromium 156.0.8078.100 and Node 24.22.3.
 - Updated `@napi-rs/canvas` to 1.1.1. A canvas stays usable while a JPEG
   encode is pending, and image bytes are fully drawn before they load.
 - Updated `ws` to 8.23.0, which closes a connection that floods pings
   without reading the replies.
 - Updated the Agent Client Protocol SDK used by Cursor, Kimi and Grok to
-  2.6.0, the Anthropic SDK to 1.8.0, lucide-react to 1.75.0 and Tailwind CSS
+  2.6.0, the Anthropic SDK to 1.10.0, lucide-react to 1.76.0 and Tailwind CSS
   to 4.3.5. The help and question icons have a redrawn question mark.
 - Updated xa11y, which window snapshots use to read the screen, to 0.16.1.
   Snapshots keep working on Linux displays scaled above 100% when a window's
   position or size is an odd number of pixels, which the new version would
   otherwise have refused.
-- Kept better-sqlite3 at 13.0.3. The SQLite 3.54.1 that 13.1.1 bundles
-  prepares many of Inertia's queries again on every call, which made loading
-  a chat's history about a third slower.
+- Kept better-sqlite3 at 13.0.3. The SQLite 3.54.1 that 13.1.1 and 13.2.0
+  bundle prepares many of Inertia's queries again on every call, which made
+  loading a chat's history about a third slower.
 
 ### Agent tools
 

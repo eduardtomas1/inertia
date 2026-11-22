@@ -1,3 +1,4 @@
+import { clipCodeUnits } from "../../shared/code-units";
 import { MAX_PROVIDER_STOP_REASON_CHARS } from "../../shared/orchestration-v2";
 import { launchCredentialValues, sanitizeProviderUserText, stripInvisibleCharacters } from "../provider/activity-detail";
 import { redactCodexErrorHeaders } from "./managed-errors";
@@ -27,16 +28,6 @@ export interface CodexHookStop {
   source: string | undefined;
   /** The trimmed text of the run's `stop` entries, joined by line breaks; raw and unredacted. */
   text: string;
-}
-
-/**
- * Cuts `value` to at most `maxChars` UTF-16 code units without leaving half of a surrogate pair at the end.
- * A local helper until a shared surrogate-safe cut exists.
- */
-export function cutAtCodePointBoundary(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  const end = maxChars > 0 && /[\uD800-\uDBFF]/u.test(value[maxChars - 1]!) ? maxChars - 1 : maxChars;
-  return value.slice(0, end);
 }
 
 function trimmed(value: unknown): string | undefined {
@@ -133,11 +124,11 @@ export class CodexHookStopTracker {
     // Invisible characters go first, so an escape inside `headers` cannot hide a header map from its redaction.
     const clean = (value: string) => sanitizeProviderUserText(redactCodexErrorHeaders(stripInvisibleCharacters(value)),
       credentials, { workspaceRoot: this.options.cwd }).trim();
-    const eventName = cutAtCodePointBoundary(clean(stop.eventName), MAX_HOOK_EVENT_NAME_CHARS);
+    const eventName = clipCodeUnits(clean(stop.eventName), MAX_HOOK_EVENT_NAME_CHARS);
     const text = clean(stop.text);
     if (!eventName || !text) return undefined;
     const source = stop.source === undefined ? "" : ` (${stop.source})`;
-    return cutAtCodePointBoundary(`${eventName} hook${source}: ${text}`, MAX_PROVIDER_STOP_REASON_CHARS);
+    return clipCodeUnits(`${eventName} hook${source}: ${text}`, MAX_PROVIDER_STOP_REASON_CHARS);
   }
 }
 

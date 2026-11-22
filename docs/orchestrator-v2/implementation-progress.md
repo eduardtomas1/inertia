@@ -5602,3 +5602,112 @@ on top of `9b7208832` (#27399), which introduced the hook reason.
   renderer test files (970 tests) and `npm run test:portable` passed after
   the redesign, and 71 files (1,022 tests) after the fifth commit. Not run: the full suite, Electron scenarios, Windows and
   Linux, and a live Codex with hooks.
+
+## D.4 remainder and D.5 — 2026-11-22
+
+Status: committed on top of `799ddb00` (PR #686), macOS arm64, Node 22. T3
+anchors are at `6f49071a3`. Four implementers worked in parallel (the user
+raised the cap to four for this batch); every package was reviewed
+independently until no finding stayed open. The stop reason has its own entry
+above. This is the last polish batch before the main sync and Phase 5 (user
+decisions of 2026-11-22: pin per phase to T3 v0.1.11, a live-provider smoke
+session before Phase 5 package 2).
+
+### A replacement session that returns the rejected id fails honestly (`d32df2d34`)
+
+Every fresh start that replaces a session records the ids it replaced
+(`replacedSessionIds`): the G9 fallback, context exhaustion, the Codex
+rejected-history start, a session left in another checkout, a retired
+checkout session and the two-failures rule. A session event or final result
+that names one of them stops the provider and fails the turn with T3's "the
+provider returned its existing session when asked for a fresh one…"; nothing
+is adopted and nothing retries. Resumed sessions (moved checkouts, forks, Pi
+copies) carry a `sessionId` and are never checked. Difference: T3 checks
+before the prompt is sent; Inertia checks at the session event.
+
+### Pi restarted content blocks (`4ecbe5508`)
+
+Pi text and thinking are tracked per kind and content index
+(`pi-events.ts`). A restarted block replaces only the open assistant segment
+(a new `scope: "segment"` text replace and a `replace` flag on `agent.text`
+and `agent.reasoning`, carried to the renderer), so earlier messages and the
+tool cards between them never move. One emitter wrapper closes Pi's segment
+on every activity, approval, question or plan. An emptied segment keeps its
+row until the segment closes or the turn settles, boot recovery removes
+empty rows, and the renderer shows no empty update. Republishing is capped
+per segment and degrades to appending past 64 MiB.
+
+Found on the way and fixed for every harness: the end-of-run reconcile put a
+multi-message run's whole final text into its last message when the harness
+joins messages with blank lines (Pi, Grok, OpenCode); it now maps the result
+onto recorded segment ends.
+
+Differences: blocks are keyed by kind and index (T3 keys by index, which
+loses the answer when a block switches kind); a restart whose new text
+differs from text already shown before a mid-message activity leaves the old
+text above that activity and the new text after it.
+
+### Small provider items
+
+- `4fccab84a`: Codex title generation and the read-only watcher config also
+  turn off the legacy `features.connectors`.
+- `c688453ac`: provider text cut by length never ends on half a surrogate pair
+  (`clipCodeUnits`, `clipTrailingCodeUnits` in `src/shared/code-units.ts`),
+  for Claude and the other providers' user-visible text; identifiers are not
+  clipped.
+- `ae268d935`: a Claude or Codex process that exits before answering reports
+  its exit status, with T3's macOS privacy guidance on EPERM or "Operation not
+  permitted"; stderr never enters the message.
+- `47583f868`, now following T3: a goal turn Codex continues on its own after
+  a resume is paused and interrupted, and the run waits (bounded) for it to
+  end before sending its prompt, after a 250 ms grace for the turn to start.
+  An explicit `/goal` start owns that turn instead. Restored history is
+  inlined when a goal may continue.
+- `0b02be3d5`: an unread follow-up no longer stops the answer before it from
+  being the run's last reply. Keeping a late-read answer visible without
+  moving the user's message needs an answer-phase column; it is deferred
+  until after the main sync renumbers the migrations.
+
+### Busy-source native forks and search (`2904c397a`, `23c339e8b`, `48afc47e7`)
+
+A new capability, `fork-while-source-running` (Claude Agent SDK, Codex App
+Server), lets a fork of a completed turn be native while a later source turn
+runs. Claude cuts the fork at the boundary turn's settled message from one
+bounded transcript read; Codex uses a separate control App Server with
+`thread/fork lastTurnId`. A live fork no longer locks the source chat (its
+completion needs to write the chat), only the target and the exact provider
+conversation. Any other fork, or a rollback, while that lock is held goes
+portable or says a fork is reading the chat. Message search excludes
+rolled-back turns and messages an active queue row names; a fork's inherited
+turns stay unsearchable after the source rolls them back, as in T3.
+
+Differences: only a `completed` source run is reachable (Inertia cannot fork
+from an unfinished turn); a source held by other work still goes portable.
+
+### Reviews
+
+Rounds per package: G9 and Pi four, stop reason five (one redesign: the
+heuristic secret-shape sanitising was replaced by linear launch-credential
+redaction after a ReDoS finding), small items three, forks two. The Fable 5.2
+alignment review of 2026-11-22 set the order that follows: stop polish, sync
+main, refresh the Phase 5 design to the pin, then Phase 5.
+
+### Open items
+
+- The Codex App Server line handler has no guard around its notification and
+  request handlers; a throw restarts the runtime.
+- T3's goal pause on Stop, continuation timeout and crash is not ported.
+- Whether a fork through a separate Codex App Server contends with the source
+  App Server's writer lock is unverified (live smoke list).
+
+### Verification
+
+On the merged tree (macOS arm64, Node 22): `npm test` 20,885 passed and 181
+skipped, `npm run test:portable` 4,696 passed and 38 skipped; in both, the one
+failure was the search-after-rollback test, whose fake provider reported the
+retired session id again after a portable rollback. The G9 guard now refuses
+that, as it should; the test's provider reports a fresh id and the file passes
+(16 tests). `typecheck`, `lint` and `check:architecture` pass.
+
+Not run: the full `npm run check`, the Electron scenarios, a packaged build,
+Windows and Linux, and real Claude Code, Codex, Pi or Cursor accounts.

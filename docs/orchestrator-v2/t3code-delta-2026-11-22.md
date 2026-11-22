@@ -251,7 +251,9 @@ By title or diffstat, out of scope:
 ### D.4 Provider polish — order changes
 
 Items 1 to 4 landed on 2026-11-22; see the progress entry "D.4 provider polish,
-first four items". The queue half of item 2 (N2 placement of every unread or
+first four items". Items 5 and 6, the stop reason and the XS items landed the same
+day (progress entries "D.4: the provider's stop reason" and "D.4 remainder and
+D.5"), as did D.5's busy-source forks and rolled-back search. The queue half of item 2 (N2 placement of every unread or
 dropped steer, recovery after a crash) stays in Phase 5 package 2.
 
 Put the safety item first. Then the items that lose user work. The 11-17

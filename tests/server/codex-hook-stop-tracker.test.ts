@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { CodexHookStopTracker, codexHookStop, cutAtCodePointBoundary } from "../../src/server/codex/app-server-hook-stop";
+import { CodexHookStopTracker, codexHookStop } from "../../src/server/codex/app-server-hook-stop";
+import { clipCodeUnits } from "../../src/shared/code-units";
 import { sanitizeProviderUserText } from "../../src/server/provider/activity-detail";
 import { MAX_PROVIDER_STOP_REASON_CHARS } from "../../src/shared/orchestration-v2";
 
@@ -69,8 +70,8 @@ describe("Codex hook stop text", () => {
       expect(reason).not.toMatch(LONE_SURROGATE);
       expect(reason.length).toBe(at + 2 <= 2_000 ? 2_000 : at);
     }
-    expect(cutAtCodePointBoundary("ab😀", 3)).toBe("ab");
-    expect(cutAtCodePointBoundary("ab😀", 4)).toBe("ab😀");
+    expect(clipCodeUnits("ab😀", 3)).toBe("ab");
+    expect(clipCodeUnits("ab😀", 4)).toBe("ab😀");
   });
 
   it("keeps the user's text as written and removes only launch credentials, controls and local paths", () => {

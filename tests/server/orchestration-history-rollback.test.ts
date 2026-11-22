@@ -19,15 +19,17 @@ import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, 
 
 afterEach(() => { vi.restoreAllMocks(); return cleanupTurnControllerTestDirectories(); });
 
-async function finish(runtime: TurnControllerTestRuntime, label: string, conversationId = runtime.conversationId) {
+/** `nativeId`: the session the fake provider reports; a turn after a rollback that retired the session starts fresh. */
+async function finish(runtime: TurnControllerTestRuntime, label: string, conversationId = runtime.conversationId,
+  nativeId = "source-native") {
   const queued = runtime.controller.queue({ conversationId, content: `${label} request` });
   runtime.controller.start(queued.turn.id);
   if (conversationId === runtime.conversationId) {
     for (const phase of ["started", "settled"] as const) runtime.provider.emit({ ...turnControllerTestIdentity(runtime),
-      type: "native-boundary", nativeConversationId: "source-native", nativeSessionId: null, nativeTurnId: label,
+      type: "native-boundary", nativeConversationId: nativeId, nativeSessionId: null, nativeTurnId: label,
       persistedHeadId: phase === "settled" ? label : null, phase });
   }
-  runtime.provider.resolve({ text: `${label} answer`, sessionId: conversationId === runtime.conversationId ? "source-native" : "child-native" });
+  runtime.provider.resolve({ text: `${label} answer`, sessionId: conversationId === runtime.conversationId ? nativeId : "child-native" });
   await flushTurnControllerTestPromises();
   return queued.turn;
 }
@@ -521,8 +523,9 @@ describe("message search after a rollback", () => {
         { conversationId: source, role: "assistant", snippet: "kept-needle answer" },
         { conversationId: source, role: "user", snippet: "kept-needle request" },
       ]);
-      // Moving forward after the rollback: the new turn is history again, the rolled-back ones stay out.
-      await finish(runtime, "forward-needle");
+      // Moving forward after the rollback: the new turn is history again, the rolled-back ones stay out. The
+      // portable rollback retired the native session, so the provider starts a fresh one.
+      await finish(runtime, "forward-needle", source, "fresh-native");
       expect(found(runtime, "forward-needle")).toHaveLength(2);
       expect(found(runtime, "dropped-needle")).toEqual([]);
     } finally { runtime.store.close(); }

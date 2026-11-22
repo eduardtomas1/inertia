@@ -1129,9 +1129,8 @@ export class TurnController {
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     const outcomeAlreadyRequested = active.deferredSettlement !== null;
-    if (!outcomeAlreadyRequested && result.sessionId && reportsReplacedSession(active, result.sessionId)) {
-      return void this.settle(active, "failed", "provider-error", REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure(active));
-    }
+    if (!outcomeAlreadyRequested && result.sessionId && reportsReplacedSession(active, result.sessionId)) return void this
+      .settle(active, "failed", "provider-error", REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure(active));
     if (!outcomeAlreadyRequested) recordRejectedProviderResume(this.store, active, result);
     if (!outcomeAlreadyRequested && providerSessionUnavailable(result)) {
       releaseUnavailableProviderSession(this.store, active, result);

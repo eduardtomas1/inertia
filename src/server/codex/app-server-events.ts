@@ -248,14 +248,10 @@ export class CodexAppServerEvents {
   }
 
   /** Whether a turn Codex started on its own waits for turn/start's response. */
-  heldTurnStarted(): boolean {
-    return this.approvalAuthority.holdsTurnStart();
-  }
+  heldTurnStarted(): boolean { return this.approvalAuthority.holdsTurnStart(); }
 
   /** An explicit goal start owns the goal turn Codex continued while the thread resumed. */
-  adoptHeldGoalTurn(): void {
-    this.approvalAuthority.replayHeldTurnStart();
-  }
+  adoptHeldGoalTurn(): void { this.approvalAuthority.replayHeldTurnStart(); }
 
   /** Replays the held notifications of the turn that turn/start returned. */
   replayPreResponseTurnNotifications(turnId: string): void {
@@ -900,8 +896,7 @@ export class CodexAppServerEvents {
       );
       const providerInterrupted = interruptionFailure !== undefined;
       const interrupted = status === "interrupted" && !providerInterrupted;
-      // Codex ends a hook-stopped turn completed or interrupted, by version (T3 `c440fd19d`). The run's outcome is
-      // not known yet, so its "Stopped by the provider" notice is added at settlement, from the recorded reason.
+      // A hook-stopped turn ends completed or interrupted (T3 `c440fd19d`); its notice is added at settlement.
       this.hookStop.settle(notificationTurnId, !this.host.cancelRequested() && (status === "completed" || interrupted));
       // T3 classifies a failed turn's own error message (`turn.error.message`) only. A classified error keeps
       // only its code and safe summary (T3 stores no raw text).

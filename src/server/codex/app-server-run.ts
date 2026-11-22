@@ -34,6 +34,8 @@ import {
 } from "./app-server-config";
 import { CodexAppServerEvents } from "./app-server-events";
 import { codexAppServerExitMessage } from "./app-server-exit-message";
+import type { OpenCodexTurnOptions } from "./app-server-open-turn-options";
+import { CodexOrphanGoalTurns, codexGoalMayContinue } from "./app-server-orphan-goal-turns";
 import { redactCodexErrorHeaders } from "./managed-errors";
 import { CodexJsonLineWriter } from "./jsonl-writer";
 import {
@@ -318,6 +320,7 @@ export function startCodexAppServerRun(
     }
     settled = true;
     phase = "settled";
+    orphanGoalTurns.release();
     stdinWriter.close(new Error("The Codex App Server run ended."));
     settleStartupGate(
       new Error("The Codex App Server run ended before startup completed."),
@@ -536,8 +539,11 @@ export function startCodexAppServerRun(
     })();
   };
 
+  const orphanGoalTurns = new CodexOrphanGoalTurns(options, () => providerThreadId, request, () => events,
+    options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS);
   events = new CodexAppServerEvents({
     options,
+    orphanGoalTurns,
     resultText,
     isSettled: () => settled,
     phase: () => phase,
@@ -750,6 +756,8 @@ export function startCodexAppServerRun(
       },
       replayPreResponseTurnNotifications: (turnId) =>
         events.replayPreResponseTurnNotifications(turnId),
+      goalTurns: { held: () => events.heldTurnStarted(), adopt: () => events.adoptHeldGoalTurn(),
+        settle: () => orphanGoalTurns.awaitStopped(codexGoalMayContinue(options)) },
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
       goalProjectionSequence: () => events.goalProjectionSequence(),
@@ -907,49 +915,6 @@ export function startCodexAppServerRun(
   };
 }
 
-interface OpenCodexTurnOptions {
-  options: CodexAppServerOptions;
-  modelProvider: CodexAppServerOptions["modelProvider"];
-  request: (
-    method: string,
-    params: JsonObject,
-    onResponseFrame?: (result?: JsonObject) => void,
-    recordFailure?: CodexRequestFailureRecording,
-  ) => Promise<JsonObject>;
-  notify: (method: string, params?: JsonObject) => void;
-  setProviderThreadId: (threadId: string) => void;
-  activeTurnId: () => string | undefined;
-  setActiveTurnId: (turnId: string | undefined) => void;
-  setRequestedTurnId?: (turnId: string | null | undefined) => void;
-  replayPreResponseTurnNotifications?: (turnId: string) => void;
-  phase: () => CodexRunPhase;
-  hasObservedTurn: (turnId: string) => boolean;
-  goalProjectionSequence: () => number;
-  beginGoalMutation: (activatesGoal: boolean) => void;
-  endGoalMutation: (activatesGoal: boolean) => void;
-  awaitInitialGoalTurn: () => void;
-  projectGoalResponse: (
-    threadId: string,
-    goal: unknown,
-    sequenceAtResponse: number,
-  ) => ProviderGoalSnapshot | null;
-  setContinuationError: (
-    error: CodexAppServerResult["continuationError"],
-  ) => void;
-  setCompatibilityError?: (
-    error: CodexAppServerResult["compatibilityError"],
-  ) => void;
-  deferSessionInstruction?: () => void;
-  setPhase: (phase: CodexRunPhase) => void;
-  isSettled: () => boolean;
-  isCancelRequested: () => boolean;
-  finish: (
-    status: CodexAppServerResult["status"],
-    exitCode: number | null,
-    signal: NodeJS.Signals | null,
-  ) => void;
-}
-
 export async function openCodexTurn({
   options,
   modelProvider,
@@ -960,6 +925,7 @@ export async function openCodexTurn({
   setActiveTurnId,
   setRequestedTurnId,
   replayPreResponseTurnNotifications,
+  goalTurns,
   phase,
   hasObservedTurn,
   goalProjectionSequence,
@@ -1096,9 +1062,12 @@ export async function openCodexTurn({
   if (!options.sessionId) recordCodexThreadRegistration(openedThreadId, options.hostTools);
   setProviderThreadId(openedThreadId);
   options.onSession?.(openedThreadId);
-  // After the thread opens and before goal/set or turn/start; never into an active turn (T3 8b21cbdf1).
+  await goalTurns?.settle(); // A goal turn no run owns stops before the run's turn starts.
+  if (isSettled()) return;
+  // Never into an active turn (T3 8b21cbdf1), nor a resumed one Codex may still continue a goal in.
   const prompt = await injectCodexHistory({ history: options.historyInjection, prompt: options.prompt, threadId: openedThreadId,
-    thread, turnActive: activeTurnId() !== undefined, cancelRequested: isCancelRequested, request });
+    thread, turnActive: activeTurnId() !== undefined || goalTurns?.held() === true || codexGoalMayContinue(options),
+    cancelRequested: isCancelRequested, request });
   if (isCancelRequested()) {
     finish("cancelled", null, null);
     return;
@@ -1106,6 +1075,7 @@ export async function openCodexTurn({
 
   if (options.goalStart) {
     setPhase("starting-turn");
+    goalTurns?.adopt();
     if (options.reasoningEffort) {
       await request("thread/settings/update", {
         threadId: openedThreadId,

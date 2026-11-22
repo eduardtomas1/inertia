@@ -2,6 +2,7 @@ import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 import type { OrchestrationRunFailureCode } from "../../shared/orchestration-v2";
 import type { ProviderRunFailure } from "../provider/contracts";
 import type { CodexRunPhase } from "./app-server-config";
+import type { CodexOrphanGoalTurns } from "./app-server-orphan-goal-turns";
 import type { CappedTextBuffer, JsonObject } from "./protocol";
 import type { CodexAppServerOptions, CodexAppServerResult } from "./types";
 
@@ -22,6 +23,8 @@ export interface CodexAppServerEventHost {
   setLastActivityId: (activityId: string) => void;
   setTerminalEvent: (event: string) => void;
   writeMessage: (message: JsonObject) => boolean;
+  /** Goal turns Codex continues on resume that no run owns. */
+  orphanGoalTurns?: CodexOrphanGoalTurns;
   cancel: (reason?: "malformed-protocol") => void;
   finish: (
     status: CodexAppServerResult["status"],

@@ -135,7 +135,25 @@ export class TurnStreamProjection {
   terminalAssistantMessageId(active: ActiveTurn): string | null {
     const boundary = active.pendingFollowUpBoundary ?? active.followUpBoundary;
     const latest = active.latestAssistantMessageId;
-    return boundary && boundary.messageId === latest ? null : latest;
+    if (!boundary || boundary.messageId !== latest) return latest;
+    // A follow-up the provider never read is not this run's input, so the
+    // answer before it still ends the run.
+    return latest && this.onlyUnreadFollowUpsAfter(active, latest) ? latest : null;
+  }
+
+  /**
+   * Whether every follow-up after the answer leaves this run for the queue.
+   * Past the queue's cap an unread follow-up stays in its turn, delivered.
+   */
+  private onlyUnreadFollowUpsAfter(active: ActiveTurn, messageId: string): boolean {
+    const unread = active.unreadFollowUpMessageIds ?? [];
+    if (unread.length === 0) return false;
+    const queued = new Set(this.options.store.queuedMessages.queueableUnreadFollowUps(
+      active.conversation.id, active.turn.id, unread));
+    const answeredAt = Date.parse(this.options.store.message(messageId).createdAt);
+    const later = [...(active.followUpMessagesBySteerId?.values() ?? [])]
+      .filter((followUpId) => Date.parse(this.options.store.message(followUpId).createdAt) > answeredAt);
+    return later.length > 0 && later.every((followUpId) => queued.has(followUpId));
   }
 
   private commitFollowUpBoundary(

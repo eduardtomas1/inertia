@@ -38,6 +38,24 @@ export class PreResponseTurnNotifications {
       notification.turnId === turnId || notification.requestId !== undefined);
   }
 
+  holdsTurnStart(): boolean {
+    return this.held.some(({ method }) => method === "turn/started");
+  }
+
+  /** The turn whose turn/started was held first, if any. */
+  firstStartedTurnId(): string | undefined {
+    return this.held.find(({ method }) => method === "turn/started")?.turnId;
+  }
+
+  /** Turns other than `turnId` that started while held, and whether each also completed. */
+  otherStartedTurns(turnId: string): Array<{ turnId: string; completed: boolean }> {
+    return this.held.filter((notification) => notification.method === "turn/started" && notification.turnId !== turnId)
+      .map((started) => ({
+        turnId: started.turnId,
+        completed: this.held.some(({ method, turnId: id }) => method === "turn/completed" && id === started.turnId),
+      }));
+  }
+
   removeRequest(requestId: RpcId): void {
     const index = this.held.findIndex((notification) => notification.requestId === requestId);
     if (index >= 0) this.held.splice(index, 1);

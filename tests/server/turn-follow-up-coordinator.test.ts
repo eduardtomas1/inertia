@@ -659,6 +659,60 @@ describe("assistant rows around an accepted follow-up", () => {
     }
   });
 
+  // The steer id the runtime gave the provider for the latest follow-up.
+  const steerIdOf = (runtime: TurnControllerTestRuntime) => [...(runtime.controller as unknown as {
+    activeByConversation: Map<string, { followUpMessagesBySteerId?: Map<string, string> }>;
+  }).activeByConversation.values()][0]!.followUpMessagesBySteerId!.keys().next().value!;
+
+  it("keeps a follow-up Claude read late at its send time, before the answer Claude wrote first", async () => {
+    const { runtime, turnId } = await running("claude");
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", label: "Build", activityId: "build" });
+      const accepted = await followUp(runtime, "Also rename the file.") as { message: ChatMessage };
+      runtime.provider.emit({ ...identity, type: "text", text: "Build answer." });
+      flushStreams(runtime);
+      // Claude ends its turn on the answer here, before it reads the follow-up; nothing may move the follow-up.
+      runtime.provider.emit({ ...identity, type: "text-boundary" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Steer reply." });
+      await end(runtime, "completed");
+      flushStreams(runtime);
+
+      expect(rows(runtime, turnId)).toEqual(["user:Also rename the file.", "assistant:Build answer.", "assistant:Steer reply."]);
+      expect(runtime.store.message(accepted.message.id).createdAt).toBe(accepted.message.createdAt);
+      expect(terminalAnswer(runtime, turnId)).toBe("Steer reply.");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it.each([
+    ["no answer was open", false],
+    ["the answer was still open", true],
+  ] as const)("keeps the answer as the run's last reply when Claude never reads a follow-up accepted while %s", async (_case, open) => {
+    const { runtime, turnId } = await running("claude");
+    try {
+      const identity = turnControllerTestIdentity(runtime);
+      if (open) runtime.provider.emit({ ...identity, type: "text", text: "Build " });
+      else runtime.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", label: "Build", activityId: "build" });
+      await followUp(runtime, "Also rename the file.");
+      const steerId = steerIdOf(runtime);
+      runtime.provider.emit({ ...identity, type: "text", text: open ? "answer." : "Build answer." });
+      flushStreams(runtime);
+      runtime.provider.emit({ ...identity, type: "text-boundary" });
+      // Claude discards the follow-up unread; settlement queues it for the next turn.
+      runtime.provider.resolve({ status: "completed", unreadFollowUps: [steerId] });
+      await flushTurnControllerTestPromises();
+      // The follow-up keeps its send time; with nothing open then, that is before the answer.
+      expect(rows(runtime, turnId)).toEqual(open
+        ? ["assistant:Build answer.", "user:Also rename the file."]
+        : ["user:Also rename the file.", "assistant:Build answer."]);
+      expect(terminalAnswer(runtime, turnId)).toBe("Build answer.");
+    } finally {
+      runtime.store.close();
+    }
+  });
+
   it("keeps a Claude answer that is still streaming before the follow-up until Claude ends that answer", async () => {
     const { runtime, turnId } = await running("claude");
     try {

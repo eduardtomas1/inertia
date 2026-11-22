@@ -95,27 +95,40 @@ export class QueuedMessageRepository {
    * through recovery, with no provider report of which follow-ups were read, so none is queued (T3 requeues them
    * in recovery from its per-steer pending state).
    */
-  requeueUnreadFollowUps(conversation: Conversation, turnId: string, messageIds: readonly string[]): string[] {
-    const message = this.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
+  /** The unread follow-ups `requeueUnreadFollowUps` would queue now, in order; the rest stay in their turn. */
+  queueableUnreadFollowUps(conversationId: string, turnId: string, messageIds: readonly string[]): string[] {
+    return this.unreadFollowUpAdmission(conversationId, turnId, messageIds).queueable;
+  }
+
+  private unreadFollowUpAdmission(conversationId: string, turnId: string, messageIds: readonly string[]) {
+    const message = this.database.prepare(`SELECT 1 FROM messages
       JOIN agent_turns AS turn ON turn.id = messages.turn_id
       WHERE messages.id = ? AND messages.conversation_id = ? AND messages.turn_id = ? AND messages.role = 'user'
         AND turn.user_message_id <> messages.id`);
     const named = this.database.prepare(`SELECT 1 FROM queued_messages WHERE conversation_id = ?
       AND state IN ${ACTIVE_STATES} AND user_message_id = ?`);
-    const count = this.database.prepare(`SELECT COUNT(*) AS count FROM queued_messages WHERE conversation_id = ?
-      AND state IN ${ACTIVE_STATES} AND ${NAMES_UNREAD_FOLLOW_UP}`);
+    const { count } = this.database.prepare(`SELECT COUNT(*) AS count FROM queued_messages WHERE conversation_id = ?
+      AND state IN ${ACTIVE_STATES} AND ${NAMES_UNREAD_FOLLOW_UP}`).get(conversationId) as { count: number };
+    const queueable: string[] = [];
+    for (const messageId of new Set(messageIds)) {
+      if (!message.get(messageId, conversationId, turnId) || named.get(conversationId, messageId)) continue;
+      if (count + queueable.length >= MAX_UNREAD_FOLLOW_UP_ROWS) return { queueable, capped: true };
+      queueable.push(messageId);
+    }
+    return { queueable, capped: false };
+  }
+
+  requeueUnreadFollowUps(conversation: Conversation, turnId: string, messageIds: readonly string[]): string[] {
+    const { queueable, capped } = this.unreadFollowUpAdmission(conversation.id, turnId, messageIds);
+    if (capped) console.warn("Too many unread follow-ups wait in this chat; the rest stay in their turn.");
+    const message = this.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE id = ?`);
     const original = this.database.prepare(`SELECT created_at FROM queued_messages WHERE conversation_id = ?
       AND state = 'accepted' AND user_message_id = ? ORDER BY sequence LIMIT 1`);
     const insert = this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json,
       intent_digest, route_identity, state, created_at, user_message_id) VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`);
     const queued: string[] = [];
-    for (const messageId of new Set(messageIds)) {
-      const row = message.get(messageId, conversation.id, turnId) as { content: string; attachments_json: string; created_at: string } | undefined;
-      if (!row || named.get(conversation.id, messageId)) continue;
-      if ((count.get(conversation.id) as { count: number }).count >= MAX_UNREAD_FOLLOW_UP_ROWS) {
-        console.warn("Too many unread follow-ups wait in this chat; the rest stay in their turn.");
-        break;
-      }
+    for (const messageId of queueable) {
+      const row = message.get(messageId) as { content: string; attachments_json: string; created_at: string };
       const attachments = rendererSafeAttachments(parseStoredAttachments(row.attachments_json));
       // The row shows the text; the adopted message carries all of it.
       const content = row.content.slice(0, 20_000);

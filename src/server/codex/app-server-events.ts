@@ -175,6 +175,14 @@ export class CodexAppServerEvents {
       handleNotification: (method, params) => this.handleNotification(method, params),
       writeMessage: host.writeMessage,
       failMalformedProtocol: (summary, message) => this.failMalformedProtocol(summary, message),
+      isStoppedTurn: (turnId) => host.orphanGoalTurns?.isStopped(turnId) === true,
+      discardedTurnStarts: (turns) => host.orphanGoalTurns?.discarded(turns),
+    });
+    host.orphanGoalTurns?.attach({
+      phase: host.phase,
+      goalActive: () => this.nativeGoalStatus === "active",
+      completedTurnIds: this.completedTurnIds,
+      emitActivity: (label, activityId) => this.emitActivity("system", "info", label, { activityId }),
     });
     this.hostTools = new CodexHostToolRuntime({
       options: host.options,
@@ -234,6 +242,16 @@ export class CodexAppServerEvents {
   hasObservedTurn(turnId: string): boolean {
     return this.host.activeTurnId() === turnId
       || this.completedTurnIds.has(turnId);
+  }
+
+  /** Whether a turn Codex started on its own waits for turn/start's response. */
+  heldTurnStarted(): boolean {
+    return this.approvalAuthority.holdsTurnStart();
+  }
+
+  /** An explicit goal start owns the goal turn Codex continued while the thread resumed. */
+  adoptHeldGoalTurn(): void {
+    this.approvalAuthority.replayHeldTurnStart();
   }
 
   /** Replays the held notifications of the turn that turn/start returned. */
@@ -645,6 +663,7 @@ export class CodexAppServerEvents {
       return;
     }
 
+    if (this.host.orphanGoalTurns?.observe(method, notificationThreadId, notificationTurnId)) return;
     if (this.approvalAuthority.holdNotification(
       method, notificationThreadId, notificationTurnId, params,
     )) return;

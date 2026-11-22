@@ -20,7 +20,7 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { hold, release } from "../../src/server/runtime/update-hold";
 import { createTurnInteractionCommandHandler } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { watcherNoteDelivery } from "../../src/server/runtime/watcher/watcher-note-instruction";
-import { messageQueueResultSchema } from "../../src/shared/queued-messages";
+import { MAX_UNREAD_FOLLOW_UP_ROWS, messageQueueResultSchema } from "../../src/shared/queued-messages";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import { rollbackConversationHistory } from "../../src/server/runtime/history-rollback-service";
 
@@ -1211,6 +1211,55 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       await f.drain();
       expect(prompts).toEqual([f.store.queuedMessages.get(f.conversationId, before)!.userMessageId, message.id,
         f.store.queuedMessages.get(f.conversationId, after)!.userMessageId]);
+    } finally { await f.close(); }
+  });
+
+  it("keeps a follow-up Claude read late at its send time and its queue place when it is never answered", async () => {
+    const f = await fixture({}, realClock);
+    try {
+      startRunning(f);
+      const identity = turnControllerTestIdentity(f);
+      const before = randomUUID();
+      await f.command("message.queue.enqueue", before);
+      await tick();
+      f.provider.emit({ ...identity, type: "activity", kind: "command", phase: "started", label: "Build", activityId: "build" });
+      const { steerId, message } = await steer(f, "Also look at this.");
+      await tick();
+      f.provider.emit({ ...identity, type: "text", text: "Build answer." });
+      // Claude ends its turn on the answer here, before it reads the follow-up; nothing may move the follow-up.
+      f.provider.emit({ ...identity, type: "text-boundary" });
+      await tick();
+      const after = randomUUID();
+      await f.command("message.queue.enqueue", after);
+      f.compaction.active = true;
+      complete(f, { unreadFollowUps: [steerId] });
+      await f.drain();
+      expect(rows(f).map(({ id, userMessageId }) => userMessageId ?? id)).toEqual([before, message.id, after]);
+      expect(f.store.message(message.id).createdAt).toBe(message.createdAt);
+      expect(unreadRows(f)[0]!.createdAt).toBe(message.createdAt);
+    } finally { await f.close(); }
+  });
+
+  it.each([
+    ["has room for it", 0, "Build answer."],
+    [`already holds ${MAX_UNREAD_FOLLOW_UP_ROWS} unread follow-ups`, MAX_UNREAD_FOLLOW_UP_ROWS, null],
+  ] as const)("ends the run on the answer before a follow-up Claude never read only when the queue %s", async (_case, stale, terminal) => {
+    const f = await fixture({}, realClock);
+    try {
+      const initial = startRunning(f);
+      const identity = turnControllerTestIdentity(f);
+      f.provider.emit({ ...identity, type: "text", text: "Build " });
+      const { steerId, message } = await steer(f, "Also look at this.");
+      f.provider.emit({ ...identity, type: "text", text: "answer." });
+      f.provider.emit({ ...identity, type: "text-boundary" });
+      for (let index = 0; index < stale; index += 1) insertStaleRow(f, initial.turn.userMessageId);
+      f.compaction.active = true;
+      complete(f, { unreadFollowUps: [steerId] });
+      await f.drain();
+      // Past the cap the follow-up stays in its turn, delivered and unanswered, so the run has no last reply.
+      expect(unreadRows(f).some(({ userMessageId }) => userMessageId === message.id)).toBe(terminal !== null);
+      const terminalId = f.store.agentTurn(initial.turn.id).terminalAssistantMessageId;
+      expect(terminalId ? f.store.message(terminalId).content : null).toBe(terminal);
     } finally { await f.close(); }
   });
 

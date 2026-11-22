@@ -35,7 +35,6 @@ import type {
   ProviderSteerInput,
 } from "../../provider/contracts";
 import type { SubagentBackgroundResult, SubagentStopOutcome } from "../../provider/agent-harness";
-import type { ProviderCommandScope } from "../../provider/provider-command-catalog";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
 import type { HarnessCapabilityTurnOffer } from "../harness-capabilities";
 import type { DocumentAttachmentContext } from "../attachments/document-attachment-context";
@@ -115,7 +114,7 @@ export interface TurnProviderRuntime {
     providerToolUseId: string,
     identity: { runId: string; turnId: string },
   ): Promise<SubagentBackgroundResult>;
-  reportedProviderCommands?(scope: ProviderCommandScope): readonly ProviderSlashCommand[] | undefined;
+  reportedProviderCommands?(scope: { providerId: ProviderId; cwd: string; conversationId: string | null }): readonly ProviderSlashCommand[] | undefined;
   disposeAll(): Promise<void>;
 }
 

@@ -115,6 +115,10 @@ async function runTurn(
   return input;
 }
 
+function reportCommands(runtime: TurnControllerTestRuntime, ...names: string[]): void {
+  runtime.provider.reportedCommands = names.map((name) => ({ name, description: name, argumentHint: null }));
+}
+
 function compact(
   runtime: TurnControllerTestRuntime,
   providerId: ProviderId,
@@ -485,6 +489,7 @@ describe("hidden instruction delivery", () => {
     "sends a %s slash command exactly as typed in Build mode and delivers the withheld instructions on the next message",
     async (providerId) => {
       const { runtime } = await chatRuntime(providerId);
+      reportCommands(runtime, "advisor");
 
       const command = await runTurn(runtime, "/advisor fable");
       const next = await runTurn(runtime, "now build");
@@ -511,6 +516,7 @@ describe("hidden instruction delivery", () => {
 
   it("sends a slash command bare and leaves later messages bare when nothing was due", async () => {
     const { runtime } = await chatRuntime("cursor");
+    reportCommands(runtime, "advisor");
 
     await runTurn(runtime, "one");
     const command = await runTurn(runtime, "/advisor fable");
@@ -529,8 +535,10 @@ describe("hidden instruction delivery", () => {
     "/plugin:command arg",
     "/advisor\nfable",
     "  /advisor fable  ",
+    "/ADVISOR fable",
   ])("treats %j as a Claude slash command", async (content) => {
     const { runtime } = await chatRuntime("claude");
+    reportCommands(runtime, "advisor", "Review", "plugin:command");
 
     const command = await runTurn(runtime, content);
 
@@ -549,6 +557,7 @@ describe("hidden instruction delivery", () => {
     `/${"a".repeat(65)} arg`,
   ])("sends %j as an ordinary message with the Build-mode instruction", async (content) => {
     const { runtime } = await chatRuntime("claude");
+    reportCommands(runtime, "advisor", "usr");
 
     const input = await runTurn(runtime, content);
 
@@ -570,6 +579,7 @@ describe("hidden instruction delivery", () => {
 
   it.each(["codex", "opencode"] as const)("keeps the instruction block on a slash-led %s message", async (providerId) => {
     const { runtime } = await chatRuntime(providerId);
+    reportCommands(runtime, "advisor");
 
     const input = await runTurn(runtime, "/advisor fable");
 
@@ -577,20 +587,67 @@ describe("hidden instruction delivery", () => {
     runtime.store.close();
   });
 
-  it("refuses a slash command that carries context, before any turn starts", async () => {
-    const { runtime } = await chatRuntime("cursor");
+  it.each([
+    ["cursor", "/advisor fable", "Cursor runs /advisor on its own."],
+    ["kimi", "/Compact", "Kimi Code runs /Compact on its own."],
+  ] as const)("refuses a reported %s slash command %j that carries context, before any turn starts", async (providerId, content, refusal) => {
+    const { runtime } = await chatRuntime(providerId);
+    reportCommands(runtime, "advisor", "compact");
 
     expect(() => runtime.controller.queue({
       conversationId: runtime.conversationId,
-      content: "/advisor fable",
+      content,
       context: { conversationContextPacketIds: ["packet-1"] },
-    })).toThrow("Cursor runs /advisor on its own. Remove the attached files and context, then send it again.");
+    })).toThrow(`${refusal} Remove the attached files and context, then send it again.`);
     expect(runtime.store.latestAgentTurnForConversation(runtime.conversationId)).toBeNull();
     runtime.store.close();
   });
 
+  it.each([
+    ["claude", "/fix the failing login test"],
+    ["cursor", "/explain this file"],
+    ["kimi", "/api returns 500 here"],
+    ["grok", "/etc is full"],
+  ] as const)("sends a %s message %j that names no reported command as an ordinary prompt with its context", async (providerId, content) => {
+    const { runtime } = await chatRuntime(providerId);
+    reportCommands(runtime, "compact", "advisor");
+
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content,
+      context: {
+        terminalContexts: [{ terminalId: "terminal-1", terminalLabel: "Shell", lineStart: 1, lineEnd: 1, content: "TERMINAL_CONTEXT" }],
+      },
+    });
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    const prompt = runtime.provider.input!.prompt;
+
+    expect(prompt.startsWith(content)).toBe(true);
+    expect(prompt).toContain("TERMINAL_CONTEXT");
+    expect(prompt).toContain(`${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+    runtime.store.close();
+  });
+
+  it.each(["claude", "cursor", "grok", "kimi"] as const)(
+    "sends a %s slash-led message as an ordinary prompt when the provider has reported no commands for the chat",
+    async (providerId) => {
+      const { runtime } = await chatRuntime(providerId);
+
+      const input = await runTurn(runtime, "/advisor fable");
+
+      expect(input.prompt).toContain(`/advisor fable\n\n${INSTRUCTIONS_HEADER}\n[build-mode]\n${BUILD_MODE_INSTRUCTION}`);
+      expect(runtime.provider.reportedCommandScopes).toEqual([{
+        providerId,
+        cwd: runtime.store.conversationPath(runtime.conversationId),
+        conversationId: runtime.conversationId,
+      }]);
+      runtime.store.close();
+    },
+  );
+
   it("refuses a slash command that would start a fresh session in an established chat, then sends the next message with history", async () => {
     const { runtime } = await chatRuntime("cursor");
+    reportCommands(runtime, "advisor");
 
     await runTurn(runtime, "one");
     runtime.store.updateConversation(runtime.conversationId, { providerSessionId: null });

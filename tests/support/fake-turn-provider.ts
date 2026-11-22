@@ -1,4 +1,5 @@
-import type { AgentApprovalDecision } from "../../src/shared/contracts";
+import type { AgentApprovalDecision, ProviderSlashCommand } from "../../src/shared/contracts";
+import type { ProviderCommandScope } from "../../src/server/provider/provider-command-catalog";
 import {
   providerRunTerminal,
   type ProviderEvent,
@@ -68,6 +69,13 @@ export class FakeTurnProvider implements TurnProviderRuntime {
   private rejectResult: ((error: unknown) => void) | null = null;
 
   resolveModelRoute = resolveNativeModelRoute;
+  reportedCommands: readonly ProviderSlashCommand[] | undefined = undefined;
+  readonly reportedCommandScopes: ProviderCommandScope[] = [];
+
+  reportedProviderCommands(scope: ProviderCommandScope): readonly ProviderSlashCommand[] | undefined {
+    this.reportedCommandScopes.push(scope);
+    return this.reportedCommands;
+  }
 
   harnessIdFor(input: ProviderRunInput): string {
     return input.harnessId;

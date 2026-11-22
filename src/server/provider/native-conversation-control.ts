@@ -24,6 +24,8 @@ export async function controlNativeConversation(
   active: ReadonlySet<string>,
   joinCleanup: boolean,
   run: (signal: AbortSignal, progress: NativeMutationProgress) => Promise<Omit<Completed, "identity" | "operationId">>,
+  /** The operations read a running source safely (`fork-while-source-running`); others refuse a live fork. */
+  options: { forksLiveSource?: boolean } = {},
 ): Promise<NativeConversationResult> {
   const base = {
     operationId: request.operationId, identity: request.source.identity,
@@ -38,7 +40,10 @@ export async function controlNativeConversation(
   try {
     validateNativeConversationRequest(request, launch);
     deadline.signal.throwIfAborted();
-    if (active.has(request.source.nativeConversationId) || pending.has(key)) {
+    const live = request.kind === "fork" && request.source.live === true;
+    if (live && !options.forksLiveSource) throw new NativeConversationRejection("rejected", "conversation-busy");
+    // A live fork reads while the source's own run writes; another native control of it still excludes this one.
+    if ((!live && active.has(request.source.nativeConversationId)) || pending.has(key)) {
       throw new NativeConversationRejection("rejected", "conversation-busy");
     }
     pending.add(key);

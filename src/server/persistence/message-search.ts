@@ -27,6 +27,9 @@ export function searchMessages(
     SELECT id AS messageId FROM messages INDEXED BY messages_created_id_idx
     ORDER BY created_at DESC, id DESC
   `);
+  // A rolled-back turn is no longer part of its chat's history, so neither its request nor its answer is found
+  // (T3 `ThreadSearch.ts:283`). Nor is an unread follow-up while a queue row names it: it waits in the queue to be
+  // sent as its own turn, and the timeline hides it until then (the queue's active states).
   const eligible = database.prepare(`
     SELECT m.id AS messageId, m.conversation_id AS conversationId,
       c.project_id AS projectId, m.turn_id AS turnId, m.role, m.created_at AS createdAt
@@ -36,7 +39,10 @@ export function searchMessages(
     LEFT JOIN agent_turns t ON t.id = m.turn_id AND t.conversation_id = c.id
     WHERE m.id = ? AND c.archived_at IS NULL AND (
       m.role = 'user' OR (m.role = 'assistant' AND t.terminal_assistant_message_id = m.id)
-    )
+    ) AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS rollback
+      WHERE rollback.kind = 'rolled-back-turn' AND rollback.id = m.turn_id AND rollback.thread_id = m.conversation_id)
+    AND NOT EXISTS (SELECT 1 FROM queued_messages AS queued WHERE queued.conversation_id = m.conversation_id
+      AND queued.state IN ('waiting','dispatching','blocked') AND queued.user_message_id = m.id)
   `);
   // Bound each native read: never aggregate an entire chunk history inside
   // SQLite before JavaScript can observe the scan deadline again.

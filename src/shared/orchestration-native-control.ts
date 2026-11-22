@@ -21,7 +21,8 @@ const nativeBoundarySelectionSchema = z.discriminatedUnion("kind", [
 ]);
 export const nativeForkRequestSchema = z.object({
   kind: z.literal("fork"), operationId: id, targetConversationId: id,
-  source: nativeSourceSchema, boundary: nativeBoundarySelectionSchema,
+  // `live`: a later turn of the source may be running while the fork reads it.
+  source: nativeSourceSchema.extend({ live: z.literal(true).optional() }).strict(), boundary: nativeBoundarySelectionSchema,
 }).strict();
 export const nativeRollbackRequestSchema = z.object({
   kind: z.literal("rollback"), operationId: id, source: nativeSourceSchema, boundary: nativeBoundarySelectionSchema,

@@ -40,6 +40,12 @@ export const PROVIDER_CAPABILITY_IDS = [
    * the session. Codex reports `turn/start`'s turn id and `turn/started`.
    */
   "turn-acceptance",
+  /**
+   * Fork natively from a completed turn while a later turn of the source is still running (T3
+   * `canForkWhileSourceRunning`). The native fork only reads the source history, cut at the boundary turn's
+   * own settled cursor, so the running turn's later writes never reach the fork.
+   */
+  "fork-while-source-running",
 ] as const;
 
 export type ProviderCapabilityId = (typeof PROVIDER_CAPABILITY_IDS)[number];
@@ -298,6 +304,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       // "unknown variant") and the turn goes inline.
       "history-injection": "negotiated",
       "turn-acceptance": "native",
+      // `thread/fork` with an inclusive `lastTurnId` omits the running turn (T3 `CodexAdapterV2.ts:281`).
+      "fork-while-source-running": "native",
     },
   },
   {
@@ -318,6 +326,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "custom-backend": "negotiated",
       "endpoint-selection": "negotiated",
       "performance-modes": "negotiated",
+      // The SDK forks the transcript up to the boundary message (T3 `ClaudeAdapterV2.ts:527`).
+      "fork-while-source-running": "native",
     },
   },
   {

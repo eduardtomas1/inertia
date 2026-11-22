@@ -46,6 +46,12 @@ describe("ProviderManager native conversation service",()=>{
     await expect(f.manager.nativeConversation(f.request,f.selection,{cwd:f.cwd})).rejects.toThrow("Stop the active");
     expect(f.execute).not.toHaveBeenCalled();
   });
+  it("refuses a live fork on a harness that does not fork while its source runs",async()=>{
+    const f=await fixture();vi.spyOn(f.manager,"isRunning").mockImplementation(id=>id==="source");
+    await expect(f.manager.nativeConversation({...f.request,source:{...f.request.source,live:true}},f.selection,{cwd:f.cwd}))
+      .rejects.toThrow("cannot fork a conversation while it runs");
+    expect(f.execute).not.toHaveBeenCalled();
+  });
   it("rejects stale route revisions and cancelled control requests",async()=>{
     const f=await fixture();
     await expect(f.manager.nativeConversation(f.request,{...f.selection,backendConfigurationRevision:999},{cwd:f.cwd})).rejects.toThrow("changed");

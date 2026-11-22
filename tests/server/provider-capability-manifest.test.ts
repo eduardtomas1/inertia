@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   attestProviderCapabilities,
   attestedProviderCapability,
+  harnessDeclaresCapability,
   productionProviderCapabilityManifests,
   PROVIDER_CAPABILITY_IDS,
   providerCapabilityManifest,
@@ -176,6 +177,14 @@ describe("provider capability manifests", () => {
       expect(capability(other, "history-injection").support).toBe("unavailable");
       expect(capability(other, "turn-acceptance").support).toBe("unavailable");
     }
+    // Only Codex and Claude fork natively while a later source turn runs, as in T3 (`canForkWhileSourceRunning`).
+    for (const value of productionProviderCapabilityManifests()) {
+      expect(capability(value, "fork-while-source-running").support)
+        .toBe(["codex-app-server", "claude-agent-sdk"].includes(value.harnessId) ? "native" : "unavailable");
+    }
+    expect(harnessDeclaresCapability("codex-app-server", "fork-while-source-running")).toBe(true);
+    expect(harnessDeclaresCapability("claude-agent-sdk", "fork-while-source-running")).toBe(true);
+    expect(harnessDeclaresCapability("codex-cli", "fork-while-source-running")).toBe(false);
 
     const claude = manifest("claude-agent-sdk");
     expect(capability(claude, "images").support).toBe("native");

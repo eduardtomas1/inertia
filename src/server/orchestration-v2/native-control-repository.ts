@@ -7,7 +7,7 @@ import type { OrchestrationEffectOutbox } from "./effect-outbox";
 import { CHECKPOINT_CAPTURE_EFFECT_KIND } from "./effect-runtime";
 import { commandFingerprint, durableJson } from "./json";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
-import { nativeControlLockResources } from "./native-control-projector";
+import { forksLiveSource, nativeControlLockResources } from "./native-control-projector";
 import type { HistoryRollbackRepository } from "./history-rollback-repository";
 
 /** Durable fences cover both application conversations and the exact native source. */
@@ -19,6 +19,15 @@ export class NativeControlRepository {
   locked(threadId: string): boolean {
     return this.database.prepare(`SELECT 1 FROM orchestration_v2_entities WHERE kind = 'native-control-lock'
       AND json_extract(payload_json, '$.resourceId') = ? AND json_extract(payload_json, '$.locked') = 1 LIMIT 1`).get(threadId) !== undefined;
+  }
+
+  /** The control that holds a locked resource, if any. */
+  lockHolder(resourceId: string): NativeControl | null {
+    const row = this.database.prepare(`SELECT json_extract(payload_json, '$.operationId') AS operationId
+      FROM orchestration_v2_entities WHERE kind = 'native-control-lock'
+        AND json_extract(payload_json, '$.resourceId') = ? AND json_extract(payload_json, '$.locked') = 1 LIMIT 1`)
+      .get(resourceId) as { operationId: string } | undefined;
+    return row ? this.get(row.operationId) : null;
   }
 
   get(id: string): NativeControl | null {
@@ -40,7 +49,9 @@ export class NativeControlRepository {
   start(input: Omit<NativeControl, "runtimeId" | "systemBootId" | "state" | "backing" | "reason" | "createdAt" | "updatedAt">,
     source?: CommandSource, result: JsonValue = null): OrchestrationEffect {
     return this.database.transaction(() => {
-      for (const threadId of [input.threadId, input.request.source.identity.conversationId]) {
+      // A live fork starts beside the source's running turn; only the target must be idle.
+      const idle = forksLiveSource(input) ? [input.threadId] : [input.threadId, input.request.source.identity.conversationId];
+      for (const threadId of idle) {
         const active = this.database.prepare(`SELECT 1 FROM orchestration_v2_entities WHERE thread_id = ? AND
           ((kind = 'thread' AND json_extract(payload_json, '$.activeRunId') IS NOT NULL)
             OR (kind = 'attempt' AND json_extract(payload_json, '$.cleanup') IN ('pending','unconfirmed','unconfirmed-released'))) LIMIT 1`).get(threadId);

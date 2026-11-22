@@ -1,5 +1,6 @@
 // @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
@@ -7,6 +8,7 @@ import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/share
 import { createQueuedMessageRuntime, UNREAD_FOLLOW_UP_ROUTE_CHANGED } from "../../src/server/runtime/queued-message-runtime";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { RuntimeStore } from "../../src/server/database";
+import { searchMessages } from "../../src/server/persistence/message-search";
 import { QueuedMessageLimitError, queuedIntentDigest, RETAINED_TERMINAL_QUEUED_MESSAGES } from "../../src/server/persistence/queued-message-repository";
 import { MessageSendPreparationTimeoutError } from "../../src/server/runtime/commands/message-send-preparation";
 import {
@@ -1131,6 +1133,33 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       complete(f);
       await f.drain();
       expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("keeps a waiting unread follow-up out of message search, as the timeline hides it, until it runs as its own turn", async () => {
+    const f = await fixture({}, realClock);
+    const found = (query: string) => {
+      const reader = new Database(join(f.directory, "inertia.sqlite"), { readonly: true });
+      try { return searchMessages(reader, query).hits.map(({ messageId, turnId }) => ({ messageId, turnId })); }
+      finally { reader.close(); }
+    };
+    try {
+      startRunning(f);
+      withSession(f);
+      const { steerId, message } = await steer(f, "Unread needle follow-up.");
+      f.compaction.active = true;
+      complete(f, { unreadFollowUps: [steerId] });
+      await f.drain();
+      expect(unreadRows(f)).toEqual([expect.objectContaining({ state: "waiting", userMessageId: message.id })]);
+      expect(found("Unread needle")).toEqual([]);
+      f.compaction.active = false;
+      f.queue.onCompactionSettled(f.conversationId);
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
+      await f.drain();
+      const next = f.store.latestAgentTurnForConversation(f.conversationId)!;
+      expect(found("Unread needle")).toEqual([{ messageId: message.id, turnId: next.id }]);
+      complete(f);
+      await f.drain();
     } finally { await f.close(); }
   });
 

@@ -8,6 +8,7 @@ import type { CodexControlClient, withCodexControlClient } from "../../src/serve
 import type { JsonObject } from "../../src/server/codex/protocol";
 import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
 import { createCodexNativeConversationOperations } from "../../src/server/provider/codex-native-conversation";
+import { controlNativeConversation } from "../../src/server/provider/native-conversation-control";
 import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle";
 import type { NativeConversationLaunch, NativeConversationRequest } from "../../src/server/provider/native-conversation-operations";
 
@@ -29,7 +30,9 @@ beforeEach(async () => {
 });
 afterEach(async () => await rm(root, { recursive: true, force: true }));
 
-function fixture(options: { loaded?: boolean; historyMode?: string; mutateResponse?: (method: string, result: JsonObject) => JsonObject } = {}) {
+function fixture(options: { loaded?: boolean; historyMode?: string; mutateResponse?: (method: string, result: JsonObject) => JsonObject;
+  /** Turn statuses other than `completed`, as `thread/turns/list` reports them. */
+  statuses?: Readonly<Record<string, string>> } = {}) {
   const sessions = new Map([ ["source-native-thread", ["turn-3", "turn-2", "turn-1"]] ]);
   let loaded = options.loaded ?? false;
   const metadata = (id: string): JsonObject => ({ thread: {
@@ -41,7 +44,7 @@ function fixture(options: { loaded?: boolean; historyMode?: string; mutateRespon
     let result: JsonObject;
     switch (method) {
       case "thread/read": result = metadata(id); break;
-      case "thread/turns/list": result = { data: sessions.get(id)!.map((turn) => ({ id: turn, status: "completed" })), nextCursor: null }; break;
+      case "thread/turns/list": result = { data: sessions.get(id)!.map((turn) => ({ id: turn, status: options.statuses?.[turn] ?? "completed" })), nextCursor: null }; break;
       case "thread/resume": loaded = true; result = metadata(id); break;
       case "thread/fork": {
         const turns = sessions.get(id)!;
@@ -224,6 +227,59 @@ describe("Codex native conversation control", () => {
     const signal = AbortSignal.abort();
     expect(await ops.execute(request, { ...launch, signal })).toMatchObject({ status: "failed", reason: "cancelled", mutationMayHaveOccurred: false });
     expect(invoked).not.toHaveBeenCalled();
+  });
+
+  describe("while a later source turn runs", () => {
+    const live = (): NativeConversationRequest => ({ ...request, source: { ...request.source, live: true } });
+    /** The source thread with a running turn after its settled head (turn-3), as another App Server writes it. */
+    function running(statuses: Record<string, string> = { "turn-4": "inProgress" }) {
+      const value = fixture({ statuses });
+      value.sessions.set("source-native-thread", ["turn-4", "turn-3", "turn-2", "turn-1"]);
+      return value;
+    }
+
+    it("forks the completed boundary through the inclusive last turn, omitting the running turn", async () => {
+      const { control, rpc, sessions } = running();
+      // The same history without the live flag is unstable: never native.
+      expect(await createCodexNativeConversationOperations(new Set(), control).execute(request, launch))
+        .toMatchObject({ status: "rejected", reason: "native-turn-not-stable" });
+      const ops = createCodexNativeConversationOperations(new Set([request.source.nativeConversationId]), control);
+      expect(await ops.execute(live(), launch)).toMatchObject({ status: "completed", effect: "native-fork",
+        backing: { nativeConversationId: "fork-native-thread", nativeSessionId: "native-session-tree", headId: "turn-2", persistedHeadId: "turn-2" } });
+      expect(rpc).toHaveBeenCalledWith("thread/fork", expect.objectContaining({ threadId: "source-native-thread", lastTurnId: "turn-2" }));
+      expect(rpc.mock.calls.some(([method]) => method === "thread/revert" || method === "thread/resume")).toBe(false);
+      expect(sessions.get("source-native-thread")).toEqual(["turn-4", "turn-3", "turn-2", "turn-1"]);
+      expect(sessions.get("fork-native-thread")).toEqual(["turn-2", "turn-1"]);
+    });
+
+    it.each<{ write: string; statuses: Record<string, string>; history: string[]; boundary: string; reason: string }>([
+      // A later write removed the settled head from the thread.
+      { write: "a history without the settled head", statuses: {}, history: ["turn-4", "turn-2", "turn-1"], boundary: "turn-2", reason: "native-head-changed" },
+      // The boundary is the running turn, after the settled head.
+      { write: "the boundary after the settled head", statuses: { "turn-4": "inProgress" }, history: ["turn-4", "turn-3", "turn-2", "turn-1"], boundary: "turn-4", reason: "native-boundary-not-found" },
+      // A turn up to the settled head has not finished.
+      { write: "an unfinished turn before the settled head", statuses: { "turn-2": "inProgress" }, history: ["turn-4", "turn-3", "turn-2", "turn-1"], boundary: "turn-2", reason: "native-turn-not-stable" },
+    ])("rejects $write before mutation", async ({ statuses, history, boundary, reason }) => {
+      const { control, rpc, sessions } = running(statuses);
+      sessions.set("source-native-thread", history);
+      expect(await createCodexNativeConversationOperations(new Set(), control).execute(
+        { ...live(), boundary: { kind: "turn", nativeTurnId: boundary } }, launch)).toMatchObject({ status: "rejected", reason });
+      expect(rpc.mock.calls.some(([method]) => method === "thread/fork")).toBe(false);
+    });
+
+    it("is refused by native operations that do not read a running source", async () => {
+      const run = vi.fn();
+      expect(await controlNativeConversation(live(), launch, new Set(), false, run))
+        .toMatchObject({ status: "rejected", reason: "conversation-busy" });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("accepts the live flag on a fork only", async () => {
+      const { control, rpc } = running();
+      expect(await createCodexNativeConversationOperations(new Set(), control).execute({ ...live(), kind: "rollback" }, launch))
+        .toMatchObject({ status: "rejected", reason: "invalid-request" });
+      expect(rpc).not.toHaveBeenCalled();
+    });
   });
 
   it("cancels during mutation and joins the control-client teardown", async () => {

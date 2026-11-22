@@ -163,6 +163,60 @@ describe("Claude native conversation control", () => {
     expect(await readdir(directory)).toHaveLength(1);
   });
 
+  describe("while a later source turn runs", () => {
+    /** The running turn's entries after the settled head (ids[3]); `parent` overrides where its chain attaches. */
+    function liveEntries(parent: string = ids[3]!) {
+      const running = [randomUUID(), randomUUID()];
+      const text = running.map((uuid, index) => JSON.stringify({
+        type: index === 0 ? "user" : "assistant", uuid, sessionId: sourceId,
+        parentUuid: index === 0 ? parent : running[0], isSidechain: false, cwd: launch.cwd,
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 1, index)).toISOString(), version: "2.1.0",
+        message: { role: index === 0 ? "user" : "assistant", content: [{ type: "text", text: `running-${index}` }] },
+      })).join("\n") + "\n";
+      return { running, text };
+    }
+    const live = () => ({ ...request, source: { ...request.source, live: true as const } });
+
+    it("forks the completed boundary natively, leaving out the running turn and its partly written entry", async () => {
+      const { text } = liveEntries();
+      // The running Claude is mid-append: its last entry has no line end yet.
+      const liveText = sourceText + text + '{"type":"assistant","uuid":"';
+      await writeFile(transcript, liveText);
+      const active = new Set([sourceId]);
+      // The same snapshot without the live flag is a changed head (and the torn line is malformed): never native.
+      expect((await createClaudeNativeConversationOperations(active).execute(request, launch)).status).toBe("rejected");
+      const result = await createClaudeNativeConversationOperations(active).execute(live(), launch);
+      if (result.status !== "completed") throw new Error(JSON.stringify(result));
+      expect(result.effect).toBe("native-fork");
+      const forkText = await readFile(join(directory, `${result.backing.nativeConversationId}.jsonl`), "utf8");
+      const messages = forkText.trim().split("\n").map((line) => JSON.parse(line))
+        .filter((record) => ["user", "assistant"].includes(record.type));
+      expect(messages.map((message) => message.message.content[0].text)).toEqual(["message-0", "message-1"]);
+      expect(result.backing.headId).toBe(messages[1].uuid);
+      expect(await readFile(transcript, "utf8")).toBe(liveText);
+    });
+
+    it.each([
+      // The live chain no longer runs through the settled head: a later write replaced history Inertia recorded.
+      { write: "a branch from before the settled head", parent: () => ids[1]!, boundary: () => ids[1]!, reason: "native-head-changed" },
+      // The boundary is a message the running turn wrote after the settled head.
+      { write: "the boundary after the settled head", parent: () => ids[3]!, boundary: (running: string[]) => running[1]!, reason: "native-boundary-not-found" },
+    ])("rejects $write before mutation", async ({ parent, boundary, reason }) => {
+      const { running, text } = liveEntries(parent());
+      await writeFile(transcript, sourceText + text);
+      const result = await createClaudeNativeConversationOperations(new Set([sourceId])).execute(
+        { ...live(), boundary: { kind: "turn", nativeTurnId: boundary(running) } }, launch);
+      expect(result).toMatchObject({ status: "rejected", reason });
+      expect(await readdir(directory)).toEqual([`${sourceId}.jsonl`]);
+    });
+
+    it("accepts the live flag on a fork only", async () => {
+      expect(await createClaudeNativeConversationOperations(new Set()).execute({ ...live(), kind: "rollback" }, launch))
+        .toMatchObject({ status: "rejected", reason: "invalid-request" });
+      expect(await readdir(directory)).toEqual([`${sourceId}.jsonl`]);
+    });
+  });
+
   it("keeps the source locked until abandoned filesystem work settles, with no late fork", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

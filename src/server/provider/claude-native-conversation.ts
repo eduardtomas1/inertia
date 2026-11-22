@@ -38,6 +38,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 function reject(reason: string): never { throw new NativeConversationRejection("rejected", reason); }
 
+/** The complete lines of a transcript a running Claude may still be appending to: an unterminated last line is
+ * a later entry being written, never part of a settled turn. */
+function completeLines(bytes: Buffer): Buffer {
+  return bytes.at(-1) === 0x0a ? bytes : bytes.subarray(0, bytes.lastIndexOf(0x0a) + 1);
+}
+
 function parseTranscript(bytes: Buffer, sessionId: string): SessionStoreEntry[] {
   const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   const lines = text.split("\n").filter((line) => line.trim());
@@ -67,6 +73,8 @@ class ScopedClaudeTranscriptStore implements SessionStore {
     private readonly filesystem?: ClaudeSkillFilesystemTestSeam,
     /** False where the answer is evidence that must hold now: the full unique search always runs. */
     private readonly useRememberedFolder = true,
+    /** The source may be running, so its transcript may end in a partly written entry. */
+    private readonly liveSource = false,
   ) {}
 
   private checkKey(key: SessionKey): void {
@@ -157,7 +165,7 @@ class ScopedClaudeTranscriptStore implements SessionStore {
     if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
       || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
       || BigInt(bytes.length) !== after.size) reject("native-history-changed-during-read");
-    this.source = parseTranscript(bytes, this.sourceId);
+    this.source = parseTranscript(this.liveSource ? completeLines(bytes) : bytes, this.sourceId);
     this.loadedElsewhere = sourceKey !== key.projectKey;
     return this.source;
   }
@@ -255,15 +263,29 @@ export function createClaudeNativeConversationOperations(
       if (!UUID.test(sourceId) || (request.source.nativeSessionId !== undefined && request.source.nativeSessionId !== sourceId)) reject("native-session-mismatch");
       const home = await claudeUserConfigHome(launch.environment, { signal });
       if (!home) reject("native-transcript-home-unavailable");
-      const store = new ScopedClaudeTranscriptStore(home, sourceId, signal, claudeEnvironmentValue(launch.environment, "CLAUDE_CODE_PROJECT_DIR_NAME"), filesystem);
+      const live = request.kind === "fork" && request.source.live === true;
+      const store = new ScopedClaudeTranscriptStore(home, sourceId, signal, claudeEnvironmentValue(launch.environment, "CLAUDE_CODE_PROJECT_DIR_NAME"), filesystem,
+        true, live);
       const options = { dir: launch.cwd, sessionStore: store, includeSystemMessages: true, limit: MAX_TRANSCRIPT_ENTRIES };
+      // One snapshot: the fork below loads the same entries from the store, never a later read.
       const messages = await getSessionMessages(sourceId, options);
       signal.throwIfAborted();
       if (!messages.length || messages.some((message) => !UUID.test(message.uuid) || message.session_id !== sourceId)) reject("invalid-native-history");
       const head = messages.at(-1)!.uuid;
-      if (head !== request.source.expectedHeadId) reject("native-head-changed");
       const kept = retainedNativeHead(request.boundary);
-      if (kept !== null && !messages.some((message) => message.uuid === kept)) reject("native-boundary-not-found");
+      const keptIndex = kept === null ? -1 : messages.findIndex((message) => message.uuid === kept);
+      if (live) {
+        // A running later turn writes past the settled head, so the live head bounds nothing (T3
+        // `ClaudeAdapterV2.ts:2777`); the fork is cut at the boundary turn's own settled cursor. The settled head
+        // must still be on the live chain, so the later writes extend the history Inertia recorded instead of
+        // replacing it, and the boundary must be at or before it.
+        const settledIndex = messages.findIndex((message) => message.uuid === request.source.expectedHeadId);
+        if (settledIndex < 0) reject("native-head-changed");
+        if (keptIndex < 0 || keptIndex > settledIndex) reject("native-boundary-not-found");
+      } else {
+        if (head !== request.source.expectedHeadId) reject("native-head-changed");
+        if (kept !== null && keptIndex < 0) reject("native-boundary-not-found");
+      }
       if (request.kind === "rollback") {
         if (kept === head) return { status: "completed", effect: "unchanged", backing: { nativeConversationId: sourceId, headId: head, persistedHeadId: head } };
         if (kept === null) {
@@ -289,7 +311,7 @@ export function createClaudeNativeConversationOperations(
       }
       await store.persist(fork.sessionId, progress);
       return { status: "completed", effect: "native-fork", backing: { nativeConversationId: fork.sessionId, headId: forkHead, persistedHeadId: forkHead } };
-    }),
+    }, { forksLiveSource: true }),
   };
 }
 

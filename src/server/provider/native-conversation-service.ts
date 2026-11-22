@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { ModelSelection } from "../../shared/model-routing";
 import { providerChildEnvironment, providerEnvironment } from "../environment";
 import { providerInstanceId } from "../orchestration-v2/provider-instance";
+import { harnessDeclaresCapability } from "./capability-manifest";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
 import { ProviderRuntimeError, type ProviderManagerOptions, type ProviderBackendLaunchOptions, type ProviderRunInput } from "./contracts";
 import type { ProviderManagerInstallationAuthority } from "./provider-manager-installation";
@@ -42,7 +43,13 @@ export async function executeNativeConversation(request: NativeConversationReque
   const source = request.source.identity.conversationId;
   options.gate?.(source, route.providerId);
   options.installation.assertRecoveryComplete(route.providerId);
-  if (options.isRunning(source) || request.kind === "fork" && options.isRunning(request.targetConversationId)) {
+  if (request.kind === "fork" && request.source.live === true
+    && !harnessDeclaresCapability(route.harnessId, "fork-while-source-running")) {
+    throw new ProviderRuntimeError("invalid_input", "This provider cannot fork a conversation while it runs.");
+  }
+  // Only a live fork may read a running source; nothing may change the history of a running target.
+  const sourceRunning = (): boolean => !(request.kind === "fork" && request.source.live === true) && options.isRunning(source);
+  if (sourceRunning() || request.kind === "fork" && options.isRunning(request.targetConversationId)) {
     throw new ProviderRuntimeError("invalid_input", "Stop the active provider run before changing native history.");
   }
   const signal = context.signal ? AbortSignal.any([options.lifetimeSignal, context.signal]) : options.lifetimeSignal;
@@ -71,7 +78,7 @@ export async function executeNativeConversation(request: NativeConversationReque
     signal.throwIfAborted();
     options.gate?.(source, route.providerId);
     requireInstance(options.resolveRoute());
-    if (options.isRunning(source) || request.kind === "fork" && options.isRunning(request.targetConversationId)) throw new ProviderRuntimeError("invalid_input", "The provider conversation became active.");
+    if (sourceRunning() || request.kind === "fork" && options.isRunning(request.targetConversationId)) throw new ProviderRuntimeError("invalid_input", "The provider conversation became active.");
     const launch: NativeConversationLaunch = { executable: options.executable, installationVersion: options.installationVersion, environment: { ...launchOptions.environment },
       cwd: context.cwd, sourceCwd: context.sourceCwd, signal, timeoutMs: context.timeoutMs, installationUse: transfer,
       harnessConfiguration: launchOptions.harnessConfiguration };

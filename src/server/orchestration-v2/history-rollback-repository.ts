@@ -71,11 +71,17 @@ export class HistoryRollbackRepository {
    * in several checkouts when its backing follows it (G11 part 1b), so the head
    * belongs to the provider instance and the native conversation, not to a
    * checkout (T3 keys native state by provider thread and native thread).
+   *
+   * `settledOnly` passes over boundaries that only started, for a source whose
+   * later turn is still running: the head is then the last settled one, which
+   * the running turn's writes follow.
    */
-  physicalHead(input: { threadId: string; providerInstanceId: string; nativeConversationId: string }): string | null {
+  physicalHead(input: { threadId: string; providerInstanceId: string; nativeConversationId: string },
+    { settledOnly = false }: { settledOnly?: boolean } = {}): string | null {
     const boundary = this.database.prepare(`SELECT revision, payload_json FROM orchestration_v2_entities
       WHERE kind = 'native-boundary' AND thread_id = ? AND json_extract(payload_json, '$.providerInstanceId') = ?
         AND json_extract(payload_json, '$.nativeConversationId') = ?
+        ${settledOnly ? "AND json_extract(payload_json, '$.phase') = 'settled'" : ""}
       ORDER BY revision DESC LIMIT 1`).get(input.threadId, input.providerInstanceId,
       input.nativeConversationId) as { revision: number; payload_json: string } | undefined;
     const cursorRow = this.events.projection("history-cursor", input.threadId);

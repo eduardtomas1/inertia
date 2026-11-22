@@ -1,13 +1,16 @@
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 
 import { RuntimeStore } from "../../src/server/database";
 import { rollbackConversationHistory } from "../../src/server/runtime/history-rollback-service";
+import { prepareForkSession } from "../../src/server/runtime/fork-session-service";
 import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest, NativeConversationResult } from "../../src/server/provider/native-conversation-operations";
 import { PROVIDER_HANDOFF_FILES_LABEL } from "../../src/server/persistence/provider-handoff-files";
+import { searchMessages } from "../../src/server/persistence/message-search";
 import { providerHandoffReason } from "../../src/server/persistence/turn-context-facts";
 import type { ServerEvent, TurnGitArtifactFile } from "../../src/shared/contracts";
 import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -411,6 +414,34 @@ describe("deferred native history rollback", () => {
     } finally { store.close(); }
   });
 
+  it("tells the user a fork is reading the chat when a live fork still holds its provider conversation", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      await finish(runtime, "second");
+      const running = send(runtime, "running request");
+      const parent = runtime.store.conversation(runtime.conversationId);
+      const input = { projectId: parent.projectId, sourceConversationId: parent.id, sourceTurnId: first.id, activate: false };
+      const child = runtime.store.orchestration.forks.create(input, { actorId: "human", commandId: "live-fork", command: { ...input } });
+      let release!: (result: NativeConversationResult) => void;
+      const forkDeps = dependencies(runtime, () => new Promise((resolve) => { release = resolve; }));
+      const forking = prepareForkSession(forkDeps, child.id, new AbortController().signal);
+      await vi.waitFor(() => expect(forkDeps.providers.nativeConversation).toHaveBeenCalledOnce());
+      runtime.provider.resolve({ text: "running answer", sessionId: "source-native" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(running.id).status).toBe("completed");
+      const deps = dependencies(runtime, async () => { throw new Error("The rollback must not reach the provider."); });
+      await expect(rollback(runtime, deps, first.id)).rejects.toThrow("A fork of this chat is still reading its history.");
+      expect(deps.providers.nativeConversation).not.toHaveBeenCalled();
+      expect(runtime.store.orchestration.history.rolledBack(running.id)).toBe(false);
+      const request = forkDeps.providers.nativeConversation.mock.calls[0]![0];
+      release({ operationId: request.operationId, identity: request.source.identity, targetConversationId: child.id,
+        status: "rejected", reason: "native-head-changed" });
+      await forking;
+      expect(runtime.store.orchestration.forks.get(child.id)?.transfer).toBe("portable");
+    } finally { runtime.store.close(); }
+  });
+
   it("orders concurrent rollback commands for one chat through the production command handler", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {
@@ -456,6 +487,71 @@ describe("handoff outcome after a rollback", () => {
       expect(runtime.store.orchestration.history.rolledBack(claude.id)).toBe(true);
       // The only other-provider turn was rolled back: nothing explains a move any more.
       expect(providerHandoffReason(database, runtime.conversationId, later, "codex")).toBeNull();
+    } finally { runtime.store.close(); }
+  });
+});
+
+describe("message search after a rollback", () => {
+  const unsupported = async (request: NativeConversationRequest): Promise<NativeConversationResult> => ({
+    operationId: request.operationId, identity: request.source.identity,
+    status: "unsupported", reason: "native-history-control-unavailable" });
+  /** The texts of the hits for `query`, on the read connection the search worker uses. */
+  function found(runtime: TurnControllerTestRuntime, query: string) {
+    const reader = new Database(join(runtime.directory, "inertia.sqlite"), { readonly: true });
+    try {
+      const result = searchMessages(reader, query);
+      expect(result.incomplete).toBe(false);
+      return result.hits.map(({ conversationId, role, snippet }) => ({ conversationId, role, snippet }));
+    } finally { reader.close(); }
+  }
+
+  it("finds neither the user nor the assistant message of a rolled-back turn, and finds the turns kept and sent after", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const source = runtime.conversationId;
+      const first = await finish(runtime, "kept-needle");
+      const second = await finish(runtime, "dropped-needle");
+      const third = await finish(runtime, "also-dropped-needle");
+      expect(found(runtime, "dropped-needle")).toHaveLength(4);
+      await expect(rollback(runtime, dependencies(runtime, unsupported), first.id)).resolves.toMatchObject({ rolledBackTurns: 2 });
+      expect(runtime.store.orchestration.history.rolledBack(second.id)).toBe(true);
+      expect(runtime.store.orchestration.history.rolledBack(third.id)).toBe(true);
+      expect(found(runtime, "dropped-needle")).toEqual([]);
+      expect(found(runtime, "kept-needle")).toEqual([
+        { conversationId: source, role: "assistant", snippet: "kept-needle answer" },
+        { conversationId: source, role: "user", snippet: "kept-needle request" },
+      ]);
+      // Moving forward after the rollback: the new turn is history again, the rolled-back ones stay out.
+      await finish(runtime, "forward-needle");
+      expect(found(runtime, "forward-needle")).toHaveLength(2);
+      expect(found(runtime, "dropped-needle")).toEqual([]);
+    } finally { runtime.store.close(); }
+  });
+
+  it("keeps a fork's own turns when its source rolls back past the fork point, and leaves out the fork's rolled-back turns", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const source = runtime.conversationId;
+      const first = await finish(runtime, "root-needle");
+      const second = await finish(runtime, "branch-needle");
+      const parent = runtime.store.conversation(source);
+      const input = { projectId: parent.projectId, sourceConversationId: source, sourceTurnId: second.id, activate: false };
+      const child = runtime.store.orchestration.forks.create(input, { actorId: "human", commandId: "fork-before-rollback", command: { ...input } });
+      const childFirst = await finish(runtime, "child-needle", child.id);
+      await finish(runtime, "child-dropped-needle", child.id);
+      const deps = dependencies(runtime, unsupported);
+      await expect(rollback(runtime, deps, first.id)).resolves.toMatchObject({ rolledBackTurns: 1 });
+      // The fork still shows the turn it inherited, but search finds it nowhere, as in T3: a fork carries no
+      // message rows of its own for inherited turns (T3 composes them from the source's turn items,
+      // ProjectionStore.ts:1708), and T3's search reads message rows only, dropping those of a rolled_back run
+      // (ThreadSearch.ts:283).
+      expect(found(runtime, "branch-needle")).toEqual([]);
+      expect(found(runtime, "child-needle").map(({ conversationId }) => conversationId)).toEqual([child.id, child.id]);
+      expect(found(runtime, "child-dropped-needle")).toHaveLength(2);
+      await expect(rollback(runtime, deps, childFirst.id, child.id)).resolves.toMatchObject({ rolledBackTurns: 1 });
+      expect(found(runtime, "child-dropped-needle")).toEqual([]);
+      expect(found(runtime, "child-needle")).toHaveLength(2);
+      expect(found(runtime, "root-needle").map(({ conversationId }) => conversationId)).toEqual([source, source]);
     } finally { runtime.store.close(); }
   });
 });

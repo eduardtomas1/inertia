@@ -13,6 +13,7 @@ import type { CommandSource } from "../orchestration-v2/types";
 import { commandFingerprint, durableJson } from "../orchestration-v2/json";
 import { providerInstanceId } from "../orchestration-v2/provider-instance";
 import { ensureOrchestrationThread } from "../orchestration-v2/thread-registration";
+import { nativeControlLockResources } from "../orchestration-v2/native-control-projector";
 import { RuntimeRequestError } from "../runtime-errors";
 import { restoreRolledBackFiles, type RestoreConversationCheckpoint, type RollbackFileRestoreResult } from "./rollback-file-restore";
 
@@ -102,10 +103,16 @@ export async function rollbackConversationHistory(dependencies: HistoryRollbackD
         projectId: conversation.projectId, workspaceKey }), repositoryId: store.project(conversation.projectId).repositoryIdentity,
       providerInstanceId: instanceId }, nativeConversationId: native.nativeConversationId,
       ...(native.nativeSessionId ? { nativeSessionId: native.nativeSessionId } : {}), expectedHeadId: native.expectedHeadId } };
-    const effect = store.orchestration.nativeControls.start({ id: operationId, threadId: conversationId,
+    const control = { id: operationId, threadId: conversationId,
       projectId: conversation.projectId, request, rollback: plan, sourceWorkspaceKey: workspaceKey, targetWorkspaceKey: workspaceKey,
-      selection, continuationIdentity: versionedContinuationIdentitySchema.parse(route.continuationIdentity) },
-    input.source, store.orchestration.history.nativeReceipt(operationId, plan, restoreFiles));
+      selection, continuationIdentity: versionedContinuationIdentitySchema.parse(route.continuationIdentity) };
+    // A live fork of this chat fences only its provider conversation, so `busy()` cannot see it.
+    if (nativeControlLockResources(control).some((id) => {
+      const holder = store.orchestration.nativeControls.lockHolder(id);
+      return holder?.request.kind === "fork" && holder.state === "running";
+    })) throw new RuntimeRequestError("A fork of this chat is still reading its history. Try rolling back again in a moment.");
+    const effect = store.orchestration.nativeControls.start(control,
+      input.source, store.orchestration.history.nativeReceipt(operationId, plan, restoreFiles));
     try {
       const result = await providers.nativeConversation(request, selection, { cwd: workspaceKey, signal, timeoutMs: 30_000 });
       const after = store.conversation(conversationId);

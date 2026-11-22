@@ -670,6 +670,10 @@ exports[`hot query plans on a seeded runtime database > snapshots every message 
     "withStatistics": "same",
     "withoutStatistics": [
       "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH rollback USING INDEX sqlite_autoindex_orchestration_v2_entities_1 (kind=? AND id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "SEARCH queued USING INDEX queued_messages_conversation_state_idx (conversation_id=? AND state=?)",
       "SEARCH c USING INDEX sqlite_autoindex_conversations_1 (id=?)",
       "SEARCH p USING COVERING INDEX sqlite_autoindex_projects_1 (id=?)",
       "SEARCH t USING INDEX agent_turns_provider_run_identity_idx (id=? AND conversation_id=?) LEFT-JOIN",

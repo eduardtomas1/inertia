@@ -24,8 +24,10 @@ function threadMetadata(response: JsonObject, expectedId: string): JsonObject {
   return thread;
 }
 
-async function history(client: CodexControlClient, threadId: string, signal: AbortSignal): Promise<string[]> {
-  const ids: string[] = [];
+interface NativeTurn { id: string; finished: boolean }
+
+async function history(client: CodexControlClient, threadId: string, signal: AbortSignal): Promise<NativeTurn[]> {
+  const turns: NativeTurn[] = [];
   const seenIds = new Set<string>();
   const cursors = new Set<string>();
   let cursor: string | undefined;
@@ -38,11 +40,8 @@ async function history(client: CodexControlClient, threadId: string, signal: Abo
     for (const value of page.data) {
       const turn = objectValue(value);
       if (!turn || !nativeId(turn.id) || seenIds.has(turn.id)) throw new Error("Invalid native history turn.");
-      if (typeof turn.status !== "string" || !TERMINAL.has(turn.status)) {
-        throw new NativeConversationRejection("rejected", "native-turn-not-stable");
-      }
       seenIds.add(turn.id);
-      ids.push(turn.id);
+      turns.push({ id: turn.id, finished: typeof turn.status === "string" && TERMINAL.has(turn.status) });
     }
     if (page.nextCursor !== null && page.nextCursor !== undefined && !nativeId(page.nextCursor)) {
       throw new Error("Invalid native history cursor.");
@@ -50,11 +49,28 @@ async function history(client: CodexControlClient, threadId: string, signal: Abo
     cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
     if (cursor && (cursors.has(cursor) || page.data.length === 0)) throw new Error("Native history pagination did not advance.");
     if (cursor) cursors.add(cursor);
-    if (ids.length > MAX_HISTORY_TURNS || (cursor && ids.length === MAX_HISTORY_TURNS)) {
+    if (turns.length > MAX_HISTORY_TURNS || (cursor && turns.length === MAX_HISTORY_TURNS)) {
       throw new NativeConversationRejection("unsupported", "native-history-limit");
     }
   } while (cursor);
-  return ids;
+  return turns;
+}
+
+/** Newest first. Every turn must have finished. */
+function stableHistory(turns: readonly NativeTurn[]): string[] {
+  if (turns.some(({ finished }) => !finished)) throw new NativeConversationRejection("rejected", "native-turn-not-stable");
+  return turns.map(({ id }) => id);
+}
+
+/**
+ * A running source's history up to its last settled head, newest first. Only turns after that head may still
+ * run; the head itself and everything before it must have finished. `thread/fork` with an inclusive
+ * `lastTurnId` at or before that head omits the later turns atomically (T3 `CodexAdapterV2.ts:1123`).
+ */
+function settledHistory(turns: readonly NativeTurn[], settledHeadId: string | null): string[] {
+  const index = turns.findIndex(({ id }) => id === settledHeadId);
+  if (index < 0) throw new NativeConversationRejection("rejected", "native-head-changed");
+  return stableHistory(turns.slice(index));
 }
 
 export function createCodexNativeConversationOperations(
@@ -80,7 +96,9 @@ export function createCodexNativeConversationOperations(
         if (thread.historyMode !== "paginated" && thread.historyMode !== "legacy") {
           throw new NativeConversationRejection("unsupported", "known-native-history-required");
         }
-        const turns = await history(client, sourceId, signal);
+        const listed = await history(client, sourceId, signal);
+        const turns = request.kind === "fork" && request.source.live === true
+          ? settledHistory(listed, request.source.expectedHeadId) : stableHistory(listed);
         const headId = turns[0] ?? null;
         if (headId !== request.source.expectedHeadId) throw new NativeConversationRejection("rejected", "native-head-changed");
         const kept = retainedNativeHead(request.boundary);
@@ -117,7 +135,7 @@ export function createCodexNativeConversationOperations(
           const checked = threadMetadata(await client.request("thread/read", { threadId: fork.id, includeTurns: false }), fork.id);
           if ((checked.historyMode !== "paginated" && checked.historyMode !== thread.historyMode)
             || checked.sessionId !== fork.sessionId
-            || (await history(client, fork.id, signal))[0] !== kept) {
+            || stableHistory(await history(client, fork.id, signal))[0] !== kept) {
             throw new Error("Native fork boundary was not confirmed.");
           }
           return { status: "completed", effect: "native-fork", backing: {
@@ -128,7 +146,7 @@ export function createCodexNativeConversationOperations(
         if (objectValue(thread.status)?.type === "notLoaded") {
           const resumed = threadMetadata(await client.request("thread/resume", { ...config, threadId: sourceId }), sourceId);
           if (resumed.historyMode !== "paginated" || resumed.sessionId !== thread.sessionId) throw new Error("Native history changed while resuming.");
-          if ((await history(client, sourceId, signal))[0] !== headId) throw new NativeConversationRejection("rejected", "native-head-changed");
+          if (stableHistory(await history(client, sourceId, signal))[0] !== headId) throw new NativeConversationRejection("rejected", "native-head-changed");
         }
         const beforeTurnId = kept === null ? turns.at(-1) : turns[turns.indexOf(kept) - 1];
         if (!beforeTurnId) throw new Error("Native revert boundary is missing.");
@@ -136,11 +154,11 @@ export function createCodexNativeConversationOperations(
         progress.mutationMayHaveOccurred = true;
         const reverted = threadMetadata(await client.request("thread/revert", { threadId: sourceId, beforeTurnId }), sourceId);
         if (reverted.historyMode !== "paginated" || reverted.sessionId !== thread.sessionId
-          || ((await history(client, sourceId, signal))[0] ?? null) !== kept) {
+          || (stableHistory(await history(client, sourceId, signal))[0] ?? null) !== kept) {
           throw new Error("Native revert boundary was not confirmed.");
         }
         return { status: "completed", effect: "native-revert", backing };
       });
-    }),
+    }, { forksLiveSource: true }),
   };
 }

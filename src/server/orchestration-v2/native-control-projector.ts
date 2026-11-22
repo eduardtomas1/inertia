@@ -4,8 +4,15 @@ import { commandFingerprint } from "./json";
 import { rollbackWrites } from "./history-projector";
 import { OrchestrationConflict, type OrchestrationEvent, type ProjectionReader, type ProjectionWrite } from "./types";
 
+/** Whether a fork reads a source whose later turn may be running (`fork-while-source-running`). */
+export function forksLiveSource(control: Pick<ReturnType<typeof nativeControlSchema.parse>, "request">): boolean {
+  return control.request.kind === "fork" && control.request.source.live === true;
+}
+
 export function nativeControlLockResources(control: Pick<ReturnType<typeof nativeControlSchema.parse>, "threadId" | "request">): string[] {
-  return [...new Set([control.threadId, control.request.source.identity.conversationId,
+  // A live fork never fences the source chat, whose running turn keeps recording its session and settling. The
+  // exact native conversation stays fenced, so no native rollback of it runs while the fork reads it.
+  return [...new Set([control.threadId, ...(forksLiveSource(control) ? [] : [control.request.source.identity.conversationId]),
     `native:${commandFingerprint({ instance: control.request.source.identity.providerInstanceId,
       conversation: control.request.source.nativeConversationId })}`])];
 }

@@ -17,6 +17,13 @@ export interface NativeConversationSource {
   nativeSessionId?: string;
   /** Actual persisted head, which may be ahead of a deferred Claude cursor. */
   expectedHeadId: string | null;
+  /**
+   * Forks only: a later turn of the source may be running (T3 `canForkWhileSourceRunning`). The native
+   * history may then extend past `expectedHeadId`, the source's last settled head, which must still be in
+   * it, finished, with the boundary at or before it. Only harnesses that declare
+   * `fork-while-source-running` accept it.
+   */
+  live?: true;
 }
 
 export type NativeConversationBoundary =
@@ -97,6 +104,8 @@ export function validateNativeConversationRequest(request: NativeConversationReq
     || !isAbsolute(launch.cwd)
     || (request.boundary.kind === "turn" && !nativeId(request.boundary.nativeTurnId))
     || (request.boundary.kind === "start" && request.boundary.inheritedHeadId !== undefined && !nativeId(request.boundary.inheritedHeadId))
+    || (request.source.live !== undefined && (request.source.live !== true || request.kind !== "fork"
+      || request.boundary.kind !== "turn" || expectedHeadId === null))
     || (request.kind === "fork" && (!nativeId(request.targetConversationId) || request.targetConversationId === identity.conversationId))) {
     throw new NativeConversationRejection("rejected", "invalid-request");
   }

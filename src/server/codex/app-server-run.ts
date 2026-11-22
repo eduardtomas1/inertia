@@ -33,6 +33,7 @@ import {
   type CodexRunPhase,
 } from "./app-server-config";
 import { CodexAppServerEvents } from "./app-server-events";
+import { codexAppServerExitMessage } from "./app-server-exit-message";
 import { redactCodexErrorHeaders } from "./managed-errors";
 import { CodexJsonLineWriter } from "./jsonl-writer";
 import {
@@ -225,9 +226,7 @@ export function startCodexAppServerRun(
       exitedBeforeOwnedTermination = true;
       rememberFailure(
         child.signalCode ? "process-signal" : "process-exit",
-        child.signalCode
-          ? "Codex App Server stopped unexpectedly."
-          : "Codex App Server exited before the turn completed.",
+        codexAppServerExitMessage(child.exitCode, child.signalCode, diagnostic.toString()),
         technicalDetail,
       );
     } else {
@@ -727,9 +726,7 @@ export function startCodexAppServerRun(
     exitedBeforeOwnedTermination = !ownedTerminationArmed;
     rememberFailure(
       signal ? "process-signal" : "process-exit",
-      signal
-        ? "Codex App Server stopped unexpectedly."
-        : "Codex App Server exited before the turn completed.",
+      codexAppServerExitMessage(code, signal, diagnostic.toString()),
     );
     finish(cancelRequested ? "cancelled" : "failed", code, signal);
   });

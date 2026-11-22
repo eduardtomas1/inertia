@@ -54,7 +54,7 @@ function fixture(respond = true) {
   });
   child.emit("spawn");
   return {
-    child, stdin, stdout, run, onStatus, terminateProcessTree,
+    child, stdin, stdout, stderr, run, onStatus, terminateProcessTree,
     observeExit(code: number | null, signal: NodeJS.Signals | null = null) {
       Object.assign(child, { exitCode: code, signalCode: signal });
       child.emit("exit", code, signal);
@@ -108,6 +108,9 @@ describe("Codex App Server exit ordering", () => {
         status: "failed", exitCode: 7, cleanupConfirmed: false,
         failure: { reason: "process-exit", phase: "running" },
       });
+      expect(result.failure?.message).toBe(
+        "Codex App Server exited with code 7 before the turn completed. Check the details for the provider's output, then retry the turn.",
+      );
       expect(result.failure?.technicalDetail).toContain("Reason: process-exit");
       expect(result.failure?.technicalDetail).not.toContain("super-secret-value");
       expect(app.terminateProcessTree).toHaveBeenCalledOnce();
@@ -115,6 +118,29 @@ describe("Codex App Server exit ordering", () => {
       void result.cleanupConfirmation?.then((value) => { confirmed = value; });
       await vi.advanceTimersByTimeAsync(30_000);
       expect(confirmed).toBe(false);
+    },
+  );
+
+  const EPERM_GUIDANCE = "It was denied access to a file or folder (EPERM). On macOS, allow Inertia under System Settings > Privacy & Security > Files and Folders, or move the project out of Desktop, Documents, or Downloads, then retry the turn.";
+  const DEFAULT_GUIDANCE = "Check the details for the provider's output, then retry the turn.";
+
+  it.each([
+    ["Error: Operation not permitted (os error 1) at /Users/private/Desktop", 1, null, `Codex App Server exited with code 1 before the turn completed. ${EPERM_GUIDANCE}`],
+    ["Error: EPERM: open /Users/private/Documents/project/.codex", 1, null, `Codex App Server exited with code 1 before the turn completed. ${EPERM_GUIDANCE}`],
+    ["panic at /Users/private/Desktop: token=sk-private-123", 101, null, `Codex App Server exited with code 101 before the turn completed. ${DEFAULT_GUIDANCE}`],
+    ["Error: Operation not permitted", null, "SIGKILL", `Codex App Server stopped unexpectedly after signal SIGKILL. ${EPERM_GUIDANCE}`],
+  ] as const)(
+    "names how an App Server that exits at startup ended, and the macOS privacy fix after EPERM: %s",
+    async (stderr, code, signal, message) => {
+      const app = fixture(false);
+      app.stderr.write(stderr);
+      await vi.advanceTimersByTimeAsync(0);
+      app.observeExit(code, signal);
+      app.finishCleanup();
+
+      const result = await app.run.result;
+      expect(result).toMatchObject({ status: "failed", failure: { reason: signal ? "process-signal" : "process-exit", message } });
+      expect(result.failure?.message).not.toMatch(/\/Users\/private|sk-private/u);
     },
   );
 

@@ -1,5 +1,7 @@
 import type { SDKMessage, SDKStartupFailureReason } from "@anthropic-ai/claude-agent-sdk";
 
+import { providerProcessExitGuidance } from "./process-exit-guidance";
+
 export const CLAUDE_STARTUP_FAILURE_RESULTS = {
   CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1",
 } as const;
@@ -55,4 +57,36 @@ export function claudeStartupFailure(
   if (result.subtype === "success" || !result.startup_failure_reason) return undefined;
   const message = STARTUP_FAILURE_MESSAGES[result.startup_failure_reason];
   return message ? { reason: result.startup_failure_reason, message } : undefined;
+}
+
+const CLAUDE_PROCESS_EXIT_ERROR_CLASSES: ReadonlySet<unknown> = new Set([
+  "process_killed_by_signal",
+  "process_exited_nonzero",
+]);
+
+/**
+ * The exit status of a Claude Code process that ended before it answered,
+ * such as "Claude Code process exited with code 1". The SDK's exit Error can
+ * append Claude's stderr tail to `message`; `telemetryMessage` omits it.
+ */
+function claudeProcessExitStatus(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const { errorClass, telemetryMessage } = error as Record<string, unknown>;
+  return typeof errorClass === "string"
+    && CLAUDE_PROCESS_EXIT_ERROR_CLASSES.has(errorClass)
+    && typeof telemetryMessage === "string"
+    ? telemetryMessage
+    : undefined;
+}
+
+/**
+ * The failure message for a Claude Code process that exited before its first
+ * message. The stderr tail only selects the guidance; it never enters the
+ * message, which is always visible.
+ */
+export function claudeStartupExitMessage(error: unknown, stderrTail: string): string | undefined {
+  const status = claudeProcessExitStatus(error);
+  return status === undefined
+    ? undefined
+    : `${status} before it started. ${providerProcessExitGuidance(stderrTail)}`;
 }

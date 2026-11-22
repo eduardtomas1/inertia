@@ -77,6 +77,7 @@ import {
   CLAUDE_TRANSCRIPT_FLUSH,
   claudeSessionNotFound,
   claudeSessionUnavailable,
+  claudeStartupExitMessage,
   claudeStartupFailure,
 } from "./claude-startup-failure";
 import { claudeRouteFailureDetail, claudeRouteFailureMessage } from "./claude-custom-backend-failure";
@@ -359,6 +360,8 @@ function startClaudeRun(
   });
   const providerResult = (async (): Promise<ProviderRunResult> => {
     let providerThrew = false;
+    // Only a Claude Code that exits before its first message gets startup-exit guidance.
+    let claudeAnswered = false;
     try {
       const continuationOptions = claudeNativeContinuationOptions(options.input.sessionId, options.nativeContinuation);
       if (options.nativeContinuation && options.input.operation) {
@@ -458,6 +461,7 @@ function startClaudeRun(
           abortController.signal,
         );
         if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
+        claudeAnswered = true;
         // One legitimately large update is shortened for Inertia's view
         // instead of failing the turn (#338). Claude keeps the full content.
         const observed = eventBudget.observe(next.value);
@@ -798,8 +802,12 @@ function startClaudeRun(
     } catch (error) {
       providerThrew = true;
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
+      const transportError = ownedProcess.transportError();
+      const startupExit = claudeAnswered || transportError
+        ? undefined
+        : claudeStartupExitMessage(error, ownedProcess.stderrTail());
       const rawError = redactLaunchText(claudeReadableRuntimeError(
-        safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
+        startupExit ?? safeError(transportError ?? error, "Claude Agent SDK stopped unexpectedly."),
       ));
       const message = routeFailure(rawError);
       const technicalDetail = routeDetail(rawError, sanitizeProviderFailureDetail(

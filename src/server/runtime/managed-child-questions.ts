@@ -165,7 +165,7 @@ function projectRequest(request: AgentInputRequest, level: ProjectionLevel): Rec
 
 /**
  * The status fields that describe a chat's pending questions: each
- * answerable request with numbered options, at most 32 KiB in all. A request
+ * answerable request with numbered options, within `budgetBytes`. A request
  * that does not fit drops its option descriptions, then shortens its question
  * and option text, and one that still does not fit is left out and counted.
  * `next` sends the parent to the user when the chat waits on something it
@@ -175,6 +175,7 @@ export function pendingQuestionStatus(
   pendingInputs: ReadonlyMap<string, AgentInputRequest> | undefined,
   conversationId: string,
   needsInput: boolean,
+  budgetBytes = MAX_PENDING_QUESTIONS_BYTES,
 ): Record<string, unknown> {
   const shown: Record<string, unknown>[] = [];
   let omitted = 0;
@@ -183,7 +184,7 @@ export function pendingQuestionStatus(
     const candidate = PROJECTION_LEVELS
       .map((level) => projectRequest(request, level))
       .map((projected) => ({ projected, size: Buffer.byteLength(JSON.stringify(projected), "utf8") + 1 }))
-      .find(({ size }) => bytes + size <= MAX_PENDING_QUESTIONS_BYTES);
+      .find(({ size }) => bytes + size <= budgetBytes);
     if (!candidate) {
       omitted += 1;
       continue;

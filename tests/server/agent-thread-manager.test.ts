@@ -1931,6 +1931,30 @@ describe("managed child questions", () => {
     } finally { env.store.close(); }
   });
 
+  it("fits the whole status and wait result, not only the questions, under the host-tool limit", async () => {
+    const env = await childAsking();
+    try {
+      // A valid question whose full list (about 32.6 KB) fits in 32 KiB by itself, but not inside a status result.
+      const asked = env.ask([approachQuestion({
+        id: "wide",
+        question: "Which layout?",
+        options: Array.from({ length: 12 }, (_value, option) => ({
+          id: `wide-${option}`, label: "l".repeat(660), description: "d".repeat(2_000),
+        })),
+      })]);
+      const status = await env.bridge.invoke(call(STATUS, { conversationId: env.conversationId }));
+      const waited = await env.bridge.invoke({ ...call("inertia_wait_for_conversation", { conversationId: env.conversationId }), toolCallId: "wait-wide" });
+      for (const result of [status, waited]) {
+        expect(Buffer.byteLength(result.text, "utf8")).toBeLessThanOrEqual(32_768);
+        const parsed = JSON.parse(result.text);
+        expect(parsed.pendingQuestions).toHaveLength(1);
+        expect(parsed.pendingQuestions[0]).toMatchObject({ requestId: asked.id });
+        expect(parsed.pendingQuestions[0].questions[0].options).toHaveLength(12);
+      }
+      expect(JSON.parse(waited.text)).toMatchObject({ outcome: "needs-input", timedOut: false });
+    } finally { env.store.close(); }
+  });
+
   it("answers after the user approves, through the same path the app's answer card uses", async () => {
     const env = await childAsking();
     try {

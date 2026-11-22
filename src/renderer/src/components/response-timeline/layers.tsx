@@ -45,6 +45,7 @@ import { MessageAgentCall } from "./MessageAgentCall";
 import { SubagentCallList } from "./SubagentCallBlock";
 import { SecretRequestList } from "./SecretRequestCard";
 import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
+import type { DelegatedWork } from "../../utils/response-timeline/subagentGroups";
 import { SubagentGroup } from "./SubagentGroup";
 import { UnlinkedSubagentRows } from "./SubagentActivityRow";
 import {
@@ -331,17 +332,15 @@ export function AgentExecutionLayer({
     subagentCalls.remaining,
     new Set([...turn.activities, ...turn.importantActivities].map(({ id }) => id)),
   ), [subagentCalls.remaining, turn.activities, turn.importantActivities]);
-  const subagentGroup = (
-    <SubagentGroup
-      conversationId={props.conversationId}
-      turnId={turn.id}
-      subagents={subagentCalls.remaining}
-      onOpenSurface={props.onOpenSurface}
-      onBeforeToggle={onBeforeToggle}
-      onAfterToggle={onAfterToggle}
-    />
-  );
   const groupInFold = agentsInFold && !turn.isActive && !consolidatesSettledWork;
+  // Each task sits where it started in the work log. Only a quiet settled
+  // turn, which draws no work log, keeps its tasks below the work instead.
+  const delegated = useMemo<DelegatedWork>(() => ({
+    calls: subagentCalls.entries,
+    traces: subagentCalls.remaining,
+    compact: unlinkedSubagents,
+    foldable: groupInFold,
+  }), [groupInFold, subagentCalls, unlinkedSubagents]);
   const delegatedWork = (
     <>
       <UnlinkedSubagentRows
@@ -349,7 +348,14 @@ export function AgentExecutionLayer({
         onBeforeToggle={onBeforeToggle}
         onAfterToggle={onAfterToggle}
       />
-      {subagentGroup}
+      <SubagentGroup
+        conversationId={props.conversationId}
+        turnId={turn.id}
+        subagents={subagentCalls.remaining}
+        onOpenSurface={props.onOpenSurface}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
     </>
   );
   return (
@@ -414,7 +420,7 @@ export function AgentExecutionLayer({
             liveContent={liveContent}
             liveContentStreaming={props.streamingChannel === "text"}
             heldFollowUpIds={heldFollowUpIds}
-            subagentCalls={subagentCalls.entries}
+            delegated={delegated}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -438,7 +444,7 @@ export function AgentExecutionLayer({
             reasoningStreaming={false}
             liveContent=""
             liveContentStreaming={false}
-            subagentCalls={subagentCalls.entries}
+            delegated={delegated}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
             projectId={props.projectId}
@@ -448,7 +454,6 @@ export function AgentExecutionLayer({
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
             fold={fold}
-            foldedWork={groupInFold ? delegatedWork : null}
           />
         </div>
       ) : null}
@@ -459,7 +464,7 @@ export function AgentExecutionLayer({
         <SubagentCallList entries={subagentCalls.entries} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />
       )}
       {!turn.isActive && consolidatesSettledWork && <SecretRequestList messages={turn.secretRequests} />}
-      {!groupInFold && delegatedWork}
+      {!turn.isActive && consolidatesSettledWork && delegatedWork}
       <span
         className="visually-hidden"
         role="status"

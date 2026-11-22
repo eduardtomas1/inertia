@@ -225,6 +225,17 @@ describe("CadService preview", () => {
     });
   });
 
+  it("passes on the area AutoCAD says the change touches, and omits it when there is none", async () => {
+    const erase = { op: "acad.erase", target: "INSERT 2A", field: "entity", before: "DOOR" };
+    const bbox = { min: [0, 0], max: [10, 5] };
+    const autocad = fakeCadHost("autocad", { preview: () => ({ ...previewAnswer(ACAD_DOCUMENT_ID, [erase]), bbox }) });
+    const { cad } = await service([autocad]);
+    const operations = [{ op: "acad.erase", handles: ["2A"] }];
+    expect(await cad.preview({ documentId: ACAD_DOCUMENT_ID, operations })).toMatchObject({ changes: [erase], bbox });
+    autocad.handlers.preview = () => previewAnswer(ACAD_DOCUMENT_ID, [erase]);
+    expect(await cad.preview({ documentId: ACAD_DOCUMENT_ID, operations })).not.toHaveProperty("bbox");
+  });
+
   it("issues a fresh proposalId for every preview", async () => {
     const { cad } = await service();
     expect(await propose(cad)).not.toBe(await propose(cad));

@@ -24,7 +24,7 @@ Read before reading or editing a designer's open SketchUp model. `inertia_cad_ex
 3. `inertia_cad_get_selection`. A non-empty `editingInside` means a group is open for editing: before you edit, ask the designer to close it, because entering or leaving one makes erase previews stale.
 4. `inertia_cad_query_objects` for lookups (`fields: "compact"` on big models).
 5. If reading answers the request, stop there.
-6. To edit: preview, tell the user what will change, apply, then capture to verify. There is no dialog: the user's request is the approval, so apply only what they asked for, even while the designer is working.
+6. To edit: there is no dialog, so the user's request in this conversation is the approval, even while the designer is working. Apply only that: preview, tell the user what will change, apply, and `inertia_cad_capture_view` before and after.
 
 ## Editing the model
 
@@ -42,4 +42,4 @@ Read before reading or editing a designer's open SketchUp model. `inertia_cad_ex
 - **Modelling beyond boxes.** No faces, arcs, components, text, dimensions, textures, Make Unique, explode or purge. Describe the steps for the designer.
 - **Sheets and PDFs** come from the designer's own SketchUp or LayOut export; for what a sheet should look like, read `inertia_cad_guide({topic: "presentation"})`.
 - **LayOut** reads the saved `.skp`, so edits reach its viewports only after the designer saves and updates the reference. A `inertia_cad_save_copy` file is a different file.
-- A parameter named here is missing (`fields`, `within`): your schemas are stale. Ask for a fresh session; never fall back to Ruby or scripts.
+- New ops and parameters from a Inertia update need a fresh agent session. If one named here (`fields`, `within`) is missing, ask for one; never fall back to Ruby or scripts.

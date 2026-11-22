@@ -57,6 +57,11 @@ export {
   inspectGitHubPreMergeConfidence,
 } from "./git/github-pre-merge";
 export {
+  GitHubPullRequestStatusError,
+  inspectGitHubPullRequestStatus,
+  type GitHubPullRequestLookup,
+} from "./git/github-pull-request-status";
+export {
   inspectGitRemoteRouting,
   parseGitRemoteWebTarget,
 } from "./git/remote-routing";

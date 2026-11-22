@@ -11,7 +11,8 @@ export type AgentThreadMutationTool =
   | "inertia_create_conversation"
   | "inertia_send_message"
   | "inertia_stop_conversation"
-  | "inertia_archive_conversation";
+  | "inertia_archive_conversation"
+  | "inertia_answer_question";
 
 export type AgentThreadOperationStatus =
   | "approval-pending"

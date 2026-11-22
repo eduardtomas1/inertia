@@ -1787,6 +1787,25 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("keeps a permission-granting input marked on the pending request it broadcasts", async () => {
+    const runtime = await testRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Plan first." });
+    runtime.controller.start(queued.turn.id);
+    const base = identity(runtime);
+    const question = {
+      id: "question-1", header: "Plan", question: "Approve this plan?", isOther: false, isSecret: false,
+      allowMultiple: false, options: [{ id: "approve", label: "Approve", description: "" }],
+    };
+    runtime.provider.emit({ ...base, type: "input", request: { requestId: "plan-1", questions: [question], autoResolutionMs: null, grantsPermission: true } });
+    runtime.provider.emit({ ...base, type: "input", request: { requestId: "question-2", questions: [question], autoResolutionMs: null } });
+    const requested = runtime.events.flatMap((event) => event.type === "agent.input.requested" ? [event.request] : []);
+    expect(requested.map(({ id, grantsPermission }) => [id, grantsPermission])).toEqual([["plan-1", true], ["question-2", undefined]]);
+    expect("grantsPermission" in requested[1]!).toBe(false);
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("retains prior-turn plans when a later authoritative turn starts", async () => {
     const runtime = await testRuntime();
     const first = runtime.controller.queue({

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { ChatAttachment, Conversation } from "../../shared/contracts";
+import type { AgentTurn, ChatAttachment, Conversation } from "../../shared/contracts";
 import { MAX_QUEUED_MESSAGES, type QueuedMessage } from "../../shared/queued-messages";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { parseStoredAttachments, rendererSafeAttachments, watcherNoteFromJson } from "./codecs";
@@ -25,6 +25,10 @@ export function queuedRouteIdentity(conversation: Conversation): string {
 }
 export function queuedIntentDigest(content: string, attachments: readonly ChatAttachment[]): string {
   return createHash("sha256").update(JSON.stringify([content.trim(), attachments.map(({ id }) => id)])).digest("hex");
+}
+/** Whether a chat's latest turn lets its queue send the next message by itself. */
+export function releasesQueue(turn: Pick<AgentTurn, "status" | "terminalReason"> | null): boolean {
+  return turn?.status === "completed" || (turn?.status === "interrupted" && turn.terminalReason === "app-update");
 }
 export class QueuedMessageLimitError extends Error {
   constructor() {

@@ -1037,3 +1037,29 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
     });
   });
 });
+
+describe("messages a parent chat queues for its managed child", () => {
+  it("wait in the child's own queue behind the running turn, refuse a fourth, and send after the turn completes", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      for (const [index, id] of ids.entries()) {
+        const result = f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id, content: `  Managed task ${index + 1}  ` });
+        expect(result.receipt).toMatchObject({ id, state: "waiting", content: `Managed task ${index + 1}` });
+        expect(result.entries.map((entry) => entry.id)).toEqual(ids.slice(0, index + 1));
+      }
+      expect(() => f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id: randomUUID(), content: "Fourth" }))
+        .toThrow(QueuedMessageLimitError);
+      await f.drain();
+      expect(f.provider.runCount).toBe(1);
+      f.provider.resolve({ status: "completed", text: "Done" });
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+      const receipt = f.store.queuedMessages.get(f.conversationId, ids[0]!)!;
+      expect(receipt).toMatchObject({ state: "accepted", turnId: expect.any(String) });
+      expect(f.store.message(receipt.userMessageId!).content).toBe("Managed task 1");
+      expect(f.store.queuedMessages.list(f.conversationId).map((entry) => entry.id)).toEqual(ids.slice(1));
+    } finally { await f.close(); }
+  });
+});

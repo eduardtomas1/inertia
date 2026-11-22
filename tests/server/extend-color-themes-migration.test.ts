@@ -78,9 +78,10 @@ describe("color theme library migration", () => {
         schema: schemaWithoutAppState(database),
       };
 
-      migrateRuntimeDatabase(database);
+      // Only this migration, so later ones that change other tables leave the comparison alone.
+      migrateRuntimeDatabase(database, EXTEND_COLOR_THEMES_SCHEMA_VERSION);
 
-      expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+      expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(EXTEND_COLOR_THEMES_SCHEMA_VERSION);
       expect(database.prepare("SELECT * FROM app_state").get()).toEqual(before.row);
       expect(database.pragma("table_info(app_state)")).toEqual(before.columns);
       expect(database.pragma("foreign_key_list(app_state)")).toEqual(before.foreignKeys);

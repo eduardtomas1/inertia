@@ -71,6 +71,14 @@ An agent can answer with a page as well as text: a chart, a table, a diagram or 
 - The page runs in a sandbox. It cannot fetch from the network, load remote content, or reach your files, the project or the rest of Inertia, so everything it shows must be inside the page itself. A script in the page can still open a WebRTC connection through a relay server over TCP.
 - Private Connect clients, chats you share as context, and another model continuing the chat see only a one-line *[page: title]* note in its place, so the agent’s reply also says in one sentence what the page shows.
 
+## Messages during a turn
+
+An agent can show you something in full while it is still working: a draft to review, a code block, or what a question it is about to ask refers to. Some models shorten what they write between tool calls, so the agent sends that text with a tool instead, and it appears exactly as written.
+
+- The message sits where the agent sent it, among its other updates and tool calls, marked *Sent mid-turn*, and stays in view when the finished turn folds its work.
+- It is not the agent’s reply: the turn’s answer still comes last, and a turn that ends after a message but without an answer shows that it ended without one.
+- Copy it, or make a task from it, from its right-click menu. Message search finds it, and Private Connect, chats you share as context, and another model continuing the chat see its text.
+
 ## Custom agents
 
 A custom agent is a named agent you keep, with its own instructions, optional skills, an icon or character and an accent. Make one in **Settings → Custom agents**, or start from one of the nine presets, and reorder, duplicate, export or import them there. An imported agent whose name is already taken is renamed, and Inertia tells you.

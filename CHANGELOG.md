@@ -59,6 +59,24 @@ The useful changes in each Inertia release, in plain language.
   prepares many of Inertia's queries again on every call, which made loading
   a chat's history about a third slower.
 
+### Agent tools
+
+- An agent can show you a draft, a code block or the subject of a question in
+  full while it works, instead of a shortened summary. The message appears in
+  the turn where the agent sent it, marked *Sent mid-turn*, stays in view
+  when the turn folds, and survives a restart. It is never taken for the
+  agent's reply. Message search, Private Connect and chats that read this one
+  see its text.
+- A chat that started another chat can see the questions that chat is
+  waiting on and answer them, after you approve the answer on a card that
+  shows each question and the proposed answer. Approvals, secret requests,
+  plan approvals and the chat picker stay yours: the agent never sees them
+  and is told to ask you instead.
+- An agent sending to a chat it started can now choose how: join the running
+  turn, add the message to that chat's queue to run next (up to three, which
+  you can see and remove), or stop the running turn and start again with the
+  message. The approval card says which.
+
 ### Look
 
 - Four new colour themes: Graphite, Blossom, Lagoon and Saffron, in

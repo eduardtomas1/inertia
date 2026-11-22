@@ -143,6 +143,28 @@ export const MISUSE_CASES: readonly MisuseCase[] = [
     expect: { success: false, includes: ["inertia_create_conversation"] },
   },
   {
+    id: "answer-question-of-chat-not-created-here",
+    kind: "bad",
+    mistake: "Answers a question in a sibling chat that this chat did not create.",
+    setup: ["foreign-chat"],
+    call: {
+      tool: "inertia_answer_question",
+      arguments: { conversationId: "$foreign", requestId: "7d3f9a52-41c8-4c55-9a43-2f1b6f0e8d21", answers: [{ options: [1] }] },
+    },
+    expect: { success: false, includes: ["inertia_create_conversation"] },
+  },
+  {
+    id: "answer-question-that-is-not-pending",
+    kind: "bad",
+    mistake: "Answers a managed chat with a request id it guessed instead of reading pendingQuestions.",
+    setup: ["managed-child"],
+    call: {
+      tool: "inertia_answer_question",
+      arguments: { conversationId: "$child", requestId: "7d3f9a52-41c8-4c55-9a43-2f1b6f0e8d21", answers: [{ text: "Yes" }] },
+    },
+    expect: { success: false, includes: ["inertia_get_conversation_status"] },
+  },
+  {
     id: "latest-result-while-running",
     kind: "bad",
     mistake: "Reads the latest result of a managed chat whose first turn is still running.",

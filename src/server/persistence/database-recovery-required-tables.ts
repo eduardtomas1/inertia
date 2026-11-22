@@ -8,6 +8,7 @@ import { SUBAGENT_TASK_SHAPE_SCHEMA_VERSION } from "./migrations/subagent-task-s
 import { CONTEXT_COMPACTION_SETTINGS_SCHEMA_VERSION } from "./migrations/context-compaction-settings";
 import { CODEX_COMPACTION_LIMIT_SCHEMA_VERSION } from "./migrations/codex-compaction-limit";
 import { AGENT_SECRET_REQUESTS_SCHEMA_VERSION } from "./migrations/agent-secret-requests";
+import { SENT_TO_USER_MESSAGES_SCHEMA_VERSION } from "./migrations/sent-to-user-messages";
 
 export type DatabaseRequiredTables = readonly (
   readonly [number, readonly string[]]
@@ -204,6 +205,7 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "answered_at",
     "expires_at",
   ]],
+  [SENT_TO_USER_MESSAGES_SCHEMA_VERSION, "messages", ["sent_to_user"]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [

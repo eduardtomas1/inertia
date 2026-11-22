@@ -1,13 +1,15 @@
 import { z } from "zod";
 
-import type { Conversation } from "../../shared/contracts";
+import type { AgentInputRequest, Conversation } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import type {
   ProviderHostToolDefinition,
   ProviderHostToolResult,
 } from "../provider/contracts";
+import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
 import { withHostToolAllowance } from "../provider/host-tool-runtime";
 import type { TurnController } from "./turns/turn-controller";
+import { pendingQuestionStatus } from "./managed-child-questions";
 
 export const AGENT_THREAD_WAIT_TOOL_NAME = "inertia_wait_for_conversation";
 
@@ -56,18 +58,30 @@ export const AGENT_THREAD_WAIT_TOOL_DEFINITION: ProviderHostToolDefinition = {
   readOnly: true,
 };
 
+/**
+ * Room the pending questions leave in a status or wait result for what is
+ * added around them: the pendingQuestions, omittedQuestions and next keys,
+ * the wait's outcome and timedOut, and the runtime's remainingToolCalls.
+ */
+const STATUS_RESPONSE_RESERVE_BYTES = 512;
+
 export interface ManagedConversationStatusDependencies {
   store: Pick<RuntimeStore, "latestAgentTurnForConversation">;
   turns: Pick<TurnController, "isActive">;
+  /** The provider questions awaiting an answer, keyed like the turn controller's map. */
+  pendingInputs?: ReadonlyMap<string, AgentInputRequest>;
 }
 
-/** The persisted lifecycle projection both the status and wait tools return. */
+/**
+ * The persisted lifecycle projection both the status and wait tools return,
+ * plus the chat's pending questions another agent may answer.
+ */
 export function managedConversationStatus(
   dependencies: ManagedConversationStatusDependencies,
   target: Conversation,
 ): Record<string, unknown> {
   const latest = dependencies.store.latestAgentTurnForConversation(target.id);
-  return {
+  const status = {
     conversationId: target.id,
     status: target.status,
     active: dependencies.turns.isActive(target.id),
@@ -81,6 +95,11 @@ export function managedConversationStatus(
       completedAt: latest.completedAt,
     } : null,
   };
+  // The questions get what the whole result leaves, so the runtime never cuts the JSON short.
+  const budget = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES
+    - Buffer.byteLength(JSON.stringify(status), "utf8")
+    - STATUS_RESPONSE_RESERVE_BYTES;
+  return { ...status, ...pendingQuestionStatus(dependencies.pendingInputs, target.id, target.status === "needs-input", budget) };
 }
 
 export interface AgentThreadWaitDependencies extends ManagedConversationStatusDependencies {

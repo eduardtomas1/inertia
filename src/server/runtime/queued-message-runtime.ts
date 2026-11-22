@@ -3,7 +3,7 @@ import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
 import { MAX_QUEUED_MESSAGES, type MessageQueueResult } from "../../shared/queued-messages";
-import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
+import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity, releasesQueue } from "../persistence/queued-message-repository";
 import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
@@ -15,10 +15,6 @@ import type { WatcherNoteAttribution } from "../../shared/watcher";
 import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note-instruction";
 
 const ADMISSION_RETRY_MS = 1_000;
-
-function releasesQueue(turn: Pick<AgentTurn, "status" | "terminalReason"> | null): boolean {
-  return turn?.status === "completed" || (turn?.status === "interrupted" && turn.terminalReason === "app-update");
-}
 
 const transientDispatchFailure = (error: unknown): boolean => error instanceof MessageSendPreparationTimeoutError
   || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
@@ -262,6 +258,23 @@ export function createQueuedMessageRuntime(
     return result(conversation.id, input.id);
   }
 
+  /**
+   * Queues a message a parent chat sent its managed child with mode `queue`.
+   * It is an ordinary queued message: the user sees it in the child's queue
+   * and can remove it, and the queue sends it after the current turn
+   * completes. A full queue throws QueuedMessageLimitError.
+   */
+  function enqueueManagedMessage(input: { conversationId: string; id: string; content: string }): MessageQueueResult {
+    const conversation = requireConversation(input.conversationId);
+    if (!dependencies.enableProviders) throw new RuntimeRequestError("Message queues require an available provider runtime.");
+    const content = input.content.trim();
+    if (!content) throw new RuntimeRequestError("The queued message is empty.");
+    store.queuedMessages.add({ id: input.id, conversation, content, attachments: [], digest: queuedIntentDigest(content, []) });
+    changed(conversation.id);
+    void schedule(conversation.id).catch(() => undefined);
+    return result(conversation.id, input.id);
+  }
+
   function withdrawWatcherNote(conversationId: string, id: string): boolean {
     const entry = store.queuedMessages.get(conversationId, id);
     if (!entry?.watcherNote) return false;
@@ -399,6 +412,7 @@ export function createQueuedMessageRuntime(
     handler,
     turnInteractionHandler: createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps }),
     enqueueWatcherNote,
+    enqueueManagedMessage,
     withdrawWatcherNote,
     onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
     onCompactionSettled(conversationId: string): void {

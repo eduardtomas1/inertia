@@ -28,6 +28,14 @@ const OPERATIONS: Record<string, Input> = {
   "acad.set_rotation": { handles: ["2A"], rotationDeg: 0 },
   "acad.rotate": { handles: ["2A"], basePoint: [0, 0], angleDeg: 90 },
   "acad.erase": { handles: ["2A"] },
+  "acad.copy": { handles: ["2A"], vector: [1, 0] },
+  "acad.mirror": { handles: ["2A"], p1: [0, 0], p2: [0, 1] },
+  "acad.scale": { handles: ["2A"], basePoint: [0, 0], factor: 2 },
+  "acad.offset": { handle: "2A", distance: -0.5 },
+  "acad.insert_block": { name: "DOOR", position: [0, 0] },
+  "acad.add_arc": { center: [0, 0], radius: 1, startDeg: 0, endDeg: 90 },
+  "acad.add_hatch": { boundary: [[0, 0], [1, 0], [1, 1]] },
+  "acad.add_dimension": { kind: "aligned", p1: [0, 0], p2: [1, 0], textPosition: [0.5, 0.2] },
   "acad.add_line": { start: [0, 0], end: [1, 1, 1] },
   "acad.add_polyline": { points: [[0, 0], [1, 1]] },
   "acad.add_circle": { center: [0, 0], radius: 0.5 },
@@ -66,6 +74,10 @@ function previewSamples(): { valid: Input[]; invalid: Input[] } {
     preview(operation("skp.erase", { ids: ["12345678901234567890"] })),
     preview(operation("acad.erase", { handles: Array.from({ length: 500 }, (_, index) => index.toString(16)) })),
     preview(...Array.from({ length: 50 }, () => operation("skp.erase"))),
+    preview(operation("acad.copy", { count: 50 }), operation("acad.mirror", { keepSource: false })),
+    preview(operation("acad.insert_block", { rotationDeg: 90, scale: 0.5, layer: "A-FURN" })),
+    preview(operation("acad.add_hatch", { boundary: ["2A", "2B"], pattern: "ANSI31", scale: 2, angleDeg: 45, layer: "A-HATCH" })),
+    preview(operation("acad.add_dimension", { kind: "linear", rotationDeg: 90, layer: "A-DIMS" })),
   );
   const invalid: Input[] = [
     preview({ op: "skp.explode", ids: ["11"] }),
@@ -106,6 +118,17 @@ function previewSamples(): { valid: Input[]; invalid: Input[] } {
     preview(operation("skp.erase", { ids: [] })),
     preview(operation("skp.set_hidden", { hidden: "yes" })),
     preview(operation("skp.rename", { name: "n".repeat(201) })),
+    preview(operation("acad.copy", { count: 0 })),
+    preview(operation("acad.copy", { count: 51 })),
+    preview(operation("acad.copy", { count: 1.5 })),
+    preview(operation("acad.scale", { factor: 0 })),
+    preview(operation("acad.offset", { handle: "" })),
+    preview(operation("acad.offset", { handle: ["2A"] })),
+    preview(operation("acad.insert_block", { scale: -1 })),
+    preview(operation("acad.add_arc", { radius: 0 })),
+    preview(operation("acad.add_hatch", { boundary: [[0, 0], "2A"] })),
+    preview(operation("acad.add_hatch", { boundary: [[0]] })),
+    preview(operation("acad.add_dimension", { kind: "angular" })),
   ];
   for (const op of Object.keys(OPERATIONS)) {
     invalid.push(preview(operation(op, { extra: 1 })));
@@ -279,7 +302,7 @@ describe("CAD tool schemas", () => {
     const items = ((operations.properties as Record<string, Schema>).operations!.items ?? {}) as Schema;
     const branches = (items.anyOf ?? []) as Schema[];
     const advertised = branches.map((branch) => ((branch.properties as Record<string, Schema>).op!).const);
-    expect(advertised).toHaveLength(22);
+    expect(advertised).toHaveLength(30);
     expect(advertised.sort()).toEqual(Object.keys(OPERATIONS).sort());
   });
 

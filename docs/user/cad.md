@@ -72,10 +72,13 @@ built-in guides on the CAD workflow and on presenting drawings before they draw.
 
 ## What agents can edit
 
-- **AutoCAD**, in drawing units: add lines, polylines, circles, and text;
-  create layers; move, rotate, and erase objects; set the rotation of blocks
+- **AutoCAD**, in drawing units: add lines, polylines, circles, arcs, text,
+  hatches, and aligned or linear dimensions (in your current dimension style);
+  insert blocks already defined in the drawing; create layers; move, rotate,
+  copy, mirror, scale, offset, and erase objects; set the rotation of blocks
   and text; change an object's layer or color; change text and block attribute
-  values.
+  values. New objects go on the current layer unless the agent picks one, with
+  color, linetype, and lineweight ByLayer.
 - **SketchUp**, in millimeters: add boxes; create tags and materials; move,
   erase, hide, or show objects; rename them; change an object's tag or
   material.

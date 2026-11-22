@@ -317,6 +317,19 @@ it("runs bounded operation-count performance checks before native jobs for a per
   expect(smoke["continue-on-error"]).not.toBe(true);
 });
 
+it("fails a provider SDK pin mismatch in the quality gate before any native job starts", () => {
+  const steps = workflow.jobs.gate.steps as Array<{ name: string; run?: string; if?: string; "timeout-minutes"?: number; "continue-on-error"?: boolean }>;
+  const pins = steps.findIndex((step) => step.name === "Check provider SDK pins against the capability manifests");
+  expect(pins).toBeGreaterThan(steps.findIndex((step) => step.name === "Install locked dependencies"));
+  expect(steps[pins]!.run).toBe("npm exec -- vitest run --maxWorkers=1 tests/server/provider-capability-manifest.test.ts");
+  expect(steps[pins]!.if).toBeUndefined();
+  expect(steps[pins]!["timeout-minutes"]).toBe(3);
+  expect(steps[pins]!["continue-on-error"]).not.toBe(true);
+  for (const job of ["test", "electron", "windows-unit", "macos-x64-unit", "pr-linux-core"]) {
+    expect(workflow.jobs[job].needs).toContain("gate");
+  }
+});
+
 it("keeps provider canary failures visible without filing incidents for cancelled or branch runs", () => {
   const drift = parse(source(".github/workflows/provider-contract-drift.yml"));
   expect(drift.on.push).toBeUndefined();

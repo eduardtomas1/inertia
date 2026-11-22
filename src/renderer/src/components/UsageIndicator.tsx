@@ -258,9 +258,16 @@ export function UsageIndicator({
   const closePopover = useCallback((restoreFocus: boolean): void => {
     setOpen(false);
     if (restoreFocus && typeof window !== "undefined") {
-      window.requestAnimationFrame(() => triggerRef.current?.focus());
+      window.requestAnimationFrame(() => {
+        const active = document.activeElement;
+        const focusMovedAway = active !== null
+          && active !== document.body
+          && active.isConnected
+          && !document.getElementById(detailsId)?.contains(active);
+        if (!focusMovedAway) triggerRef.current?.focus();
+      });
     }
-  }, []);
+  }, [detailsId]);
 
   useEffect(() => {
     setOpen(false);

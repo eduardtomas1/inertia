@@ -134,6 +134,63 @@ describe("outside-pointer focus policy", () => {
   });
 });
 
+describe("usage popover Escape focus policy", () => {
+  function queueFrames(): () => Promise<void> {
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    return async () => {
+      await act(async () => { for (const frame of frames.splice(0)) frame(performance.now()); });
+    };
+  }
+
+  async function openUsageWithFocusInside(): Promise<HTMLElement> {
+    renderUsage();
+    const trigger = screen.getByRole("button", { name: /Open usage and context/u });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await act(async () => { await vi.dynamicImportSettled(); });
+    const close = screen.getByRole("button", { name: "Close usage and context" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Usage & context" })).not.toBeInTheDocument();
+    return trigger;
+  }
+
+  it("returns focus to the usage trigger after Escape from inside the popover", async () => {
+    const flushFrames = queueFrames();
+    const trigger = await openUsageWithFocusInside();
+
+    await flushFrames();
+
+    expect(trigger).toHaveFocus();
+  });
+
+  it("returns focus to the usage trigger when the hidden popover dropped focus to the body", async () => {
+    const flushFrames = queueFrames();
+    const trigger = await openUsageWithFocusInside();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    await flushFrames();
+
+    expect(trigger).toHaveFocus();
+  });
+
+  it("leaves focus where the user moved it before the frame after Escape", async () => {
+    const flushFrames = queueFrames();
+    await openUsageWithFocusInside();
+    const destination = screen.getByRole("button", { name: "Outside action" });
+    destination.focus();
+
+    await flushFrames();
+
+    expect(destination).toHaveFocus();
+  });
+});
+
 describe("model search active descendant", () => {
   it("keeps active-descendant ownership on the focused search and favorites on each row", async () => {
     renderChooser();

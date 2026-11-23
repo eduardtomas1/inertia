@@ -10,6 +10,7 @@ import { emptyMascotStatus } from "../../src/shared/mascot";
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import { conversation } from "./composer-fixtures";
 import { settingsProvider, settingsViewProps } from "./settings-view-fixtures";
+import { archivedChatsProps } from "./archived-chats-fixtures";
 
 const themeLibraryRenders = vi.hoisted(() => ({ count: 0 }));
 
@@ -167,12 +168,13 @@ describe("Settings row metadata coverage", () => {
         settings: { ...defaultSettings, completionSound: { ...defaultSettings.completionSound, enabled: true } },
         providers: [settingsProvider("codex", "Codex"), settingsProvider("claude", "Claude")],
         projects: [project],
-        archived: [{ ...conversation("33333333-3333-4333-8333-333333333333"), archivedAt: "2026-09-01T00:00:00.000Z" }],
+        ...archivedChatsProps([{ ...conversation("33333333-3333-4333-8333-333333333333"), archivedAt: "2026-09-01T00:00:00.000Z" }]),
       })} />);
       const expected = SETTINGS_SECTIONS.find(({ id }) => id === target.section)!.rows
         .filter(({ group }) => target.section !== "projects" || (target.projectId ? group !== "All projects" : group === "All projects"))
         .map(({ id }) => id);
       await waitFor(() => expect(settingRowIds()).toEqual(expect.arrayContaining(expected)));
+      await waitFor(() => expect(screen.queryByText("Loading archived chats…")).toBeNull());
       for (const row of SETTINGS_SECTIONS.find(({ id }) => id === target.section)!.rows.filter(({ id }) => expected.includes(id))) {
         const element = document.querySelector(`[data-setting-id="${row.id}"]`)!;
         const labels = [element.textContent ?? "", ...[element, ...element.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label") ?? "")];
@@ -345,7 +347,6 @@ describe("Settings render stability", () => {
       settings,
       providers: [],
       conversations: conversations.filter(({ archivedAt }) => archivedAt === null),
-      archived: conversations.filter(({ archivedAt }) => archivedAt !== null),
       maintenanceStatuses: new Map(),
       maintenanceOperations: new Map(),
     });

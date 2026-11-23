@@ -1,6 +1,7 @@
 import { createUsageCommandHandler, type UsageCommandDependencies } from "./usage-commands";
 import { createBackgroundTaskCommandHandler, type BackgroundTaskCommandDependencies } from "./background-task-commands";
 import { createMessageSearchCommandHandler, MessageSearchController } from "./message-search-commands";
+import { createConversationReadCommandHandler } from "./conversation-read-commands";
 import type { MessageSearchTarget } from "../../../shared/message-search";
 import type { RuntimeCommandHandler } from "./command-router";
 
@@ -18,5 +19,6 @@ export function createReadCommandHandlers(input: UsageCommandDependencies & {
     createUsageCommandHandler(input),
     createMessageSearchCommandHandler({ ...input, searches }),
     createBackgroundTaskCommandHandler(input),
+    createConversationReadCommandHandler(input),
   ];
 }

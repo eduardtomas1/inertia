@@ -534,6 +534,11 @@ export const AppLayout = memo(function AppLayout({
       actions.selectConversation(thread);
       setView("workspace");
     },
+    openArchivedConversation: (conversationId: string) => {
+      void actions.run("conversation.select", { type: "conversation.select", payload: { conversationId } })
+        .then(() => setView("workspace"))
+        .catch(() => undefined);
+    },
     open: () => setView("tasks"),
     openTask: (id: string) => {
       setOpenTaskRequest((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }));
@@ -967,6 +972,7 @@ export const AppLayout = memo(function AppLayout({
                   projectScopeId={projectScopeId}
                   request={tasksActions.request}
                   onOpenConversation={tasksActions.openConversation}
+                  onOpenArchivedConversation={tasksActions.openArchivedConversation}
                   onError={setActionError}
                   openTaskRequest={openTaskRequest}
                   focusAddRequest={tasksFocusAddRequest}

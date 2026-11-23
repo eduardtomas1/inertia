@@ -144,7 +144,7 @@ export function createSettingsBackendCommandHandler(
         }
         dependencies.store.updateSettings(command.payload);
         if (command.payload.attachmentStorageGiB !== undefined || command.payload.autoRemoveOldAttachments !== undefined) {
-          const settings = dependencies.store.shellSnapshot().settings;
+          const settings = dependencies.store.settings();
           dependencies.conversationAttachments.setStoragePolicy(
             settings.attachmentStorageGiB * 1024 ** 3, settings.autoRemoveOldAttachments,
           );
@@ -333,7 +333,7 @@ export function createSettingsBackendCommandHandler(
         return "mutation";
       case "settings.restore-defaults": {
         assertMaintenanceIdle("codex");
-        const restored = restoredDefaultSettings(dependencies.store.shellSnapshot().settings);
+        const restored = restoredDefaultSettings(dependencies.store.settings());
         dependencies.backendProfileController.replaceGlobalDefaultWithSettings(restored);
         dependencies.providers.setCommand("codex", undefined);
         dependencies.conversationAttachments.setStoragePolicy(

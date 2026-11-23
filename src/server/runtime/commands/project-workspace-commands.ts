@@ -150,8 +150,7 @@ export function createProjectWorkspaceCommandHandler(
         if (dependencies.store.project(projectId).workspaceKind === "scratch") {
           throw new RuntimeRequestError("Delete chats without a project one at a time.");
         }
-        const conversations = dependencies.store.shellSnapshot().conversations
-          .filter((conversation) => conversation.projectId === projectId);
+        const conversations = dependencies.store.projectConversations(projectId);
         const storedWorkspaces = (items: typeof conversations) => {
           const projectPath = dependencies.store.project(projectId).path;
           return [
@@ -203,9 +202,7 @@ export function createProjectWorkspaceCommandHandler(
               "A Duo in this project is still running or needs attention. Let its chats finish or stop them, or resolve it from the Duo dialog (the two-chats button in the sidebar), then remove the project again.",
             );
           }
-          const latestConversations = dependencies.store.shellSnapshot()
-            .conversations.filter((conversation) =>
-              conversation.projectId === projectId);
+          const latestConversations = dependencies.store.projectConversations(projectId);
           const latestWorkspaces = storedWorkspaces(latestConversations);
           if (
             latestConversations.length !== conversations.length

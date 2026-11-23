@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 
 import type {
+  ArchivedConversationRef,
   ConversationShell,
   ModelBackendProfileView,
   Project,
@@ -15,6 +16,7 @@ export interface WatcherSurfaceModel {
   surface: "main" | "detached";
   links: WatcherLinkIndex;
   conversations: readonly ConversationShell[];
+  archivedConversations?: ReadonlyMap<string, ArchivedConversationRef>;
   projects: readonly Project[];
   providers: readonly ProviderInfo[];
   backendProfiles: readonly ModelBackendProfileView[];

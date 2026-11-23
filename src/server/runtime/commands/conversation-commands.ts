@@ -708,10 +708,9 @@ export function createConversationCommandHandler(
           }
           await holdGoalReads({ conversationId: conversation.id });
           if (ownership?.ownsWorktree) {
-            const sharedCheckout = dependencies.store.shellSnapshot()
-              .conversations.find((candidate) => (
+            const sharedCheckout = dependencies.store.projectConversations(conversation.projectId)
+              .find((candidate) => (
                 candidate.id !== conversation.id
-                && candidate.projectId === conversation.projectId
                 && candidate.worktreePath !== null
                 && resolve(candidate.worktreePath)
                   === resolve(conversation.worktreePath!)

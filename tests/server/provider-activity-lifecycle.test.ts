@@ -28,6 +28,10 @@ import type {
   ProviderId,
 } from "../../src/server/provider/contracts";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import { runtimeWireEvent } from "../../src/server/runtime/runtime-sync-hub";
+import { applyActivityDetailPatch } from "../../src/shared/activity-detail";
+import { MAX_PROVIDER_ACTIVITY_DETAIL_CHARS } from "../../src/server/provider/activity-detail";
+import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
 import { TurnActivityProjection } from
   "../../src/server/runtime/turns/turn-activity-projection";
 import type {
@@ -1164,6 +1168,98 @@ describe("durable provider activity lifecycle contract", () => {
       "Command:\nmake\n\nOutput:\nbuilding\n\n\nOutput:\n[output trimmed by Codex]\nbuilt",
       `Command:\nnpm test\n\nOutput:\n${streamed.join("")}${ending}`,
     ]);
+    await finish(value);
+  });
+});
+
+describe("streamed activity output as append patches", () => {
+  function wireActivities(value: Awaited<ReturnType<typeof runtime>>, from: number) {
+    return value.events.slice(from).flatMap((event) => {
+      if (event.type !== "agent.activity") return [];
+      const wire = runtimeWireEvent(event);
+      if (wire.type !== "agent.activity") return [];
+      expect(parseServerEvent(wire)).toEqual(wire);
+      return [wire];
+    });
+  }
+
+  it("sends only the new output each window and replays to the stored detail", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const from = value.events.length;
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "hot", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    let output = "";
+    for (let window = 0; window < 6; window += 1) {
+      for (let line = 0; line < 20; line += 1) {
+        const delta = `window ${window} line ${line}\n`;
+        output += delta;
+        codex.handleNotification("item/commandExecution/outputDelta", { ...owned, itemId: "hot", delta });
+      }
+      runTimers(value.scheduler, 64);
+    }
+    const streamed = wireActivities(value, from);
+    expect(streamed[0]?.detailPatch).toBeUndefined();
+    const patches = streamed.slice(1);
+    expect(patches.length).toBeGreaterThanOrEqual(5);
+    expect(patches.every(({ detailPatch }) => detailPatch !== undefined)).toBe(true);
+    let rendered = streamed[0]!.activity.detail;
+    for (const event of patches) {
+      expect(event.activity.detail!.length).toBeLessThan(2_048);
+      rendered = applyActivityDetailPatch(rendered, event.detailPatch!, event.activity.detail);
+      expect(rendered).not.toBeNull();
+    }
+    expect(rendered).toBe(`Command:\nnpm test\n\nOutput:\n${output}`);
+    expect(rendered).toBe(turnActivities(value).find(({ title }) => title === "npm test")?.detail);
+    expect(applyActivityDetailPatch(rendered!.slice(1), patches.at(-1)!.detailPatch!, "x")).toBeNull();
+
+    const beforeTerminal = value.events.length;
+    codex.handleNotification("item/commandExecution/outputDelta", { ...owned, itemId: "hot", delta: "last pending line\n" });
+    codex.handleNotification("item/completed", {
+      ...owned,
+      item: { id: "hot", type: "commandExecution", command: "npm test", status: "completed",
+        aggregatedOutput: `${output}last pending line\n` },
+    });
+    const terminal = wireActivities(value, beforeTerminal);
+    expect(terminal.map(({ activity }) => activity.status)).toEqual(["running", "completed"]);
+    expect(terminal[0]!.detailPatch).toBeDefined();
+    expect(terminal[1]!.detailPatch).toBeUndefined();
+    expect(applyActivityDetailPatch(rendered, terminal[0]!.detailPatch!, terminal[0]!.activity.detail))
+      .toBe(`Command:\nnpm test\n\nOutput:\n${output}last pending line\n`);
+    expect(terminal[1]!.activity.detail).toBe(turnActivities(value).find(({ title }) => title === "npm test")?.detail);
+    await finish(value);
+  });
+
+  it("replaces the whole detail when the output is cut to the activity cap", async () => {
+    const value = await runtime();
+    const codex = codexEvents(value);
+    const owned = { threadId: "codex-thread", turnId: "codex-turn" };
+    const from = value.events.length;
+    codex.handleNotification("item/started", {
+      ...owned,
+      item: { id: "hot", type: "commandExecution", command: "npm test", status: "inProgress" },
+    });
+    for (let window = 0; window < 40; window += 1) {
+      codex.handleNotification("item/commandExecution/outputDelta", {
+        ...owned, itemId: "hot", delta: `${String(window).padStart(4, "0")}${"z".repeat(995)}\n`,
+      });
+      runTimers(value.scheduler, 64);
+    }
+    const streamed = wireActivities(value, from);
+    const replaced = streamed.filter(({ detailPatch }) => detailPatch === undefined);
+    expect(replaced.length).toBeGreaterThan(0);
+    expect(replaced.at(-1)!.activity.detail).toHaveLength(MAX_PROVIDER_ACTIVITY_DETAIL_CHARS);
+    let rendered: string | null = null;
+    for (const event of streamed) {
+      rendered = event.detailPatch
+        ? applyActivityDetailPatch(rendered, event.detailPatch, event.activity.detail)
+        : event.activity.detail;
+      expect(rendered).not.toBeNull();
+    }
+    expect(rendered).toBe(turnActivities(value).find(({ title }) => title === "npm test")?.detail);
     await finish(value);
   });
 });

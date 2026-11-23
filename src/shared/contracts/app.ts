@@ -347,9 +347,15 @@ export interface RuntimeSyncCursor {
   latestSequence: number;
 }
 
+export type ArchivedConversationRef = Pick<Conversation, "id" | "projectId" | "title" | "providerId"> & {
+  archivedAt: string;
+};
+
 export interface AppSnapshot {
   projects: Project[];
   conversations: ConversationShell[];
+  archivedConversationRefs?: ArchivedConversationRef[];
+  archivedConversationCount?: number;
   runs: WorkspaceRun[];
   providers: ProviderInfo[];
   /**

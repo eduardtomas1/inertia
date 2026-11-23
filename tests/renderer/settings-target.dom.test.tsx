@@ -87,7 +87,6 @@ describe("Settings external section targets", () => {
       backendDefaults: [],
       projects: [],
       conversations: [],
-      archived: [],
       databaseBackup: {
         lastValidatedAt: "2026-08-03T10:15:00.000Z",
       },

@@ -30,10 +30,31 @@ function sortDescendingTimestamp<
  * Transcript and execution-detail payloads remain on their subscribed stream.
  */
 export function applyConversationShellEvent(
-  snapshot: AppSnapshot,
+  shell: AppSnapshot,
   event: ConversationShellEvent,
 ): AppSnapshot {
+  let snapshot = shell;
   const conversationId = event.conversation.id;
+  const archived = event.conversation.archivedAt !== null
+    && conversationId !== snapshot.activeConversationId;
+  const refs = snapshot.archivedConversationRefs ?? [];
+  if (archived || refs.some(({ id }) => id === conversationId)) {
+    const { id, projectId, title, providerId, archivedAt } = event.conversation;
+    const nextRefs = archived
+      ? [...refs.filter((ref) => ref.id !== id), { id, projectId, title, providerId, archivedAt: archivedAt! }]
+      : refs.filter((ref) => ref.id !== id);
+    snapshot = { ...snapshot, archivedConversationRefs: nextRefs };
+    if (archived) {
+      return {
+        ...snapshot,
+        conversations: snapshot.conversations.filter((conversation) => conversation.id !== id),
+        runs: sortDescendingTimestamp([
+          ...snapshot.runs.filter((run) => run.conversationId !== id),
+          ...event.runs,
+        ]).slice(0, 200),
+      };
+    }
+  }
   const current = snapshot.conversations.find(({ id }) => id === conversationId);
   const conversation = current && structurallyEqual(current, event.conversation)
     ? current

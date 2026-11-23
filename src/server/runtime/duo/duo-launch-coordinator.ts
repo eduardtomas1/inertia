@@ -966,7 +966,7 @@ export class DuoLaunchCoordinator {
     payload: DuoSidePayload | DuoComparisonPayload,
     unavailable: { backend: string; route: string },
   ): Promise<ModelSelection> {
-    const settings = this.store.shellSnapshot().settings;
+    const settings = this.store.settings();
     const selection = this.backendProfiles.validateSelection(
       payload.modelSelection ?? providerNativeModelSelection({
         providerId: payload.providerId ?? settings.defaultProvider,
@@ -1023,9 +1023,8 @@ export class DuoLaunchCoordinator {
     const conversationId = randomUUID();
     if (payload.worktreePath) {
       const requestedPath = resolve(payload.worktreePath);
-      const reusable = this.store.shellSnapshot().conversations.find(
-        (conversation) => conversation.projectId === payload.projectId
-          && conversation.worktreePath !== null
+      const reusable = this.store.projectConversations(payload.projectId).find(
+        (conversation) => conversation.worktreePath !== null
           && normalizeIdentityPath(resolve(conversation.worktreePath))
             === normalizeIdentityPath(requestedPath),
       );

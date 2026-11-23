@@ -219,7 +219,7 @@ describe("DataSettings database compaction workflow", () => {
         settings={defaultSettings}
         disabled={false}
         providers={[]}
-        archived={[]}
+        archivedCount={0}
         onReportCommand={request}
         onUpdate={vi.fn(async () => undefined)}
         onUnarchive={vi.fn()}

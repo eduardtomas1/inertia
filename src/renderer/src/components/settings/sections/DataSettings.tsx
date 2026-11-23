@@ -19,7 +19,7 @@ import { SettingsSectionFallback } from "../SettingsSectionFallback";
 import { SettingActionRow, SettingsGroup } from "../SettingsLayout";
 import { useSettingAction } from "../useSettingAction";
 import { AgentSecretsSettings } from "./AgentSecretsSettings";
-import { ArchivedChats } from "./ArchivedChats";
+import { ArchivedChats, type ArchivedConversationsLoader } from "./ArchivedChats";
 import "./DataSettings.css";
 
 export const APP_HEALTH_SAMPLE_INTERVAL_MS = 10_000;
@@ -44,7 +44,8 @@ export interface DataSettingsProps {
   settings: AppSettings;
   disabled: boolean;
   providers: ProviderInfo[];
-  archived: Conversation[];
+  archivedCount: number;
+  onLoadArchived?: ArchivedConversationsLoader;
   databaseBackup?: DatabaseBackupStatus;
   hasActiveTurns?: boolean;
   onReportCommand?: IssueReportSettingsProps["request"];
@@ -58,7 +59,8 @@ export function DataSettings({
   settings,
   disabled,
   providers,
-  archived,
+  archivedCount,
+  onLoadArchived,
   databaseBackup,
   hasActiveTurns = false,
   onReportCommand,
@@ -257,7 +259,7 @@ export function DataSettings({
           )}
         />
       </SettingsGroup>
-      <ArchivedChats archived={archived} providers={providers} disabled={disabled} onUnarchive={onUnarchive} />
+      <ArchivedChats count={archivedCount} load={onLoadArchived} providers={providers} disabled={disabled} onUnarchive={onUnarchive} />
       <SettingsGroup title="Defaults" headingId="restore-defaults-heading">
         <RestoreDefaults confirmDestructiveActions={settings.confirmDestructiveActions} disabled={disabled} onRestoreDefaults={onRestoreDefaults} />
       </SettingsGroup>

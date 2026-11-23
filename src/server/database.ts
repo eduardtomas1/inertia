@@ -99,6 +99,8 @@ import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projecti
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import { backgroundTasks } from "./persistence/background-task-repository";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "../shared/background-tasks";
+import type { ArchivedConversationsPage, ArchivedConversationsRequest } from "../shared/archived-conversations";
+import type { ActivityDetailReadResult } from "../shared/activity-detail";
 import type {
   AgentTurnRow,
   ConversationRow,
@@ -310,29 +312,12 @@ export class RuntimeStore {
     this.backupManager.start();
   }
 
-  startCompaction(): void {
-    this.compactionManager.start();
-  }
-
-  databaseStorageStatus(): DatabaseStorageStatus {
-    return this.compactionManager.status();
-  }
-
-  compactDatabase(): Promise<{ storage: DatabaseStorageStatus; compaction: DatabaseCompactionSummary }> {
-    return this.compactionManager.compactNow();
-  }
-
-  runIdleDatabaseCompaction(): Promise<DatabaseCompactionSummary | null> {
-    return this.compactionManager.runIdlePass();
-  }
-
-  isDatabaseCompacting(): boolean {
-    return this.compactionManager.isCompacting();
-  }
-
-  isDatabaseVacuuming(): boolean {
-    return this.compactionManager.isHoldingExclusiveWork();
-  }
+  startCompaction(): void { this.compactionManager.start(); }
+  databaseStorageStatus(): DatabaseStorageStatus { return this.compactionManager.status(); }
+  compactDatabase(): Promise<{ storage: DatabaseStorageStatus; compaction: DatabaseCompactionSummary }> { return this.compactionManager.compactNow(); }
+  runIdleDatabaseCompaction(): Promise<DatabaseCompactionSummary | null> { return this.compactionManager.runIdlePass(); }
+  isDatabaseCompacting(): boolean { return this.compactionManager.isCompacting(); }
+  isDatabaseVacuuming(): boolean { return this.compactionManager.isHoldingExclusiveWork(); }
 
   createInitialBackup(options: { quietGraceMs?: number } = {}): Promise<DatabaseBackupResult | null> {
     return this.backupManager.requestInitialBackup(options.quietGraceMs ?? 0);
@@ -398,6 +383,12 @@ export class RuntimeStore {
   conversationShell(conversationId: string): ConversationShell | null {
     return this.snapshotRepository.conversationShell(conversationId);
   }
+
+  projects(): Project[] { return this.snapshotRepository.projects(); }
+  conversationIds(): string[] { return this.snapshotRepository.conversationIds(); }
+  projectConversations(projectId: string): ConversationShell[] { return this.snapshotRepository.projectConversations(projectId); }
+  archivedConversations(request: ArchivedConversationsRequest): ArchivedConversationsPage { return this.snapshotRepository.archivedConversations(request); }
+  activityDetail(conversationId: string, activityId: string): ActivityDetailReadResult | null { return this.snapshotRepository.activityDetail(conversationId, activityId); }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
     return this.snapshotRepository.conversationDetail(conversationId);
@@ -835,9 +826,7 @@ export class RuntimeStore {
     return this.gitArtifactRepository.clearRefs(updates, updatedAt);
   }
 
-  retainedTurnGitArtifactRefsForRetention(): import("./persistence/types").RetainedArtifactRefRecord[] {
-    return this.gitArtifactRepository.retainedRefsForRetention();
-  }
+  retainedTurnGitArtifactRefsForRetention(): import("./persistence/types").RetainedArtifactRefRecord[] { return this.gitArtifactRepository.retainedRefsForRetention(); }
 
   markCheckpointsExpired(
     checkpointIds: readonly string[],
@@ -846,13 +835,8 @@ export class RuntimeStore {
     return this.executionLedgerRepository.markCheckpointsExpired(checkpointIds, expiredAt);
   }
 
-  activeCheckpointsForRetention(): import("./persistence/types").RetainedCheckpointRecord[] {
-    return this.executionLedgerRepository.activeCheckpointsForRetention();
-  }
-
-  checkpointExpirationRevision(): string {
-    return this.executionLedgerRepository.checkpointExpirationRevision();
-  }
+  activeCheckpointsForRetention(): import("./persistence/types").RetainedCheckpointRecord[] { return this.executionLedgerRepository.activeCheckpointsForRetention(); }
+  checkpointExpirationRevision(): string { return this.executionLedgerRepository.checkpointExpirationRevision(); }
 
   updateAgentTurnLifecycle(turnId: string, update: AgentTurnLifecycleUpdate): AgentTurn {
     return this.turnLedgerRepository.updateLifecycle(turnId, update);

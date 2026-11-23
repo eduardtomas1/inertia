@@ -26,16 +26,20 @@ import { messageSendFailureText, runtimeCommandDelivery } from "../utils/connect
 import type { QueueCommandRunner } from "../components/composer/runtimeQueueClient";
 import { RUNTIME_QUEUE_CHANGED } from "../components/composer/runtimeQueueEvents";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "@shared/background-tasks";
+import type { ArchivedConversationsPage, ArchivedConversationsRequest } from "@shared/archived-conversations";
 
 export type ConversationBackgroundTasksLoader = (
   conversationId: string,
   before: BackgroundTaskCursor | null,
 ) => Promise<BackgroundTasksResult>;
 
+export type ArchivedConversationsLoader = (request: ArchivedConversationsRequest) => Promise<ArchivedConversationsPage>;
+
 export interface AppRuntimeActions {
   runQueueCommand: QueueCommandRunner;
   runLimitResetCommand: LimitResetCommandRunner;
   loadBackgroundTasks: ConversationBackgroundTasksLoader;
+  loadArchivedConversations: ArchivedConversationsLoader;
   sendingConversationIds: ReadonlySet<string>;
   run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
   openProjectPath: (
@@ -116,6 +120,13 @@ export function useAppRuntimeActions(options: {
     const event = await sendCommand(withRequestId({ type: "conversation.background-tasks.get", payload: { conversationId, before } }));
     if (event.type !== "request.result" || event.result.kind !== "conversation.background-tasks") {
       throw new Error("The local service returned an unexpected background tasks response.");
+    }
+    return event.result;
+  }, [sendCommand]);
+  const loadArchivedConversations = useCallback<ArchivedConversationsLoader>(async (payload) => {
+    const event = await sendCommand(withRequestId({ type: "conversation.archived.list", payload }));
+    if (event.type !== "request.result" || event.result.kind !== "conversation.archived") {
+      throw new Error("The local service returned an unexpected archived chats response.");
     }
     return event.result;
   }, [sendCommand]);
@@ -331,6 +342,7 @@ export function useAppRuntimeActions(options: {
     runQueueCommand,
     runLimitResetCommand,
     loadBackgroundTasks,
+    loadArchivedConversations,
     sendingConversationIds,
     run,
     openProjectPath,

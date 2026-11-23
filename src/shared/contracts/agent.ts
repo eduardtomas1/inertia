@@ -267,6 +267,8 @@ export interface AgentActivity {
   kind: "status" | "tool" | "command" | "file" | "reasoning" | "error";
   title: string;
   detail: string | null;
+  detailBytes?: number;
+  detailTruncated?: boolean;
   status: "running" | "completed" | "failed";
   createdAt: string;
 }

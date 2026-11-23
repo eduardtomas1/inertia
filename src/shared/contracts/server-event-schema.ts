@@ -7,6 +7,8 @@ import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
 import { usageResultValidators } from "./usage-results-schema";
 import { backgroundTasksResult } from "./background-tasks-schema";
+import { ARCHIVED_CONVERSATIONS_PAGE_SIZE, archivedConversationsCursorSchema } from "../archived-conversations";
+import { MAX_ACTIVITY_DETAIL_READ_CHARS } from "../activity-detail";
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { gitBranch } from "./git-branch-schema";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent, todoCollectionCoherent, libraryCoherent, uniqueRecordField, unknownEventType } from "./server-event-discriminants";
@@ -323,6 +325,8 @@ function appSnapshot(value: unknown): boolean {
   if (!(record(value)
     && arrayOf(value.projects, project)
     && arrayOf(value.conversations, conversationShell)
+    && (value.archivedConversationRefs === undefined || arrayOf(value.archivedConversationRefs, archivedConversationRef))
+    && (value.archivedConversationCount === undefined || integerFieldAtLeast(value, "archivedConversationCount"))
     && arrayOf(value.runs, workspaceRun)
     && arrayOf(value.providers, providerInfo)
     && (value.maintenanceOperations === undefined
@@ -371,7 +375,36 @@ function activity(value: unknown): boolean {
     && oneOf(value, "kind", SERVER_EVENT_OPTIONS.activityKinds)
     && oneOf(value, "status", SERVER_EVENT_OPTIONS.activityStatuses)
     && nullableStringField(value, "turnId")
-    && nullableStringField(value, "detail");
+    && nullableStringField(value, "detail")
+    && (value.detailBytes === undefined || integerFieldAtLeast(value, "detailBytes"))
+    && optionalBooleanField(value, "detailTruncated")
+    && (value.detailTruncated !== true || (value.detail !== null && value.detailBytes !== undefined));
+}
+
+function activityDetailPatch(value: unknown): boolean {
+  return value === undefined || (record(value)
+    && integerFieldAtLeast(value, "base")
+    && integerFieldAtLeast(value, "offset", 1)
+    && (value.offset as number) <= (value.base as number));
+}
+
+function archivedConversationRef(value: unknown): boolean {
+  return recordWithStrings(value, "id", "projectId", "title", "archivedAt") && providerId(value, "providerId");
+}
+
+function archivedConversationsPage(value: UnknownRecord): boolean {
+  return arrayOf(value.conversations, (entry) => conversation(entry) && typeof entry.archivedAt === "string")
+    && (value.conversations as unknown[]).length <= ARCHIVED_CONVERSATIONS_PAGE_SIZE
+    && uniqueRecordField(value.conversations as unknown[], "id")
+    && integerFieldAtLeast(value, "total")
+    && (value.next === null || archivedConversationsCursorSchema.safeParse(value.next).success);
+}
+
+function activityDetailReadResult(value: UnknownRecord): boolean {
+  return recordWithStrings(value, "conversationId", "activityId")
+    && nullableStringField(value, "turnId")
+    && nullableStringField(value, "detail")
+    && (value.detail === null || (value.detail as string).length <= MAX_ACTIVITY_DETAIL_READ_CHARS);
 }
 
 function approvalRequest(value: unknown): boolean {
@@ -961,7 +994,9 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "agent.usage":
       return threadUsage(value.usage);
     case "agent.activity":
-      return activity(value.activity);
+      return activity(value.activity)
+        && activityDetailPatch(value.detailPatch)
+        && (value.detailPatch === undefined || (record(value.activity) && value.activity.detail !== null && value.activity.detailTruncated === undefined));
     case "agent.subagent.updated":
       return subagentTrace(value.trace);
     case "agent.approval.requested":
@@ -1024,6 +1059,8 @@ const REQUEST_RESULT_VALIDATORS = {
   ...workspaceToolResultValidators,
   "updates.run": (value) => updatesRunResultSchema.safeParse(value).success,
   "conversation.background-tasks": (value) => backgroundTasksResult(value, workspaceRun),
+  "conversation.archived": archivedConversationsPage,
+  "activity.detail": activityDetailReadResult,
   "conversation.created": (value) => stringField(value, "conversationId"),
   "todo.started": (value) => stringField(value, "conversationId"),
   "conversation.cli.scan": (value) => cliConversationScanSchema.safeParse(value.scan).success, "conversation.cli.preview": (value) => cliConversationPreviewSchema.safeParse(value.preview).success, "conversation.cli.imported": (value) => stringField(value, "conversationId"),

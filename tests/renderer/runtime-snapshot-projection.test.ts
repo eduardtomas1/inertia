@@ -112,6 +112,33 @@ describe("bounded conversation shell projection", () => {
     expect(next.runs[1]).toBe(secondaryRun);
   });
 
+  it("moves an archived chat to the references and brings it back live when it is restored", () => {
+    const primary = conversation("primary", "2026-07-30T10:00:00.000Z");
+    const other = conversation("other", "2026-07-30T09:00:00.000Z");
+    const snapshot: AppSnapshot = {
+      projects: [], conversations: [primary, other], runs: [], providers: [],
+      settings: { ...defaultSettings }, activeProjectId: primary.projectId, activeConversationId: primary.id,
+    };
+    const archivedOther = { ...other, archivedAt: "2026-07-30T11:00:00.000Z" };
+    const archived = applyConversationShellEvent(snapshot, {
+      type: "conversation.shell.updated", conversation: archivedOther, runs: [],
+    });
+    expect(archived.conversations).toEqual([primary]);
+    expect(archived.archivedConversationRefs).toEqual([{
+      id: other.id, projectId: other.projectId, title: other.title, providerId: "codex", archivedAt: archivedOther.archivedAt,
+    }]);
+    const restored = applyConversationShellEvent(archived, {
+      type: "conversation.shell.updated", conversation: other, runs: [],
+    });
+    expect(restored.conversations.map(({ id }) => id)).toEqual([primary.id, other.id]);
+    expect(restored.archivedConversationRefs).toEqual([]);
+    const selectedArchived = applyConversationShellEvent(snapshot, {
+      type: "conversation.shell.updated", conversation: { ...primary, archivedAt: "2026-07-30T11:00:00.000Z" }, runs: [],
+    });
+    expect(selectedArchived.conversations.map(({ id }) => id)).toContain(primary.id);
+    expect(selectedArchived.archivedConversationRefs).toBeUndefined();
+  });
+
   it("keeps the global shell run projection bounded", () => {
     const primary = conversation("primary", "2026-07-30T10:00:00.000Z");
     const snapshot: AppSnapshot = {

@@ -1,6 +1,8 @@
 import type { LimitResetResult } from "../limit-reset";
 import type { UpdatesRunResult } from "../updates";
 import type { BackgroundTasksResult } from "../background-tasks";
+import type { ArchivedConversationsPage } from "../archived-conversations";
+import type { ActivityDetailPatch, ActivityDetailReadResult } from "../activity-detail";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
 import type { MessageQueueResult } from "../queued-messages";
@@ -128,7 +130,7 @@ export type RuntimeMutationEvent =
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
   | { type: "agent.commentary.persisted"; message: ChatMessage }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }
-  | { type: "agent.activity"; activity: AgentActivity }
+  | { type: "agent.activity"; activity: AgentActivity; detailPatch?: ActivityDetailPatch }
   | { type: "agent.subagent.updated"; trace: SubagentTrace }
   | { type: "agent.approval.requested"; request: AgentApprovalRequest }
   | { type: "agent.approval.resolved"; conversationId: string; runId: string; turnId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
@@ -253,6 +255,8 @@ export type ServerEvent =
         | LimitResetResult
         | UpdatesRunResult
         | BackgroundTasksResult
+        | ArchivedConversationsPage
+        | ActivityDetailReadResult
         | ConversationCompactionResult
         | ConversationCompactAndSendResult
         | DuoPreparedResult

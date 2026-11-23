@@ -52,6 +52,7 @@ import {
 } from "../utils/terminalTurnProjection";
 import { createStreamingAgentStore } from "./useStreamingAgentState";
 import { useConversationHistory } from "./useConversationHistory";
+import { materializeActivityEvent, withFullActivityDetail } from "../utils/activityDetailStream";
 import type { RuntimeDetailSubscriptionOwner } from "@shared/runtime-detail-subscriptions";
 
 // A chat that is listed but unreadable is retried at these intervals before
@@ -171,6 +172,10 @@ export function useConversationProjection({
   const liveMessagesRef = useRef(liveMessages);
   const liveUsageRef = useRef(liveUsage);
   const liveActivitiesRef = useRef(liveActivities);
+  const streamedActivitiesRef = useRef(new Map<string, { activity: AgentActivity; revision: number }>());
+  const activityResyncsRef = useRef(new Set<string>());
+  const requestRef = useRef(request);
+  requestRef.current = request;
   const liveSubagentsRef = useRef(liveSubagents);
   const pendingApprovalsRef = useRef(pendingApprovals);
   const pendingInputsRef = useRef(pendingInputs);
@@ -200,6 +205,8 @@ export function useConversationProjection({
     setLiveMessages({});
     setLiveUsage({});
     setLiveActivities({});
+    streamedActivitiesRef.current.clear();
+    activityResyncsRef.current.clear();
     setLiveSubagents({});
     setNativePlans({});
     setTerminalProjections({});
@@ -469,7 +476,9 @@ export function useConversationProjection({
         const stored = authoritativeActivities.get(activity.id);
         return !stored
           || stored.title !== activity.title
-          || stored.detail !== activity.detail
+          || (stored.detailTruncated
+            ? activity.status === "running" || !activity.detail?.startsWith((stored.detail ?? "").slice(0, 1_024))
+            : stored.detail !== activity.detail)
           || stored.status !== activity.status;
       });
       if (remaining.length === existing.length) return current;
@@ -758,16 +767,52 @@ export function useConversationProjection({
       } else {
         closeTextStream();
       }
-      setLiveActivities((current) => {
-        const existing = current[event.activity.conversationId] ?? [];
+      const streamed = streamedActivitiesRef.current;
+      const previous = streamed.get(event.activity.id);
+      const history = detailStateRef.current?.state === "ready"
+        && detailStateRef.current.conversationId === event.activity.conversationId
+        ? detailStateRef.current.detail.activities.find(({ id }) => id === event.activity.id)
+        : undefined;
+      const materialized = materializeActivityEvent(event, previous?.activity ?? history);
+      const revision = (previous?.revision ?? 0) + (materialized.resync ? 0 : 1);
+      streamed.delete(event.activity.id);
+      if (materialized.activity.status === "running" || materialized.resync) {
+        streamed.set(event.activity.id, { activity: materialized.activity, revision });
+      }
+      const publish = (activity: AgentActivity): void => setLiveActivities((current) => {
+        const existing = current[activity.conversationId] ?? [];
         return {
           ...current,
-          [event.activity.conversationId]: [
-            ...existing.filter(({ id }) => id !== event.activity.id),
-            event.activity,
+          [activity.conversationId]: [
+            ...existing.filter(({ id }) => id !== activity.id),
+            activity,
           ],
         };
       });
+      publish(materialized.activity);
+      if (materialized.resync && !activityResyncsRef.current.has(event.activity.id)) {
+        const { conversationId: ownerId, id: activityId } = event.activity;
+        activityResyncsRef.current.add(activityId);
+        void requestRef.current({ type: "activity.detail.read", payload: { conversationId: ownerId, activityId } })
+          .then((result) => {
+            if (
+              result.type !== "request.result"
+              || result.result.kind !== "activity.detail"
+              || result.result.conversationId !== ownerId
+              || result.result.activityId !== activityId
+            ) return;
+            const current = streamedActivitiesRef.current.get(activityId);
+            if (!current || current.revision !== revision) return;
+            const activity = withFullActivityDetail(current.activity, result.result.detail);
+            streamedActivitiesRef.current.delete(activityId);
+            if (activity.status === "running") {
+              streamedActivitiesRef.current.set(activityId, { activity, revision: revision + 1 });
+            }
+            publish(activity);
+          })
+          .catch(() => undefined)
+          .finally(() => { activityResyncsRef.current.delete(activityId); });
+      }
       return;
     }
     if (event.type === "agent.subagent.updated") {

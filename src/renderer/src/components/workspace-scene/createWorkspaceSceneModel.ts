@@ -1,4 +1,4 @@
-import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
+import type { ArchivedConversationsLoader, ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
 import type { DraftSkillsProjection } from "../../hooks/useDraftSkills";
 import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
@@ -343,6 +343,7 @@ export interface WorkspaceSceneActions {
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
   loadBackgroundTasks?: ConversationBackgroundTasksLoader;
+  loadArchivedConversations?: ArchivedConversationsLoader;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -644,9 +645,8 @@ export function createWorkspaceSceneModel({
       conversations: connection.snapshot?.conversations.filter(
         ({ archivedAt }) => archivedAt === null,
       ) ?? [],
-      archived: connection.snapshot?.conversations.filter(
-        ({ archivedAt }) => archivedAt !== null,
-      ) ?? [],
+      archivedCount: connection.snapshot?.archivedConversationCount ?? 0,
+      onLoadArchived: actions.loadArchivedConversations,
       databaseBackup: connection.snapshot?.databaseBackup,
       customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
       skills: currentWorkflow?.skills ?? EMPTY_LIST,

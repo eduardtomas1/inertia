@@ -426,6 +426,7 @@ export interface ActiveTurn {
   providerCommandRuns: Map<string, { id: string; label: string }>;
   providerOutputActivityIds: Set<string>;
   pendingActivityUpdates: Map<string, AgentActivity>;
+  broadcastActivityDetails?: Map<string, string | null>;
   activityFlushTimer: unknown;
   approvalIds: Set<string>;
   inputIds: Set<string>;

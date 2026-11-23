@@ -8,6 +8,7 @@ import type { MessageSearchTarget } from "@shared/message-search";
 
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useMinuteClock } from "../hooks/useMinuteClock";
+import { conversationReferences } from "../utils/conversationReferences";
 import { resultEvent, type CommandWithoutId } from "../lib/runtimeCommands";
 import { LibraryAnswerCard } from "./library/LibraryAnswerCard";
 import { LibraryCategoryRail } from "./library/LibraryCategoryRail";
@@ -100,9 +101,9 @@ export function LibraryView({
   const offline = status !== "online";
   const library = snapshot?.library;
   const categories = useMemo(() => library?.categories ?? [], [library?.categories]);
-  const conversations = snapshot?.conversations;
+  const conversations = useMemo(() => conversationReferences(snapshot), [snapshot]);
   const entries = useMemo(
-    () => savedAnswerEntries(library, conversations ?? [], snapshot?.projects ?? []),
+    () => savedAnswerEntries(library, conversations, snapshot?.projects ?? []),
     [conversations, library, snapshot?.projects],
   );
   const counts = useMemo(() => libraryCounts(entries), [entries]);
@@ -114,9 +115,9 @@ export function LibraryView({
     () => entries.filter((entry) => inLibraryFilter(entry, effectiveFilter) && savedAnswerMatches(entry, query)),
     [effectiveFilter, entries, query],
   );
-  const knownConversationIds = useMemo(() => new Set((conversations ?? []).map(({ id }) => id)), [conversations]);
+  const knownConversationIds = useMemo(() => new Set(conversations.map(({ id }) => id)), [conversations]);
   const archivedConversationIds = useMemo(
-    () => new Set((conversations ?? []).filter(({ archivedAt }) => archivedAt !== null).map(({ id }) => id)),
+    () => new Set(conversations.filter(({ archivedAt }) => archivedAt !== null).map(({ id }) => id)),
     [conversations],
   );
   const visiblePages = useMemo(
@@ -156,7 +157,7 @@ export function LibraryView({
   useEffect(() => {
     const pending = pendingOpen.current;
     if (!pending) return;
-    const conversation = conversations?.find(({ id }) => id === pending.conversationId);
+    const conversation = conversations.find(({ id }) => id === pending.conversationId);
     if (!conversation) {
       pendingOpen.current = null;
       setOpening(null);
@@ -198,21 +199,21 @@ export function LibraryView({
     const target = savedAnswerTarget(entry);
     openAfterRestore(entry.conversation.id, entry.answer.id, () => onOpenAnswer({
       ...target,
-      projectId: snapshot?.conversations.find(({ id }) => id === target.conversationId)?.projectId ?? target.projectId,
+      projectId: conversations.find(({ id }) => id === target.conversationId)?.projectId ?? target.projectId,
     }));
-  }, [onOpenAnswer, openAfterRestore, snapshot?.conversations]);
+  }, [conversations, onOpenAnswer, openAfterRestore]);
 
   const goToPage = useCallback((page: LibraryPage): void => {
     setOpenPage(null);
     openAfterRestore(page.conversationId, page.renderId, () => {
-      const projectId = snapshot?.conversations.find(({ id }) => id === page.conversationId)?.projectId ?? page.projectId;
+      const projectId = conversations.find(({ id }) => id === page.conversationId)?.projectId ?? page.projectId;
       if (page.messageId) {
         onOpenAnswer({ projectId, conversationId: page.conversationId, turnId: page.turnId, messageId: page.messageId });
       } else {
         onOpenTurn({ conversationId: page.conversationId, turnId: page.turnId });
       }
     });
-  }, [onOpenAnswer, onOpenTurn, openAfterRestore, snapshot?.conversations]);
+  }, [conversations, onOpenAnswer, onOpenTurn, openAfterRestore]);
 
   const createCategory = useCallback(async (name: string): Promise<string | null> => {
     try {

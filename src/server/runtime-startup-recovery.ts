@@ -84,7 +84,7 @@ export async function initializeRuntimePersistence(
     const testRecordLimit = process.env.NODE_ENV === "test"
       ? Number(process.env.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS ?? 0)
       : 0;
-    const attachmentSettings = store.shellSnapshot().settings;
+    const attachmentSettings = store.settings();
     conversationAttachments = await ConversationAttachmentStore.open(
       dataDirectory,
       {

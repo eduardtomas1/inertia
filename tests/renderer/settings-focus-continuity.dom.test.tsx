@@ -17,6 +17,7 @@ import { emptyMascotStatus, type MascotSettingsBridge, type MascotSnapshot } fro
 import { defaultProjectPreferences } from "../../src/shared/project-preferences";
 import type { SnapshotState } from "../../src/shared/snapshots";
 import { conversation, deferred, provider } from "./composer-fixtures";
+import { archivedLoader } from "./archived-chats-fixtures";
 
 const original = window.inertia;
 afterEach(() => {
@@ -256,32 +257,30 @@ describe("focus survives controls that close themselves", () => {
     expect(screen.queryByRole("form", { name: "New action" })).toBeNull();
   });
 
-  it("moves focus to the next Restore, then to the filter, when a restored chat leaves the list", () => {
+  it("moves focus to the next Restore, then to the filter, when a restored chat leaves the list", async () => {
     const chats = [
       archivedChat("a", "Oldest", "2026-10-01T00:00:00.000Z"),
       archivedChat("b", "Middle", "2026-10-02T00:00:00.000Z"),
       archivedChat("c", "Newest", "2026-10-03T00:00:00.000Z"),
     ];
     const onUnarchive = vi.fn();
-    const view = render(<ArchivedChats archived={chats} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
-    press(screen.getByRole("button", { name: "Restore Middle" }));
+    const view = render(<ArchivedChats count={3} load={archivedLoader(chats)} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    press(await screen.findByRole("button", { name: "Restore Middle" }));
     expect(onUnarchive).toHaveBeenCalledWith(chats[1]);
-    view.rerender(<ArchivedChats archived={[chats[0]!, chats[2]!]} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
     expect(screen.getByRole("button", { name: "Restore Oldest" })).toHaveFocus();
-    press(screen.getByRole("button", { name: "Restore Oldest" }));
-    view.rerender(<ArchivedChats archived={[chats[2]!]} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    view.rerender(<ArchivedChats count={2} load={archivedLoader([chats[0]!, chats[2]!])} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    press(await screen.findByRole("button", { name: "Restore Oldest" }));
     expect(screen.getByRole("button", { name: "Restore Newest" })).toHaveFocus();
+    view.rerender(<ArchivedChats count={1} load={archivedLoader([chats[2]!])} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter archived chats" }), { target: { value: "new" } });
-    press(screen.getByRole("button", { name: "Restore Newest" }));
-    view.rerender(<ArchivedChats archived={[archivedChat("d", "Other", "2026-10-04T00:00:00.000Z")]} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    press(await screen.findByRole("button", { name: "Restore Newest" }));
     expect(screen.getByRole("searchbox", { name: "Filter archived chats" })).toHaveFocus();
   });
 
-  it("moves focus to the empty message when the last archived chat is restored", () => {
+  it("moves focus to the empty message when the last archived chat is restored", async () => {
     const chat = archivedChat("a", "Only", "2026-10-01T00:00:00.000Z");
-    const view = render(<ArchivedChats archived={[chat]} providers={[provider]} disabled={false} onUnarchive={vi.fn()} />);
-    press(screen.getByRole("button", { name: "Restore Only" }));
-    view.rerender(<ArchivedChats archived={[]} providers={[provider]} disabled={false} onUnarchive={vi.fn()} />);
+    render(<ArchivedChats count={1} load={archivedLoader([chat])} providers={[provider]} disabled={false} onUnarchive={vi.fn()} />);
+    press(await screen.findByRole("button", { name: "Restore Only" }));
     expect(screen.getByText("No archived chats.")).toHaveFocus();
   });
 });

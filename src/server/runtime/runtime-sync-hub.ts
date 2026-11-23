@@ -57,6 +57,11 @@ interface RuntimeClientSubscription extends RuntimeDetailSubscription {
  * monotonic publication, replay, fresh hydration, and connection teardown.
  * Socket admission and command execution remain in the protocol layer.
  */
+export function runtimeWireEvent(event: RuntimeMutationEvent): RuntimeMutationEvent {
+  if (event.type !== "agent.activity" || !event.detailPatch || event.activity.detail === null) return event;
+  return { ...event, activity: { ...event.activity, detail: event.activity.detail.slice(event.detailPatch.offset) } };
+}
+
 export class RuntimeSyncHub<Socket> {
   private readonly clients = new Map<Socket, RuntimeClientSubscription>();
   private readonly pendingMessageFocus = new Map<string, PendingMessageFocus>();
@@ -282,7 +287,8 @@ export class RuntimeSyncHub<Socket> {
   }
 
   broadcast(event: RuntimeMutationEvent): void {
-    this.broadcastCommitted(() => event);
+    const wire = runtimeWireEvent(event);
+    this.broadcastCommitted(() => wire);
   }
 
   broadcastSnapshot(snapshot: (sync: RuntimeSyncCursor) => AppSnapshot): void {

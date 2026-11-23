@@ -173,16 +173,11 @@ const SettingsShell = memo(function SettingsShell({
     setQuery("");
     setLocalTarget({ base: externalTarget, target: { section: row.sectionId, anchor: row.id, ...(projectId ? { projectId } : {}) } });
   }, [externalTarget, memory, regularProjects, target]);
-  const allConversations = useMemo(
-    () => [...view.conversations, ...view.archived],
-    [view.archived, view.conversations],
-  );
   const definition = settingsSectionDefinition(section);
   const context: SettingsSectionContext = {
     ...view,
     target,
     regularProjects,
-    allConversations,
     onNavigate: navigate,
     memory,
   };

@@ -111,7 +111,6 @@ function settingsProps(
     backendDefaults: [],
     projects: [],
     conversations: [],
-    archived: [],
     onUpdate,
     onSetDefaultModel: vi.fn(async () => undefined),
     onRestoreDefaults: vi.fn(async () => undefined),

@@ -2,7 +2,7 @@ import { realpath } from "node:fs/promises";
 import { isAbsolute, relative } from "node:path";
 
 import type { OpenProjectPathRequest } from "../shared/desktop";
-import type { Conversation, Project } from "../shared/contracts";
+import type { AppSettings, Conversation, Project } from "../shared/contracts";
 import { RuntimeRequestError } from "./runtime-errors";
 import { resolveWorkspacePathForOpen, type ResolvedWorkspacePath } from "./workspace";
 
@@ -14,10 +14,26 @@ export interface ProjectPathStore {
 }
 
 export interface AuthorizedEditorPathStore extends ProjectPathStore {
-  shellSnapshot: () => {
-    projects: readonly Project[];
-    conversations: readonly Pick<Conversation, "id" | "projectId" | "worktreePath">[];
-  };
+  projects: () => readonly Project[];
+  projectConversations: (projectId: string) => readonly Pick<Conversation, "id" | "projectId" | "worktreePath">[];
+}
+
+export interface EditorContextStore extends AuthorizedEditorPathStore {
+  settings: () => Pick<AppSettings, "preferredEditor">;
+}
+
+export async function resolveEditorContext(
+  store: EditorContextStore,
+  filePath: string | undefined,
+  authority: ProjectIdentityAuthority | undefined,
+  locked: boolean,
+): Promise<{ preferredEditor: AppSettings["preferredEditor"]; authorizedPath?: string; projectRoot?: string }> {
+  const preferredEditor = store.settings().preferredEditor;
+  if (!filePath || locked) return { preferredEditor };
+  const authorized = await resolveAuthorizedEditorFile(store, filePath, authority);
+  return authorized
+    ? { preferredEditor, authorizedPath: authorized.absolute, projectRoot: authorized.projectRoot }
+    : { preferredEditor };
 }
 
 export interface AuthorizedEditorFile {
@@ -74,9 +90,9 @@ export async function resolveAuthorizedEditorFile(
   } catch {
     return null;
   }
-  const snapshot = store.shellSnapshot();
+  const projects = store.projects();
   const candidates: Array<{ projectId: string; projectRoot: string; root: string }> = [];
-  for (const project of snapshot.projects) {
+  for (const project of projects) {
     if (project.workspaceKind === "scratch") continue;
     try {
       const root = store.projectPath(project.id);
@@ -85,7 +101,7 @@ export async function resolveAuthorizedEditorFile(
       continue;
     }
   }
-  for (const conversation of snapshot.conversations) {
+  for (const conversation of projects.flatMap((project) => store.projectConversations(project.id))) {
     if (!conversation.worktreePath) continue;
     try {
       const projectRoot = store.projectPath(conversation.projectId);

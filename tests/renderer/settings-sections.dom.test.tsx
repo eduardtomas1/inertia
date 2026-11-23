@@ -6,6 +6,7 @@ import { defaultSettings } from "../../src/shared/contracts";
 import { DEFAULT_APP_KEYBINDINGS } from "../../src/shared/keybindings";
 import { conversation } from "./composer-fixtures";
 import { settingsProvider, settingsViewProps } from "./settings-view-fixtures";
+import { archivedChatsProps } from "./archived-chats-fixtures";
 
 function row(id: string): HTMLElement {
   return document.querySelector<HTMLElement>(`[data-setting-id="${id}"]`)!;
@@ -100,7 +101,7 @@ describe("Archived chats", () => {
     render(<SettingsView {...settingsViewProps({
       target: { section: "data" },
       providers: [settingsProvider("codex", "Codex")],
-      archived: [archived],
+      ...archivedChatsProps([archived]),
       onUnarchive,
     })} />);
     const navigation = within(screen.getByRole("navigation", { name: "Settings sections" }));

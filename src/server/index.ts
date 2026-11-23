@@ -23,7 +23,7 @@ import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { createConversationTitleRuntime } from "./runtime/conversation-title-service";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
-import { resolveAuthoritativeProjectPath, resolveAuthorizedEditorFile } from "./project-path";
+import { resolveAuthoritativeProjectPath, resolveEditorContext } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { createManualUsageRefresh, createRateLimitChangeSignal, createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
@@ -218,8 +218,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   });
   const recoveryImportAdmission = new DatabaseRecoveryImportAdmission();
-  let activeRuntimeCommands = 0;
-  let activeNonStorageCommands = 0;
+  let activeRuntimeCommands = 0, activeNonStorageCommands = 0;
   const updatePreparation = new RuntimeUpdatePreparationGate({
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
@@ -261,8 +260,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           closed, updatePreparing: updatePreparation.isAdmissionClosed(), recoveryActive: recoveryImportAdmission.isActive(),
           activeTurns: (turns?.activeConversationIds().length ?? 0) > 0,
           activeRuns: (isolatedRuns?.activeCount() ?? 0) > 0 || store.hasRecordedActiveWorkspaceRun(),
-          providerMaintenanceActive: (providerMaintenance?.activeOperations().length ?? 0) > 0,
-          activeRuntimeCommands, activeNonStorageCommands, activeProviderRefreshes,
+          providerMaintenanceActive: (providerMaintenance?.activeOperations().length ?? 0) > 0, activeRuntimeCommands, activeNonStorageCommands, activeProviderRefreshes,
         }),
         trackOperation: trackRuntimeOperation,
       },
@@ -306,7 +304,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     },
   });
-  const projectIdentityCandidates = store.shellSnapshot().projects
+  const projectIdentityCandidates = store.projects()
     .filter(({ workspaceKind }) => workspaceKind !== "scratch")
     .map(({ id, path }) => ({ id, path }));
   const projectIdentityAuthority = {
@@ -321,9 +319,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
-  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, {
-    reportIncident: commandIncidents.report,
-  });
+  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, { reportIncident: commandIncidents.report });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,
@@ -338,7 +334,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       save: (metadata) => store.saveProviderMetadata(metadata),
     },
   });
-  const savedSettings = store.shellSnapshot().settings;
+  const savedSettings = store.settings();
   const backendProfileController = BackendProfileController.open({
     store,
     credentials: options.backendCredentials,
@@ -908,8 +904,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       return;
     }
     if (store.isDatabaseVacuuming() && command.type !== "database.storage.get") {
-      send(socket, { type: "request.error", requestId: command.requestId, message: "Database compaction is in progress. Try again after it finishes." });
-      return;
+      return send(socket, { type: "request.error", requestId: command.requestId, message: "Database compaction is in progress. Try again after it finishes." });
     }
     const isStorageCommand = command.type === "database.storage.get" || command.type === "database.storage.compact";
     activeRuntimeCommands += 1;
@@ -1026,10 +1021,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
     readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
-    attachmentConversations: (attachmentId) => [...new Set([
-      ...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
-      ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? [],
-    ])],
+    attachmentConversations: (attachmentId) => [...new Set([...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+      ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? []])],
     deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
@@ -1042,14 +1035,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         projectIdentityAuthority,
       )).absolute;
     }),
-    editorContext: (filePath) => trackRuntimeOperation(async () => {
-      const preferredEditor = store.settings().preferredEditor;
-      if (!filePath || runtimeSafetyLock) return { preferredEditor };
-      const authorized = await resolveAuthorizedEditorFile(store, filePath, projectIdentityAuthority);
-      return authorized
-        ? { preferredEditor, authorizedPath: authorized.absolute, projectRoot: authorized.projectRoot }
-        : { preferredEditor };
-    }),
+    editorContext: (filePath) => trackRuntimeOperation(() => resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock)),
     privateConnectRequest: (subject, request) =>
       updatePreparation.isAdmissionClosed()
       ? Promise.resolve({

@@ -305,7 +305,7 @@
     "@crowecawcaw/xa11y": "0.16.1",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@napi-rs/canvas": "1.1.1",
-    "@opencode-ai/sdk": "1.19.5",
+    "@opencode-ai/sdk": "1.19.6",
     "@tanstack/react-virtual": "3.14.26",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "0.16.0",

@@ -8,6 +8,11 @@ import type {
   ConversationAttachmentStoreAnyOperationRunner,
   ConversationAttachmentStoreAuthority,
 } from "../node/conversation-attachment-store-child.js";
+import { isExtractedDocumentAttachmentMimeType } from "../shared/attachments.js";
+import type {
+  AttachmentImportDocumentExtractExecution,
+  AttachmentImportDocumentExtractOperation,
+} from "./attachment-import-file.js";
 import type { ValidatedAttachmentPreview } from "./attachment-registry.js";
 import { AttachmentRegistry } from "./attachment-registry.js";
 
@@ -88,33 +93,63 @@ export async function closeConversationAttachmentAccess(
   await retained?.then((store) => store.close());
 }
 
+export type AttachmentDocumentPreviewExtractor = (
+  operation: AttachmentImportDocumentExtractOperation,
+  signal?: AbortSignal,
+) => AttachmentImportDocumentExtractExecution;
+
 export async function resolveAttachmentPreviewResponse(
   temporary: AttachmentRegistry | null,
   retained: ConversationAttachmentAccess | null,
   id: string,
+  extractDocument?: AttachmentDocumentPreviewExtractor,
+  signal?: AbortSignal,
 ): Promise<Response | null> {
   const temporaryPreview = temporary
-    ? await temporary.preview(id).catch(() => null)
+    ? await temporary.preview(id, signal).catch(() => null)
     : null;
   const retainedPreview = temporaryPreview
     ? null
-    : await retained?.then((store) => store.preview(id)).catch(() => null);
-  const preview: ValidatedAttachmentPreview | null = temporaryPreview
-    ?? (retainedPreview
-      ? {
-          bytes: retainedPreview.bytes,
-          mimeType: retainedPreview.attachment.mimeType,
-          size: retainedPreview.attachment.size,
-        }
-      : null);
+    : await retained?.then((store) => store.preview(id, signal)).catch(() => null);
+  let preview: ValidatedAttachmentPreview | null = temporaryPreview;
+  if (!preview && retainedPreview) {
+    if (isExtractedDocumentAttachmentMimeType(retainedPreview.attachment.mimeType)) {
+      if (!extractDocument) return null;
+      const execution = extractDocument({
+        mimeType: retainedPreview.attachment.mimeType,
+        bytes: retainedPreview.bytes,
+      }, signal);
+      let extracted: { readonly text: string; readonly truncated: boolean } | null = null;
+      try {
+        extracted = await execution.result;
+      } catch {
+        await execution.stopped.catch(() => undefined);
+        return null;
+      }
+      await execution.stopped.catch(() => undefined);
+      preview = {
+        bytes: Buffer.from(extracted.text, "utf8"),
+        mimeType: retainedPreview.attachment.mimeType,
+        size: retainedPreview.attachment.size,
+        truncated: extracted.truncated,
+      };
+    } else {
+      preview = {
+        bytes: retainedPreview.bytes,
+        mimeType: retainedPreview.attachment.mimeType,
+        size: retainedPreview.attachment.size,
+      };
+    }
+  }
   if (!preview) return null;
+  const truncated = preview.truncated ?? (preview.bytes.byteLength < preview.size);
   return new Response(new Uint8Array(preview.bytes).buffer, {
     status: 200,
     headers: {
       "Content-Type": preview.mimeType,
       "Content-Length": String(preview.bytes.byteLength),
       "X-Attachment-Size": String(preview.size),
-      "X-Attachment-Truncated": String(preview.bytes.byteLength < preview.size),
+      "X-Attachment-Truncated": String(truncated),
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "no-store",
     },

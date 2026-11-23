@@ -8,12 +8,18 @@ import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
 import {
   MAX_ATTACHMENT_COUNT,
+  MAX_EXTRACTED_DOCUMENT_EXPANDED_BYTES,
   MAX_IMAGE_ATTACHMENT_BYTES as MAX_ATTACHMENT_BYTES,
   MAX_IMAGE_ATTACHMENT_TOTAL_BYTES as MAX_ATTACHMENT_TOTAL_BYTES,
   MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES,
   chatAttachmentKind,
+  chatAttachmentTypeLabel,
+  isExtractedDocumentAttachmentMimeType,
   isSpreadsheetAttachmentMimeType,
+  type ExtractedDocumentAttachmentMimeType,
 } from "../../../shared/attachments";
+import { DocumentExtractionError } from "../../../node/document-text-errors";
+import { extractStructuredDocumentText } from "../../../node/document-text-extract";
 import type { ChatAttachment } from "../../../shared/contracts";
 import {
   SPREADSHEET_PROVIDER_LIMITS,
@@ -655,6 +661,35 @@ async function extractSpreadsheetDocument(
   }
 }
 
+async function extractStructuredDocument(
+  attachment: ChatAttachment,
+  mimeType: ExtractedDocumentAttachmentMimeType,
+  bytes: Uint8Array,
+  maximumJsonBytes: number,
+  signal: AbortSignal,
+): Promise<{ content: string; truncated: boolean }> {
+  if (signal.aborted) throw new DocumentExtractionCancelledError();
+  try {
+    const extracted = extractStructuredDocumentText(bytes, mimeType);
+    if (signal.aborted) throw new DocumentExtractionCancelledError();
+    const bounded = boundedUtf8(extracted.text, maximumJsonBytes);
+    if (!bounded.value) {
+      throw new DocumentAttachmentError(`${attachment.name} contains no readable text.`);
+    }
+    return {
+      content: bounded.value,
+      truncated: bounded.truncated || extracted.truncated,
+    };
+  } catch (error) {
+    if (error instanceof DocumentExtractionCancelledError) throw error;
+    if (error instanceof DocumentAttachmentError) throw error;
+    if (error instanceof DocumentExtractionError) {
+      throw new DocumentAttachmentError(`${attachment.name}: ${error.message}`);
+    }
+    throw new DocumentAttachmentError(`${attachment.name} could not be read safely.`);
+  }
+}
+
 export async function prepareDocumentAttachments(
   payloads: readonly ResolvedAttachmentPayload[],
   options: DocumentAttachmentContextOptions = {},
@@ -673,10 +708,16 @@ export async function prepareDocumentAttachments(
     remainingBytes: MAX_ATTACHMENT_TOTAL_BYTES - existingImageBytes,
     remainingCount: Math.max(0, MAX_DOCUMENT_EXTRACTION_COUNT - existingImages.length),
   };
-  const documents = payloads.flatMap((payload) =>
-    (payload.source || payload.attachment.mimeType.startsWith("image/"))
-      ? []
-      : [payload]);
+  const documents = payloads.flatMap((payload) => {
+    if (payload.attachment.mimeType.startsWith("image/")) return [];
+    if (payload.source) {
+      return isExtractedDocumentAttachmentMimeType(payload.attachment.mimeType)
+        && payload.bytes.byteLength > 0
+        ? [payload]
+        : [];
+    }
+    return [payload];
+  });
   if (documents.length === 0) {
     return {
       contexts: [],
@@ -780,6 +821,36 @@ export async function prepareDocumentAttachments(
             context: {
               attachmentId: attachment.id,
               label: `Spreadsheet · ${attachment.name}`,
+              content: extracted.content,
+              truncated: extracted.truncated,
+            } satisfies DocumentAttachmentContext,
+          };
+        }
+        if (isExtractedDocumentAttachmentMimeType(attachment.mimeType)) {
+          const mimeType = attachment.mimeType;
+          const extracted = await scheduler.schedule({
+            groupId,
+            weight: bytes.byteLength + MAX_EXTRACTED_DOCUMENT_EXPANDED_BYTES,
+            deadlineAt,
+            signal: batchAbort.signal,
+            onOperationFailure: (error) => {
+              if (!(error instanceof DocumentExtractionCancelledError)) {
+                batchAbort.abort();
+              }
+            },
+            operation: (signal) => extractStructuredDocument(
+              attachment,
+              mimeType,
+              bytes,
+              maximumJsonBytes,
+              signal,
+            ),
+          });
+          return {
+            kind: "text" as const,
+            context: {
+              attachmentId: attachment.id,
+              label: `${chatAttachmentTypeLabel(mimeType)} · ${attachment.name}`,
               content: extracted.content,
               truncated: extracted.truncated,
             } satisfies DocumentAttachmentContext,

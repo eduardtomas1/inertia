@@ -10,6 +10,7 @@ import {
 } from "@shared/attachments";
 import { previewAnnotationChipLabel } from "@shared/preview-annotation";
 import {
+  attachmentIconKind,
   attachmentPreviewKind,
   attachmentPreviewUrl,
   formatAttachmentSize,
@@ -79,7 +80,7 @@ export function ComposerAttachmentList({
                         alt=""
                       />
                     )
-                  : previewKind === "spreadsheet"
+                  : attachmentIconKind(attachment) === "spreadsheet"
                     ? <FileSpreadsheet size={16} />
                     : previewKind === "file"
                       ? <File size={16} />

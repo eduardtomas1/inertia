@@ -377,3 +377,48 @@ describe("document attachment previews", () => {
     expect(readSourceText("src/renderer/src/components/DocumentAttachmentPreview.tsx")).not.toMatch(/If the embedded viewer is unavailable|It may use an unsupported format/u);
   });
 });
+
+describe("extracted office document previews", () => {
+  it.each([
+    ["plan.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word document", "lucide-file-text"],
+    ["deck.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", "PowerPoint presentation", "lucide-file-text"],
+    ["letter.rtf", "application/rtf", "RTF document", "lucide-file-text"],
+    ["essay.odt", "application/vnd.oasis.opendocument.text", "OpenDocument text", "lucide-file-text"],
+    ["ledger.ods", "application/vnd.oasis.opendocument.spreadsheet", "OpenDocument spreadsheet", "lucide-file-spreadsheet"],
+    ["talk.odp", "application/vnd.oasis.opendocument.presentation", "OpenDocument presentation", "lucide-file-text"],
+    ["analysis.ipynb", "application/x-ipynb+json", "Jupyter notebook", "lucide-file-text"],
+    ["novel.epub", "application/epub+zip", "EPUB book", "lucide-file-text"],
+  ] as const)("previews %s as inert extracted text with its type label and icon", async (name, mimeType, label, icon) => {
+    const text = "## Slide 1\nQuarterly <b>plan</b>";
+    vi.stubGlobal("fetch", vi.fn(async () => previewResponse(Buffer.from(text), mimeType)));
+    const user = userEvent.setup();
+    render(<ComposerAttachmentList attachments={[attachment({ name, mimeType, size: 2_048 })]} onRemove={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: `Preview attachment ${name}` });
+    expect(trigger.querySelector(`.${icon}`)).not.toBeNull();
+    expect(trigger).toHaveTextContent(`${label} · 2.0 KB`);
+    await user.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name });
+    expect(dialog).toHaveTextContent(label);
+    const preview = await screen.findByLabelText(`Text preview of ${name}`);
+    expect(preview.textContent).toBe(text);
+    expect(preview.querySelector("b")).toBeNull();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("explains that extracted text stopped at the extraction limits", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => previewResponse(
+      Buffer.from("Long report"),
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      true,
+    )));
+    const user = userEvent.setup();
+    render(<ComposerAttachmentList attachments={[attachment({
+      name: "report.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: 4 * 1024 * 1024,
+    })]} onRemove={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Preview attachment report.docx" }));
+    const notice = await screen.findByText("Showing extracted text truncated at document extraction limits. The complete file is saved.");
+    expect(notice).toHaveAttribute("role", "status");
+  });
+});

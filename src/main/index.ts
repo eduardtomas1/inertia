@@ -227,6 +227,7 @@ const registerRendererProtocol = createAppProtocolRegistrar({
   scheme: releaseChannel.protocolScheme,
   attachmentRegistry: () => importedAttachments,
   conversationAttachments: () => conversationAttachments,
+  extractDocument: attachmentImportRunner.extract,
   runtimeSupervisor: () => runtimeSupervisor,
   mascotSprite: (id, name) => mascotMain?.sprite(id, name) ?? null,
 });

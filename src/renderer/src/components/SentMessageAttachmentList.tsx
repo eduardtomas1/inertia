@@ -21,6 +21,7 @@ import {
 } from "@shared/attachments";
 import { previewAnnotationChipLabel } from "@shared/preview-annotation";
 import {
+  attachmentIconKind,
   attachmentPreviewKind,
   attachmentPreviewUrl,
   formatAttachmentSize,
@@ -62,7 +63,9 @@ function SentAttachment({
   const unavailable = state === "unavailable";
   const Icon = kind === "image"
     ? unavailable ? TriangleAlert : ImageIcon
-    : previewKind === "spreadsheet" ? FileSpreadsheet : previewKind === "file" ? File : FileText;
+    : attachmentIconKind(attachment) === "spreadsheet"
+      ? FileSpreadsheet
+      : previewKind === "file" ? File : FileText;
   const previewButton = (node: Element | null): HTMLButtonElement | null =>
     node?.closest(".sent-attachment")?.querySelector<HTMLButtonElement>(".sent-attachment-open") ?? null;
   const openMenu = actions ? (event: MouseEvent<HTMLLIElement>): void => {

@@ -1,5 +1,5 @@
 import {
-  CHAT_ATTACHMENT_MIME_TYPES,
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
@@ -62,7 +62,7 @@ export function parseDocumentPreparationOperation(value: unknown): DocumentPrepa
       || !id(payload.id) || seen.has(payload.id)
       || typeof payload.name !== "string" || payload.name.length < 1 || payload.name.length > 512
       || typeof payload.mimeType !== "string"
-      || !(CHAT_ATTACHMENT_MIME_TYPES as readonly string[]).includes(payload.mimeType)
+      || !(ACCEPTED_ATTACHMENT_MIME_TYPES as readonly string[]).includes(payload.mimeType)
       || !bytes(payload.bytes)) return null;
     seen.add(payload.id);
     total += payload.bytes.byteLength;

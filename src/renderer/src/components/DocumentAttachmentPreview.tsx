@@ -20,6 +20,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   ATTACHMENT_PREVIEW_BYTES as MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentTypeLabel,
+  isExtractedDocumentAttachmentMimeType,
   isSpreadsheetAttachmentMimeType,
   type ChatAttachmentMimeType,
 } from "@shared/attachments";
@@ -131,6 +132,7 @@ function columnName(column: number): string {
 }
 
 const TRUNCATED_PREVIEW_NOTICE = "Showing the first 1 MiB. The complete file is saved and available to the agent.";
+const TRUNCATED_EXTRACTED_PREVIEW_NOTICE = "Showing extracted text truncated at document extraction limits. The complete file is saved.";
 
 function SpreadsheetPreview({
   title,
@@ -340,7 +342,11 @@ export function DocumentAttachmentPreview({
     ? (
         <div className="text-attachment-preview-frame">
           {preview}
-          <p className="text-attachment-preview-notice" role="status">{TRUNCATED_PREVIEW_NOTICE}</p>
+          <p className="text-attachment-preview-notice" role="status">
+            {isExtractedDocumentAttachmentMimeType(mimeType)
+              ? TRUNCATED_EXTRACTED_PREVIEW_NOTICE
+              : TRUNCATED_PREVIEW_NOTICE}
+          </p>
         </div>
       )
     : preview;

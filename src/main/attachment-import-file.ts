@@ -10,10 +10,20 @@ import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
 import {
   ACCEPTED_ATTACHMENT_MIME_TYPES,
+  ATTACHMENT_PREVIEW_BYTES,
   MAX_ATTACHMENT_BYTES,
+  MAX_FILE_PREVIEW_BYTES,
+  chatAttachmentStorageExtension,
+  isExtractedDocumentAttachmentMimeType,
   type ChatAttachmentMimeType,
+  type ExtractedDocumentAttachmentMimeType,
   type ImageAttachmentMimeType,
 } from "../shared/attachments.js";
+import {
+  DOCUMENT_EXTRACTION_ERROR_MESSAGES,
+  DocumentExtractionError,
+} from "../node/document-text-errors.js";
+import { extractStructuredDocumentText } from "../node/document-text-extract.js";
 import {
   ImageAttachmentTooLargeError,
   imageAttachmentTooLargeMessage,
@@ -21,10 +31,18 @@ import {
 import { prepareAttachmentImportMetadata, validateAttachmentImport } from "./attachment-import.js";
 import { TextAttachmentError } from "../shared/text-attachment.js";
 
+const STAGED_ATTACHMENT_EXTENSIONS = new Set(
+  ACCEPTED_ATTACHMENT_MIME_TYPES.map(chatAttachmentStorageExtension),
+);
 const OWNED_STAGED_ATTACHMENT =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls|bin)$/iu;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.([a-z0-9]{1,8})$/iu;
 const DECIMAL_IDENTITY = /^\d{1,40}$/u;
 const SHA256_DIGEST = /^[0-9a-f]{64}$/u;
+
+function isAllowedStagedFileName(fileName: string): boolean {
+  const extension = OWNED_STAGED_ATTACHMENT.exec(fileName)?.[1]?.toLowerCase();
+  return extension !== undefined && STAGED_ATTACHMENT_EXTENSIONS.has(extension);
+}
 
 export interface AttachmentImportFileOperation {
   readonly root: string;
@@ -37,6 +55,7 @@ export interface AttachmentImportFileOperation {
   readonly size: number;
   readonly stallBeforeValidationMs: number;
   readonly normalizeImage?: boolean;
+  readonly extractText?: boolean;
 }
 
 export interface AttachmentImportValidationReceipt {
@@ -46,6 +65,23 @@ export interface AttachmentImportValidationReceipt {
   readonly size: number;
   readonly digest: string;
   readonly normalized?: true;
+  readonly extractedText?: string;
+  readonly extractedTruncated?: boolean;
+}
+
+export interface AttachmentImportDocumentExtractOperation {
+  readonly mimeType: ExtractedDocumentAttachmentMimeType;
+  readonly bytes: Uint8Array;
+}
+
+export interface AttachmentImportDocumentExtractResult {
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
+export interface AttachmentImportDocumentExtractExecution {
+  readonly result: Promise<AttachmentImportDocumentExtractResult>;
+  readonly stopped: Promise<void>;
 }
 
 export interface AttachmentImportValidationExecution {
@@ -58,11 +94,19 @@ export interface AttachmentImportValidationRunner {
     operation: AttachmentImportFileOperation,
     signal?: AbortSignal,
   ): AttachmentImportValidationExecution;
+  extract?(
+    operation: AttachmentImportDocumentExtractOperation,
+    signal?: AbortSignal,
+  ): AttachmentImportDocumentExtractExecution;
   shutdown?(): Promise<boolean>;
 }
 
 export type AttachmentImportValidationFailure =
   | "content"
+  | "document-corrupt"
+  | "document-empty"
+  | "document-encrypted"
+  | "document-limit"
   | "image-too-large"
   | "text-content"
   | "text-size"
@@ -73,7 +117,6 @@ export interface AttachmentImportImageSize {
   readonly height: number;
 }
 
-// No supported image format can declare a side beyond 2^31 - 1 pixels.
 const MAX_REPORTED_IMAGE_SIDE = 0x7fff_ffff;
 
 export function isReportedImageSide(value: unknown): value is number {
@@ -93,6 +136,14 @@ function validationFailureMessage(
   if (code === "image-too-large" && image) {
     return imageAttachmentTooLargeMessage(image.width, image.height);
   }
+  if (
+    code === "document-encrypted"
+    || code === "document-corrupt"
+    || code === "document-empty"
+    || code === "document-limit"
+  ) {
+    return DOCUMENT_EXTRACTION_ERROR_MESSAGES[code];
+  }
   return code === "unsafe"
     ? "Temporary attachment storage could not be verified safely."
     : "Attachment content does not match its safe file type.";
@@ -101,7 +152,17 @@ function validationFailureMessage(
 export class AttachmentImportValidationError extends Error {
   readonly image: AttachmentImportImageSize | null;
 
-  constructor(code: "content" | "unsafe" | "text-content" | "text-size");
+  constructor(
+    code:
+      | "content"
+      | "unsafe"
+      | "text-content"
+      | "text-size"
+      | "document-encrypted"
+      | "document-corrupt"
+      | "document-empty"
+      | "document-limit",
+  );
   constructor(code: "image-too-large", image: AttachmentImportImageSize);
   constructor(
     readonly code: AttachmentImportValidationFailure,
@@ -115,15 +176,87 @@ export class AttachmentImportValidationError extends Error {
   }
 }
 
+export function boundExtractedPreviewText(
+  text: string,
+  alreadyTruncated: boolean,
+): { readonly text: string; readonly truncated: boolean } {
+  if (Buffer.byteLength(text, "utf8") <= ATTACHMENT_PREVIEW_BYTES) {
+    return { text, truncated: alreadyTruncated };
+  }
+  let output = "";
+  let bytes = 0;
+  for (const ch of text) {
+    const size = Buffer.byteLength(ch, "utf8");
+    if (bytes + size > ATTACHMENT_PREVIEW_BYTES) break;
+    output += ch;
+    bytes += size;
+  }
+  return { text: output, truncated: true };
+}
+
+export function extractAttachmentDocumentBytes(
+  value: unknown,
+): AttachmentImportDocumentExtractResult {
+  const operation = parseAttachmentImportDocumentExtractOperation(value);
+  if (!operation) throw new AttachmentImportValidationError("unsafe");
+  try {
+    const extracted = extractStructuredDocumentText(operation.bytes, operation.mimeType);
+    return boundExtractedPreviewText(extracted.text, extracted.truncated);
+  } catch (error) {
+    if (error instanceof DocumentExtractionError) {
+      throw new AttachmentImportValidationError(error.code);
+    }
+    throw new AttachmentImportValidationError("document-corrupt");
+  }
+}
+
+export function parseAttachmentImportDocumentExtractOperation(
+  value: unknown,
+): AttachmentImportDocumentExtractOperation | null {
+  if (!record(value) || Object.keys(value).length !== 2) return null;
+  if (
+    typeof value.mimeType !== "string"
+    || !isExtractedDocumentAttachmentMimeType(value.mimeType)
+    || !(value.bytes instanceof Uint8Array)
+    || value.bytes.byteLength < 1
+    || value.bytes.byteLength > MAX_FILE_PREVIEW_BYTES
+  ) return null;
+  return {
+    mimeType: value.mimeType,
+    bytes: value.bytes,
+  };
+}
+
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const ALLOWED_OPERATION_KEYS = new Set([
+  "root",
+  "rootDev",
+  "rootIno",
+  "rootUid",
+  "fileName",
+  "name",
+  "mimeType",
+  "size",
+  "stallBeforeValidationMs",
+  "normalizeImage",
+  "extractText",
+]);
+
 export function parseAttachmentImportFileOperation(
   value: unknown,
 ): AttachmentImportFileOperation | null {
-  if (!record(value) || ![9, 10].includes(Object.keys(value).length)
-    || (Object.keys(value).length === 10 && typeof value.normalizeImage !== "boolean")) return null;
+  if (!record(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length < 9
+    || keys.length > 11
+    || keys.some((key) => !ALLOWED_OPERATION_KEYS.has(key))
+    || ("normalizeImage" in value && typeof value.normalizeImage !== "boolean")
+    || ("extractText" in value && typeof value.extractText !== "boolean")
+  ) return null;
   if (
     typeof value.root !== "string"
     || !isAbsolute(value.root)
@@ -139,7 +272,7 @@ export function parseAttachmentImportFileOperation(
         && DECIMAL_IDENTITY.test(value.rootUid))
     )
     || typeof value.fileName !== "string"
-    || !OWNED_STAGED_ATTACHMENT.test(value.fileName)
+    || !isAllowedStagedFileName(value.fileName)
     || typeof value.name !== "string"
     || value.name.length < 1
     || value.name.length > 255
@@ -167,14 +300,44 @@ export function parseAttachmentImportFileOperation(
     size: value.size,
     stallBeforeValidationMs: value.stallBeforeValidationMs,
     ...(value.normalizeImage === true ? { normalizeImage: true } : {}),
+    ...(value.extractText === true ? { extractText: true } : {}),
   };
 }
+
+const ALLOWED_RECEIPT_KEYS = new Set([
+  "displayName",
+  "mimeType",
+  "extension",
+  "size",
+  "digest",
+  "normalized",
+  "extractedText",
+  "extractedTruncated",
+]);
 
 export function parseAttachmentImportValidationReceipt(
   value: unknown,
 ): AttachmentImportValidationReceipt | null {
-  if (!record(value) || ![5, 6].includes(Object.keys(value).length)
-    || (Object.keys(value).length === 6 && value.normalized !== true)) return null;
+  if (!record(value)) return null;
+  const keys = Object.keys(value);
+  if (
+    keys.length < 5
+    || keys.length > 8
+    || keys.some((key) => !ALLOWED_RECEIPT_KEYS.has(key))
+    || ("normalized" in value && value.normalized !== true)
+  ) return null;
+  const hasExtractedText = "extractedText" in value;
+  const hasExtractedTruncated = "extractedTruncated" in value;
+  if (hasExtractedText !== hasExtractedTruncated) return null;
+  if (
+    hasExtractedText
+    && (
+      typeof value.extractedText !== "string"
+      || value.extractedText.includes("\0")
+      || Buffer.byteLength(value.extractedText, "utf8") > ATTACHMENT_PREVIEW_BYTES
+      || typeof value.extractedTruncated !== "boolean"
+    )
+  ) return null;
   if (
     typeof value.displayName !== "string"
     || value.displayName.length < 1
@@ -185,9 +348,7 @@ export function parseAttachmentImportValidationReceipt(
       value.mimeType,
     )
     || typeof value.extension !== "string"
-    || !/^(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls|bin)$/u.test(
-      value.extension,
-    )
+    || !STAGED_ATTACHMENT_EXTENSIONS.has(value.extension)
     || typeof value.size !== "number"
     || !Number.isSafeInteger(value.size)
     || value.size < 1
@@ -202,6 +363,12 @@ export function parseAttachmentImportValidationReceipt(
     size: value.size,
     digest: value.digest,
     ...(value.normalized === true ? { normalized: true as const } : {}),
+    ...(hasExtractedText
+      ? {
+          extractedText: value.extractedText as string,
+          extractedTruncated: value.extractedTruncated as boolean,
+        }
+      : {}),
   };
 }
 
@@ -359,6 +526,9 @@ export async function validateAttachmentImportFile(
       if (error instanceof TextAttachmentError) {
         throw new AttachmentImportValidationError(error.code);
       }
+      if (error instanceof DocumentExtractionError) {
+        throw new AttachmentImportValidationError(error.code);
+      }
       if (
         error instanceof ImageAttachmentTooLargeError
         && isReportedImageSide(error.width)
@@ -420,6 +590,14 @@ export async function validateAttachmentImportFile(
         await writer.close();
       }
     }
+    const previewExtraction = operation.extractText === true
+      && "extractedText" in validated
+      && typeof validated.extractedText === "string"
+      ? boundExtractedPreviewText(
+          validated.extractedText,
+          "extractedTruncated" in validated && validated.extractedTruncated === true,
+        )
+      : null;
     return {
       displayName: validated.displayName,
       mimeType: validated.mimeType,
@@ -427,6 +605,12 @@ export async function validateAttachmentImportFile(
       size: validated.size,
       digest: validated.digest,
       ...(normalized ? { normalized: true as const } : {}),
+      ...(previewExtraction
+        ? {
+            extractedText: previewExtraction.text,
+            extractedTruncated: previewExtraction.truncated,
+          }
+        : {}),
     };
   } finally {
     await file.close();
@@ -434,7 +618,21 @@ export async function validateAttachmentImportFile(
 }
 
 export const inProcessAttachmentImportValidationRunner:
-AttachmentImportValidationRunner = (operation, signal) => ({
-  result: validateAttachmentImportFile(operation, { signal }),
-  stopped: Promise.resolve(),
-});
+AttachmentImportValidationRunner = Object.assign(
+  (operation: AttachmentImportFileOperation, signal?: AbortSignal) => ({
+    result: validateAttachmentImportFile(operation, { signal }),
+    stopped: Promise.resolve(),
+  }),
+  {
+    extract: (
+      operation: AttachmentImportDocumentExtractOperation,
+      signal?: AbortSignal,
+    ): AttachmentImportDocumentExtractExecution => ({
+      result: Promise.resolve().then(() => {
+        signal?.throwIfAborted();
+        return extractAttachmentDocumentBytes(operation);
+      }),
+      stopped: Promise.resolve(),
+    }),
+  },
+);

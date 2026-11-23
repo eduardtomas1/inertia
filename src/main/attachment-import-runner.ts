@@ -1,20 +1,28 @@
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 
 import type { UtilityProcess } from "electron";
 
-import type {
-  AttachmentImportFileOperation,
-  AttachmentImportValidationExecution,
-  AttachmentImportValidationReceipt,
-  AttachmentImportValidationRunner,
+import { isExtractedDocumentAttachmentMimeType } from "../shared/attachments.js";
+import {
+  AttachmentImportValidationError,
+  type AttachmentImportDocumentExtractExecution,
+  type AttachmentImportDocumentExtractOperation,
+  type AttachmentImportDocumentExtractResult,
+  type AttachmentImportFileOperation,
+  type AttachmentImportValidationExecution,
+  type AttachmentImportValidationReceipt,
+  type AttachmentImportValidationRunner,
 } from "./attachment-import-file.js";
 import {
   attachmentImportFailureError,
+  parseAttachmentImportExtractWorkerEvent,
   parseAttachmentImportWorkerEvent,
   type AttachmentImportWorkerRequest,
 } from "./attachment-import-worker-protocol.js";
 
 const IMPORT_TIMEOUT_MS = 30_000;
+export const DOCUMENT_IMPORT_TIMEOUT_MS = 15_000;
 const IMPORT_KILL_GRACE_MS = 3_000;
 const MAX_ACTIVE_IMPORTS = 2;
 const MAX_PENDING_IMPORTS = 16;
@@ -27,10 +35,14 @@ export interface AttachmentImportUtilityRunnerOptions {
   maxPendingOperations?: number;
 }
 
-interface QueuedImport {
-  readonly operation: AttachmentImportFileOperation;
+type RunnerRequest =
+  | { readonly kind: "validate"; readonly operation: AttachmentImportFileOperation }
+  | { readonly kind: "extract"; readonly operation: AttachmentImportDocumentExtractOperation };
+
+interface RunnerJob {
+  readonly request: RunnerRequest;
   readonly signal: AbortSignal | undefined;
-  readonly resolveResult: (value: AttachmentImportValidationReceipt) => void;
+  readonly resolveResult: (value: unknown) => void;
   readonly rejectResult: (error: Error) => void;
   readonly resolveStopped: () => void;
   readonly rejectStopped: (error: Error) => void;
@@ -48,9 +60,16 @@ function unavailable(message: string): Error {
 export function createAttachmentImportUtilityRunner(
   options: AttachmentImportUtilityRunnerOptions,
 ): AttachmentImportValidationRunner {
-  const timeoutMs = Math.max(
+  const defaultTimeoutMs = Math.max(
     1,
     Math.min(Math.trunc(options.timeoutMs ?? IMPORT_TIMEOUT_MS), 60_000),
+  );
+  const documentTimeoutMs = Math.max(
+    1,
+    Math.min(
+      Math.trunc(options.timeoutMs ?? DOCUMENT_IMPORT_TIMEOUT_MS),
+      60_000,
+    ),
   );
   const killGraceMs = Math.max(
     1,
@@ -75,11 +94,11 @@ export function createAttachmentImportUtilityRunner(
   let closed = false;
   let poisonError: Error | null = null;
   let shutdownPromise: Promise<boolean> | null = null;
-  const queued: QueuedImport[] = [];
+  const queued: RunnerJob[] = [];
   const activeControllers = new Set<AbortController>();
   const activeStops = new Set<Promise<void>>();
 
-  const failQueued = (next: QueuedImport, error: Error): void => {
+  const failQueued = (next: RunnerJob, error: Error): void => {
     next.signal?.removeEventListener("abort", next.onAbort);
     next.rejectResult(error);
     next.rejectStopped(error);
@@ -93,11 +112,14 @@ export function createAttachmentImportUtilityRunner(
     return poisonError;
   };
 
-  const runNow = (
-    operation: AttachmentImportFileOperation,
+  const runJobNow = (
+    job: RunnerRequest,
     signal?: AbortSignal,
-  ): AttachmentImportValidationExecution => {
+  ): { readonly result: Promise<unknown>; readonly stopped: Promise<void> } => {
     const operationId = randomUUID();
+    const documentJob = job.kind === "extract"
+      || isExtractedDocumentAttachmentMimeType(job.operation.mimeType);
+    const timeoutMs = documentJob ? documentTimeoutMs : defaultTimeoutMs;
     let resolveStopped!: () => void;
     let rejectStopped!: (error: Error) => void;
     const stopped = new Promise<void>((resolve, reject) => {
@@ -110,7 +132,7 @@ export function createAttachmentImportUtilityRunner(
     }
     let child: UtilityProcess;
     try {
-      child = options.spawn(operation.root);
+      child = options.spawn(job.kind === "validate" ? job.operation.root : tmpdir());
     } catch {
       resolveStopped();
       return {
@@ -120,11 +142,9 @@ export function createAttachmentImportUtilityRunner(
         stopped,
       };
     }
-    const result = new Promise<AttachmentImportValidationReceipt>((
-      resolveImport,
-      rejectImport,
-    ) => {
-      let reported: ReturnType<typeof parseAttachmentImportWorkerEvent> = null;
+    const result = new Promise<unknown>((resolveImport, rejectImport) => {
+      let reportedValidate: ReturnType<typeof parseAttachmentImportWorkerEvent> = null;
+      let reportedExtract: ReturnType<typeof parseAttachmentImportExtractWorkerEvent> = null;
       let stoppingError: Error | null = null;
       let killGraceTimer: NodeJS.Timeout | null = null;
       let settled = false;
@@ -142,17 +162,34 @@ export function createAttachmentImportUtilityRunner(
           rejectImport(error);
           return;
         }
-        if (!reported) {
+        if (job.kind === "validate") {
+          if (!reportedValidate) {
+            rejectImport(unavailable(
+              "Attachment validation utility stopped before replying.",
+            ));
+            return;
+          }
+          if (!reportedValidate.ok) {
+            rejectImport(attachmentImportFailureError(reportedValidate));
+            return;
+          }
+          resolveImport(reportedValidate.receipt);
+          return;
+        }
+        if (!reportedExtract) {
           rejectImport(unavailable(
             "Attachment validation utility stopped before replying.",
           ));
           return;
         }
-        if (!reported.ok) {
-          rejectImport(attachmentImportFailureError(reported));
+        if (!reportedExtract.ok) {
+          rejectImport(new AttachmentImportValidationError(reportedExtract.code));
           return;
         }
-        resolveImport(reported.receipt);
+        resolveImport({
+          text: reportedExtract.text,
+          truncated: reportedExtract.truncated,
+        } satisfies AttachmentImportDocumentExtractResult);
       };
       const stop = (error: Error): void => {
         if (stoppingError || settled) return;
@@ -169,7 +206,9 @@ export function createAttachmentImportUtilityRunner(
       };
       const onAbort = (): void => stop(cancelled());
       const timer = setTimeout(() => {
-        stop(unavailable("Attachment validation timed out."));
+        stop(documentJob
+          ? new AttachmentImportValidationError("document-limit")
+          : unavailable("Attachment validation timed out."));
       }, timeoutMs);
       timer.unref();
       signal?.addEventListener("abort", onAbort, { once: true });
@@ -184,11 +223,19 @@ export function createAttachmentImportUtilityRunner(
           return;
         }
         try {
-          child.postMessage({
-            type: "attachment-import.validate",
-            operationId,
-            operation,
-          } satisfies AttachmentImportWorkerRequest);
+          child.postMessage(
+            job.kind === "validate"
+              ? ({
+                  type: "attachment-import.validate",
+                  operationId,
+                  operation: job.operation,
+                } satisfies AttachmentImportWorkerRequest)
+              : ({
+                  type: "attachment-import.extract",
+                  operationId,
+                  operation: job.operation,
+                } satisfies AttachmentImportWorkerRequest),
+          );
         } catch {
           stop(unavailable(
             "Attachment validation request could not be delivered.",
@@ -202,14 +249,25 @@ export function createAttachmentImportUtilityRunner(
           ));
           return;
         }
-        const event = parseAttachmentImportWorkerEvent(value);
-        if (!event || event.operationId !== operationId || reported) {
-          stop(unavailable(
-            "Attachment validation returned an invalid result.",
-          ));
-          return;
+        if (job.kind === "validate") {
+          const event = parseAttachmentImportWorkerEvent(value);
+          if (!event || event.operationId !== operationId || reportedValidate) {
+            stop(unavailable(
+              "Attachment validation returned an invalid result.",
+            ));
+            return;
+          }
+          reportedValidate = event;
+        } else {
+          const event = parseAttachmentImportExtractWorkerEvent(value);
+          if (!event || event.operationId !== operationId || reportedExtract) {
+            stop(unavailable(
+              "Attachment validation returned an invalid result.",
+            ));
+            return;
+          }
+          reportedExtract = event;
         }
-        reported = event;
         try {
           child.postMessage({
             type: "attachment-import.result-ack",
@@ -242,7 +300,10 @@ export function createAttachmentImportUtilityRunner(
       }).once("exit", (code, exitSignal) => {
         if (killGraceTimer) clearTimeout(killGraceTimer);
         resolveStopped();
-        const expectedExit = reported?.ok === true ? code === 0 : code === 1;
+        const reportedOk = job.kind === "validate"
+          ? reportedValidate?.ok === true
+          : reportedExtract?.ok === true;
+        const expectedExit = reportedOk ? code === 0 : code === 1;
         settle(stoppingError ?? (
           expectedExit && !exitSignal
             ? undefined
@@ -276,7 +337,7 @@ export function createAttachmentImportUtilityRunner(
       const signal = next.signal
         ? AbortSignal.any([next.signal, controller.signal])
         : controller.signal;
-      const running = runNow(next.operation, signal);
+      const running = runJobNow(next.request, signal);
       activeStops.add(running.stopped);
       void running.result.then(next.resolveResult, next.rejectResult);
       void running.stopped.then(
@@ -291,18 +352,15 @@ export function createAttachmentImportUtilityRunner(
     }
   };
 
-  const run = (
-    operation: AttachmentImportFileOperation,
+  const enqueue = <T>(
+    request: RunnerRequest,
     signal?: AbortSignal,
-  ): AttachmentImportValidationExecution => {
-    let resolveResult!: (value: AttachmentImportValidationReceipt) => void;
+  ): { readonly result: Promise<T>; readonly stopped: Promise<void> } => {
+    let resolveResult!: (value: T) => void;
     let rejectResult!: (error: Error) => void;
     let resolveStopped!: () => void;
     let rejectStopped!: (error: Error) => void;
-    const result = new Promise<AttachmentImportValidationReceipt>((
-      resolve,
-      reject,
-    ) => {
+    const result = new Promise<T>((resolve, reject) => {
       resolveResult = resolve;
       rejectResult = reject;
     });
@@ -329,10 +387,10 @@ export function createAttachmentImportUtilityRunner(
       resolveStopped();
       return { result, stopped };
     }
-    const next: QueuedImport = {
-      operation,
+    const next: RunnerJob = {
+      request,
       signal,
-      resolveResult,
+      resolveResult: (value) => resolveResult(value as T),
       rejectResult,
       resolveStopped,
       rejectStopped,
@@ -351,18 +409,32 @@ export function createAttachmentImportUtilityRunner(
     return { result, stopped };
   };
 
-  run.shutdown = (): Promise<boolean> => {
-    if (shutdownPromise) return shutdownPromise;
-    closed = true;
-    const shutdownError = unavailable(
-      "Attachment validation utility is unavailable.",
-    );
-    for (const next of queued.splice(0)) failQueued(next, shutdownError);
-    for (const controller of activeControllers) controller.abort();
-    shutdownPromise = Promise.allSettled(activeStops).then((results) =>
-      !poisonError && results.every(({ status }) => status === "fulfilled"));
-    return shutdownPromise;
-  };
+  const run: AttachmentImportValidationRunner = Object.assign(
+    (
+      operation: AttachmentImportFileOperation,
+      signal?: AbortSignal,
+    ): AttachmentImportValidationExecution =>
+      enqueue<AttachmentImportValidationReceipt>({ kind: "validate", operation }, signal),
+    {
+      extract: (
+        operation: AttachmentImportDocumentExtractOperation,
+        signal?: AbortSignal,
+      ): AttachmentImportDocumentExtractExecution =>
+        enqueue<AttachmentImportDocumentExtractResult>({ kind: "extract", operation }, signal),
+      shutdown: (): Promise<boolean> => {
+        if (shutdownPromise) return shutdownPromise;
+        closed = true;
+        const shutdownError = unavailable(
+          "Attachment validation utility is unavailable.",
+        );
+        for (const next of queued.splice(0)) failQueued(next, shutdownError);
+        for (const controller of activeControllers) controller.abort();
+        shutdownPromise = Promise.allSettled(activeStops).then((results) =>
+          !poisonError && results.every(({ status }) => status === "fulfilled"));
+        return shutdownPromise;
+      },
+    },
+  );
 
   return run;
 }

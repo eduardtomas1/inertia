@@ -17,6 +17,10 @@ import {
   FILE_OPEN_DIRECTORY,
   FILE_OPEN_NO_FOLLOW,
 } from "../node/platform-file-open-flags.js";
+import {
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  chatAttachmentStorageExtension,
+} from "../shared/attachments.js";
 
 export const MAX_SESSION_ATTACHMENT_RECORDS = 1_024;
 export const TEMPORARY_ATTACHMENT_STORAGE_FULL =
@@ -34,7 +38,15 @@ const TRANSIENT_UNLINK_CODES = new Set([
   "ETXTBSY",
 ]);
 const OWNED_ATTACHMENT_FILE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp|gif|pdf|txt|md|csv|json|xlsx|xls|bin)$/iu;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.([a-z0-9]{1,8})$/iu;
+const OWNED_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set(
+  ACCEPTED_ATTACHMENT_MIME_TYPES.map(chatAttachmentStorageExtension),
+);
+
+function isOwnedAttachmentFile(name: string): boolean {
+  const extension = OWNED_ATTACHMENT_FILE.exec(name)?.[1]?.toLowerCase();
+  return extension !== undefined && OWNED_ATTACHMENT_EXTENSIONS.has(extension);
+}
 
 export interface AttachmentStorageReservation {
   readonly records: number;
@@ -86,7 +98,7 @@ export async function cleanupOrphanedAttachments(
   let records = 0;
   let bytes = 0;
   for (const name of entries) {
-    if (!OWNED_ATTACHMENT_FILE.test(name)) continue;
+    if (!isOwnedAttachmentFile(name)) continue;
     const path = join(directory, name);
     try {
       const info = await inspectFile(path);

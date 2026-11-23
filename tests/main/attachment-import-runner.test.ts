@@ -10,6 +10,7 @@ import type {
   AttachmentImportValidationReceipt,
 } from "../../src/main/attachment-import-file";
 import {
+  DOCUMENT_IMPORT_TIMEOUT_MS,
   createAttachmentImportUtilityRunner,
 } from "../../src/main/attachment-import-runner";
 
@@ -448,5 +449,154 @@ describe("supervised attachment import utility", () => {
 
     await expect(running.result).rejects.toThrow(/cancelled/u);
     await expect(shutdown).resolves.toBe(true);
+  });
+
+  describe("document text extraction", () => {
+    const docxBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04]);
+    const docxOperation: AttachmentImportFileOperation = {
+      ...operation,
+      fileName: "11111111-1111-4111-8111-111111111111.docx",
+      name: "brief.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+
+    function extractRequest(child: FakeUtilityProcess): Record<string, unknown> {
+      const request = child.postMessage.mock.calls
+        .map(([value]) => value as Record<string, unknown>)
+        .find(({ type }) => type === "attachment-import.extract");
+      expect(request?.operationId).toEqual(expect.any(String));
+      return request!;
+    }
+
+    it("runs extraction in the utility and returns its bounded text", async () => {
+      const child = new FakeUtilityProcess();
+      const runner = createAttachmentImportUtilityRunner({ spawn: () => utility(child) });
+      const running = runner.extract!({
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        bytes: docxBytes,
+      });
+      child.emit("spawn");
+      const request = extractRequest(child);
+      expect(request.operation).toEqual({
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        bytes: docxBytes,
+      });
+      child.emit("message", {
+        type: "attachment-import.extract-result",
+        operationId: request.operationId,
+        ok: true,
+        text: "Quarterly plan",
+        truncated: false,
+      });
+      expect(child.postMessage).toHaveBeenLastCalledWith({
+        type: "attachment-import.result-ack",
+        operationId: request.operationId,
+      });
+      child.emit("exit", 0);
+      await expect(running.result).resolves.toEqual({ text: "Quarterly plan", truncated: false });
+      await expect(running.stopped).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ["document-encrypted", "Encrypted documents are not supported."],
+      ["document-corrupt", "The document is corrupt or unreadable."],
+      ["document-empty", "The document contains no readable text."],
+      ["document-limit", "The document exceeds safe extraction limits."],
+    ])("surfaces a %s extraction failure with its specific message", async (code, message) => {
+      const child = new FakeUtilityProcess();
+      const runner = createAttachmentImportUtilityRunner({ spawn: () => utility(child) });
+      const running = runner.extract!({ mimeType: "application/rtf", bytes: docxBytes });
+      child.emit("spawn");
+      child.emit("message", {
+        type: "attachment-import.extract-result",
+        operationId: extractRequest(child).operationId,
+        ok: false,
+        code,
+      });
+      child.emit("exit", 1);
+      await expect(running.result).rejects.toThrow(message);
+    });
+
+    it("kills an extraction that returns oversized or malformed text", async () => {
+      for (const text of ["x".repeat(1024 * 1024 + 1), "nul byte"]) {
+        const child = new FakeUtilityProcess();
+        const runner = createAttachmentImportUtilityRunner({ spawn: () => utility(child) });
+        const running = runner.extract!({ mimeType: "application/rtf", bytes: docxBytes });
+        void running.result.catch(() => undefined);
+        child.emit("spawn");
+        child.emit("message", {
+          type: "attachment-import.extract-result",
+          operationId: extractRequest(child).operationId,
+          ok: true,
+          text,
+          truncated: false,
+        });
+        expect(child.kill).toHaveBeenCalledOnce();
+        child.emit("exit", 1);
+        await expect(running.result).rejects.toThrow(/invalid result/u);
+      }
+    });
+
+    it("terminates a hung document worker at the timeout with a document limit message", async () => {
+      vi.useFakeTimers();
+      try {
+        const children: FakeUtilityProcess[] = [];
+        const runner = createAttachmentImportUtilityRunner({
+          spawn: () => {
+            const child = new FakeUtilityProcess();
+            children.push(child);
+            return utility(child);
+          },
+          timeoutMs: 15_000,
+          killGraceMs: 1_000,
+        });
+        const extraction = runner.extract!({ mimeType: "application/epub+zip", bytes: docxBytes });
+        const validation = runner(docxOperation);
+        void extraction.result.catch(() => undefined);
+        void validation.result.catch(() => undefined);
+        for (const child of children) child.emit("spawn");
+        await vi.advanceTimersByTimeAsync(14_999);
+        for (const child of children) expect(child.kill).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        for (const child of children) {
+          expect(child.kill).toHaveBeenCalledOnce();
+          child.emit("exit", null, "SIGTERM");
+        }
+        await expect(extraction.result).rejects.toThrow("The document exceeds safe extraction limits.");
+        await expect(validation.result).rejects.toThrow("The document exceeds safe extraction limits.");
+        await expect(extraction.stopped).resolves.toBeUndefined();
+        await expect(validation.stopped).resolves.toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("gives document validation the shorter document timeout by default", async () => {
+      vi.useFakeTimers();
+      try {
+        const children: FakeUtilityProcess[] = [];
+        const runner = createAttachmentImportUtilityRunner({
+          spawn: () => {
+            const child = new FakeUtilityProcess();
+            children.push(child);
+            return utility(child);
+          },
+        });
+        const pdf = runner(operation);
+        const docx = runner(docxOperation);
+        void pdf.result.catch(() => undefined);
+        void docx.result.catch(() => undefined);
+        for (const child of children) child.emit("spawn");
+        await vi.advanceTimersByTimeAsync(DOCUMENT_IMPORT_TIMEOUT_MS);
+        expect(children[0]!.kill).not.toHaveBeenCalled();
+        expect(children[1]!.kill).toHaveBeenCalledOnce();
+        children[1]!.emit("exit", 1);
+        await expect(docx.result).rejects.toThrow("The document exceeds safe extraction limits.");
+        reportSuccess(children[0]!);
+        await expect(pdf.result).resolves.toEqual(receipt);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

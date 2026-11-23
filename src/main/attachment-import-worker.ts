@@ -1,7 +1,12 @@
-import { validateAttachmentImportFile } from "./attachment-import-file.js";
 import {
+  extractAttachmentDocumentBytes,
+  validateAttachmentImportFile,
+} from "./attachment-import-file.js";
+import {
+  attachmentImportExtractFailureEvent,
   attachmentImportFailureEvent,
   parseAttachmentImportWorkerRequest,
+  type AttachmentImportExtractWorkerEvent,
   type AttachmentImportWorkerEvent,
 } from "./attachment-import-worker-protocol.js";
 
@@ -10,11 +15,18 @@ const parentPort = process.parentPort;
 if (parentPort) {
   parentPort.once("message", (event) => {
     const request = parseAttachmentImportWorkerRequest(event.data);
-    if (!request || request.type !== "attachment-import.validate") {
+    if (
+      !request
+      || (request.type !== "attachment-import.validate"
+        && request.type !== "attachment-import.extract")
+    ) {
       process.exit(1);
       return;
     }
-    const finish = (result: AttachmentImportWorkerEvent, exitCode: number): void => {
+    const finish = (
+      result: AttachmentImportWorkerEvent | AttachmentImportExtractWorkerEvent,
+      exitCode: number,
+    ): void => {
       parentPort.once("message", (acknowledgement) => {
         const ack = parseAttachmentImportWorkerRequest(acknowledgement.data);
         process.exit(
@@ -26,6 +38,21 @@ if (parentPort) {
       });
       parentPort.postMessage(result);
     };
+    if (request.type === "attachment-import.extract") {
+      try {
+        const extracted = extractAttachmentDocumentBytes(request.operation);
+        finish({
+          type: "attachment-import.extract-result",
+          operationId: request.operationId,
+          ok: true,
+          text: extracted.text,
+          truncated: extracted.truncated,
+        }, 0);
+      } catch (error: unknown) {
+        finish(attachmentImportExtractFailureEvent(request.operationId, error), 1);
+      }
+      return;
+    }
     void validateAttachmentImportFile(request.operation, {
       requirePinnedCwd: true,
     }).then(

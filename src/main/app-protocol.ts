@@ -9,6 +9,7 @@ import { parseWorkspaceImagePreviewUrl } from "../shared/workspace-image-preview
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import {
   resolveAttachmentPreviewResponse,
+  type AttachmentDocumentPreviewExtractor,
   type ConversationAttachmentAccess,
 } from "./conversation-attachment-access.js";
 import {
@@ -70,6 +71,7 @@ export function registerAppProtocol(options: {
   scheme?: string;
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
+  extractDocument?: AttachmentDocumentPreviewExtractor;
   runtimeSupervisor: () => RuntimeSupervisor | null;
   mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
   conversationScope?: string;
@@ -100,6 +102,8 @@ export function registerAppProtocol(options: {
           options.attachmentRegistry(),
           options.conversationAttachments(),
           previewId,
+          options.extractDocument,
+          request.signal,
         );
         if (!response) throw new Error();
         return response;
@@ -146,6 +150,7 @@ export function createAppProtocolRegistrar(options: {
   scheme: string;
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
+  extractDocument?: AttachmentDocumentPreviewExtractor;
   runtimeSupervisor: () => RuntimeSupervisor | null;
   mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
 }): (target?: Pick<Protocol, "handle" | "isProtocolHandled">, conversationId?: string) => void {

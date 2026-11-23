@@ -21,9 +21,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { imageAttachmentTooLargeMessage } from "../../src/main/attachment-image-validation";
 import {
   AttachmentImportValidationError,
+  extractAttachmentDocumentBytes,
+  parseAttachmentImportDocumentExtractOperation,
+  parseAttachmentImportFileOperation,
   validateAttachmentImportFile,
   type AttachmentImportFileOperation,
 } from "../../src/main/attachment-import-file";
+import { documentArchive } from "../fixtures/attachments/document-archives";
 import {
   overlappingXlsxFixture,
   truncatedPdfFixture,
@@ -336,5 +340,93 @@ describe("private staged attachment validation", () => {
     controller.abort();
 
     await expect(validation).rejects.toThrow(/abort/u);
+  });
+});
+
+describe("structured document import validation", () => {
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const wordDocument = (body: string) => documentArchive({
+    "word/document.xml": `<w:document xmlns:w="urn:w"><w:body>${body}</w:body></w:document>`,
+  });
+
+  it("validates a Word document and returns preview text only when asked", async () => {
+    const bytes = wordDocument("<w:p><w:r><w:t>Launch moves to 3 March.</w:t></w:r></w:p>");
+    const { operation, path } = await stage("plan.docx", DOCX, bytes);
+    const plain = await validateAttachmentImportFile(operation);
+    expect(plain).toEqual({
+      displayName: "plan.docx",
+      mimeType: DOCX,
+      extension: "docx",
+      size: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    });
+    await expect(validateAttachmentImportFile({ ...operation, extractText: true })).resolves.toEqual({
+      ...plain,
+      extractedText: "Launch moves to 3 March.",
+      extractedTruncated: false,
+    });
+    expect(await readFile(path)).toEqual(bytes);
+  });
+
+  it.each([
+    ["corrupt", "document-corrupt", () => wordDocument("<w:p><w:r><w:t>Cut</w:t>").subarray(0, 60)],
+    ["renamed text", "content", () => Buffer.from("not a zip archive at all")],
+    ["encrypted", "document-encrypted", () => documentArchive({
+      "word/document.xml": { data: Buffer.from("<document><p>Secret</p></document>"), flags: 1 },
+    })],
+    ["empty", "document-empty", () => wordDocument("<w:p/>")],
+    ["bomb", "document-limit", () => documentArchive({
+      "word/document.xml": { data: Buffer.alloc(4 * 1024 * 1024, 0x20), method: 8 },
+    })],
+  ] as const)("refuses a %s Word document with a specific message", async (_label, code, bytes) => {
+    const { operation } = await stage("plan.docx", DOCX, bytes());
+    const failure = validateAttachmentImportFile(operation);
+    await expect(failure).rejects.toBeInstanceOf(AttachmentImportValidationError);
+    await expect(failure).rejects.toMatchObject({ code });
+  });
+
+  it("accepts staged names for every document storage extension only", () => {
+    const base = {
+      root: join(tmpdir(), "inertia-import"),
+      rootDev: "1",
+      rootIno: "2",
+      rootUid: null,
+      name: "deck.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      size: 10,
+      stallBeforeValidationMs: 0,
+    };
+    for (const extension of ["docx", "pptx", "rtf", "odt", "ods", "odp", "ipynb", "epub"]) {
+      expect(parseAttachmentImportFileOperation({
+        ...base,
+        fileName: `11111111-1111-4111-8111-111111111111.${extension}`,
+      }), extension).not.toBeNull();
+    }
+    expect(parseAttachmentImportFileOperation({
+      ...base,
+      fileName: "11111111-1111-4111-8111-111111111111.exe",
+    })).toBeNull();
+    expect(parseAttachmentImportFileOperation({
+      ...base,
+      fileName: "11111111-1111-4111-8111-111111111111.docx",
+      unexpected: true,
+    })).toBeNull();
+  });
+
+  it("bounds retained preview extraction input and output", () => {
+    expect(parseAttachmentImportDocumentExtractOperation({
+      mimeType: DOCX,
+      bytes: new Uint8Array(10 * 1024 * 1024 + 1),
+    })).toBeNull();
+    expect(parseAttachmentImportDocumentExtractOperation({ mimeType: "application/pdf", bytes: new Uint8Array(4) }))
+      .toBeNull();
+    const large = extractAttachmentDocumentBytes({
+      mimeType: "application/rtf",
+      bytes: Buffer.from(String.raw`{\rtf1 ` + String.raw`☈5?`.repeat(400_000) + "}"),
+    });
+    expect(Buffer.byteLength(large.text, "utf8")).toBeLessThanOrEqual(1024 * 1024);
+    expect(large.truncated).toBe(true);
+    expect(() => extractAttachmentDocumentBytes({ mimeType: "application/rtf", bytes: Buffer.from("plain") }))
+      .toThrow(AttachmentImportValidationError);
   });
 });

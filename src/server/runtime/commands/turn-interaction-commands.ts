@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
-import { chatAttachmentKind } from "../../../shared/attachments";
+import {
+  MAX_CHAT_ATTACHMENT_BYTES,
+  chatAttachmentKind,
+  isExtractedDocumentAttachmentMimeType,
+} from "../../../shared/attachments";
 
 import {
   type AgentApprovalRequest,
@@ -497,8 +501,12 @@ export function createTurnInteractionCommandHandler(
             : null;
           if (queuedImageLimit) throw new RuntimeRequestError(queuedImageLimit);
           for (const attachment of dependencies.queuedMessage.attachments) {
+            const readQueued = isExtractedDocumentAttachmentMimeType(attachment.mimeType)
+              && attachment.size <= MAX_CHAT_ATTACHMENT_BYTES
+              ? dependencies.conversationAttachments.preview(attachment.id)
+              : dependencies.conversationAttachments.resolve(attachment.id);
             const preview = await awaitMessageSendPreparation(
-              dependencies.conversationAttachments.resolve(attachment.id), preparationDeadlineAt,
+              readQueued, preparationDeadlineAt,
             );
             if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
             resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}), ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}) } });

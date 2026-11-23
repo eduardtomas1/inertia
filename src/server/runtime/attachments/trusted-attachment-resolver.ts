@@ -19,9 +19,11 @@ import { FILE_OPEN_NO_FOLLOW } from
   "../../../node/platform-file-open-flags.js";
 import {
   MAX_ATTACHMENT_COUNT,
+  MAX_CHAT_ATTACHMENT_BYTES,
   attachmentLimitError,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_TOTAL_BYTES,
+  isExtractedDocumentAttachmentMimeType,
   storedAttachmentTypeMatchesName,
   chatAttachmentStorageExtension,
 } from "../../../shared/attachments.js";
@@ -183,7 +185,11 @@ export class TrustedAttachmentResolver {
           || before.size !== trusted.size
         ) throw publicAttachmentError();
         if (signal?.aborted) throw publicAttachmentError();
-        const read = await readAttachment(file, trusted.size, 0, signal);
+        const captureBytes = isExtractedDocumentAttachmentMimeType(trusted.mimeType)
+          && trusted.size <= MAX_CHAT_ATTACHMENT_BYTES
+          ? trusted.size
+          : 0;
+        const read = await readAttachment(file, trusted.size, captureBytes, signal);
         bytes = read.bytes;
         const after = await file.stat();
         if (

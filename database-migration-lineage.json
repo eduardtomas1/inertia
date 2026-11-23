@@ -881,6 +881,11 @@
       "version": 121,
       "name": "PersistPreferredEditor",
       "digest": "67281a228dceee5b5682e2268cdb9909fa66a4d14838891cc4dbfe13841be37f"
+    },
+    {
+      "version": 122,
+      "name": "IndexMessageSearchText",
+      "digest": "f7c3bdf3d66499d34ccc41f0a4dd8f6bfd8a9e1ddc4242f035fcd74f87c41777"
     }
   ]
 }

@@ -45,6 +45,7 @@ import { sentToUserMessagesMigration } from "./sent-to-user-messages";
 import { agentThreadQuestionAnswersMigration } from "./agent-thread-question-answers";
 import { checkpointExpirationMigration } from "./checkpoint-expiration";
 import { preferredEditorMigration } from "./preferred-editor";
+import { messageSearchIndexMigration } from "./message-search-index";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -93,4 +94,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   agentThreadQuestionAnswersMigration,
   checkpointExpirationMigration,
   preferredEditorMigration,
+  messageSearchIndexMigration,
 ];

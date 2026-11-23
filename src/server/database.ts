@@ -84,6 +84,7 @@ import type { UsagePricing } from "./usage/price-list";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import { backgroundTasks } from "./persistence/background-task-repository";
+import { indexMessageSearchBatch, type MessageSearchIndexProgress } from "./persistence/message-search-indexer";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "../shared/background-tasks";
 import type { ArchivedConversationsPage, ArchivedConversationsRequest } from "../shared/archived-conversations";
 import type { ActivityDetailReadResult } from "../shared/activity-detail";
@@ -895,6 +896,7 @@ export class RuntimeStore {
   evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] { return this.queuedMessages.excludeQueuedAttachments(this.transcriptRepository.evictableAttachmentIds(conversationIds)); }
   attachmentConversationIds(attachmentIds: readonly string[], options?: { includeUnreadable?: boolean }): string[] { return this.transcriptRepository.attachmentConversationIds(attachmentIds, options); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
+  indexMessageSearchBatch(budgetMs: number, mergeMs = 0): MessageSearchIndexProgress { return indexMessageSearchBatch(this.database, { budgetMs, mergeMs }); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
   continuationHistory(...input: Parameters<TranscriptRepository["continuationHistory"]>) { return this.transcriptRepository.continuationHistory(...input); }
 

@@ -18,9 +18,19 @@ export function optimizeRuntimeConnection(database: Database.Database): void {
   try {
     database.pragma("analysis_limit = 1000");
     database.pragma("optimize = 0x10002");
+    forgetShadowTableStatistics(database);
   } catch {
     return;
   }
+}
+
+function forgetShadowTableStatistics(database: Database.Database): void {
+  const shadows = (database.pragma("table_list") as Array<{ schema: string; name: string; type: string }>)
+    .filter(({ schema, type }) => schema === "main" && type === "shadow")
+    .map(({ name }) => name);
+  if (shadows.length === 0 || !database.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'sqlite_stat1'").get()) return;
+  const removed = database.prepare(`DELETE FROM sqlite_stat1 WHERE tbl IN (${shadows.map(() => "?").join(", ")})`).run(...shadows).changes;
+  if (removed > 0) database.exec("ANALYZE sqlite_schema");
 }
 
 export function openRuntimeConnection(

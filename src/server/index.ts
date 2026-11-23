@@ -65,6 +65,8 @@ import { createDetachedChatRuntimeSecurity } from "./runtime/detached-chat-runti
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import { startProjectAutoPull } from "./runtime/project-auto-pull";
+import { startMessageSearchIndexing } from "./runtime/message-search-indexing";
+import { MessageSearchIndexWorker } from "./persistence/message-search-index-worker-client";
 import {
   createRuntimeCommandExecutor,
 } from "./runtime/commands/command-router";
@@ -541,6 +543,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     idle: () => !closed && !updatePreparation.isAdmissionClosed() && activeRuntimeCommands === 0
       && !recoveryImportAdmission.isActive() && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
     reportIncident: commandIncidents.report, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed,
+  });
+  const messageSearchIndexer = new MessageSearchIndexWorker(databasePath);
+  runtimeLifetimeAbort.signal.addEventListener("abort", () => { void messageSearchIndexer.close(); }, { once: true });
+  startMessageSearchIndexing({
+    signal: runtimeLifetimeAbort.signal, writes: databaseWrites,
+    index: (options) => messageSearchIndexer.batch(options),
+    availability: () => closed || runtimeSafetyLock || store.isDatabaseVacuuming() || updatePreparation.isAdmissionClosed() || recoveryImportAdmission.isActive() || activeRuntimeCommands > 0
+      ? "blocked" : turns.activeConversationIds().length > 0 || isolatedRuns.activeCount() > 0 ? "busy" : "idle",
   });
   const rateLimitChanges = createRateLimitChangeSignal();
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {

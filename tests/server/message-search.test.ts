@@ -38,19 +38,21 @@ function answer(store: RuntimeStore, conversationId: string, content: string, tu
 }
 
 describe("persisted message search", () => {
-  it("streams candidates without a temporary ordering B-tree", async () => {
+  it.each(["ne", "needle"])("streams %s history scans without a temporary ordering B-tree", async (query) => {
     const { store, database, conversation } = await fixture();
     store.createMessage(conversation.id, "needle");
     const prepared = vi.spyOn(database, "prepare");
     let statements: string[];
     try {
-      searchMessages(database, "needle", { maxScanMs: 0 });
+      searchMessages(database, query, { maxScanMs: 0 });
       statements = prepared.mock.calls.map(([sql]) => sql);
     } finally { prepared.mockRestore(); }
-    const plans = statements.flatMap((sql) => database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(sql.match(/\?/gu) ?? []).map(() => null))) as Array<{ detail: string }>;
-    expect(plans.map(({ detail }) => detail)).not.toEqual(expect.arrayContaining([
-      expect.stringContaining("USE TEMP B-TREE"),
-    ]));
+    expect(statements.filter((sql) => sql.includes("FROM messages m INDEXED BY messages_created_id_idx"))).toHaveLength(query === "ne" ? 1 : 0);
+    for (const sql of statements) {
+      const plan = (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(sql.match(/\?/gu) ?? []).map(() => null)) as Array<{ detail: string }>)
+        .map(({ detail }) => detail);
+      if (plan.some((detail) => detail.includes("USE TEMP B-TREE"))) expect(sql).toMatch(/message_search_index MATCH|d\.state <> 1/u);
+    }
   });
 
   it.each(["archived", "system", "nonterminal"] as const)("checks the scan deadline while traversing newer %s rows", async (kind) => {
@@ -66,10 +68,16 @@ describe("persisted message search", () => {
       })();
     } finally { writer.close(); }
     let ticks = 0;
-    expect(searchMessages(database, "needle", { now: () => ticks++, maxScanMs: 8 })).toMatchObject({
-      hits: [], incomplete: true,
+    expect(searchMessages(database, "ne", { now: () => ticks++, maxScanMs: 8 })).toMatchObject({
+      hits: [], incomplete: true, continuation: expect.objectContaining({ createdAt: "2026-09-08T00:00:00.000Z" }),
     });
     expect(ticks).toBeLessThanOrEqual(10);
+    expect(searchMessages(database, "old needle", { now: () => ticks++, maxScanMs: 8 })).toMatchObject({ hits: [], incomplete: true });
+    while (store.indexMessageSearchBatch(1_000).remaining) continue;
+    ticks = 0;
+    expect(searchMessages(database, "old needle", { now: () => ticks++, maxScanMs: 8 })).toMatchObject({
+      hits: [expect.objectContaining({ snippet: "old needle" })], incomplete: false, continuation: null,
+    });
   });
 
   it("finds user text and canonical answers across chunks, without exposing work logs or archived chats", async () => {
@@ -142,6 +150,10 @@ describe("persisted message search", () => {
       result.hits.map(({ createdAt, messageId }) => `${createdAt}:${messageId}`).sort().reverse(),
     );
     expect(searchMessages(database, "absent", { maxScanBytes: 1 })).toMatchObject({ hits: [], incomplete: true });
+    while (store.indexMessageSearchBatch(1_000).remaining) continue;
+    expect(searchMessages(database, "needle")).toEqual(result);
+    expect(searchMessages(database, "absent", { maxScanBytes: 1 })).toMatchObject({ hits: [], incomplete: false });
+    expect(searchMessages(database, "ab", { maxScanBytes: 1 })).toMatchObject({ hits: [], incomplete: true });
     expect(searchMessages(database, "needle", { maxScanMs: 0 })).toMatchObject({ hits: [], incomplete: true });
     expect(searchMessages(database, "needle", { maxScanBytes: 1 })).toMatchObject({ hits: [], incomplete: true });
   });

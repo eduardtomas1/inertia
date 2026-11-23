@@ -80,6 +80,7 @@ type PaletteItem = {
   match?: MessageSearchHit;
   run?: () => void;
   view?: CommandPaletteView;
+  keepOpen?: boolean;
   /** Listed with its reason, but does nothing until it becomes available. */
   disabledReason?: string;
 };
@@ -234,9 +235,10 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         keywords: row.keywords.join(" "), icon: <Settings size={14} />, run: () => onOpenSettings(target) }];
     }));
   }, [currentProjectId, onOpenSettings, projects]);
+  const { loadMore: searchOlderMessages, loadingMore: searchingOlderMessages } = search;
   const messageItems = useMemo<PaletteItem[]>(() => {
     if (!onSelectMessage) return [];
-    return (search.result?.hits ?? []).flatMap((hit) => {
+    const hits: PaletteItem[] = (search.result?.hits ?? []).flatMap((hit) => {
       const conversation = conversations.find(({ id, projectId, archivedAt }) => id === hit.conversationId && projectId === hit.projectId && archivedAt === null);
       const project = projects.find(({ id }) => id === hit.projectId);
       if (!conversation || !project) return [];
@@ -244,7 +246,14 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
         detail: `${project.name} · ${hit.role === "user" ? "Your message" : "Agent answer"}`,
         icon: <MessageSquare size={14} />, match: hit }];
     });
-  }, [search.result, conversations, projects, onSelectMessage]);
+    if (!search.result?.continuation) return hits;
+    return [...hits, {
+      id: "message-search:older", group: "Messages", label: "Search older messages",
+      detail: search.result.hasMore ? "More messages match this search" : "Older history has not been searched yet",
+      icon: <Search size={14} aria-hidden="true" />, keepOpen: true, run: searchOlderMessages,
+      ...(searchingOlderMessages ? { disabledReason: "Searching older messages…" } : {}),
+    }];
+  }, [search.result, conversations, projects, onSelectMessage, searchOlderMessages, searchingOlderMessages]);
   const projectChoices = useMemo<PaletteItem[]>(() => {
     const current = projects.find(({ id }) => id === currentProjectId);
     const choices: PaletteItem[] = (current ? [current, ...projects.filter((project) => project !== current)] : projects).filter((project) => project.workspaceKind !== "scratch").map((project) => ({
@@ -289,6 +298,7 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
     if (!item) return;
     if (item.disabledReason) { searchRef.current?.focus(); return; }
     if (item.view) { changeView(item.view); return; }
+    if (item.keepOpen) { item.run?.(); searchRef.current?.focus(); return; }
     if (item.match && onSelectMessage) {
       opening.current?.abort();
       const controller = new AbortController();
@@ -374,8 +384,10 @@ export function CommandPalette({ open, initialView = "search", currentProjectId,
           {openError && <div className="palette-search-status" role="alert">Could not open this message. Try again.</div>}
           {search.loading && <div className="palette-search-status" role="status">Searching messages…</div>}
           {search.error && <div className="palette-search-status" role="status">{search.error} <button type="button" onClick={() => { search.retry(); searchRef.current?.focus(); }}>Retry</button></div>}
-          {search.result?.incomplete && <div className="palette-search-status" role="status">Search reached its history limit. Results may be incomplete.</div>}
-          {search.result?.hasMore && <div className="palette-search-status" role="status">More message matches are available. Refine your search to find them.</div>}
+          {search.loadingMore && <div className="palette-search-status" role="status">Searching older messages…</div>}
+          {search.moreError && <div className="palette-search-status" role="status">{search.moreError}</div>}
+          {search.result?.indexing && <div className="palette-search-status" role="status">Indexing older messages… Searching them takes longer until indexing finishes.</div>}
+          {search.result?.incomplete && !search.result.continuation && <div className="palette-search-status" role="status">Some very large messages could not be searched.</div>}
           {items.length === 0 && (choosingProject
             ? <p className="palette-empty">No matching projects</p>
             : !search.loading && !search.error && !search.result?.incomplete && <p className="palette-empty">No matches</p>)}

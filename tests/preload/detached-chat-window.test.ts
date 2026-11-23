@@ -49,6 +49,7 @@ describe("detached chat preload", () => {
       "copyText",
       "dockDetachedChat",
       "finishAttachmentHandoff",
+      "getAvailableEditors",
       "getPlatform",
       "getRuntimeConnection",
       "getWindowContext",

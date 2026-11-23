@@ -318,6 +318,12 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.openAttachmentExternally, id) as Promise<void>,
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
+  getAvailableEditors: (request?: Parameters<DesktopBridge["getAvailableEditors"]>[0]) =>
+    (request === undefined
+      ? ipcRenderer.invoke(IPC.getAvailableEditors)
+      : ipcRenderer.invoke(IPC.getAvailableEditors, { refresh: request.refresh === true })) as ReturnType<
+      DesktopBridge["getAvailableEditors"]
+    >,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
   showContextMenu: (request: Parameters<DesktopBridge["showContextMenu"]>[0]) =>
     ipcRenderer.invoke(IPC.showContextMenu, request) as ReturnType<DesktopBridge["showContextMenu"]>,

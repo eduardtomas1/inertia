@@ -876,6 +876,11 @@
       "version": 120,
       "name": "RecordCheckpointExpiration",
       "digest": "26c0763c5c2ac4288d94da14b060e14d6e8203c752ac2323cd83850d4013ae84"
+    },
+    {
+      "version": 121,
+      "name": "PersistPreferredEditor",
+      "digest": "67281a228dceee5b5682e2268cdb9909fa66a4d14838891cc4dbfe13841be37f"
     }
   ]
 }

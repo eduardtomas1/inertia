@@ -369,6 +369,7 @@ export interface StateRow {
   default_interaction_mode: InteractionMode;
   codex_binary_path: string;
   discord_release_repository_url: string;
+  preferred_editor?: string;
   working_indicator_json?: string | null;
   completion_sound_json?: string | null;
   quota_warnings_enabled?: number;

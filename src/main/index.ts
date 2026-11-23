@@ -1,6 +1,8 @@
 import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerChatAttachmentIpc } from "./chat-attachment-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
+import { EditorLauncher } from "./editor-launcher.js";
+import { openProjectPathInEditor, registerEditorIpc, resolveContextMenuEditorState, tryOpenLinkInPreferredEditor } from "./editor-ipc.js";
 import { MascotMain } from "./mascot-main.js";
 import { MascotFeedMemory } from "./mascot-feed-memory.js";
 import { DeferredWindowCreation } from "./deferred-window-creation.js";
@@ -526,9 +528,12 @@ function registerIpcHandlers(): void {
     (incident) => runtimeDiagnostics?.recordIncident(incident),
   );
 
+  const editorLauncher = new EditorLauncher();
+  registerEditorIpc({ channel: IPC.getAvailableEditors, assertTrusted: assertTrustedChatIpc, launcher: editorLauncher });
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
   registerContextMenuIpc({
     channel: IPC.showContextMenu, assertTrusted: assertTrustedChatIpc, isPackaged: () => app.isPackaged,
+    editorMenu: () => resolveContextMenuEditorState(editorLauncher, runtimeSupervisor),
     windowFor: (event, count, expected) => {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, expected);
@@ -569,13 +574,17 @@ function registerIpcHandlers(): void {
     }
     if (!runtimeSupervisor) throw new Error("The local runtime is not available");
     const path = await runtimeSupervisor.resolveProjectPath(request);
+    if (request.action === "open-in-editor") {
+      return openProjectPathInEditor(editorLauncher, runtimeSupervisor, path, request);
+    }
     return openAuthorizedProjectPath(path, request.action, shell);
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
     assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
-    await openDesktopLink(value, shell);
+    await openDesktopLink(value, shell, process.platform, (filePath, position) =>
+      tryOpenLinkInPreferredEditor(editorLauncher, runtimeSupervisor, filePath, position));
   });
 
   ipcMain.handle(IPC.showThreadNotification, (event, ...args) => {

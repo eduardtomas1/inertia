@@ -1,3 +1,6 @@
+import { realpath } from "node:fs/promises";
+import { isAbsolute, relative } from "node:path";
+
 import type { OpenProjectPathRequest } from "../shared/desktop";
 import type { Conversation, Project } from "../shared/contracts";
 import { RuntimeRequestError } from "./runtime-errors";
@@ -8,6 +11,18 @@ export interface ProjectPathStore {
   conversation: (conversationId: string) => Conversation;
   projectPath: (projectId: string) => string;
   conversationPath: (conversationId: string) => string;
+}
+
+export interface AuthorizedEditorPathStore extends ProjectPathStore {
+  shellSnapshot: () => {
+    projects: readonly Project[];
+    conversations: readonly Pick<Conversation, "id" | "projectId" | "worktreePath">[];
+  };
+}
+
+export interface AuthorizedEditorFile {
+  absolute: string;
+  projectRoot: string;
 }
 
 export interface ProjectIdentityAuthority {
@@ -45,4 +60,63 @@ export async function resolveAuthoritativeProjectPath(
     root = store.conversationPath(conversation.id);
   }
   return resolveWorkspacePathForOpen(root, request.relativePath);
+}
+
+export async function resolveAuthorizedEditorFile(
+  store: AuthorizedEditorPathStore,
+  filePath: string,
+  authority?: ProjectIdentityAuthority,
+): Promise<AuthorizedEditorFile | null> {
+  if (!filePath || !isAbsolute(filePath)) return null;
+  let canonicalTarget: string;
+  try {
+    canonicalTarget = await realpath(filePath);
+  } catch {
+    return null;
+  }
+  const snapshot = store.shellSnapshot();
+  const candidates: Array<{ projectId: string; projectRoot: string; root: string }> = [];
+  for (const project of snapshot.projects) {
+    if (project.workspaceKind === "scratch") continue;
+    try {
+      const root = store.projectPath(project.id);
+      candidates.push({ projectId: project.id, projectRoot: root, root });
+    } catch {
+      continue;
+    }
+  }
+  for (const conversation of snapshot.conversations) {
+    if (!conversation.worktreePath) continue;
+    try {
+      const projectRoot = store.projectPath(conversation.projectId);
+      const root = store.conversationPath(conversation.id);
+      candidates.push({ projectId: conversation.projectId, projectRoot, root });
+    } catch {
+      continue;
+    }
+  }
+  candidates.sort((left, right) => right.root.length - left.root.length);
+  for (const candidate of candidates) {
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = await realpath(candidate.root);
+    } catch {
+      continue;
+    }
+    const rel = relative(canonicalRoot, canonicalTarget);
+    if (rel === ".." || rel.startsWith("..\\") || rel.startsWith("../") || isAbsolute(rel)) {
+      continue;
+    }
+    try {
+      await assertProjectIdentityAuthority(authority, candidate.projectId, candidate.projectRoot);
+      const resolved = await resolveWorkspacePathForOpen(
+        canonicalRoot,
+        rel ? rel.replaceAll("\\", "/") : ".",
+      );
+      return { absolute: resolved.absolute, projectRoot: canonicalRoot };
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }

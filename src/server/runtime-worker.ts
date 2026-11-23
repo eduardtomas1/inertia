@@ -400,6 +400,28 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.editor-context") {
+    if (!runtime || stopping || updatePreparation) {
+      post({
+        type: "runtime.editor-context-rejected",
+        requestId: command.requestId,
+        message: "The local runtime is not ready.",
+      });
+      return;
+    }
+    void runtime.editorContext(command.filePath).then(
+      (result) => post({ type: "runtime.editor-context-resolved", requestId: command.requestId, ...result }),
+      (error: unknown) => {
+        const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 1_000) : "";
+        post({
+          type: "runtime.editor-context-rejected",
+          requestId: command.requestId,
+          message: detail || "The editor context could not be resolved.",
+        });
+      },
+    );
+    return;
+  }
   if (command.type === "runtime.read-html-render") {
     post(answerRuntimeHtmlRenderRead(stopping ? null : runtime, command));
     return;

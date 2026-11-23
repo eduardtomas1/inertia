@@ -20,6 +20,7 @@ const IPC = {
   releaseAttachment: "inertia:release-attachment",
   openAttachmentExternally: "inertia:open-attachment-externally",
   openProjectPath: "inertia:open-project-path",
+  getAvailableEditors: "inertia:get-available-editors",
   openExternal: "inertia:open-external",
   showContextMenu: "inertia:show-context-menu",
   snapshot: "inertia:snapshot",
@@ -158,6 +159,13 @@ const bridge = Object.freeze({
     IPC.openProjectPath,
     request,
   ) as ReturnType<DesktopBridge["openProjectPath"]>,
+  getAvailableEditors: (
+    request?: Parameters<DesktopBridge["getAvailableEditors"]>[0],
+  ) => (request === undefined
+    ? ipcRenderer.invoke(IPC.getAvailableEditors)
+    : ipcRenderer.invoke(IPC.getAvailableEditors, { refresh: request.refresh === true })) as ReturnType<
+    DesktopBridge["getAvailableEditors"]
+  >,
   openExternal: (url: string) =>
     ipcRenderer.invoke(
       IPC.openExternal,

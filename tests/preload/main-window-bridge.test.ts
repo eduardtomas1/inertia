@@ -60,6 +60,7 @@ describe("main window preload", () => {
       "finishAttachmentHandoff",
       "focusDetachedChat",
       "getAppHealth",
+      "getAvailableEditors",
       "getBackendCredentialState",
       "getCanaryRollbackStatus",
       "getDetachedChatWindows",

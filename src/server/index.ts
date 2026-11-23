@@ -23,7 +23,7 @@ import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { createConversationTitleRuntime } from "./runtime/conversation-title-service";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
-import { resolveAuthoritativeProjectPath } from "./project-path";
+import { resolveAuthoritativeProjectPath, resolveAuthorizedEditorFile } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { createManualUsageRefresh, createRateLimitChangeSignal, createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
@@ -1041,6 +1041,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         request,
         projectIdentityAuthority,
       )).absolute;
+    }),
+    editorContext: (filePath) => trackRuntimeOperation(async () => {
+      const preferredEditor = store.settings().preferredEditor;
+      if (!filePath || runtimeSafetyLock) return { preferredEditor };
+      const authorized = await resolveAuthorizedEditorFile(store, filePath, projectIdentityAuthority);
+      return authorized
+        ? { preferredEditor, authorizedPath: authorized.absolute, projectRoot: authorized.projectRoot }
+        : { preferredEditor };
     }),
     privateConnectRequest: (subject, request) =>
       updatePreparation.isAdmissionClosed()

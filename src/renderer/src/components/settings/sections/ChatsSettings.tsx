@@ -1,9 +1,17 @@
+import { useMemo } from "react";
 import type { AppSettings } from "@shared/contracts";
 import {
   CLAUDE_AUTO_COMPACT_WINDOWS,
   CODEX_AUTO_COMPACT_LIMITS,
   DEFAULT_COMPACT_ON_RETURN,
 } from "@shared/compact-on-return";
+import {
+  DEFAULT_PREFERRED_EDITOR,
+  editorLabel,
+  isEditorId,
+  type PreferredEditor,
+} from "@shared/editor-ids";
+import { useAvailableEditors } from "../../../hooks/useAvailableEditors";
 import { SettingRadioGroup, SettingSelect, SettingSwitch, type SettingOption } from "../SettingControls";
 import { SettingsGroup } from "../SettingsLayout";
 import { NewChatDefaults, type NewChatDefaultsProps } from "./NewChatDefaults";
@@ -52,6 +60,25 @@ function tokenChoiceValue(tokens: number | null, choices: readonly SettingOption
 
 export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
   const { settings, disabled, onUpdate } = props;
+  const { editors: detectedEditors } = useAvailableEditors({ refresh: true });
+  const preferredEditor = settings.preferredEditor ?? DEFAULT_PREFERRED_EDITOR;
+  const editorOptions = useMemo<readonly SettingOption<PreferredEditor>[]>(() => {
+    const options: SettingOption<PreferredEditor>[] = [
+      { value: "system", label: "System default" },
+      { value: "ask", label: "Ask" },
+      ...detectedEditors.map((editor) => ({
+        value: editor.id as PreferredEditor,
+        label: editor.label,
+      })),
+    ];
+    if (isEditorId(preferredEditor) && !detectedEditors.some((editor) => editor.id === preferredEditor)) {
+      options.push({
+        value: preferredEditor,
+        label: `${editorLabel(preferredEditor)} (not detected)`,
+      });
+    }
+    return options;
+  }, [detectedEditors, preferredEditor]);
   return (
     <>
       <NewChatDefaults {...props} />
@@ -108,6 +135,15 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
       </SettingsGroup>
 
       <SettingsGroup title="Review and terminal" headingId="source-heading">
+        <SettingSelect
+          id="preferred-editor"
+          title="Preferred editor"
+          description="Used when opening files, folders, and line links in your editor."
+          value={preferredEditor}
+          options={editorOptions}
+          disabled={disabled}
+          onChange={(nextEditor) => onUpdate({ preferredEditor: nextEditor })}
+        />
         <div className="settings-rows">
           <SettingSwitch id="wrap-diffs" title="Wrap long diff lines" checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} />
           <SettingSwitch id="ignore-whitespace" title="Ignore whitespace" checked={settings.ignoreWhitespace} disabled={disabled} onChange={(ignoreWhitespace) => onUpdate({ ignoreWhitespace })} />

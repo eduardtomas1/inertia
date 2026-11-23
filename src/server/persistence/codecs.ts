@@ -1,4 +1,5 @@
 import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
+import { parsePreferredEditor } from "../../shared/editors";
 import { TURN_FAILURE_KINDS, type TurnFailureKind } from "../../shared/turn-lifecycle";
 import { snapshotSourceSchema } from "../../shared/snapshots";
 import { parseProjectPreferences } from "../../shared/project-preferences";
@@ -500,6 +501,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     defaultInteractionMode: state.default_interaction_mode,
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
+    preferredEditor: parsePreferredEditor(state.preferred_editor),
     workingIndicator: parseWorkingIndicatorJson(state.working_indicator_json),
     completionSound: parseCompletionSoundJson(state.completion_sound_json),
   };

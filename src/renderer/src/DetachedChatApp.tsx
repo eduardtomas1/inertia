@@ -19,6 +19,7 @@ import { newChatTarget } from "./components/detached/detachedTargets";
 import { detachedTerminalIds, useDetachedHandoff } from "./components/detached/useDetachedHandoff";
 import { useDetachedShortcuts } from "./components/detached/useDetachedShortcuts";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
+import { EditorPreferenceContext, useAvailableEditors } from "./hooks/useAvailableEditors";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
 import { useStableController } from "./hooks/useStableController";
 import { useTheme } from "./hooks/useTheme";
@@ -275,8 +276,14 @@ export default function DetachedChatApp({
     request,
     onError: setActionError,
   }), [connection.snapshot?.library, connection.status, request]);
+  const { editors: detectedEditors } = useAvailableEditors();
+  const editorPreference = useMemo(() => ({
+    preferredEditor: settings.preferredEditor,
+    detectedEditors,
+  }), [detectedEditors, settings.preferredEditor]);
   const platform = window.inertia?.getPlatform?.() ?? "unknown";
   return (
+    <EditorPreferenceContext.Provider value={editorPreference}>
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
     <WatcherContext.Provider value={watchers.surface}>
@@ -317,5 +324,6 @@ export default function DetachedChatApp({
     </WatcherContext.Provider>
     </HtmlRenderRuntimeStatusContext.Provider>
     </WorkingIndicatorProvider>
+    </EditorPreferenceContext.Provider>
   );
 }

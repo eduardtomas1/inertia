@@ -42,6 +42,7 @@ function runtimeWithClose(
     prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
     releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),
+    editorContext: vi.fn(async () => ({ preferredEditor: "system" as const })),
     readHtmlRender: vi.fn(() => null),
     attachmentConversations: vi.fn(() => []),
     deliverAgentSecret: vi.fn(async () => ({ status: "rejected" as const, reason: "ended" as const })),

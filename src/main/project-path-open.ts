@@ -34,7 +34,7 @@ const INERT_LINK_EXTENSIONS = new Set([
   ".mp4", ".m4v", ".webm", ".mov", ".mkv", ".avi",
 ]);
 
-export type ProjectPathOpenAction = ProjectPathAction | "open-link";
+export type ProjectPathOpenAction = Exclude<ProjectPathAction, "open-in-editor"> | "open-link";
 
 interface ProjectPathShell {
   openPath(path: string): Promise<string>;

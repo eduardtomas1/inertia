@@ -18,6 +18,13 @@ import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./appl
 import type { CompletionSoundImport } from "./completion-sound";
 import type { CustomAgentDraft, CustomAgentExport } from "./custom-agents";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
+import {
+  isEditorId,
+  isPositiveEditorInt,
+  type DetectedEditor,
+  type EditorId,
+  type GetAvailableEditorsRequest,
+} from "./editor-ids";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 import {
   parseTerminalHandoffIds,
@@ -273,13 +280,16 @@ export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   evidence?: BrowserEvidenceSnapshot;
 }
 
-export type ProjectPathAction = "open-externally" | "reveal";
+export type ProjectPathAction = "open-externally" | "reveal" | "open-in-editor";
 
 export interface OpenProjectPathRequest {
   projectId: string;
   conversationId?: string;
   relativePath: string;
   action: ProjectPathAction;
+  editor?: EditorId;
+  line?: number;
+  column?: number;
 }
 
 export type DesktopNotificationKind =
@@ -636,20 +646,45 @@ export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequ
   const candidate = value as Partial<Record<keyof OpenProjectPathRequest, unknown>>;
   const keys = Object.keys(value);
   const hasConversationId = Object.prototype.hasOwnProperty.call(value, "conversationId");
+  const hasEditor = Object.prototype.hasOwnProperty.call(value, "editor");
+  const hasLine = Object.prototype.hasOwnProperty.call(value, "line");
+  const hasColumn = Object.prototype.hasOwnProperty.call(value, "column");
+  const allowedAction = candidate.action === "open-externally"
+    || candidate.action === "reveal"
+    || candidate.action === "open-in-editor";
+  const expectedKeyCount = 3
+    + Number(hasConversationId)
+    + Number(hasEditor)
+    + Number(hasLine)
+    + Number(hasColumn);
   if (
-    keys.length !== (hasConversationId ? 4 : 3)
-    || !keys.every((key) => key === "projectId" || key === "conversationId" || key === "relativePath" || key === "action")
+    keys.length !== expectedKeyCount
+    || !keys.every((key) =>
+      key === "projectId"
+      || key === "conversationId"
+      || key === "relativePath"
+      || key === "action"
+      || key === "editor"
+      || key === "line"
+      || key === "column")
     || typeof candidate.projectId !== "string"
     || !UUID_PATTERN.test(candidate.projectId)
     || (hasConversationId && (typeof candidate.conversationId !== "string" || !UUID_PATTERN.test(candidate.conversationId)))
     || !isProjectRelativePath(candidate.relativePath)
-    || (candidate.action !== "open-externally" && candidate.action !== "reveal")
+    || !allowedAction
+    || (candidate.action !== "open-in-editor" && (hasEditor || hasLine || hasColumn))
+    || (hasEditor && !isEditorId(candidate.editor))
+    || (hasLine && !isPositiveEditorInt(candidate.line))
+    || (hasColumn && (!hasLine || !isPositiveEditorInt(candidate.column)))
   ) return null;
   return {
     projectId: candidate.projectId,
     ...(hasConversationId ? { conversationId: candidate.conversationId as string } : {}),
     relativePath: candidate.relativePath,
-    action: candidate.action,
+    action: candidate.action as ProjectPathAction,
+    ...(hasEditor ? { editor: candidate.editor as EditorId } : {}),
+    ...(hasLine ? { line: candidate.line as number } : {}),
+    ...(hasColumn ? { column: candidate.column as number } : {}),
   };
 }
 
@@ -912,6 +947,7 @@ export interface DesktopBridge {
   openAttachmentExternally: (id: string) => Promise<void>;
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
+  getAvailableEditors: (request?: GetAvailableEditorsRequest) => Promise<DetectedEditor[]>;
   openExternal: (url: string) => Promise<void>;
   showContextMenu: (request: ContextMenuRequest) => Promise<ContextMenuAction | null>;
   /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */

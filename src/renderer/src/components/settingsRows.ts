@@ -67,6 +67,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
       ["codex-auto-compact", "Auto-compact Codex chats after", ["auto-compact", "autocompact", "compaction", "compact", "context window", "codex", "openai", "chatgpt", "tokens", "usage", "cost", "context"]],
     ],
     "Review and terminal": [
+      ["preferred-editor", "Preferred editor", ["editor", "preferred editor", "open in editor", "vscode", "vs code", "cursor", "zed", "jetbrains", "ide", "files", "links"]],
       ["wrap-diffs", "Wrap long diff lines", ["diff", "wrap", "review", "source control"]],
       ["ignore-whitespace", "Ignore whitespace", ["diff", "whitespace", "review", "source control"]],
       ["terminal-font-size", "Terminal font size", ["font", "text size", "zoom", "terminal"]],

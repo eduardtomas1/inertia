@@ -1,60 +1,14 @@
-import { extname, win32 } from "node:path";
+import {
+  buildWindowsCommandShimInvocation,
+  type WindowsCommandShimInvocation,
+} from "../../node/windows-command-shim";
 
-import { WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY } from "../../node/windows-current-directory-search";
-
-export interface ProviderProcessInvocation {
-  command: string;
-  args: string[];
-  windowsVerbatimArguments?: boolean;
-}
+export type ProviderProcessInvocation = WindowsCommandShimInvocation;
 
 export function providerPtyArguments(invocation: ProviderProcessInvocation): readonly string[] | string {
   return invocation.windowsVerbatimArguments ? invocation.args.join(" ") : invocation.args;
 }
 
-function windowsEnvironmentValue(environment: NodeJS.ProcessEnv, key: string): string | undefined {
-  const normalized = key.toUpperCase();
-  const match = Object.keys(environment).find((candidate) => candidate.toUpperCase() === normalized);
-  return match ? environment[match] : undefined;
-}
-
-const WINDOWS_CURRENT_DIRECTORY_SEARCH_GUARD = `set ${WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY}=1&`;
-
-function windowsCommandProcessor(environment: NodeJS.ProcessEnv): string {
-  const configured = windowsEnvironmentValue(environment, "ComSpec");
-  if (configured && win32.isAbsolute(configured)) return configured;
-  const systemRoot = windowsEnvironmentValue(environment, "SystemRoot");
-  if (systemRoot && win32.isAbsolute(systemRoot)) return win32.join(systemRoot, "System32", "cmd.exe");
-  return "C:\\Windows\\System32\\cmd.exe";
-}
-
-const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/gu;
-
-function assertSafeCmdValue(value: string): void {
-  if (value.includes("\0") || /[\r\n"]/u.test(value)) {
-    throw new Error("The provider command contains characters that cannot be passed safely to a Windows command shim.");
-  }
-}
-
-function escapeCmdCommand(value: string): string {
-  assertSafeCmdValue(value);
-  return value.replace(CMD_META_CHARACTERS, "^$1");
-}
-
-function escapeCmdArgument(value: string): string {
-  assertSafeCmdValue(value);
-  // Double trailing slashes before adding quotes, then protect cmd.exe
-  // metacharacters. Delayed expansion is disabled by the invocation below.
-  const quoted = `"${value.replace(/(\\+)$/u, "$1$1")}"`;
-  return quoted.replace(CMD_META_CHARACTERS, "^$1");
-}
-
-/**
- * Resolve a provider command without enabling Node's generic `shell` mode.
- * Windows batch shims need cmd.exe, but receive one fully quoted command with
- * delayed expansion disabled so spaces, parentheses, and Unicode paths remain
- * data rather than shell syntax.
- */
 export function providerProcessInvocation(
   executable: string,
   args: readonly string[],
@@ -62,17 +16,8 @@ export function providerProcessInvocation(
   platform: NodeJS.Platform = process.platform,
   { guardCurrentDirectorySearch = true }: { guardCurrentDirectorySearch?: boolean } = {},
 ): ProviderProcessInvocation {
-  if (platform !== "win32" || ![".cmd", ".bat"].includes(extname(executable).toLowerCase())) {
-    return { command: executable, args: [...args] };
-  }
-  const commandLine = [
-    escapeCmdCommand(executable),
-    ...args.map(escapeCmdArgument),
-  ].join(" ");
-  const guard = guardCurrentDirectorySearch ? WINDOWS_CURRENT_DIRECTORY_SEARCH_GUARD : "";
-  return {
-    command: windowsCommandProcessor(environment),
-    args: ["/d", "/s", "/v:off", "/c", `"${guard}${commandLine}"`],
-    windowsVerbatimArguments: true,
-  };
+  return buildWindowsCommandShimInvocation(executable, args, environment, platform, {
+    guardCurrentDirectorySearch,
+    unsafeErrorMessage: "The provider command contains characters that cannot be passed safely to a Windows command shim.",
+  });
 }

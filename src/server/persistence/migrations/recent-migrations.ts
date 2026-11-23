@@ -44,6 +44,7 @@ import { extendColorThemesMigration } from "./extend-color-themes";
 import { sentToUserMessagesMigration } from "./sent-to-user-messages";
 import { agentThreadQuestionAnswersMigration } from "./agent-thread-question-answers";
 import { checkpointExpirationMigration } from "./checkpoint-expiration";
+import { preferredEditorMigration } from "./preferred-editor";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -91,4 +92,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   sentToUserMessagesMigration,
   agentThreadQuestionAnswersMigration,
   checkpointExpirationMigration,
+  preferredEditorMigration,
 ];

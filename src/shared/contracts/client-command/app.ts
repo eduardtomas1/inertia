@@ -5,6 +5,7 @@ import { backgroundTaskCursorSchema } from "../../background-tasks";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
 import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
+import { PREFERRED_EDITOR_VALUES } from "../../editor-ids";
 import { QUOTA_WARNING_THRESHOLDS } from "../../quota-warnings";
 import {
   AUTO_COMPACT_TOKENS_MAX,
@@ -458,6 +459,7 @@ export const configurationCommandSchemas = [
           defaultReasoningEffort: z.string().trim().max(40).optional(),
           defaultInteractionMode: interactionModeSchema.optional(),
           codexBinaryPath: z.string().trim().max(4096).optional(),
+          preferredEditor: z.enum(PREFERRED_EDITOR_VALUES).optional(),
           workingIndicator: z.object({
             style: z.enum(WORKING_INDICATOR_STYLES).optional(),
             color: z.enum(WORKING_INDICATOR_COLORS).optional(),

@@ -27,6 +27,7 @@ import type {
   Project,
   ProjectAction,
 } from "@shared/contracts";
+import type { DetectedEditor, EditorId, PreferredEditor } from "@shared/editor-ids";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useDismissibleMenu } from "../hooks/useDismissibleMenu";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
@@ -97,6 +98,8 @@ type WorkspaceHeaderProps = {
   busy: boolean;
   checkoutPath?: string | null;
   filesAvailable?: boolean;
+  preferredEditor?: PreferredEditor;
+  detectedEditors?: readonly DetectedEditor[];
   conversationMenu?: HeaderConversationMenu | null;
   linkedTask?: { id: string; title: string } | null;
   onOpenTask?: (taskId: string) => void;
@@ -108,6 +111,7 @@ type WorkspaceHeaderProps = {
   onOpenFolder: () => void;
   onRevealFolder: () => void;
   onOpenFiles: () => void;
+  onOpenInEditor?: (editor: EditorId) => void;
   onAddAction?: () => void;
   onRefreshBranches: () => void;
   onSwitchBranch: (name: string, remote?: boolean) => void | Promise<void>;
@@ -144,6 +148,8 @@ export function WorkspaceHeader({
   busy,
   checkoutPath = null,
   filesAvailable = true,
+  preferredEditor,
+  detectedEditors,
   conversationMenu = null,
   linkedTask = null,
   onOpenTask,
@@ -155,6 +161,7 @@ export function WorkspaceHeader({
   onOpenFolder,
   onRevealFolder,
   onOpenFiles,
+  onOpenInEditor,
   onAddAction,
   onRefreshBranches,
   onSwitchBranch,
@@ -319,6 +326,8 @@ export function WorkspaceHeader({
         runs={runs}
         checkoutPath={checkoutPath}
         filesAvailable={filesAvailable}
+        {...(preferredEditor ? { preferredEditor } : {})}
+        {...(detectedEditors ? { detectedEditors } : {})}
         gitStatus={showGit ? gitStatus : null}
         busy={busy}
         gitNotice={gitNotice}
@@ -327,6 +336,7 @@ export function WorkspaceHeader({
         onOpenFolder={onOpenFolder}
         onRevealFolder={onRevealFolder}
         onOpenFiles={onOpenFiles}
+        {...(onOpenInEditor ? { onOpenInEditor } : {})}
         onCommit={onCommit}
         onPush={onPush}
         onPull={onPull}

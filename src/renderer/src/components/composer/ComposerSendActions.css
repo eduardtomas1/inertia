@@ -6,6 +6,44 @@
   margin-top: 72px;
 }
 
+.composer:has(> .composer-queue[data-rows="2"]) {
+  margin-top: 90px;
+}
+
+.composer:has(> .composer-queue[data-rows="2"] > [role="status"]) {
+  margin-top: 114px;
+}
+
+.composer:has(> .composer-queue[data-rows="3"]) {
+  margin-top: 132px;
+}
+
+.composer:has(> .composer-queue[data-rows="3"] > [role="status"]) {
+  margin-top: 156px;
+}
+
+.composer:has(> .composer-queue[data-rows="4"]) {
+  margin-top: 174px;
+}
+
+.composer:has(> .composer-queue[data-rows="4"] > [role="status"]) {
+  margin-top: 198px;
+}
+
+.composer-queue-item + .composer-queue-item {
+  border-top: 1px solid var(--line-soft);
+}
+
+.composer-queue-confirm .composer-queue-copy {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.composer-queue .composer-queue-remove[aria-disabled="true"] {
+  color: var(--text-muted);
+  opacity: var(--disabled-opacity);
+}
+
 .composer-queue {
   position: absolute;
   z-index: -2;

@@ -1754,9 +1754,7 @@ describe("composer asynchronous ownership", () => {
     }));
 
     await waitFor(() => expect(cancelAttachmentImport).toHaveBeenCalledOnce());
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Attachments could not be rolled back safely.",
-    );
+    expect(await screen.findByText("Attachments could not be rolled back safely.")).toHaveAttribute("role", "alert");
     expect(screen.getByRole("button", {
       name: "Attach follow-up images",
     })).toBeEnabled();
@@ -2140,9 +2138,7 @@ describe("composer asynchronous ownership", () => {
     });
 
     await waitFor(() => expect(cancelAttachmentImport).toHaveBeenCalledOnce());
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Attachments could not be rolled back safely.",
-    );
+    expect(await screen.findByText("Attachments could not be rolled back safely.")).toHaveAttribute("role", "alert");
     expect(screen.getByRole("button", {
       name: "Attach follow-up images",
     })).toBeEnabled();

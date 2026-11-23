@@ -1006,7 +1006,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
     readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
-    attachmentConversations: (attachmentId) => store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+    attachmentConversations: (attachmentId) => [...new Set([
+      ...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+      ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? [],
+    ])],
     deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {

@@ -54,7 +54,7 @@ import { useComposerChipFolding, type ComposerFoldKey } from "./useComposerChipF
 import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
-import type { QueueCommandRunner } from "./runtimeQueueClient";
+import type { QueueCommandRunner, QueuedMessageEdit } from "./runtimeQueueClient";
 import type { ComposerCompactOnReturnAction } from "./ComposerSendActions";
 import type { PromptCacheFacts } from "@shared/compact-on-return";
 
@@ -112,6 +112,7 @@ export function composerCheckoutBranch(
 
 export interface ComposerToolbarProps {
   onQueueCommand?: QueueCommandRunner;
+  queueEdit?: QueuedMessageEdit;
   actions: ProjectAction[];
   disabled: boolean;
   running: boolean;
@@ -264,6 +265,7 @@ export function ComposerToolbar({
   queuedTurnAuthoritative,
   onSendQueued,
   onQueueCommand,
+  queueEdit,
   onReleaseAttachment,
   onSubmit,
   onStop,
@@ -603,7 +605,13 @@ export function ComposerToolbar({
         </div>
         <div className="composer-attach-actions" role="group" aria-label="Attach">
           <IconButton
-            label={running
+            label={running && onQueueCommand
+              ? imageInputUnavailableReason
+                ? `Attach documents or spreadsheets to queue. ${imageInputUnavailableReason}`
+                : canSendAttachmentWhileRunning
+                  ? "Attach follow-up images, or documents to queue"
+                  : "Attach images or documents to queue"
+              : running
               ? imageInputUnavailableReason
                 ? `Attach images. ${imageInputUnavailableReason}`
                 : canSendAttachmentWhileRunning
@@ -616,7 +624,7 @@ export function ComposerToolbar({
             disabled={
               attachmentDisabled
               || attachmentCount >= MAX_ATTACHMENT_COUNT
-              || (running && imageInputUnavailableReason !== null)
+              || (running && !onQueueCommand && imageInputUnavailableReason !== null)
             }
           >
             <Paperclip size={16} />
@@ -650,6 +658,7 @@ export function ComposerToolbar({
             compacting={compacting}
             onSendQueued={onSendQueued}
             onQueueCommand={onQueueCommand}
+            queueEdit={queueEdit}
             onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}

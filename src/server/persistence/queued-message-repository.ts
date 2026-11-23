@@ -87,6 +87,25 @@ export class QueuedMessageRepository {
       .get(message.id, conversation.id) as { route_identity: string } | undefined;
     return row?.route_identity === queuedRouteIdentity(conversation);
   }
+  queuedRoute(conversationId: string, id: string): { providerId: string; interactionMode: Conversation["interactionMode"]; accessMode: Conversation["accessMode"] } | null {
+    const row = this.database.prepare("SELECT route_identity FROM queued_messages WHERE id = ? AND conversation_id = ?")
+      .get(id, conversationId) as { route_identity: string } | undefined;
+    if (!row) return null;
+    try {
+      const route: unknown = JSON.parse(row.route_identity);
+      if (!Array.isArray(route) || route.length !== 8) return null;
+      const [, , providerId, , , , interactionMode, accessMode] = route as unknown[];
+      if (typeof providerId !== "string" || (interactionMode !== "build" && interactionMode !== "plan")
+        || (accessMode !== "supervised" && accessMode !== "auto-edit" && accessMode !== "full")) return null;
+      return { providerId, interactionMode, accessMode };
+    } catch {
+      return null;
+    }
+  }
+  reroute(conversation: Conversation, id: string): boolean {
+    return this.database.prepare("UPDATE queued_messages SET route_identity = ?, state = 'waiting', error = NULL WHERE id = ? AND conversation_id = ? AND state IN ('waiting','blocked')")
+      .run(queuedRouteIdentity(conversation), id, conversation.id).changes === 1;
+  }
   claim(conversationId: string, id: string): boolean {
     return this.database.prepare("UPDATE queued_messages SET state = 'dispatching', error = NULL WHERE id = ? AND conversation_id = ? AND state IN ('waiting','blocked')")
       .run(id, conversationId).changes === 1;

@@ -19,6 +19,7 @@ import {
   chatAttachmentKind,
   chatAttachmentTypeLabel,
 } from "@shared/attachments";
+import { previewAnnotationChipLabel } from "@shared/preview-annotation";
 import {
   attachmentPreviewKind,
   attachmentPreviewUrl,
@@ -104,9 +105,11 @@ function SentAttachment({
           {state !== "ready" && <Icon size={16} />}
         </span>
         <span className="sent-attachment-copy">
-          <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
+          <strong title={attachment.snapshot?.windowTitle ?? (attachment.previewAnnotation ? `${attachment.previewAnnotation.selector} · ${attachment.previewAnnotation.pageUrl}` : attachment.name)}>
+            {attachment.snapshot?.appName ?? (attachment.previewAnnotation ? previewAnnotationChipLabel(attachment.previewAnnotation).title : attachment.name)}
+          </strong>
           <small id={metadataId}>
-            {attachment.snapshot?.windowTitle ?? `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`}
+            {attachment.snapshot?.windowTitle ?? (attachment.previewAnnotation ? previewAnnotationChipLabel(attachment.previewAnnotation).subtitle : `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`)}
             {unavailable && " · no longer stored"}
           </small>
         </span>

@@ -317,7 +317,7 @@ export function useDesktopTools({
   }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewCommand = useCallback((
-    action: "back" | "forward" | "reload" | "viewport",
+    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel",
     viewport?: AgentBrowserViewportRequest,
   ) => {
     const contextId = previewContextId;

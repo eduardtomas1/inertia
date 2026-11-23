@@ -1,5 +1,6 @@
 import { readAttachment } from "../node/read-attachment.js";
 import { snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots.js";
+import { previewAnnotationSchema, type PreviewAnnotation } from "../shared/preview-annotation.js";
 import { randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import {
@@ -294,6 +295,14 @@ export class AttachmentRegistry {
     if (!record || record.mimeType !== "image/png") throw new Error("Snapshot attachment is unavailable.");
     record.snapshot = snapshot;
     return { id: record.id, name: record.name, path: record.id, mimeType: record.mimeType, size: record.size, snapshot };
+  }
+
+  setPreviewAnnotation(id: string, annotation: PreviewAnnotation): ChatAttachment {
+    const parsed = previewAnnotationSchema.parse(annotation);
+    const record = this.records.get(id);
+    if (!record || record.mimeType !== "image/png") throw new Error("Page annotation attachment is unavailable.");
+    record.previewAnnotation = parsed;
+    return { id: record.id, name: record.name, path: record.id, mimeType: record.mimeType, size: record.size, previewAnnotation: parsed };
   }
 
   async import(
@@ -608,6 +617,7 @@ export class AttachmentRegistry {
           size: record.size,
           digest: record.digest,
           ...(record.snapshot ? { snapshot: record.snapshot } : {}),
+          ...(record.previewAnnotation ? { previewAnnotation: record.previewAnnotation } : {}),
         },
         bytes,
       };

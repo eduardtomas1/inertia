@@ -334,7 +334,7 @@ export function createQueuedMessageRuntime(
       for (const attachment of first.attachments) {
         const preview = await awaitMessageSendPreparation(conversationAttachments.resolve(attachment.id), deadline);
         if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
-        attachments.push({ ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) });
+        attachments.push({ ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}), ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}) });
       }
       if (!store.queuedMessages.claim(conversationId, first.id)) return;
       claimed = true;

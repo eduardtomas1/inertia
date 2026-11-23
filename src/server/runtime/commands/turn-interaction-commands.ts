@@ -501,7 +501,7 @@ export function createTurnInteractionCommandHandler(
               dependencies.conversationAttachments.resolve(attachment.id), preparationDeadlineAt,
             );
             if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
-            resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });
+            resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}), ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}) } });
           }
         } else if (handedOff && dependencies.compactionHandoff) {
           resolvedAttachments = [...dependencies.compactionHandoff.attachments];

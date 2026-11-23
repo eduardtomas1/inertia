@@ -40,6 +40,8 @@ import {
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
+import { PREVIEW_PICKER_EVENT_CHANNEL } from "../shared/preview-annotation.js";
+import { previewAnnotationImportDocument } from "./preview-picker.js";
 import { openDesktopLink } from "./external-link-open.js";
 import { inertiaWindowInForeground } from "./desktop-notification-gate.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
@@ -203,6 +205,13 @@ const previewBroker = new PreviewBroker({
   recordOperationFailure: (failure) => runtimeDiagnostics?.record("browser.operation-failure", { ...failure }),
   confirmPageUnload: confirmPreviewPageUnload,
   partitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary-preview" : "inertia-preview",
+  annotations: {
+    window: () => mainWindow,
+    document: () => previewAnnotationImportDocument(mainWindow),
+    registry: attachmentRegistry,
+    get imports() { return rendererAttachmentImports; },
+    channel: IPC.previewAnnotationReady,
+  },
 });
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
@@ -402,6 +411,7 @@ function registerIpcHandlers(): void {
   });
   registerCustomAgentFileIpc({ ipcMain, assertTrusted: assertTrustedIpc, window: () => mainWindow, dialog, defaultPath: () => app.getPath("documents") });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
+  ipcMain.on(PREVIEW_PICKER_EVENT_CHANNEL, (event, value) => { previewBroker.handlePickerEvent(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length, Math.min(args.length, 1));
     applyRuntimeConnectionRequest(args, context.role, runtimeSupervisor);

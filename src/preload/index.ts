@@ -378,6 +378,18 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.on(IPC.previewState, handler);
     return () => ipcRenderer.removeListener(IPC.previewState, handler);
   },
+  onPreviewAnnotation: (
+    listener: (event: import("../shared/preview-annotation").PreviewAnnotationDelivery) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      delivery: import("../shared/preview-annotation").PreviewAnnotationDelivery,
+    ) => {
+      listener(delivery);
+    };
+    ipcRenderer.on(IPC.previewAnnotationReady, handler);
+    return () => ipcRenderer.removeListener(IPC.previewAnnotationReady, handler);
+  },
   syncThemePreference: (preference: Parameters<DesktopBridge["syncThemePreference"]>[0]) => ipcRenderer.invoke(IPC.syncThemePreference, preference) as Promise<void>,
   syncAppShortcutKeys: (keys: Parameters<DesktopBridge["syncAppShortcutKeys"]>[0]) => ipcRenderer.invoke(IPC.syncAppShortcutKeys, [...keys]) as Promise<void>,
   setBackendCredential: (request: Parameters<DesktopBridge["setBackendCredential"]>[0]) =>

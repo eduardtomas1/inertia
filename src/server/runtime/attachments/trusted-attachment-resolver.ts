@@ -1,4 +1,5 @@
 import { snapshotSourceSchema } from "../../../shared/snapshots";
+import { previewAnnotationSchema } from "../../../shared/preview-annotation";
 import { readAttachment, type AttachmentFileSource } from "../../../node/read-attachment.js";
 import { constants } from "node:fs";
 import {
@@ -203,6 +204,7 @@ export class TrustedAttachmentResolver {
           mimeType: trusted.mimeType,
           size: trusted.size,
           ...(trusted.snapshot ? { snapshot: snapshotSourceSchema.parse(trusted.snapshot) } : {}),
+          ...(trusted.previewAnnotation ? { previewAnnotation: previewAnnotationSchema.parse(trusted.previewAnnotation) } : {}),
         },
         bytes,
         source: { path: canonicalPath, digest: trusted.digest },

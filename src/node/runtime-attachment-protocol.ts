@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_BYTES } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
 import { snapshotSourceSchema } from "../shared/snapshots";
+import { previewAnnotationSchema } from "../shared/preview-annotation";
 
 export type RuntimeAttachmentFailureCode = "not-found" | "unavailable" | "invalid";
 
@@ -102,9 +103,13 @@ export function parseRuntimeAttachmentResult(
     || !plainObject(value.attachment)
   ) return null;
   const attachment = value.attachment;
+  const expectedKeyCount = 6
+    + Number(attachment.snapshot !== undefined)
+    + Number(attachment.previewAnnotation !== undefined);
   if (
-    Object.keys(attachment).length !== (attachment.snapshot === undefined ? 6 : 7)
+    Object.keys(attachment).length !== expectedKeyCount
     || (attachment.snapshot !== undefined && !snapshotSourceSchema.safeParse(attachment.snapshot).success)
+    || (attachment.previewAnnotation !== undefined && !previewAnnotationSchema.safeParse(attachment.previewAnnotation).success)
     || typeof attachment.id !== "string"
     || !UUID_PATTERN.test(attachment.id)
     || typeof attachment.name !== "string"
@@ -134,6 +139,7 @@ export function parseRuntimeAttachmentResult(
       size: attachment.size,
       digest: attachment.digest,
       ...(attachment.snapshot ? { snapshot: snapshotSourceSchema.parse(attachment.snapshot) } : {}),
+      ...(attachment.previewAnnotation ? { previewAnnotation: previewAnnotationSchema.parse(attachment.previewAnnotation) } : {}),
     },
   };
 }

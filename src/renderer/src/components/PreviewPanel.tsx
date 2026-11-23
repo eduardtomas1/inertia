@@ -24,7 +24,7 @@ import {
   usePreviewTabCloseFocus,
   type WorkspacePreviewOwner,
 } from "../utils/workspacePreviewFocus";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Crosshair, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
 import { TooltipButton } from "./TooltipButton";
 import { usePanelTabRow } from "../hooks/usePanelTabRow";
@@ -44,6 +44,8 @@ export type PreviewPanelProps = {
   evidence?: BrowserEvidenceSnapshot;
   pageFocused?: boolean;
   viewport?: AgentBrowserViewport;
+  agentBusy?: boolean;
+  pickerActive?: boolean;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -53,6 +55,7 @@ export type PreviewPanelProps = {
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
   onViewportChange?: (request: AgentBrowserViewportRequest) => void;
+  onTogglePicker?: () => void;
   onInspectEvidenceImage?: (evidenceId: string) => Promise<boolean>;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
@@ -134,6 +137,8 @@ export function PreviewPanel({
   evidence = { revision: 0, entries: [], omitted: false },
   pageFocused = false,
   viewport,
+  agentBusy = false,
+  pickerActive = false,
   onNavigate,
   onOpenExternal,
   onBack,
@@ -143,6 +148,7 @@ export function PreviewPanel({
   onActivateTab,
   onCloseTab,
   onViewportChange,
+  onTogglePicker,
   onInspectEvidenceImage,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
@@ -159,6 +165,22 @@ export function PreviewPanel({
     registerWorkspacePreviewAddress(owner, address);
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
+  const canPickPage = Boolean(
+    url
+    && !loading
+    && !evidenceOpen
+    && currentLocation
+    && !("error" in currentLocation)
+    && currentLocation.target === "embed",
+  );
+  const pickerDisabled = agentBusy || !canPickPage;
+  const pickerTooltip = agentBusy
+    ? "Element picking is unavailable while the agent is controlling this page."
+    : !canPickPage
+      ? "Open a local preview page to pick an element."
+      : pickerActive
+        ? "Cancel picking element (Escape)"
+        : "Pick element";
   const selectedViewport = viewportSelection(viewport);
   const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs, addressElementRef);
   const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeTabId });
@@ -200,6 +222,18 @@ export function PreviewPanel({
       onBoundsChange(null);
     };
   }, [evidenceOpen, onBoundsChange]);
+
+  useEffect(() => {
+    if (!pickerActive || !onTogglePicker) return;
+    const cancelOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      onTogglePicker();
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  }, [onTogglePicker, pickerActive]);
 
   const closeEvidence = useCallback(() => {
     setOpenEvidenceContextId(null);
@@ -387,6 +421,20 @@ export function PreviewPanel({
             )}
           </select>
         )}
+        {onTogglePicker && (
+          <TooltipButton
+            tooltip={pickerTooltip}
+            describeTooltip={pickerDisabled || pickerActive}
+            className={`preview-picker-toggle${pickerActive ? " is-active" : ""}`}
+            aria-label="Pick element"
+            aria-pressed={pickerActive}
+            disabled={pickerDisabled}
+            title={pickerDisabled ? pickerTooltip : undefined}
+            onClick={onTogglePicker}
+          >
+            <Crosshair size={14} aria-hidden="true" />
+          </TooltipButton>
+        )}
         <TooltipButton
           ref={evidenceToggleRef}
           tooltip="Browser evidence"
@@ -395,9 +443,12 @@ export function PreviewPanel({
           aria-label={`Evidence ${evidence.entries.length}`}
           aria-expanded={evidenceOpen}
           aria-controls={`browser-evidence-${owner}`}
-          onClick={() => setOpenEvidenceContextId((current) => (
-            current === contextId ? null : contextId
-          ))}
+          onClick={() => {
+            if (!evidenceOpen && pickerActive) onTogglePicker?.();
+            setOpenEvidenceContextId((current) => (
+              current === contextId ? null : contextId
+            ));
+          }}
         >
           <History size={14} aria-hidden="true" />
         </TooltipButton>

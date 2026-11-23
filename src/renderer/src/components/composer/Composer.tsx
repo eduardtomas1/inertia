@@ -44,6 +44,7 @@ import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerSnapshots } from "./useComposerSnapshots";
+import { useComposerPreviewAnnotations } from "./useComposerPreviewAnnotations";
 import { useComposerAttachmentReattach } from "./useComposerAttachmentReattach";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions, DOCUMENT_FOLLOW_UP_UNSUPPORTED } from "./composerAttachmentActions";
@@ -700,6 +701,7 @@ export const Composer = memo(function Composer({
       ? `${providerIdentityLabels?.[selectedProvider.id] ?? selectedProvider.label} · ${selectedModel?.label ?? conversation.modelSelection.modelId}`
       : conversation.modelSelection.backendProfileDisplayName;
   useComposerSnapshots(conversation.id, adoptAttachments, textareaRef);
+  useComposerPreviewAnnotations(conversation.id, adoptAttachments, setAttachmentError, textareaRef);
   useComposerAttachmentReattach(conversation.id, reattachAttachment);
   const attachmentFallback = running
     ? "Please inspect the attached image."

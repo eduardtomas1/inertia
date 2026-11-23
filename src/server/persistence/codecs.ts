@@ -2,6 +2,7 @@ import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
 import { parsePreferredEditor } from "../../shared/editors";
 import { TURN_FAILURE_KINDS, type TurnFailureKind } from "../../shared/turn-lifecycle";
 import { snapshotSourceSchema } from "../../shared/snapshots";
+import { previewAnnotationSchema } from "../../shared/preview-annotation";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
@@ -769,6 +770,7 @@ export function parseStoredAttachments(value: string): ChatAttachment[] {
       || attachmentLimitError([...attachments, attachment]) !== null
     ) continue;
     const snapshot = snapshotSourceSchema.safeParse(attachment.snapshot);
+    const previewAnnotation = previewAnnotationSchema.safeParse(attachment.previewAnnotation);
     attachments.push({
       id: attachment.id,
       name: attachment.name,
@@ -776,6 +778,7 @@ export function parseStoredAttachments(value: string): ChatAttachment[] {
       mimeType: attachment.mimeType,
       size: attachment.size,
       ...(snapshot.success ? { snapshot: snapshot.data } : {}),
+      ...(previewAnnotation.success ? { previewAnnotation: previewAnnotation.data } : {}),
     });
     ids.add(attachment.id);
   }

@@ -1,7 +1,11 @@
 .preview-panel { container-type: inline-size; }
-.preview-evidence-toggle { display: inline-grid; width: var(--control-height-small); height: var(--control-height-small); flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
-.preview-evidence-toggle:hover { color: var(--text); background: var(--fill); }
-.preview-evidence-toggle.is-active { color: var(--text); background: var(--fill-strong); }
+.preview-evidence-toggle,
+.preview-picker-toggle { display: inline-grid; width: var(--control-height-small); height: var(--control-height-small); flex: 0 0 auto; place-items: center; padding: 0; border: 0; border-radius: var(--radius-xs); color: var(--text-muted); background: transparent; transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.preview-evidence-toggle:hover,
+.preview-picker-toggle:hover:not(:disabled) { color: var(--text); background: var(--fill); }
+.preview-evidence-toggle.is-active,
+.preview-picker-toggle.is-active { color: var(--text); background: var(--fill-strong); }
+.preview-picker-toggle:disabled { opacity: 0.45; cursor: default; }
 .preview-evidence-toggle.has-failures:not(.is-active) svg { color: var(--danger); }
 .preview-viewport-select { min-width: 0; max-width: 136px; height: var(--control-height-small); flex: 0 1 auto; padding: 0 24px 0 7px; border: 1px solid transparent; border-radius: var(--radius-xs); color: var(--text-muted); background-color: transparent; font-size: var(--text-sm); text-overflow: ellipsis; }
 .preview-viewport-select:hover,
@@ -13,6 +17,8 @@
 }
 
 @media (forced-colors: active) {
-  .preview-evidence-toggle.is-active { outline: 1px solid CanvasText; }
-  .preview-evidence-toggle:focus-visible { outline-color: Highlight; }
+  .preview-evidence-toggle.is-active,
+  .preview-picker-toggle.is-active { outline: 1px solid CanvasText; }
+  .preview-evidence-toggle:focus-visible,
+  .preview-picker-toggle:focus-visible { outline-color: Highlight; }
 }

@@ -89,6 +89,7 @@ export interface TurnRequestContext {
 
 export interface ChatAttachment {
   snapshot?: import("../snapshots").SnapshotSource;
+  previewAnnotation?: import("../preview-annotation").PreviewAnnotation;
   id: string;
   name: string;
   /** Renderer projections use the opaque attachment id; only privileged code may carry a local path. */

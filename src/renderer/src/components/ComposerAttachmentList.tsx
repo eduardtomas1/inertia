@@ -8,6 +8,7 @@ import {
   chatAttachmentKind,
   chatAttachmentTypeLabel,
 } from "@shared/attachments";
+import { previewAnnotationChipLabel } from "@shared/preview-annotation";
 import {
   attachmentPreviewKind,
   attachmentPreviewUrl,
@@ -52,6 +53,22 @@ export function ComposerAttachmentList({
           const previewKind = attachmentPreviewKind(attachment);
           const previewUrl = attachmentPreviewUrl(attachment);
           const pending = pendingAttachmentIds.has(attachment.id);
+          const annotation = attachment.previewAnnotation;
+          const annotationLabel = annotation ? previewAnnotationChipLabel(annotation) : null;
+          const displayTitle = attachment.snapshot?.appName ?? annotationLabel?.title ?? attachment.name;
+          const displayTitleTooltip = attachment.snapshot?.windowTitle
+            ?? (annotation ? `${annotation.selector} · ${annotation.pageUrl}` : attachment.name);
+          const displaySubtitle = attachment.snapshot
+            ? attachment.snapshot.windowTitle
+            : annotationLabel
+              ? annotationLabel.subtitle
+              : `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`;
+          const openAriaLabel = annotationLabel
+            ? `Preview page annotation ${annotationLabel.title}`
+            : `Preview attachment ${attachment.name}`;
+          const removeAriaLabel = annotationLabel
+            ? `Remove page annotation ${annotationLabel.title}`
+            : `Remove attachment ${attachment.name}`;
           const content = (
             <>
               <span className="composer-attachment-preview" aria-hidden="true">
@@ -69,10 +86,8 @@ export function ComposerAttachmentList({
                       : <FileText size={16} />}
               </span>
               <span className="composer-attachment-copy">
-                <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
-                <small>
-                  {attachment.snapshot ? attachment.snapshot.windowTitle : `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`}
-                </small>
+                <strong title={displayTitleTooltip}>{displayTitle}</strong>
+                <small>{displaySubtitle}</small>
               </span>
             </>
           );
@@ -81,6 +96,7 @@ export function ComposerAttachmentList({
               className="composer-attachment"
               data-attachment-kind={kind}
               data-snapshot={Boolean(attachment.snapshot) || undefined}
+              data-preview-annotation={Boolean(annotation) || undefined}
               data-attachment-pending={pending || undefined}
               key={attachment.id}
             >
@@ -88,7 +104,7 @@ export function ComposerAttachmentList({
                 type="button"
                 className="composer-attachment-open"
                 data-preview-source={pending ? undefined : previewUrl}
-                aria-label={`Preview attachment ${attachment.name}`}
+                aria-label={openAriaLabel}
                 disabled={disabled || pending}
                 onClick={() => setPreviewAttachment(attachment)}
               >
@@ -97,7 +113,7 @@ export function ComposerAttachmentList({
               <button
                 type="button"
                 className="composer-attachment-remove"
-                aria-label={`Remove attachment ${attachment.name}`}
+                aria-label={removeAriaLabel}
                 disabled={disabled || pending}
                 onClick={() => onRemove(attachment)}
               >

@@ -427,8 +427,9 @@ export function AttachmentPreviewDialog({
       )}
     >
       {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" className="secondary-button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
+      {attachment.previewAnnotation && <div className="snapshot-preview-controls"><span title={attachment.previewAnnotation.selector}>{attachment.previewAnnotation.selector} · {attachment.previewAnnotation.pageUrl}</span><button type="button" className="secondary-button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View annotation details"}</button></div>}
       <div className="attachment-preview-stage" data-load-failed={loadFailed}>
-        {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
+        {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : snapshotData && attachment.previewAnnotation ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Page annotation details">{JSON.stringify(attachment.previewAnnotation, null, 2)}</pre> : loadFailed
           ? (
               <div className="attachment-preview-unavailable" role="alert">
                 <strong>Preview unavailable</strong>

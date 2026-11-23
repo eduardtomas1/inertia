@@ -220,6 +220,7 @@ export interface CanaryRollbackStatus {
 
 export interface DesktopAttachment {
   snapshot?: import("./snapshots").SnapshotSource;
+  previewAnnotation?: import("./preview-annotation").PreviewAnnotation;
   id: string;
   name: string;
   path: string;
@@ -299,6 +300,8 @@ export interface PreviewState {
   evidence: BrowserEvidenceSnapshot;
   pageFocused?: boolean;
   viewport?: AgentBrowserViewport;
+  agentBusy?: boolean;
+  pickerActive?: boolean;
 }
 export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";
@@ -1005,7 +1008,7 @@ export interface DesktopBridge {
   previewCommand: (request: {
     ownerId: string;
     contextId: string;
-    action: "back" | "forward" | "reload" | "viewport";
+    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel";
     viewport?: AgentBrowserViewportRequest;
   }) => Promise<PreviewState>;
   previewTab: (request: {
@@ -1034,6 +1037,9 @@ export interface DesktopBridge {
   }) => Promise<boolean>;
   /** Subscribes to navigation initiated inside an owned desktop preview. */
   onPreviewState: (listener: (state: PreviewStateUpdate) => void) => () => void;
+  onPreviewAnnotation: (
+    listener: (event: import("./preview-annotation").PreviewAnnotationDelivery) => void,
+  ) => () => void;
   syncThemePreference: (preference: "system" | "light" | "dark") => Promise<void>;
   /** The keys the app shortcuts are bound to, which a focused Browser page hands back to the app. */
   syncAppShortcutKeys: (keys: readonly AppShortcutKey[]) => Promise<void>;

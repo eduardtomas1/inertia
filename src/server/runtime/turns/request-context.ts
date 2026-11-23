@@ -1,4 +1,5 @@
 import { snapshotPromptContext } from "../../../shared/snapshots";
+import { previewAnnotationContextLabel, previewAnnotationPromptContext } from "../../../shared/preview-annotation";
 import { createHash } from "node:crypto";
 import {
   realpathSync,
@@ -708,10 +709,19 @@ export function assembleTurnRequest(input: AssembleTurnRequestInput): AssembledT
   const { contexts, conversationContextIndex } = materializeContext(
     input.cwd,
     input.context,
-    [...(input.documentContexts ?? []), ...(input.attachments ?? []).filter((attachment) => attachment.snapshot).map((attachment) => ({
-      attachmentId: attachment.id, label: `Snapshot · ${attachment.snapshot!.appName}`,
-      content: snapshotPromptContext([attachment]), truncated: attachment.snapshot!.accessibility.truncated,
-    }))],
+    [
+      ...(input.documentContexts ?? []),
+      ...(input.attachments ?? []).filter((attachment) => attachment.snapshot).map((attachment) => ({
+        attachmentId: attachment.id, label: `Snapshot · ${attachment.snapshot!.appName}`,
+        content: snapshotPromptContext([attachment]), truncated: attachment.snapshot!.accessibility.truncated,
+      })),
+      ...(input.attachments ?? []).filter((attachment) => attachment.previewAnnotation).map((attachment) => ({
+        attachmentId: attachment.id,
+        label: previewAnnotationContextLabel(attachment.previewAnnotation!),
+        content: previewAnnotationPromptContext([attachment]),
+        truncated: attachment.previewAnnotation!.htmlTruncated === true,
+      })),
+    ],
   );
   const { imagePaths, imageBytes } = validateImages(
     input.attachments ?? [],

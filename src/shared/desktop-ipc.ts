@@ -47,6 +47,7 @@ export const DESKTOP_IPC = {
   previewClose: "inertia:preview-close",
   previewInspectEvidenceImage: "inertia:preview-inspect-evidence-image",
   previewState: "inertia:preview-state",
+  previewAnnotationReady: "inertia:preview-annotation-ready",
   syncThemePreference: "inertia:sync-theme-preference",
   syncAppShortcutKeys: "inertia:sync-app-shortcut-keys",
   setBackendCredential: "inertia:set-backend-credential",

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_BYTES } from "./attachments";
 import { snapshotSourceSchema } from "./snapshots";
+import { previewAnnotationSchema } from "./preview-annotation";
 import { watcherNoteAttributionSchema } from "./watcher";
 
 export const MAX_QUEUED_MESSAGES = 3;
@@ -10,6 +11,7 @@ const queuedAttachmentSchema = z.strictObject({
   id: z.uuid(), name: z.string().min(1).max(255), path: z.string().min(1).max(4096),
   mimeType: z.enum(ACCEPTED_ATTACHMENT_MIME_TYPES), size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
   snapshot: snapshotSourceSchema.optional(),
+  previewAnnotation: previewAnnotationSchema.optional(),
 });
 export const queuedMessageSchema = z.strictObject({
   id: z.uuid(), conversationId: z.uuid(), content: z.string().max(20_000),

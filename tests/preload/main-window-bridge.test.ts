@@ -82,6 +82,7 @@ describe("main window preload", () => {
       "onDiagnosticsChanged",
       "onLaunchRequest",
       "onMainWindowTarget",
+      "onPreviewAnnotation",
       "onPreviewState",
       "onPrivateConnectState",
       "onRuntimeReady",

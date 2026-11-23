@@ -207,6 +207,45 @@ export interface StoredTurnGitArtifact extends TurnGitArtifact {
   updatedAt: string;
 }
 
+export interface RetainedCheckpointRecord {
+  id: string;
+  conversationId: string;
+  projectId: string;
+  projectWorkspaceKind: string | null;
+  projectPath: string;
+  worktreePath: string | null;
+  archivedAt: string | null;
+  turnId: string | null;
+  turnStatus: AgentTurn["status"] | null;
+  ref: string;
+  label: string;
+  turnIndex: number;
+  createdAt: string;
+}
+
+export interface RetainedArtifactRefRecord {
+  turnId: string;
+  conversationId: string;
+  projectId: string;
+  projectWorkspaceKind: string | null;
+  projectPath: string;
+  worktreePath: string | null;
+  archivedAt: string | null;
+  turnStatus: AgentTurn["status"];
+  beforeCheckpointId: string | null;
+  beforeRef: string | null;
+  afterRef: string | null;
+  status: TurnGitArtifactStatus;
+  patchState: TurnGitPatchState;
+  createdAt: string;
+}
+
+export interface ArtifactRefClearUpdate {
+  turnId: string;
+  clearBeforeRef?: boolean;
+  clearAfterRef?: boolean;
+}
+
 export interface CreateTurnGitArtifactInput {
   id?: string;
   turnId: string;

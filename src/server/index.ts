@@ -308,7 +308,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
-  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
+  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, {
+    reportIncident: commandIncidents.report,
+  });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,

@@ -28,6 +28,13 @@ import {
   RuntimeStore,
   type StoredTurnGitArtifact,
 } from "./database";
+import type { IncidentObservation } from "../node/application-incidents";
+import {
+  pruneCheckpointRefs,
+  type CheckpointPruneFailure,
+  type CheckpointRetentionPolicy,
+  type PruneCheckpointRefsOptions,
+} from "./checkpoint-retention";
 import { CheckpointError, createCheckpoint, deleteCheckpoint } from "./checkpoints";
 import {
   captureGitArtifactState,
@@ -61,6 +68,11 @@ export interface TurnGitArtifactManagerOptions {
   clockMs?: () => number;
   preCaptureTimeoutMs?: number;
   finalizationTimeoutMs?: number;
+  retentionPolicy?: Partial<CheckpointRetentionPolicy>;
+  isConversationProtected?: (conversationId: string) => boolean;
+  reportIncident?: (observation: IncidentObservation) => unknown;
+  onPruneFailure?: (failure: CheckpointPruneFailure) => void;
+  deleteCheckpointRefs?: PruneCheckpointRefsOptions["deleteRefs"];
 }
 
 export interface TurnGitArtifactOperationOptions {
@@ -213,9 +225,17 @@ export class TurnGitArtifactManager {
   readonly #clockMs: () => number;
   readonly #preCaptureTimeoutMs: number;
   readonly #finalizationTimeoutMs: number;
+  readonly #retentionPolicy: Partial<CheckpointRetentionPolicy> | undefined;
+  readonly #isConversationProtected: ((conversationId: string) => boolean) | undefined;
+  readonly #reportIncident: ((observation: IncidentObservation) => unknown) | undefined;
+  readonly #onPruneFailure: ((failure: CheckpointPruneFailure) => void) | undefined;
+  readonly #deleteCheckpointRefs: PruneCheckpointRefsOptions["deleteRefs"];
   readonly #finalizations = new Map<string, Promise<void>>();
+  readonly #activeCaptureTurns = new Set<string>();
   readonly #liveComparisons = new Map<string, LiveComparison>();
   readonly #lifetime = new AbortController();
+  #pruneInFlight: Promise<void> | null = null;
+  #pruneQueued = false;
   #shutdownDeadlineAt: number | null = null;
   #cleanupFailure: GitError | null = null;
 
@@ -238,6 +258,11 @@ export class TurnGitArtifactManager {
       options.finalizationTimeoutMs
         ?? TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
     );
+    this.#retentionPolicy = options.retentionPolicy;
+    this.#isConversationProtected = options.isConversationProtected;
+    this.#reportIncident = options.reportIncident;
+    this.#onPruneFailure = options.onPruneFailure;
+    this.#deleteCheckpointRefs = options.deleteCheckpointRefs;
   }
 
   beginShutdown(deadlineAt: number): void {
@@ -447,6 +472,7 @@ export class TurnGitArtifactManager {
 
     const repositoryPath = this.store.conversationPath(input.turn.conversationId);
     let afterRef: string | null = null;
+    this.#activeCaptureTurns.add(input.turn.id);
     try {
       const postSnapshot = await createCheckpoint(
         repositoryPath,
@@ -497,6 +523,7 @@ export class TurnGitArtifactManager {
         terminalAssistantMessageId: input.terminalAssistantMessageId ?? null,
         failureReason: truncatedCaptureReason(comparison),
       });
+      this.#activeCaptureTurns.delete(input.turn.id);
       await this.prune();
     } catch (error) {
       this.#recordCleanupFailure(error);
@@ -509,6 +536,8 @@ export class TurnGitArtifactManager {
         terminalAssistantMessageId: input.terminalAssistantMessageId ?? null,
         failureReason: safeFailure(error, "post-turn"),
       });
+    } finally {
+      this.#activeCaptureTurns.delete(input.turn.id);
     }
   }
 
@@ -530,7 +559,8 @@ export class TurnGitArtifactManager {
   }
 
   async reconcile(): Promise<boolean> {
-    const before = this.store.turnGitArtifactRevision();
+    const beforeArtifacts = this.store.turnGitArtifactRevision();
+    const beforeCheckpoints = this.store.checkpointExpirationRevision();
     for (const artifact of this.store.pendingTurnGitArtifacts()) {
       if (this.#lifetime.signal.aborted) break;
       const turn = this.store.agentTurn(artifact.turnId);
@@ -558,12 +588,15 @@ export class TurnGitArtifactManager {
       }));
       await this.prune();
     }
-    return this.store.turnGitArtifactRevision() !== before;
+    return this.store.turnGitArtifactRevision() !== beforeArtifacts
+      || this.store.checkpointExpirationRevision() !== beforeCheckpoints;
   }
 
   async settleShutdown(): Promise<void> {
-    while (this.#finalizations.size > 0) {
-      await Promise.allSettled(this.#finalizations.values());
+    while (this.#finalizations.size > 0 || this.#pruneInFlight !== null) {
+      const pending: Promise<void>[] = [...this.#finalizations.values()];
+      if (this.#pruneInFlight) pending.push(this.#pruneInFlight);
+      await Promise.allSettled(pending);
     }
     if (this.#cleanupFailure) throw this.#cleanupFailure;
   }
@@ -852,28 +885,91 @@ export class TurnGitArtifactManager {
   }
 
   async prune(): Promise<void> {
-    await mkdir(this.#patchDirectory, { recursive: true, mode: 0o700 });
-    const entries = await readdir(this.#patchDirectory, { withFileTypes: true });
-    const candidates = (await Promise.all(entries.flatMap((entry) => {
-      const match = /^([0-9a-f]{64})\.gz$/u.exec(entry.name);
-      if (!entry.isFile() || !match) return [];
-      const path = join(this.#patchDirectory, entry.name);
-      return [stat(path).then((info) => ({
-        digest: match[1]!,
-        path,
-        size: info.size,
-        modifiedAt: info.mtimeMs,
-      })).catch(() => null)];
-    }))).filter((entry): entry is NonNullable<typeof entry> => entry !== null)
-      .sort((left, right) => right.modifiedAt - left.modifiedAt || left.digest.localeCompare(right.digest, "en"));
-    let retainedBytes = 0;
-    let retainedCount = 0;
-    for (const entry of candidates) {
-      retainedBytes += entry.size;
-      retainedCount += 1;
-      if (retainedCount <= MAX_RETAINED_PATCHES && retainedBytes <= MAX_RETAINED_BYTES) continue;
-      await rm(entry.path, { force: true });
-      this.store.expireTurnGitPatch(entry.digest);
+    if (this.#pruneInFlight) {
+      this.#pruneQueued = true;
+      await this.#pruneInFlight;
+      return;
+    }
+    const task = this.#runPruneLoop().finally(() => {
+      if (this.#pruneInFlight === task) this.#pruneInFlight = null;
+    });
+    this.#pruneInFlight = task;
+    await task;
+  }
+
+  async #runPruneLoop(): Promise<void> {
+    do {
+      this.#pruneQueued = false;
+      if (this.#lifetime.signal.aborted) return;
+      await this.#prunePatches();
+      if (this.#lifetime.signal.aborted) return;
+      await this.#pruneCheckpointRefs();
+    } while (this.#pruneQueued && !this.#lifetime.signal.aborted);
+  }
+
+  async #prunePatches(): Promise<void> {
+    try {
+      await mkdir(this.#patchDirectory, { recursive: true, mode: 0o700 });
+      const entries = await readdir(this.#patchDirectory, { withFileTypes: true });
+      const candidates = (await Promise.all(entries.flatMap((entry) => {
+        const match = /^([0-9a-f]{64})\.gz$/u.exec(entry.name);
+        if (!entry.isFile() || !match) return [];
+        const path = join(this.#patchDirectory, entry.name);
+        return [stat(path).then((info) => ({
+          digest: match[1]!,
+          path,
+          size: info.size,
+          modifiedAt: info.mtimeMs,
+        })).catch(() => null)];
+      }))).filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .sort((left, right) => right.modifiedAt - left.modifiedAt || left.digest.localeCompare(right.digest, "en"));
+      let retainedBytes = 0;
+      let retainedCount = 0;
+      for (const entry of candidates) {
+        retainedBytes += entry.size;
+        retainedCount += 1;
+        if (retainedCount <= MAX_RETAINED_PATCHES && retainedBytes <= MAX_RETAINED_BYTES) continue;
+        await rm(entry.path, { force: true });
+        this.store.expireTurnGitPatch(entry.digest);
+      }
+    } catch (error) {
+      console.warn("Turn Git patch pruning failed; will retry at next prune.", {
+        reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+      });
+      this.#reportIncident?.({
+        code: "git.command-failed",
+        outcome: "failed",
+        context: { commandType: "checkpoint.prune" },
+      });
+    }
+  }
+
+  async #pruneCheckpointRefs(): Promise<void> {
+    const operation = this.#operationOptions(this.#finalizationTimeoutMs);
+    try {
+      await pruneCheckpointRefs(this.store, {
+        policy: this.#retentionPolicy,
+        now: this.now,
+        deadlineAt: operation.deadlineAt,
+        signal: operation.signal,
+        isConversationProtected: this.#isConversationProtected,
+        isTurnProtected: (turnId) => this.#activeCaptureTurns.has(turnId) || this.#liveComparisons.has(turnId),
+        reportIncident: this.#reportIncident,
+        onFailure: this.#onPruneFailure,
+        deleteRefs: this.#deleteCheckpointRefs,
+      });
+    } catch (error) {
+      this.#recordCleanupFailure(error);
+      if (!isGitProcessTreeTerminationFailure(error)) {
+        console.warn("Checkpoint ref pruning failed; will retry at next prune.", {
+          reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+        });
+        this.#reportIncident?.({
+          code: "git.command-failed",
+          outcome: "failed",
+          context: { commandType: "checkpoint.prune" },
+        });
+      }
     }
   }
 

@@ -2232,7 +2232,8 @@ button.header-breadcrumb-project:hover {
   font-size: var(--text-sm);
 }
 
-.message-revert:hover { color: var(--text); background: var(--fill); }
+.message-revert:hover:not(:disabled) { color: var(--text); background: var(--fill); }
+.message-revert:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .message-body {
   color: var(--text);
@@ -8404,7 +8405,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   font-size: var(--text-sm);
 }
 
-.turn-user-request .message-revert:hover {
+.turn-user-request .message-revert:hover:not(:disabled) {
   color: var(--text);
   background: var(--fill);
 }

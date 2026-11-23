@@ -280,6 +280,7 @@ export interface CheckpointRow {
   insertions: number;
   deletions: number;
   created_at: string;
+  expired_at?: string | null;
 }
 
 export interface AgentPlanRow {

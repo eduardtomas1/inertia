@@ -414,22 +414,16 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const timelineRef = useRef(timeline);
   timelineRef.current = timeline;
   const previousComparableTurn = useMemo(() => {
-    const result = new Map<string, string>();
-    const previousByWorktree = new Map<string, string>();
+    const result = new Map<string, { turnId: string; expired: boolean }>();
+    const previousByWorktree = new Map<string, { turnId: string; expired: boolean }>();
     for (const item of timeline) {
       if (item.kind !== "turn") continue;
       const artifact = item.turn.gitArtifact;
-      if (
-        !artifact
-        || artifact.status === "pending"
-        || artifact.repositoryIdentity === null
-        || artifact.worktreeIdentity === null
-        || artifact.afterFingerprint === null
-      ) continue;
+      if (!artifact || artifact.status === "pending" || artifact.repositoryIdentity === null || artifact.worktreeIdentity === null || artifact.afterFingerprint === null) continue;
       const key = `${artifact.repositoryIdentity}\u0000${artifact.worktreeIdentity}`;
-      const previousTurnId = previousByWorktree.get(key);
-      if (previousTurnId) result.set(artifact.turnId, previousTurnId);
-      previousByWorktree.set(key, artifact.turnId);
+      const previous = previousByWorktree.get(key);
+      if (previous) result.set(artifact.turnId, { turnId: previous.turnId, expired: previous.expired || Boolean(artifact.afterSnapshotExpired) });
+      previousByWorktree.set(key, { turnId: artifact.turnId, expired: Boolean(artifact.afterSnapshotExpired) });
     }
     return result;
   }, [timeline]);
@@ -1178,7 +1172,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         turn={item.turn}
         props={projectedProps}
         subagents={subagentsByTurn.get(item.turn.id) ?? EMPTY_SUBAGENTS}
-        previousArtifactTurnId={previousComparableTurn.get(item.turn.id) ?? null}
+        previousArtifactTurnId={previousComparableTurn.get(item.turn.id)?.turnId ?? null}
+        previousArtifactCompareExpired={previousComparableTurn.get(item.turn.id)?.expired ?? false}
         onBeforeToggle={captureExpansionAnchor}
         onAfterToggle={restoreExpansionAnchor}
       />

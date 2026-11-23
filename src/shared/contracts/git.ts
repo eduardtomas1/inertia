@@ -277,6 +277,7 @@ export interface TurnGitArtifact {
    * produced before the typed classification was introduced.
    */
   absenceReason?: TurnGitArtifactAbsenceReason | null;
+  afterSnapshotExpired?: boolean;
 }
 
 export interface TurnGitDiffSnapshot extends GitDiffSnapshot {

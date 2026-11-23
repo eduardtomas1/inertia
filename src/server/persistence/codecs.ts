@@ -935,6 +935,7 @@ export function checkpointFromRow(row: CheckpointRow): CheckpointSummary {
     insertions: row.insertions,
     deletions: row.deletions,
     createdAt: row.created_at,
+    ...(row.expired_at ? { expiredAt: row.expired_at } : {}),
   };
 }
 

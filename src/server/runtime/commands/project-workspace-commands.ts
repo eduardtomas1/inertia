@@ -9,6 +9,12 @@ import {
   isProviderTerminalSessionId,
 } from "../../../shared/provider-terminal-resume";
 import { restoreConversationCheckpoint } from "../checkpoint-restoration";
+import {
+  CheckpointError,
+  deleteCheckpointsForConversations,
+  resolveCheckpointCommonGitDir,
+} from "../../checkpoints";
+import { mayBeInsideGitRepository } from "../../git/paths";
 import { importedResumeCwd } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import { cloneProject } from "../../project-clone";
@@ -241,6 +247,45 @@ export function createProjectWorkspaceCommandHandler(
               && error.message.includes("Cancel the active Duo launch")
             ) throw new RuntimeRequestError(error.message);
             throw error;
+          }
+          const projectConversationIds = latestConversations.map(({ id }) => id);
+          if (projectConversationIds.length > 0) {
+            const projectRootPath = typeof dependencies.store.projectPath === "function"
+              ? dependencies.store.projectPath(projectId)
+              : dependencies.store.project(projectId).path;
+            const candidatePaths = new Set<string>([
+              projectRootPath,
+              ...latestConversations.flatMap(({ worktreePath }) => worktreePath ? [worktreePath] : []),
+            ]);
+            const cleanedCommonDirs = new Set<string>();
+            for (const candidatePath of candidatePaths) {
+              try {
+                if (!await mayBeInsideGitRepository(candidatePath)) continue;
+                const resolved = await resolveCheckpointCommonGitDir(candidatePath);
+                if (cleanedCommonDirs.has(resolved.commonGitDir)) continue;
+                cleanedCommonDirs.add(resolved.commonGitDir);
+                await deleteCheckpointsForConversations(
+                  resolved.gitRoot,
+                  projectConversationIds,
+                );
+              } catch (error) {
+                if (
+                  error instanceof CheckpointError
+                  && (error.message === "not-repository" || error.message === "not-found")
+                ) {
+                  continue;
+                }
+                console.warn("Project checkpoint ref cleanup failed.", {
+                  projectId,
+                  reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+                });
+                dependencies.reportIncident?.({
+                  code: "git.command-failed",
+                  outcome: "failed",
+                  context: { projectId, commandType: "project.remove" },
+                });
+              }
+            }
           }
           const attachmentIds = latestConversations.flatMap(({ id }) =>
             dependencies.store.attachments(id).map(({ id: attachmentId }) =>
@@ -528,6 +573,11 @@ export function createProjectWorkspaceCommandHandler(
         if (checkpoint.conversationId !== command.payload.conversationId) {
           throw new RuntimeRequestError(
             "The checkpoint does not belong to this thread.",
+          );
+        }
+        if (checkpoint.expiredAt) {
+          throw new RuntimeRequestError(
+            "This checkpoint was pruned and is no longer available to restore.",
           );
         }
         if (

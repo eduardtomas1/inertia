@@ -790,6 +790,32 @@ export class RuntimeStore {
     this.gitArtifactRepository.expirePatch(digest);
   }
 
+  clearTurnGitArtifactRefs(
+    updates: readonly import("./persistence/types").ArtifactRefClearUpdate[],
+    updatedAt?: string,
+  ): number {
+    return this.gitArtifactRepository.clearRefs(updates, updatedAt);
+  }
+
+  retainedTurnGitArtifactRefsForRetention(): import("./persistence/types").RetainedArtifactRefRecord[] {
+    return this.gitArtifactRepository.retainedRefsForRetention();
+  }
+
+  markCheckpointsExpired(
+    checkpointIds: readonly string[],
+    expiredAt?: string,
+  ): number {
+    return this.executionLedgerRepository.markCheckpointsExpired(checkpointIds, expiredAt);
+  }
+
+  activeCheckpointsForRetention(): import("./persistence/types").RetainedCheckpointRecord[] {
+    return this.executionLedgerRepository.activeCheckpointsForRetention();
+  }
+
+  checkpointExpirationRevision(): string {
+    return this.executionLedgerRepository.checkpointExpirationRevision();
+  }
+
   updateAgentTurnLifecycle(turnId: string, update: AgentTurnLifecycleUpdate): AgentTurn {
     return this.turnLedgerRepository.updateLifecycle(turnId, update);
   }

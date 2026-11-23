@@ -458,4 +458,5 @@ export interface CheckpointSummary {
   insertions: number;
   deletions: number;
   createdAt: string;
+  expiredAt?: string | null;
 }

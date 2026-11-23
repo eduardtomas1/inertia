@@ -12,6 +12,7 @@ import {
   type TurnGitArtifactSummary,
 } from "../../utils/responseTimeline";
 import { sourceLanguageForFile } from "@shared/source-language";
+import { TURN_COMPARE_EXPIRED_DESCRIPTION } from "@shared/turn-checkpoint";
 import { TooltipButton } from "../TooltipButton";
 import { useAnchoredDetailsToggle } from "./activity";
 import type { ResponseTimelineProps } from "./types";
@@ -19,12 +20,14 @@ import type { ResponseTimelineProps } from "./types";
 export function ChangedFilesSummary({
   artifact,
   previousTurnId,
+  previousCompareExpired = false,
   props,
   onBeforeToggle,
   onAfterToggle,
 }: {
   artifact: TurnGitArtifactSummary;
   previousTurnId: string | null;
+  previousCompareExpired?: boolean;
   props: ResponseTimelineProps;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
@@ -141,11 +144,22 @@ export function ChangedFilesSummary({
           <button type="button" disabled={!patchAvailable} onClick={() => props.onOpenTurnDiff(artifact.turnId)}>
             <GitCompareArrows size={14} aria-hidden="true" />Open exact turn diff
           </button>
-          {previousTurnId && (
-            <button type="button" onClick={() => props.onCompareTurnArtifacts(previousTurnId, artifact.turnId)}>
-              <GitCompareArrows size={14} aria-hidden="true" />Compare with previous turn
-            </button>
-          )}
+          {previousTurnId && (() => {
+            const compareExpired = Boolean(artifact.afterSnapshotExpired || previousCompareExpired);
+            return (
+              <TooltipButton
+                disabled={compareExpired}
+                data-compare-expired={compareExpired ? "true" : undefined}
+                tooltip={compareExpired ? TURN_COMPARE_EXPIRED_DESCRIPTION : "Compare changes with the previous turn"}
+                onClick={() => {
+                  if (!compareExpired) props.onCompareTurnArtifacts(previousTurnId, artifact.turnId);
+                }}
+              >
+                <GitCompareArrows size={14} aria-hidden="true" />
+                {compareExpired ? "Compare unavailable" : "Compare with previous turn"}
+              </TooltipButton>
+            );
+          })()}
         </div>
       </div>
     </details>

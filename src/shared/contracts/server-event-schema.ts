@@ -834,6 +834,7 @@ function turnGitArtifact(value: unknown): boolean {
     && (value.absenceReason === undefined
       || value.absenceReason === null
       || value.absenceReason === "not-repository")
+    && optionalBooleanField(value, "afterSnapshotExpired")
     && arrayOf(value.files, turnGitArtifactFile)
     && integerField(value, "insertions")
     && integerField(value, "deletions")
@@ -854,7 +855,8 @@ function checkpoint(value: unknown): boolean {
     && integerField(value, "turnIndex")
     && integerField(value, "filesChanged")
     && integerField(value, "insertions")
-    && integerField(value, "deletions");
+    && integerField(value, "deletions")
+    && optionalNullableStringField(value, "expiredAt");
 }
 
 function reviewState(value: unknown): boolean {

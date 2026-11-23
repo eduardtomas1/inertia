@@ -43,6 +43,7 @@ import { agentSecretRequestsMigration } from "./agent-secret-requests";
 import { extendColorThemesMigration } from "./extend-color-themes";
 import { sentToUserMessagesMigration } from "./sent-to-user-messages";
 import { agentThreadQuestionAnswersMigration } from "./agent-thread-question-answers";
+import { checkpointExpirationMigration } from "./checkpoint-expiration";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -89,4 +90,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   extendColorThemesMigration,
   sentToUserMessagesMigration,
   agentThreadQuestionAnswersMigration,
+  checkpointExpirationMigration,
 ];

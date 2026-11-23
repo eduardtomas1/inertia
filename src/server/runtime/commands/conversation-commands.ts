@@ -19,7 +19,8 @@ import {
   type ModelSelection,
 } from "../../../shared/model-routing";
 import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
-import { deleteCheckpoints } from "../../checkpoints";
+import { CheckpointError, deleteCheckpoints } from "../../checkpoints";
+import { mayBeInsideGitRepository } from "../../git/paths";
 import type { RuntimeStore } from "../../database";
 import {
   inspectUnacknowledgedWorktreeCreation,
@@ -748,10 +749,32 @@ export function createConversationCommandHandler(
             }
           }
           if (dependencies.store.project(conversation.projectId).workspaceKind !== "scratch") {
-            await deleteCheckpoints(
-              dependencies.store.projectPath(conversation.projectId),
-              conversation.id,
-            ).catch(() => undefined);
+            const projectPath = dependencies.store.projectPath(conversation.projectId);
+            try {
+              if (await mayBeInsideGitRepository(projectPath)) {
+                await deleteCheckpoints(projectPath, conversation.id);
+              }
+            } catch (error) {
+              if (
+                !(error instanceof CheckpointError
+                  && (error.message === "not-repository" || error.message === "not-found"))
+              ) {
+                console.warn("Conversation checkpoint ref cleanup failed.", {
+                  projectId: conversation.projectId,
+                  conversationId: conversation.id,
+                  reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+                });
+                dependencies.reportIncident?.({
+                  code: "git.command-failed",
+                  outcome: "failed",
+                  context: {
+                    projectId: conversation.projectId,
+                    conversationId: conversation.id,
+                    commandType: "conversation.delete",
+                  },
+                });
+              }
+            }
           }
           const finalConversation = dependencies.store.conversation(
             command.payload.conversationId,

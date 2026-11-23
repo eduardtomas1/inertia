@@ -871,6 +871,11 @@
       "version": 119,
       "name": "RecordAgentThreadQuestionAnswers",
       "digest": "77c4ab3a9bc36a4f143a39b5cec7446e358b3d2129a24e4628c9c589d31c3999"
+    },
+    {
+      "version": 120,
+      "name": "RecordCheckpointExpiration",
+      "digest": "26c0763c5c2ac4288d94da14b060e14d6e8203c752ac2323cd83850d4013ae84"
     }
   ]
 }

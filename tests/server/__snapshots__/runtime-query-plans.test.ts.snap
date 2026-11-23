@@ -645,10 +645,38 @@ exports[`hot query plans on a seeded runtime database > snapshots every history 
 exports[`hot query plans on a seeded runtime database > snapshots every message search plan with and without planner statistics 1`] = `
 [
   {
-    "query": "SELECT id AS messageId FROM messages INDEXED BY messages_created_id_idx ORDER BY created_at DESC, id DESC",
+    "query": "SELECT complete, before_created_at AS createdAt, before_message_id AS messageId FROM message_search_backfill WHERE singleton = 1",
     "withStatistics": "same",
     "withoutStatistics": [
-      "SCAN messages USING COVERING INDEX messages_created_id_idx",
+      "SEARCH message_search_backfill USING INTEGER PRIMARY KEY (rowid=?)",
+    ],
+  },
+  {
+    "query": "SELECT count(*) FROM ( SELECT rowid FROM message_search_index WHERE message_search_index MATCH ? LIMIT ? )",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "CO-ROUTINE (subquery-1)",
+      "SCAN message_search_index VIRTUAL TABLE INDEX 0:M1",
+      "SCAN (subquery-1)",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt FROM message_search_index JOIN message_search_documents d ON d.document_id = message_search_index.rowid JOIN…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN message_search_index VIRTUAL TABLE INDEX 0:M1",
+      "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt FROM message_search_documents d INDEXED BY message_search_documents_unindexed_idx JOIN messages m ON m.id = …",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN d USING INDEX message_search_documents_unindexed_idx",
+      "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
     ],
   },
   {
@@ -673,6 +701,28 @@ exports[`hot query plans on a seeded runtime database > snapshots every message 
     "withStatistics": "same",
     "withoutStatistics": [
       "SEARCH message_content_chunks USING INDEX message_content_chunks_message_sequence_idx (message_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt, NULL AS documentId, NULL AS state FROM messages m INDEXED BY messages_created_id_idx WHERE 1 ORDER BY m.cre…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN m USING COVERING INDEX messages_created_id_idx",
+    ],
+  },
+  {
+    "query": "SELECT rowid FROM message_search_index WHERE message_search_index MATCH ? ORDER BY rowid",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN message_search_index VIRTUAL TABLE INDEX 64:M1",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt, d.document_id AS documentId, d.state AS state FROM messages m INDEXED BY messages_created_id_idx LEFT JOIN …",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN m USING COVERING INDEX messages_created_id_idx",
+      "SEARCH d USING INDEX sqlite_autoindex_message_search_documents_1 (message_id=?) LEFT-JOIN",
     ],
   },
 ]

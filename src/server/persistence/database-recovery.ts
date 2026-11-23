@@ -36,8 +36,10 @@ import {
   waitForOperationOrAbort,
 } from "./database-backup-cancellation";
 import {
+  type BackupFileMetadata,
   cleanAutomaticBackupSidecars,
   databaseBackupPattern,
+  listCompleteBackupMetadata,
   safeDatabaseStem,
 } from "./database-backup-sidecar-cleanup";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
@@ -117,12 +119,7 @@ export interface DatabaseBackupStatus {
   readonly lastValidatedAt: string | null;
 }
 
-interface ValidatedBackup {
-  readonly filename: string;
-  readonly modifiedAt: number;
-  readonly path: string;
-  readonly size: number;
-}
+type ValidatedBackup = BackupFileMetadata;
 
 export type DatabaseValidation =
   | "valid-current"
@@ -636,31 +633,11 @@ function listValidatedBackups(databasePath: string): {
   return { invalid, unsupported, valid };
 }
 
-function listBackupMetadata(databasePath: string): ValidatedBackup[] {
-  const { backupsDirectory } = databaseRecoveryPaths(databasePath);
-  if (!existsSync(backupsDirectory)) return [];
-  const pattern = databaseBackupPattern(databasePath, "complete");
-  const backups: ValidatedBackup[] = [];
-  for (const filename of readdirSync(backupsDirectory)) {
-    if (!pattern.test(filename)) continue;
-    const path = join(backupsDirectory, filename);
-    if (!regularOwnedFile(path)) continue;
-    try {
-      const metadata = statSync(path);
-      backups.push({
-        filename,
-        modifiedAt: metadata.mtimeMs,
-        path,
-        size: metadata.size,
-      });
-    } catch {
-      // A concurrently removed backup is no longer part of retention.
-    }
-  }
-  backups.sort((left, right) =>
-    right.modifiedAt - left.modifiedAt
-    || right.filename.localeCompare(left.filename, "en"));
-  return backups;
+export function listBackupMetadata(databasePath: string): ValidatedBackup[] {
+  return listCompleteBackupMetadata(
+    databasePath,
+    databaseRecoveryPaths(databasePath).backupsDirectory,
+  );
 }
 
 function compactTimestamp(now: Date): string {
@@ -930,6 +907,14 @@ export class DatabaseBackupManager {
 
   status(): DatabaseBackupStatus {
     return { lastValidatedAt: this.lastValidatedAt };
+  }
+
+  hasFreshBackup(): boolean {
+    if (this.lastValidatedAt === null || this.publishedChanges === null) return false;
+    const current = this.changeMarker();
+    return current !== null
+      && current === this.publishedChanges
+      && listBackupMetadata(this.databasePath).length > 0;
   }
 
   async cancelAndWait(): Promise<void> {

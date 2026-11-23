@@ -54,6 +54,11 @@ import {
   type DatabaseRecoveryReport,
   recoverDatabaseOnStartup,
 } from "./persistence/database-recovery";
+import {
+  DatabaseCompactionManager,
+  type DatabaseCompactionOptions,
+} from "./persistence/database-compaction";
+import type { DatabaseCompactionSummary, DatabaseStorageStatus } from "../shared/database-storage";
 import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
 import {
   DATABASE_RECOVERY_EXPORT_MAX_BYTES,
@@ -123,6 +128,7 @@ export type * from "./database-public-types";
 export class RuntimeStore {
   private readonly database: Database.Database;
   private readonly backupManager: DatabaseBackupManager;
+  private readonly compactionManager: DatabaseCompactionManager;
   private readonly recoveryReport: DatabaseRecoveryReport;
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
@@ -159,6 +165,7 @@ export class RuntimeStore {
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
       databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
+      databaseCompaction?: DatabaseCompactionOptions;
       recoverInterruptedRuns?: boolean;
       recoveryExportMaxBytes?: number;
     } = {},
@@ -182,6 +189,12 @@ export class RuntimeStore {
         },
         onCreated: options.onDatabaseBackupCreated,
       },
+    );
+    this.compactionManager = new DatabaseCompactionManager(
+      this.database,
+      databasePath,
+      this.backupManager,
+      options.databaseCompaction,
     );
     this.backendProfileRepository = new BackendProfileRepository({
       database: this.database,
@@ -287,6 +300,7 @@ export class RuntimeStore {
   }
 
   close(): void {
+    this.compactionManager.stop();
     this.backupManager.stop();
     this.conversationWork.clear();
     if (this.database.open) this.database.close();
@@ -294,6 +308,30 @@ export class RuntimeStore {
 
   startBackups(): void {
     this.backupManager.start();
+  }
+
+  startCompaction(): void {
+    this.compactionManager.start();
+  }
+
+  databaseStorageStatus(): DatabaseStorageStatus {
+    return this.compactionManager.status();
+  }
+
+  compactDatabase(): Promise<{ storage: DatabaseStorageStatus; compaction: DatabaseCompactionSummary }> {
+    return this.compactionManager.compactNow();
+  }
+
+  runIdleDatabaseCompaction(): Promise<DatabaseCompactionSummary | null> {
+    return this.compactionManager.runIdlePass();
+  }
+
+  isDatabaseCompacting(): boolean {
+    return this.compactionManager.isCompacting();
+  }
+
+  isDatabaseVacuuming(): boolean {
+    return this.compactionManager.isHoldingExclusiveWork();
   }
 
   createInitialBackup(options: { quietGraceMs?: number } = {}): Promise<DatabaseBackupResult | null> {
@@ -336,7 +374,7 @@ export class RuntimeStore {
   }
 
   async backupAndClose(): Promise<void> {
-    return closeDatabaseAfterBackupCancellation(this.database, this.backupManager);
+    return closeDatabaseAfterBackupCancellation(this.database, this.backupManager, this.compactionManager);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {

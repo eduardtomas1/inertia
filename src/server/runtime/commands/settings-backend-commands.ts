@@ -56,6 +56,8 @@ export function createSettingsBackendCommandHandler(
     "settings.update",
     "attachment.storage.get",
     "attachment.storage.cleanup",
+    "database.storage.get",
+    "database.storage.compact",
     "prompt-preset.create",
     "prompt-preset.update",
     "prompt-preset.duplicate",
@@ -83,6 +85,27 @@ export function createSettingsBackendCommandHandler(
         const storage = await dependencies.conversationAttachments.storageStatus(order);
         dependencies.send(socket, { type: "request.result", requestId: command.requestId,
           result: { kind: "attachment.storage", storage, ...(removed ? { removed } : {}) } });
+        return "handled";
+      }
+      case "database.storage.get": {
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "database.storage",
+            storage: dependencies.store.databaseStorageStatus(),
+          },
+        });
+        return "handled";
+      }
+      case "database.storage.compact": {
+        const { storage, compaction } = await dependencies.store.compactDatabase();
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "database.storage", storage, compaction },
+        });
         return "handled";
       }
       case "settings.update": {

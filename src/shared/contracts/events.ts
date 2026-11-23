@@ -213,6 +213,7 @@ export type ServerEvent =
       requestId: string;
       result:
         | { kind: "attachment.storage"; storage: import("../attachment-storage").AttachmentStorageStatus; removed?: { records: number; bytes: number } }
+        | { kind: "database.storage"; storage: import("../database-storage").DatabaseStorageStatus; compaction?: import("../database-storage").DatabaseCompactionSummary }
         | { kind: "support.report"; report: import("../issue-report").IssueReport | null; github?: import("../issue-report").IssueGitHubState }
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }

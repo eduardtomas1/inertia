@@ -220,6 +220,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       providers: context.providers,
       archived: context.archived,
       databaseBackup: context.databaseBackup,
+      hasActiveTurns: (context.lifecycleDiagnostics?.ownedResources.turns ?? 0) > 0
+        || context.allConversations.some((conversation) => conversation.status === "running"),
       onReportCommand: context.onSaveCommand ?? context.onReportCommand,
       onUpdate: context.onUpdate,
       onUnarchive: context.onUnarchive,

@@ -176,6 +176,7 @@ export const SETTINGS_SECTION_ROWS: readonly SettingsSectionRows[] = [
   section("data", "Data", {
     Storage: [
       ["resource-health", "Local storage", ["storage", "disk", "browser cache", "clear cache", "where my data is", "storage use", "archive"]],
+      ["database-storage", "Database storage", ["compact", "vacuum", "reclaim", "wal", "database", "storage", "disk"]],
       ["database-backup", "Full local database backup", ["backup", "backups", "database", "storage", "archive"]],
       ["attachment-storage", "Attachment storage", ["disk", "files", "storage", "archive"]],
       ["attachment-storage-limit", "Attachment storage limit", ["budget", "disk", "storage", "limit"]],

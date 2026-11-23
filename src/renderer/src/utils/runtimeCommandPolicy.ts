@@ -265,6 +265,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "review.summary.generate": reviewOperation,
   "attachment.storage.get": shortMutation,
   "attachment.storage.cleanup": { timeoutMs: 60_000, timeoutDelivery: "ambiguous" },
+  "database.storage.get": shortRetrySafe,
+  "database.storage.compact": { timeoutMs: 300_000, timeoutDelivery: "ambiguous" },
   "settings.default-model.set": shortMutation,
   "settings.restore-defaults": {
     timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS,

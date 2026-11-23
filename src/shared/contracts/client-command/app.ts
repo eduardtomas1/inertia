@@ -386,6 +386,8 @@ export const appCommandSchemas = [
 export const configurationCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("attachment.storage.get") }).strict(),
   z.object({ ...requestBase, type: z.literal("attachment.storage.cleanup") }).strict(),
+  z.object({ ...requestBase, type: z.literal("database.storage.get") }).strict(),
+  z.object({ ...requestBase, type: z.literal("database.storage.compact") }).strict(),
   z
     .object({
       ...requestBase,

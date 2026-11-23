@@ -1,6 +1,7 @@
 import { cliConversationPreviewSchema, cliConversationScanSchema } from "../cli-conversations";
 import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
+import { isDatabaseStorageResult } from "../database-storage";
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
 import { isConversationAttachmentGallery } from "../conversation-attachment-gallery";
@@ -1008,6 +1009,7 @@ const REQUEST_RESULT_VALIDATORS = {
   "message.queue": (value) => messageQueueResultSchema.safeParse(value).success,
   "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "attachment.storage": isAttachmentStorageResult,
+  "database.storage": isDatabaseStorageResult,
   "support.report": issueReportResult,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")

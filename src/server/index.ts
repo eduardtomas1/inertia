@@ -17,6 +17,7 @@ import {
   type RuntimeSyncCursor,
 } from "../shared/contracts";
 import { RuntimeStore } from "./database";
+import { runtimeDatabaseCompactionBlocker } from "./persistence/database-compaction";
 import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
@@ -185,7 +186,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   // that never became usable.
   const postReady = new PostReadyWork({
     isClosed: () => closed, isBlocked: () => runtimeSafetyLock, track: (operation) => trackRuntimeOperation(operation),
-    startBackups: () => store.startBackups(),
+    startBackups: () => { store.startBackups(); store.startCompaction(); },
     refreshProjectIdentities: () => projectIdentities.refreshAll(projectIdentityCandidates),
     afterProjectIdentityRefresh: () => testOnlyProjectIdentityRefresh,
     reconcileWorkspaces: () => Promise.all([
@@ -218,6 +219,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const recoveryImportAdmission = new DatabaseRecoveryImportAdmission();
   let activeRuntimeCommands = 0;
+  let activeNonStorageCommands = 0;
   const updatePreparation = new RuntimeUpdatePreparationGate({
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
@@ -252,7 +254,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         !closed
         && !recoveryImportAdmission.isActive()
         && activeRuntimeCommands === 0
-        && (turns?.activeConversationIds().length ?? 0) === 0,
+        && (turns?.activeConversationIds().length ?? 0) === 0
+        && !store?.isDatabaseCompacting(),
+      databaseCompaction: {
+        blockedReason: (mode) => runtimeDatabaseCompactionBlocker(mode, {
+          closed, updatePreparing: updatePreparation.isAdmissionClosed(), recoveryActive: recoveryImportAdmission.isActive(),
+          activeTurns: (turns?.activeConversationIds().length ?? 0) > 0,
+          activeRuns: (isolatedRuns?.activeCount() ?? 0) > 0 || store.hasRecordedActiveWorkspaceRun(),
+          providerMaintenanceActive: (providerMaintenance?.activeOperations().length ?? 0) > 0,
+          activeRuntimeCommands, activeNonStorageCommands, activeProviderRefreshes,
+        }),
+        trackOperation: trackRuntimeOperation,
+      },
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
       ...(testInitialBackupDelayMs > 0 ? { databaseBackupInitialDelayMs: testInitialBackupDelayMs } : {}),
     },
@@ -894,7 +907,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
+    if (store.isDatabaseVacuuming() && command.type !== "database.storage.get") {
+      send(socket, { type: "request.error", requestId: command.requestId, message: "Database compaction is in progress. Try again after it finishes." });
+      return;
+    }
+    const isStorageCommand = command.type === "database.storage.get" || command.type === "database.storage.compact";
     activeRuntimeCommands += 1;
+    if (!isStorageCommand) activeNonStorageCommands += 1;
     try {
       await trackRuntimeOperation(async () => {
         await testOnlyBeforeRuntimeCommand?.();
@@ -912,6 +931,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
     } finally {
       activeRuntimeCommands -= 1;
+      if (!isStorageCommand) activeNonStorageCommands -= 1;
       if (activeRuntimeCommands === 0) {
         for (const resolveDrain of runtimeCommandDrainWaiters) resolveDrain();
         runtimeCommandDrainWaiters.clear();

@@ -1,12 +1,14 @@
 import type Database from "better-sqlite3";
 
+export const RUNTIME_MMAP_SIZE_BYTES = 268435456;
+
 export function applyRuntimeConnectionPragmas(database: Database.Database): void {
   database.pragma("foreign_keys = ON");
   database.pragma("busy_timeout = 5000");
   database.pragma("journal_mode = WAL");
   database.pragma("synchronous = NORMAL");
   database.pragma("cache_size = -16000");
-  database.pragma("mmap_size = 268435456");
+  database.pragma(`mmap_size = ${RUNTIME_MMAP_SIZE_BYTES}`);
   database.pragma("temp_store = MEMORY");
 }
 
@@ -25,6 +27,9 @@ export function openRuntimeConnection(
   database: Database.Database,
   migrate: (database: Database.Database) => void,
 ): void {
+  if (database.pragma("page_count", { simple: true }) === 0) {
+    database.pragma("auto_vacuum = INCREMENTAL");
+  }
   applyRuntimeConnectionPragmas(database);
   migrate(database);
   optimizeRuntimeConnection(database);

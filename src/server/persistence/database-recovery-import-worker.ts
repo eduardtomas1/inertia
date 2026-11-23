@@ -2,7 +2,6 @@ import { writeFileSync } from "node:fs";
 import { parentPort, workerData } from "node:worker_threads";
 
 import { RuntimeStore } from "../database";
-import { readDatabaseRecoveryExportFile } from "./database-export-file";
 import {
   parseRecoveryImportWorkerRequest,
   type RecoveryImportWorkerEvent,
@@ -55,8 +54,8 @@ async function run(): Promise<void> {
       input.defaultWorkspacePath,
       { recoverInterruptedRuns: false },
     );
-    const result = await store.importRecoveryData(
-      await readDatabaseRecoveryExportFile(input.recoveryPath),
+    const result = await store.importRecoveryFile(
+      input.recoveryPath,
       input.targetDirectory,
       {
         operationId: input.operationId,

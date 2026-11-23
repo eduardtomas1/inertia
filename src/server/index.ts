@@ -123,6 +123,7 @@ import {
 import {
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
+import { reconcileRecoveryAttachmentStaging } from "./persistence/database-recovery-bundle";
 import { runRecoveryImportWorker } from "./persistence/database-recovery-import-worker-client";
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
@@ -1119,76 +1120,43 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (scope.kind === "all") privateConnectGateway.reset();
       else privateConnectGateway.forgetConversation(scope.conversationId);
     },
-    exportRecoveryData: (path, signal) =>
+    exportRecoveryData: (path, signal, exportOptions) =>
       updatePreparation.runDatabaseRecovery(async () => {
-        if (runtimeSafetyLock) {
-          throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
-        }
-        await writeDatabaseRecoveryExportFile(
-          path,
-          store.exportRecoveryData(),
-          { signal },
-        );
+        if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
+        if (exportOptions?.includeAttachments) return await store.exportRecoveryBundle(path, { signal });
+        await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData(), { signal });
+        return { includeAttachments: false, attachments: 0, missingAttachments: 0 };
       }),
     importRecoveryData: (path, targetDirectory, signal, operationId) =>
       updatePreparation.runDatabaseRecovery(async () => {
-        if (runtimeSafetyLock) {
-          throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
-        }
-        if (!operationId) {
-          throw new Error("The database recovery import identity is required.");
-        }
-        if (isWithinScratchRoot(dataDirectory, targetDirectory)) {
-          throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
-        }
+        if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
+        if (!operationId) throw new Error("The database recovery import identity is required.");
+        if (isWithinScratchRoot(dataDirectory, targetDirectory)) throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
         recoveryImportAdmission.begin();
         try {
-          if (activeRuntimeCommands > 0) {
-            await new Promise<void>((resolveDrain) => {
-              runtimeCommandDrainWaiters.add(resolveDrain);
-            });
-          }
+          if (activeRuntimeCommands > 0) await new Promise<void>((resolveDrain) => { runtimeCommandDrainWaiters.add(resolveDrain); });
           await recoveryImportAdmission.drain();
           await postReady.identityRefresh;
           await postReady.artifactReconciliation;
-          if (
-            turns.activeConversationIds().length > 0
-            || store.hasRecordedActiveWorkspaceRun()
-            || providerMaintenance.activeOperations().length > 0
-            || activeProviderRefreshes > 0
-          ) {
-            throw new Error(
-              "Database recovery cannot start while runtime work is active.",
-            );
+          if (turns.activeConversationIds().length > 0 || store.hasRecordedActiveWorkspaceRun()
+            || providerMaintenance.activeOperations().length > 0 || activeProviderRefreshes > 0) {
+            throw new Error("Database recovery cannot start while runtime work is active.");
           }
-          // With command admission closed and active turns ruled out, no new
-          // terminal task can appear after this final store-writer drain.
           await turns.drainSettlementTasks(signal);
           const result = await runRecoveryImportWorker({
-            databasePath,
-            defaultWorkspacePath: options.defaultWorkspacePath,
-            recoveryPath: path,
-            targetDirectory,
-            operationId,
-            signal,
-            ...(recoveryImportFault
-              ? {
-                  fault: {
-                    phase: recoveryImportFault.phase,
-                    markerPath: recoveryImportFault.markerPath,
-                    stallMs: recoveryImportFault.stallMs,
-                  },
-                }
-              : {}),
+            databasePath, defaultWorkspacePath: options.defaultWorkspacePath, recoveryPath: path,
+            targetDirectory, operationId, signal,
+            ...(recoveryImportFault ? { fault: { ...recoveryImportFault } } : {}),
           });
           await new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined);
+          if (result.attachments && result.attachments > 0) {
+            await initializedConversationAttachments.syncImportedReferences(store.attachments()).catch(() => undefined);
+          }
           broadcastSnapshot();
           return result;
         } catch (error) {
-          // Worker termination is confirmed before rejection. Reconcile its
-          // durable filesystem journal only after SQLite has rolled back and
-          // released the independent connection.
           store.reconcileRecoveryImport();
+          await reconcileRecoveryAttachmentStaging(dataDirectory, store.attachments()).catch(() => undefined);
           broadcastSnapshot();
           throw error;
         } finally {

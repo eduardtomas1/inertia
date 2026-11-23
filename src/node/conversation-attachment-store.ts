@@ -618,6 +618,22 @@ export class ConversationAttachmentStore {
     this.autoRemoveOldAttachments = autoRemoveOldAttachments;
   }
 
+  async syncImportedReferences(references: readonly ChatAttachment[]): Promise<void> {
+    this.assertOpen();
+    await this.serialize(async () => {
+      this.assertOpen();
+      if (this.reconciliation || this.reconciliationFailure) return;
+      for (const attachment of references) {
+        if (!UUID_PATTERN.test(attachment.id)) continue;
+        if (this.records?.has(attachment.id)) continue;
+        const current = await this.inspect(attachment.id, undefined, false);
+        if (!current) continue;
+        this.records?.set(attachment.id, current.attachment.size);
+        this.authoritativeRecords.add(attachment.id);
+      }
+    });
+  }
+
   private async availableDiskBytes(): Promise<number> {
     await this.assertStoreRootAuthority();
     return await availableAttachmentDiskBytes(this.directory);

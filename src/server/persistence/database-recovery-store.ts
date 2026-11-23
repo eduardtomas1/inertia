@@ -4,17 +4,20 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import type Database from "better-sqlite3";
 
+import type { ChatAttachment } from "../../shared/contracts";
 import {
   conversationFromRow,
   messageFromRow,
   projectFromRow,
 } from "./codecs";
 import {
+  DATABASE_RECOVERY_BUNDLE_VERSION,
   DATABASE_RECOVERY_EXPORT_FORMAT,
   DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS,
   DATABASE_RECOVERY_EXPORT_MAX_MESSAGES,
   DATABASE_RECOVERY_EXPORT_MAX_PROJECTS,
   DATABASE_RECOVERY_EXPORT_VERSION,
+  type DatabaseRecoveryBundleExport,
   type DatabaseRecoveryExport,
   type DatabaseRecoveryImportResult,
   parseDatabaseRecoveryExport,
@@ -31,12 +34,24 @@ type RecoveryProject = DatabaseRecoveryExport["projects"][number];
 type RecoveryConversation = RecoveryProject["conversations"][number];
 type RecoveryMessage = RecoveryConversation["messages"][number];
 
+export interface RecoveryExportAttachmentReference {
+  readonly projectIndex: number;
+  readonly conversationIndex: number;
+  readonly messageOrdinal: number;
+  readonly messageId: string;
+  readonly conversationId: string;
+  readonly attachment: ChatAttachment;
+}
+
 export interface DatabaseRecoveryImportOptions {
   signal?: AbortSignal;
   operationId?: string;
+  maxAttachments?: number;
+  maxAttachmentBytes?: number;
+  maxTotalAttachmentBytes?: number;
   operations?: PrepareRecoveryImportOptions["operations"] & {
-    /** Privileged test-only worker fault seam. */
     afterMessageCreate?: () => void;
+    beforePublishAttachment?: (id: string) => void;
   };
 }
 
@@ -51,6 +66,7 @@ export interface DatabaseRecoveryImportWriters {
     id: string,
     conversationId: string,
     message: RecoveryMessage,
+    attachments?: ChatAttachment[],
   ): void;
 }
 
@@ -81,10 +97,30 @@ function verifyRecoveredProjectDirectory(path: string, root: string): string {
   return canonical;
 }
 
-export function exportDatabaseRecoveryData(
+export function snapshotRecoveryExportData(
   database: Database.Database,
   maxBytes: number,
-): string {
+  version: typeof DATABASE_RECOVERY_EXPORT_VERSION,
+): {
+  readonly exportData: DatabaseRecoveryExport;
+  readonly attachmentReferences: readonly RecoveryExportAttachmentReference[];
+};
+export function snapshotRecoveryExportData(
+  database: Database.Database,
+  maxBytes: number,
+  version: typeof DATABASE_RECOVERY_BUNDLE_VERSION,
+): {
+  readonly exportData: DatabaseRecoveryBundleExport;
+  readonly attachmentReferences: readonly RecoveryExportAttachmentReference[];
+};
+export function snapshotRecoveryExportData(
+  database: Database.Database,
+  maxBytes: number,
+  version: typeof DATABASE_RECOVERY_EXPORT_VERSION | typeof DATABASE_RECOVERY_BUNDLE_VERSION,
+): {
+  readonly exportData: DatabaseRecoveryExport | DatabaseRecoveryBundleExport;
+  readonly attachmentReferences: readonly RecoveryExportAttachmentReference[];
+} {
   if (database.prepare("PRAGMA foreign_key_check").get()) {
     throw new Error("The database has invalid relationships and cannot be exported safely.");
   }
@@ -105,10 +141,6 @@ export function exportDatabaseRecoveryData(
   ) {
     throw new Error("The recovery export contains too many records.");
   }
-  // Any UTF-8 source byte expands to at most six JSON bytes (for example a
-  // NUL becomes "\\u0000"). Include a conservative per-record allowance
-  // for keys, punctuation, and pretty-print indentation before fetching any
-  // reconstructed message projections into the JS heap.
   let sourceBytes = 1_024
     + counts.projects * 256
     + counts.conversations * 384
@@ -206,74 +238,105 @@ export function exportDatabaseRecoveryData(
       throw new Error("The recovery export exceeds its safe size limit.");
     }
   };
-  const value: DatabaseRecoveryExport = {
-    format: DATABASE_RECOVERY_EXPORT_FORMAT,
-    version: DATABASE_RECOVERY_EXPORT_VERSION,
-    exportedAt: new Date().toISOString(),
-    projects: projects.map((project) => {
-      const scratch = project.workspaceKind === "scratch";
-      account({ name: project.name, path: project.path });
-      return {
-        name: project.name,
-        path: project.path,
-        ...(scratch ? { workspaceKind: "scratch" as const } : {}),
-        conversations: (conversationsByProject.get(project.id) ?? [])
-          .map((conversation) => {
-            account({
-              title: conversation.title,
-              providerId: conversation.providerId,
-              model: conversation.model,
-              reasoningEffort: conversation.reasoningEffort,
-              interactionMode: conversation.interactionMode,
-              accessMode: conversation.accessMode,
-            });
-            return {
-              title: conversation.title,
-              providerId: conversation.providerId,
-              model: conversation.model,
-              reasoningEffort: conversation.reasoningEffort,
-              interactionMode: conversation.interactionMode,
-              accessMode: conversation.accessMode,
-              messages: (messagesByConversation.get(conversation.id) ?? [])
-                .map((message, ordinal) => {
-                  const exportedMessage = {
-                    role: message.role,
-                    content: message.content,
-                    createdAt: message.createdAt,
-                    ordinal,
-                  };
-                  account(exportedMessage);
-                  return exportedMessage;
-                }),
-            };
-          }),
-      };
-    }),
+  const attachmentReferences: RecoveryExportAttachmentReference[] = [];
+  const exportedProjects = projects.map((project, projectIndex) => {
+    const scratch = project.workspaceKind === "scratch";
+    account({ name: project.name, path: project.path });
+    return {
+      name: project.name,
+      path: project.path,
+      ...(scratch ? { workspaceKind: "scratch" as const } : {}),
+      conversations: (conversationsByProject.get(project.id) ?? [])
+        .map((conversation, conversationIndex) => {
+          account({
+            title: conversation.title,
+            providerId: conversation.providerId,
+            model: conversation.model,
+            reasoningEffort: conversation.reasoningEffort,
+            interactionMode: conversation.interactionMode,
+            accessMode: conversation.accessMode,
+          });
+          return {
+            title: conversation.title,
+            providerId: conversation.providerId,
+            model: conversation.model,
+            reasoningEffort: conversation.reasoningEffort,
+            interactionMode: conversation.interactionMode,
+            accessMode: conversation.accessMode,
+            messages: (messagesByConversation.get(conversation.id) ?? [])
+              .map((message, ordinal) => {
+                for (const attachment of message.attachments) {
+                  attachmentReferences.push({
+                    projectIndex,
+                    conversationIndex,
+                    messageOrdinal: ordinal,
+                    messageId: message.id,
+                    conversationId: conversation.id,
+                    attachment,
+                  });
+                }
+                const exportedMessage = {
+                  role: message.role,
+                  content: message.content,
+                  createdAt: message.createdAt,
+                  ordinal,
+                };
+                account(exportedMessage);
+                return exportedMessage;
+              }),
+          };
+        }),
+    };
+  });
+  return {
+    exportData: {
+      format: DATABASE_RECOVERY_EXPORT_FORMAT,
+      version,
+      exportedAt: new Date().toISOString(),
+      projects: exportedProjects,
+    },
+    attachmentReferences,
   };
-  return serializeDatabaseRecoveryExport(value);
 }
 
-export async function importDatabaseRecoveryData(
+export function exportDatabaseRecoveryData(
   database: Database.Database,
-  serialized: string,
-  authorizedRoot: string,
-  writers: DatabaseRecoveryImportWriters,
-  options: DatabaseRecoveryImportOptions = {},
-): Promise<DatabaseRecoveryImportResult> {
-  if (!isAbsolute(authorizedRoot) || authorizedRoot.includes("\0")) {
-    throw new Error("The recovery import destination is invalid.");
-  }
-  const rootMetadata = lstatSync(authorizedRoot);
-  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
-    throw new Error("The recovery import destination is not a local directory.");
-  }
-  const resolvedRoot = resolve(realpathSync(authorizedRoot));
-  const recovery = parseDatabaseRecoveryExport(serialized);
-  const digest = createHash("sha256")
-    .update(serialized, "utf8")
-    .update("\0", "utf8")
-    .update(resolvedRoot, "utf8")
-    .digest("hex");
+  maxBytes: number,
+): string {
+  const { exportData } = snapshotRecoveryExportData(
+    database,
+    maxBytes,
+    DATABASE_RECOVERY_EXPORT_VERSION,
+  );
+  return serializeDatabaseRecoveryExport(exportData);
+}
+
+export interface CommittedDatabaseRecoveryImport {
+  readonly summary: DatabaseRecoveryImportResult;
+  readonly createdProjectIds: readonly string[];
+  readonly createdConversationIds: readonly string[];
+  readonly operationId: string;
+  readonly placeholderProjectCount: number;
+}
+
+export async function importPreparedDatabaseRecovery(options: {
+  readonly database: Database.Database;
+  readonly recovery: DatabaseRecoveryExport;
+  readonly digest: string;
+  readonly resolvedRoot: string;
+  readonly writers: DatabaseRecoveryImportWriters;
+  readonly importOptions?: DatabaseRecoveryImportOptions;
+  readonly attachmentsByMessageKey?: ReadonlyMap<string, ChatAttachment[]>;
+}): Promise<CommittedDatabaseRecoveryImport> {
+  const {
+    database,
+    recovery,
+    digest,
+    resolvedRoot,
+    writers,
+    importOptions = {},
+    attachmentsByMessageKey,
+  } = options;
   const existingReceipt = database.prepare(`
     SELECT projects, conversations, messages
     FROM recovery_import_receipts WHERE digest = ?
@@ -282,15 +345,27 @@ export async function importDatabaseRecoveryData(
     conversations: number;
     messages: number;
   } | undefined;
-  if (existingReceipt) return { ...existingReceipt, alreadyImported: true };
+  const operationId = importOptions.operationId ?? randomUUID();
+  if (existingReceipt) {
+    return {
+      summary: { ...existingReceipt, alreadyImported: true },
+      createdProjectIds: [],
+      createdConversationIds: [],
+      operationId,
+      placeholderProjectCount: 0,
+    };
+  }
+  const placeholderProjectCount = recovery.projects.filter(
+    ({ workspaceKind }) => workspaceKind !== "scratch",
+  ).length;
   const prepared = await prepareRecoveryImport({
     database,
     digest,
     authorizedRoot: resolvedRoot,
-    projectCount: recovery.projects.filter(({ workspaceKind }) => workspaceKind !== "scratch").length,
-    operationId: options.operationId,
-    signal: options.signal,
-    operations: options.operations,
+    projectCount: placeholderProjectCount,
+    operationId,
+    signal: importOptions.signal,
+    operations: importOptions.operations,
   });
   try {
     return database.transaction(() => {
@@ -313,10 +388,12 @@ export async function importDatabaseRecoveryData(
         active_project_id: string | null;
         active_conversation_id: string | null;
       };
+      const createdProjectIds: string[] = [];
+      const createdConversationIds: string[] = [];
       let conversationCount = 0;
       let messageCount = 0;
       let placeholderIndex = 0;
-      for (const importedProject of recovery.projects) {
+      for (const [projectIndex, importedProject] of recovery.projects.entries()) {
         const scratch = importedProject.workspaceKind === "scratch";
         const projectId = scratch
           ? writers.scratchProject()
@@ -324,24 +401,30 @@ export async function importDatabaseRecoveryData(
             prepared.projectPath(placeholderIndex++),
             resolvedRoot,
           ));
-        for (const importedConversation of importedProject.conversations) {
+        if (!scratch) createdProjectIds.push(projectId);
+        for (const [conversationIndex, importedConversation] of importedProject.conversations.entries()) {
           const conversationId = writers.createConversation(
             projectId,
             importedConversation,
           );
+          createdConversationIds.push(conversationId);
           conversationCount += 1;
           const messageIdPrefix = randomUUID().slice(
             0,
             -RECOVERY_MESSAGE_ORDINAL_HEX_DIGITS,
           );
           for (const importedMessage of importedConversation.messages) {
+            const messageAttachments = attachmentsByMessageKey?.get(
+              `${projectIndex}:${conversationIndex}:${importedMessage.ordinal}`,
+            );
             writers.createMessage(
               recoveryMessageId(messageIdPrefix, importedMessage.ordinal),
               conversationId,
               importedMessage,
+              messageAttachments,
             );
             messageCount += 1;
-            options.operations?.afterMessageCreate?.();
+            importOptions.operations?.afterMessageCreate?.();
           }
         }
       }
@@ -371,7 +454,13 @@ export async function importDatabaseRecoveryData(
         new Date().toISOString(),
       );
       prepared.complete();
-      return summary;
+      return {
+        summary,
+        createdProjectIds,
+        createdConversationIds,
+        operationId,
+        placeholderProjectCount,
+      };
     })();
   } catch (error) {
     try {
@@ -386,4 +475,36 @@ export async function importDatabaseRecoveryData(
     }
     throw error;
   }
+}
+
+export async function importDatabaseRecoveryData(
+  database: Database.Database,
+  serialized: string,
+  authorizedRoot: string,
+  writers: DatabaseRecoveryImportWriters,
+  options: DatabaseRecoveryImportOptions = {},
+): Promise<DatabaseRecoveryImportResult> {
+  if (!isAbsolute(authorizedRoot) || authorizedRoot.includes("\0")) {
+    throw new Error("The recovery import destination is invalid.");
+  }
+  const rootMetadata = lstatSync(authorizedRoot);
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+    throw new Error("The recovery import destination is not a local directory.");
+  }
+  const resolvedRoot = resolve(realpathSync(authorizedRoot));
+  const recovery = parseDatabaseRecoveryExport(serialized);
+  const digest = createHash("sha256")
+    .update(serialized, "utf8")
+    .update("\0", "utf8")
+    .update(resolvedRoot, "utf8")
+    .digest("hex");
+  const committed = await importPreparedDatabaseRecovery({
+    database,
+    recovery,
+    digest,
+    resolvedRoot,
+    writers,
+    importOptions: options,
+  });
+  return committed.summary;
 }

@@ -218,4 +218,15 @@ describe("main window preload", () => {
       ["inertia:custom-agent-file", "import"],
     ]);
   });
+
+  it("forwards only a sanitized includeAttachments boolean for recovery exports", async () => {
+    await bridge.exportRecoveryData();
+    await bridge.exportRecoveryData({ includeAttachments: true });
+    await bridge.exportRecoveryData({ includeAttachments: "yes" as unknown as boolean });
+    expect(electron.invoke.mock.calls).toEqual([
+      ["inertia:export-recovery-data"],
+      ["inertia:export-recovery-data", { includeAttachments: true }],
+      ["inertia:export-recovery-data", { includeAttachments: false }],
+    ]);
+  });
 });

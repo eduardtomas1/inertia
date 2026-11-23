@@ -867,6 +867,11 @@ describe("runtime process protocol", () => {
       path,
     } as const;
     expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    expect(parseRuntimeWorkerCommand({ ...command, includeAttachments: true })).toEqual({
+      ...command,
+      includeAttachments: true,
+    });
+    expect(parseRuntimeWorkerCommand({ ...command, includeAttachments: "yes" })).toBeNull();
     expect(parseRuntimeWorkerCommand({
       type: "runtime.database-recovery-cancel",
       operationId,
@@ -911,6 +916,30 @@ describe("runtime process protocol", () => {
       },
     } as const;
     expect(parseRuntimeWorkerEvent(imported)).toEqual(imported);
+    expect(parseRuntimeWorkerEvent({
+      ...imported,
+      summary: { ...imported.summary, attachments: 2, missingAttachments: 1 },
+    })).toEqual({
+      ...imported,
+      summary: { ...imported.summary, attachments: 2, missingAttachments: 1 },
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.database-recovery-result",
+      operationId,
+      generation,
+      operation: "export",
+      ok: true,
+      summary: null,
+      exportSummary: { includeAttachments: true, attachments: 3, missingAttachments: 1 },
+    })).toEqual({
+      type: "runtime.database-recovery-result",
+      operationId,
+      generation,
+      operation: "export",
+      ok: true,
+      summary: null,
+      exportSummary: { includeAttachments: true, attachments: 3, missingAttachments: 1 },
+    });
     expect(parseRuntimeWorkerEvent({
       ...imported,
       operation: "export",

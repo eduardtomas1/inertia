@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  RuntimeDatabaseRecoveryExportSummary,
   RuntimeDatabaseRecoveryOperation,
   RuntimeDatabaseRecoverySummary,
   RuntimeWorkerCommand,
@@ -37,7 +38,22 @@ export class RuntimeDatabaseRecoveryCoordinator {
     operation: RuntimeDatabaseRecoveryOperation,
     path: string,
     targetDirectory?: string,
+    options?: { includeAttachments?: boolean },
   ): Promise<RuntimeDatabaseRecoverySummary | null> {
+    return this.requestDetailed(record, operation, path, targetDirectory, options)
+      .then((result) => result.summary);
+  }
+
+  requestDetailed(
+    record: RuntimeProcessRecord,
+    operation: RuntimeDatabaseRecoveryOperation,
+    path: string,
+    targetDirectory?: string,
+    options?: { includeAttachments?: boolean },
+  ): Promise<{
+    summary: RuntimeDatabaseRecoverySummary | null;
+    exportSummary?: RuntimeDatabaseRecoveryExportSummary;
+  }> {
     if (operation === "import" && !targetDirectory) {
       return Promise.reject(new Error(
         "The recovery import needs an explicitly authorized destination folder.",
@@ -82,6 +98,9 @@ export class RuntimeDatabaseRecoveryCoordinator {
         ...(operation === "import" && targetDirectory
           ? { targetDirectory }
           : {}),
+        ...(operation === "export" && options?.includeAttachments !== undefined
+          ? { includeAttachments: options.includeAttachments }
+          : {}),
       });
     });
   }
@@ -96,8 +115,12 @@ export class RuntimeDatabaseRecoveryCoordinator {
     ) return;
     this.pending.delete(event.operationId);
     this.options.clearTimer(pending.timer);
-    if (event.ok) pending.resolve(event.summary);
-    else if (pending.timedOut && event.cancelled) {
+    if (event.ok) {
+      pending.resolve({
+        summary: event.summary,
+        ...(event.exportSummary ? { exportSummary: event.exportSummary } : {}),
+      });
+    } else if (pending.timedOut && event.cancelled) {
       pending.reject(new Error(
         "The database recovery request timed out and was cancelled.",
       ));

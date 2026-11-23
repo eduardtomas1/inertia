@@ -100,20 +100,47 @@ export type SendDiscordReleaseInfoResult =
   | { sent: true; comparisonLimited: boolean; incidentId?: string }
   | { sent: false; code: import("./application-diagnostics").DiagnosticCode; incidentId?: string };
 
+export interface DatabaseRecoveryExportOptions {
+  includeAttachments?: boolean;
+}
+
+export interface DatabaseRecoveryExportSummary {
+  includeAttachments: boolean;
+  attachments: number;
+  missingAttachments: number;
+}
+
 export interface DatabaseRecoveryImportSummary {
   projects: number;
   conversations: number;
   messages: number;
   alreadyImported: boolean;
+  attachments?: number;
+  missingAttachments?: number;
 }
 
 export type DatabaseRecoveryExportResult =
   | { status: "cancelled" }
-  | { status: "exported" };
+  | { status: "exported"; summary?: DatabaseRecoveryExportSummary };
 
 export type DatabaseRecoveryImportResult =
   | { status: "cancelled" }
   | { status: "imported"; summary: DatabaseRecoveryImportSummary };
+
+export function parseDatabaseRecoveryExportOptions(
+  value: unknown,
+): DatabaseRecoveryExportOptions | null {
+  if (value === undefined) return { includeAttachments: false };
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return { includeAttachments: false };
+  if (
+    keys.length !== 1
+    || keys[0] !== "includeAttachments"
+    || typeof value.includeAttachments !== "boolean"
+  ) return null;
+  return { includeAttachments: value.includeAttachments };
+}
 
 export type AppUpdateState =
   | "idle"
@@ -876,7 +903,9 @@ export interface DesktopBridge {
   onLaunchRequest: (listener: () => void) => () => void;
   selectCodexExecutable: () => Promise<string | null>;
   /** Writes a bounded transcript-only recovery export chosen by the user. */
-  exportRecoveryData: () => Promise<DatabaseRecoveryExportResult>;
+  exportRecoveryData: (
+    options?: DatabaseRecoveryExportOptions,
+  ) => Promise<DatabaseRecoveryExportResult>;
   /** Imports a strictly validated recovery export under fresh local identities. */
   importRecoveryData: () => Promise<DatabaseRecoveryImportResult>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */

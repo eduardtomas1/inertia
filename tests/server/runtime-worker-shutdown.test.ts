@@ -57,7 +57,11 @@ function runtimeWithClose(
       throw new Error("unused");
     }),
     forgetPrivateConnectTranscripts: vi.fn(),
-    exportRecoveryData: vi.fn(async () => undefined),
+    exportRecoveryData: vi.fn(async () => ({
+      includeAttachments: false,
+      attachments: 0,
+      missingAttachments: 0,
+    })),
     importRecoveryData: vi.fn(async () => ({
       projects: 0,
       conversations: 0,

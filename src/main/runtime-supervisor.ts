@@ -334,26 +334,18 @@ export class RuntimeSupervisor {
   releaseUpdatePreparation(): Promise<boolean> {
     return this.updatePreparation.release();
   }
-  databaseRecovery(
-    operation: RuntimeDatabaseRecoveryOperation,
-    path: string,
-    targetDirectory?: string,
-  ): Promise<RuntimeDatabaseRecoverySummary | null> {
-    if (operation === "import" && !targetDirectory) {
-      return Promise.reject(new Error(
-        "The recovery import needs an explicitly authorized destination folder.",
-      ));
-    }
+  databaseRecovery(operation: RuntimeDatabaseRecoveryOperation, path: string, targetDirectory?: string): Promise<RuntimeDatabaseRecoverySummary | null> {
+    if (operation === "import" && !targetDirectory) return Promise.reject(new Error("The recovery import needs an explicitly authorized destination folder."));
     const record = this.current;
-    if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
-    }
-    return this.databaseRecoveryRequests.request(
-      record,
-      operation,
-      path,
-      targetDirectory,
-    );
+    if (this.phase !== "ready" || !record?.ready) return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
+    return this.databaseRecoveryRequests.request(record, operation, path, targetDirectory);
+  }
+  exportRecoveryData(path: string, options?: { includeAttachments?: boolean }): Promise<{ includeAttachments: boolean; attachments: number; missingAttachments: number }> {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
+    return this.databaseRecoveryRequests.requestDetailed(record, "export", path, undefined, options).then((result) => result.exportSummary ?? {
+      includeAttachments: options?.includeAttachments === true, attachments: 0, missingAttachments: 0,
+    });
   }
   privateConnectRequest(
     subject: PrivateConnectRuntimeAuthorization,

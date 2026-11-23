@@ -514,18 +514,27 @@ parentPort.on("message", (messageEvent) => {
         if (runtime !== currentRuntime || stopping) {
           throw new Error("The local runtime is not ready.");
         }
-        return command.operation === "export"
-          ? currentRuntime.exportRecoveryData(command.path, signal).then(() => null)
-          : currentRuntime.importRecoveryData(
-              command.path,
-              command.targetDirectory!,
-              signal,
-              command.operationId,
-            );
+        if (command.operation === "export") {
+          const exportSummary = await currentRuntime.exportRecoveryData(
+            command.path,
+            signal,
+            command.includeAttachments !== undefined
+              ? { includeAttachments: command.includeAttachments }
+              : undefined,
+          );
+          return { summary: null, exportSummary };
+        }
+        const summary = await currentRuntime.importRecoveryData(
+          command.path,
+          command.targetDirectory!,
+          signal,
+          command.operationId,
+        );
+        return { summary };
       },
     );
     void operation.then(
-      (summary) => {
+      (outcome) => {
         if (stopping) return;
         activeDatabaseRecoveryOperations.delete(key);
         postDatabaseRecoveryResult({
@@ -534,7 +543,8 @@ parentPort.on("message", (messageEvent) => {
           generation: command.generation,
           operation: command.operation,
           ok: true,
-          summary,
+          summary: outcome.summary,
+          ...(outcome.exportSummary ? { exportSummary: outcome.exportSummary } : {}),
         });
       },
       (error: unknown) => {

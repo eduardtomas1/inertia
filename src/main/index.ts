@@ -34,6 +34,7 @@ import {
 } from "../shared/claude-backend-profiles.js";
 import {
   type AppHealthSnapshot,
+  parseDatabaseRecoveryExportOptions,
   parseDesktopNotificationRequest,
   DESKTOP_NOTIFICATION_COPY,
   parseOpenProjectPathRequest,
@@ -467,24 +468,34 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.exportRecoveryData, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
+    assertTrustedIpc(event, args.length, args.length <= 1 ? args.length : 0);
     if (!mainWindow || !runtimeSupervisor) {
       throw new Error("Database recovery export is unavailable.");
     }
+    const exportOptions = parseDatabaseRecoveryExportOptions(args[0]);
+    if (!exportOptions) {
+      throw new Error("Invalid recovery export request.");
+    }
+    const includeAttachments = exportOptions.includeAttachments === true;
     const timestamp = new Date().toISOString().slice(0, 10);
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: "Export Inertia recovery data",
-      defaultPath: join(
-        app.getPath("documents"),
-        `Inertia recovery ${timestamp}.json`,
-      ),
-      buttonLabel: "Export recovery file",
-      filters: [{ name: "JSON", extensions: ["json"] }],
-      properties: ["createDirectory", "showOverwriteConfirmation"],
-    });
+    const result = await dialog.showSaveDialog(mainWindow, includeAttachments
+      ? {
+          title: "Export Inertia recovery bundle",
+          defaultPath: join(app.getPath("documents"), `Inertia recovery ${timestamp}.tar`),
+          buttonLabel: "Export recovery bundle",
+          filters: [{ name: "Inertia recovery bundle", extensions: ["tar"] }],
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        }
+      : {
+          title: "Export Inertia recovery data",
+          defaultPath: join(app.getPath("documents"), `Inertia recovery ${timestamp}.json`),
+          buttonLabel: "Export recovery file",
+          filters: [{ name: "JSON", extensions: ["json"] }],
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        });
     if (result.canceled || !result.filePath) return { status: "cancelled" };
-    await runtimeSupervisor.databaseRecovery("export", result.filePath);
-    return { status: "exported" };
+    const summary = await runtimeSupervisor.exportRecoveryData(result.filePath, { includeAttachments });
+    return { status: "exported", summary };
   });
 
   ipcMain.handle(IPC.importRecoveryData, async (event, ...args) => {
@@ -496,7 +507,11 @@ function registerIpcHandlers(): void {
       title: "Import Inertia recovery data",
       defaultPath: app.getPath("documents"),
       buttonLabel: "Import recovery file",
-      filters: [{ name: "JSON", extensions: ["json"] }],
+      filters: [
+        { name: "Inertia recovery files", extensions: ["json", "tar"] },
+        { name: "JSON", extensions: ["json"] },
+        { name: "Inertia recovery bundle", extensions: ["tar"] },
+      ],
       properties: ["openFile"],
     });
     const path = result.canceled ? undefined : result.filePaths[0];

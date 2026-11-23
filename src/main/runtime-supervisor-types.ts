@@ -5,6 +5,7 @@ import type { DocumentPreparationRunner } from "../node/document-preparation";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type { PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
 import type {
+  RuntimeDatabaseRecoveryExportSummary,
   RuntimeDatabaseRecoveryOperation,
   RuntimeDatabaseRecoverySummary,
   RuntimeDatabaseStartupRecoveryReport,
@@ -89,7 +90,10 @@ export interface PendingDatabaseRecoveryRequest {
   operation: RuntimeDatabaseRecoveryOperation;
   timer: RuntimeSupervisorTimer;
   timedOut: boolean;
-  resolve: (summary: RuntimeDatabaseRecoverySummary | null) => void;
+  resolve: (result: {
+    summary: RuntimeDatabaseRecoverySummary | null;
+    exportSummary?: RuntimeDatabaseRecoveryExportSummary;
+  }) => void;
   reject: (error: Error) => void;
 }
 

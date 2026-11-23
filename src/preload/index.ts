@@ -217,8 +217,12 @@ const bridge: MainWindowBridge = Object.freeze({
     return () => { ipcRenderer.removeListener(IPC.launchRequestAvailable, handler); };
   },
   selectCodexExecutable: () => ipcRenderer.invoke(IPC.selectCodexExecutable) as Promise<string | null>,
-  exportRecoveryData: () =>
-    ipcRenderer.invoke(IPC.exportRecoveryData) as ReturnType<
+  exportRecoveryData: (options?: Parameters<DesktopBridge["exportRecoveryData"]>[0]) =>
+    (options === undefined
+      ? ipcRenderer.invoke(IPC.exportRecoveryData)
+      : ipcRenderer.invoke(IPC.exportRecoveryData, {
+          includeAttachments: options.includeAttachments === true,
+        })) as ReturnType<
       DesktopBridge["exportRecoveryData"]
     >,
   importRecoveryData: () =>

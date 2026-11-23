@@ -48,29 +48,15 @@ import {
   createDuoConversationsAtomically,
   type DuoConversationPlan,
 } from "./persistence/duo-conversation-creation";
-import {
-  DatabaseBackupManager,
-  type DatabaseBackupResult,
-  type DatabaseRecoveryReport,
-  recoverDatabaseOnStartup,
-} from "./persistence/database-recovery";
-import {
-  DatabaseCompactionManager,
-  type DatabaseCompactionOptions,
-} from "./persistence/database-compaction";
+import { DatabaseBackupManager, type DatabaseBackupResult, type DatabaseRecoveryReport, recoverDatabaseOnStartup } from "./persistence/database-recovery";
+import { DatabaseCompactionManager, type DatabaseCompactionOptions } from "./persistence/database-compaction";
 import type { DatabaseCompactionSummary, DatabaseStorageStatus } from "../shared/database-storage";
 import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
-import {
-  DATABASE_RECOVERY_EXPORT_MAX_BYTES,
-  type DatabaseRecoveryImportResult,
-} from "./persistence/database-export";
+import { DATABASE_RECOVERY_EXPORT_MAX_BYTES, type DatabaseRecoveryExportResultSummary, type DatabaseRecoveryImportResult } from "./persistence/database-export";
+import { exportDatabaseRecoveryBundle, importDatabaseRecoveryFile } from "./persistence/database-recovery-bundle";
 import { recoveryImportWriters } from "./persistence/recovery-import-writers";
 import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
-import {
-  exportDatabaseRecoveryData,
-  importDatabaseRecoveryData,
-  type DatabaseRecoveryImportOptions,
-} from "./persistence/database-recovery-store";
+import { exportDatabaseRecoveryData, importDatabaseRecoveryData, type DatabaseRecoveryImportOptions } from "./persistence/database-recovery-store";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
@@ -331,27 +317,25 @@ export class RuntimeStore {
     return this.recoveryReport;
   }
 
-  exportRecoveryData(): string {
-    return exportDatabaseRecoveryData(
-      this.database,
-      this.recoveryExportMaxBytes,
-    );
-  }
-
-  async importRecoveryData(
-    serialized: string,
-    authorizedRoot: string,
-    options: DatabaseRecoveryImportOptions = {},
-  ): Promise<DatabaseRecoveryImportResult> {
-    if (isWithinScratchRoot(dirname(resolve(this.database.name)), authorizedRoot)) {
-      throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
-    }
-    return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, recoveryImportWriters({
-      database: this.database,
-      createProject: (name, path, identity) => this.createProject(name, path, identity),
+  private recoveryWriters() {
+    return recoveryImportWriters({
+      database: this.database, createProject: (name, path, identity) => this.createProject(name, path, identity),
       createConversation: (projectId, title, conversation) => this.createConversation(projectId, title, conversation),
       createRecoveredMessage: (...message) => { this.transcriptRepository.createRecoveredMessage(...message); },
-    }), options);
+    });
+  }
+  exportRecoveryData(): string { return exportDatabaseRecoveryData(this.database, this.recoveryExportMaxBytes); }
+  exportRecoveryBundle(outputPath: string, options: { readonly signal?: AbortSignal; readonly maxAttachmentBytes?: number; readonly maxTotalAttachmentBytes?: number } = {}): Promise<DatabaseRecoveryExportResultSummary> {
+    return exportDatabaseRecoveryBundle({ database: this.database, dataDirectory: dirname(resolve(this.database.name)), outputPath, maxExportBytes: this.recoveryExportMaxBytes, ...options });
+  }
+  async importRecoveryData(serialized: string, authorizedRoot: string, options: DatabaseRecoveryImportOptions = {}): Promise<DatabaseRecoveryImportResult> {
+    if (isWithinScratchRoot(dirname(resolve(this.database.name)), authorizedRoot)) throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+    return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, this.recoveryWriters(), options);
+  }
+  async importRecoveryFile(recoveryPath: string, authorizedRoot: string, options: DatabaseRecoveryImportOptions = {}): Promise<DatabaseRecoveryImportResult> {
+    const dataDirectory = dirname(resolve(this.database.name));
+    if (isWithinScratchRoot(dataDirectory, authorizedRoot)) throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+    return importDatabaseRecoveryFile({ database: this.database, dataDirectory, recoveryPath, authorizedRoot, writers: this.recoveryWriters(), importOptions: options, maxExportBytes: this.recoveryExportMaxBytes });
   }
 
   reconcileRecoveryImport(): void {

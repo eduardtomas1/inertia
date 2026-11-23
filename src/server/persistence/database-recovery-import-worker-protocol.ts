@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 import {
+  DATABASE_RECOVERY_BUNDLE_MAX_ATTACHMENTS,
   DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS,
   DATABASE_RECOVERY_EXPORT_MAX_MESSAGES,
   DATABASE_RECOVERY_EXPORT_MAX_PROJECTS,
@@ -36,6 +37,8 @@ const receipt = z.object({
   conversations: z.number().int().min(0).max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS),
   messages: z.number().int().min(0).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES),
   alreadyImported: z.boolean(),
+  attachments: z.number().int().min(0).max(DATABASE_RECOVERY_BUNDLE_MAX_ATTACHMENTS).optional(),
+  missingAttachments: z.number().int().min(0).max(DATABASE_RECOVERY_BUNDLE_MAX_ATTACHMENTS).optional(),
 }).strict();
 const result = z.discriminatedUnion("ok", [
   z.object({

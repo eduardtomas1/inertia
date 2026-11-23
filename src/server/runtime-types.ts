@@ -25,7 +25,10 @@ import type {
 } from "../node/conversation-attachment-store-child.js";
 import type { RuntimeStore } from "./database.js";
 import type { AgentHarnessRegistry } from "./provider/agent-harness-registry.js";
-import type { DatabaseRecoveryImportResult } from "./persistence/database-export.js";
+import type {
+  DatabaseRecoveryExportResultSummary,
+  DatabaseRecoveryImportResult,
+} from "./persistence/database-export.js";
 import type { RuntimeAttachmentBroker } from "./runtime/attachments/trusted-attachment-resolver.js";
 import type { RuntimeSecureFileBroker } from "./secure-files.js";
 import type {
@@ -134,7 +137,11 @@ export interface RunningRuntime extends RuntimeHtmlRenderReader, RuntimeAgentSec
     preparationId: string,
   ) => PrivateConnectRuntimeResponse;
   forgetPrivateConnectTranscripts: (scope: RuntimePrivateConnectForgetScope) => void;
-  exportRecoveryData: (path: string, signal?: AbortSignal) => Promise<void>;
+  exportRecoveryData: (
+    path: string,
+    signal?: AbortSignal,
+    options?: { includeAttachments?: boolean },
+  ) => Promise<DatabaseRecoveryExportResultSummary>;
   importRecoveryData: (
     path: string,
     targetDirectory: string,

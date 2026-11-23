@@ -15,6 +15,7 @@ import {
 } from "../node/runtime-modern-recovery-authorities.js";
 import type { RuntimeOptions } from "./runtime-types.js";
 import { RuntimeStore } from "./database.js";
+import { reconcileRecoveryAttachmentStaging } from "./persistence/database-recovery-bundle.js";
 import { reconcileInterruptedDuoLaunches } from
   "./runtime/duo/duo-launch-coordinator.js";
 import { recoverInterruptedTurns } from
@@ -100,6 +101,7 @@ export async function initializeRuntimePersistence(
       },
     );
     if (!runtimeSafetyLock) {
+      await reconcileRecoveryAttachmentStaging(dataDirectory, store.attachments());
       await conversationAttachments.reconcile(store.attachments());
       if (manuallyRetiredGenerations.length > 0
         && process.env.NODE_ENV === "test") {

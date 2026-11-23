@@ -8,6 +8,7 @@ import {
   AUTO_COMPACT_MAX_FULL_VACUUM_BYTES,
   AUTO_COMPACT_MIN_RECLAIMABLE_BYTES,
   AUTO_COMPACT_MIN_RECLAIMABLE_RATIO,
+  DATABASE_VACUUM_UNINTERRUPTIBLE_MESSAGE,
   FULL_VACUUM_DISK_MARGIN_BYTES,
   INCREMENTAL_VACUUM_PAGES_PER_STEP,
   type DatabaseAutoVacuumMode,
@@ -29,7 +30,6 @@ export const DATABASE_COMPACTION_IDLE_INTERVAL_MS = 10 * 60 * 1_000;
 export const DATABASE_COMPACTION_INITIAL_IDLE_DELAY_MS = 60 * 1_000;
 export const DATABASE_COMPACTION_STEP_YIELD_MS = 25;
 export const DATABASE_COMPACTION_MAX_IDLE_STEPS = 64;
-export const DATABASE_COMPACTION_VACUUM_TIMEOUT_MS = 5 * 60 * 1_000;
 
 export type DatabaseCompactionTriggerMode = "manual" | "idle";
 export type AvailableDiskBytesProbe = (directoryPath: string) => number | Promise<number>;
@@ -51,7 +51,6 @@ export interface DatabaseCompactionOptions {
   readonly maxIdleIncrementalSteps?: number;
   readonly idleIntervalMs?: number;
   readonly initialIdleDelayMs?: number;
-  readonly vacuumTimeoutMs?: number;
   readonly trackOperation?: <T>(operation: () => Promise<T>) => Promise<T>;
   readonly onStateChange?: (status: DatabaseStorageStatus) => void;
   readonly onError?: (error: unknown) => void;
@@ -70,6 +69,7 @@ export function runtimeDatabaseCompactionBlocker(
     activeRuntimeCommands: number;
     activeNonStorageCommands: number;
     activeProviderRefreshes: number;
+    activeBackgroundWrites?: number;
   },
 ): string | null {
   if (state.closed) return "The runtime is shutting down.";
@@ -88,10 +88,11 @@ export function runtimeDatabaseCompactionBlocker(
   if (state.providerMaintenanceActive) {
     return "Wait for provider maintenance to finish before compacting the database.";
   }
-  if (mode === "idle" && (state.activeRuntimeCommands > 0 || state.activeProviderRefreshes > 0)) {
+  const backgroundWrites = (state.activeBackgroundWrites ?? 0) > 0;
+  if (mode === "idle" && (state.activeRuntimeCommands > 0 || state.activeProviderRefreshes > 0 || backgroundWrites)) {
     return "Runtime work is active.";
   }
-  if (mode === "manual" && state.activeNonStorageCommands > 0) {
+  if (mode === "manual" && (state.activeNonStorageCommands > 0 || backgroundWrites)) {
     return "Wait for pending operations to finish before compacting the database.";
   }
   return null;
@@ -218,7 +219,6 @@ function yieldStep(delayMs: number, signal: AbortSignal): Promise<void> {
 export function runFullVacuumOffThread(
   databasePath: string,
   signal: AbortSignal,
-  timeoutMs = DATABASE_COMPACTION_VACUUM_TIMEOUT_MS,
 ): Promise<void> {
   const resolvedPath = resolve(databasePath);
   if (!regularOwnedFile(resolvedPath)) {
@@ -261,34 +261,12 @@ export function runFullVacuumOffThread(
     });
     let receipt: { ok: true } | { ok: false; message: string } | undefined;
     let settled = false;
-    let stopping = false;
     const finish = (error?: unknown): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      signal.removeEventListener("abort", cancel);
       if (error !== undefined) rejectVacuum(error);
       else resolveVacuum();
     };
-    const stop = (error: unknown): void => {
-      if (settled || stopping) return;
-      stopping = true;
-      clearTimeout(timer);
-      signal.removeEventListener("abort", cancel);
-      worker.unref();
-      void worker.terminate().then(
-        () => finish(error),
-        (terminationError: unknown) => finish(terminationError),
-      );
-    };
-    const cancel = (): void => stop(new DatabaseCompactionCancelledError());
-    const timer = setTimeout(
-      () => stop(new DatabaseCompactionError("Database compaction timed out.")),
-      Math.max(1_000, Math.trunc(timeoutMs)),
-    );
-    timer.unref();
-    signal.addEventListener("abort", cancel, { once: true });
-    if (signal.aborted) cancel();
     worker.once("message", (value: unknown) => {
       if (value && typeof value === "object" && "ok" in value && value.ok === true) {
         receipt = { ok: true };
@@ -299,9 +277,8 @@ export function runFullVacuumOffThread(
         receipt = { ok: false, message };
       }
     });
-    worker.once("error", (error) => stop(error));
+    worker.once("error", (error) => finish(error));
     worker.once("exit", (code) => {
-      if (stopping) return;
       if (code !== 0 || receipt === undefined) {
         finish(new DatabaseCompactionError("The database compaction worker stopped unexpectedly."));
         return;
@@ -323,6 +300,7 @@ export class DatabaseCompactionManager {
   private initialTimer: NodeJS.Timeout | null = null;
   private intervalTimer: NodeJS.Timeout | null = null;
   private started = false;
+  private readonly writableWaiters = new Set<() => void>();
 
   constructor(
     private readonly database: Database.Database,
@@ -379,6 +357,17 @@ export class DatabaseCompactionManager {
 
   isHoldingExclusiveWork(): boolean {
     return this.state === "checkpointing" || this.state === "vacuuming";
+  }
+
+  whenWritable(): Promise<void> {
+    if (!this.isHoldingExclusiveWork()) return Promise.resolve();
+    return new Promise<void>((resolveWritable) => {
+      this.writableWaiters.add(resolveWritable);
+    });
+  }
+
+  async whenSettled(): Promise<void> {
+    while (this.inFlight) await this.inFlight.catch(() => undefined);
   }
 
   status(): DatabaseStorageStatus {
@@ -465,6 +454,9 @@ export class DatabaseCompactionManager {
     const operation = this.inFlight;
     this.inFlightAbort?.abort();
     if (!operation) return;
+    if (this.state === "vacuuming") {
+      console.warn(`Waiting for database compaction to finish before closing. ${DATABASE_VACUUM_UNINTERRUPTIBLE_MESSAGE}`);
+    }
     try {
       await operation;
     } catch (error) {
@@ -481,6 +473,11 @@ export class DatabaseCompactionManager {
 
   private setState(next: DatabaseCompactionState): void {
     this.state = next;
+    if (!this.isHoldingExclusiveWork() && this.writableWaiters.size > 0) {
+      const waiters = [...this.writableWaiters];
+      this.writableWaiters.clear();
+      for (const resolveWritable of waiters) resolveWritable();
+    }
     if (this.cachedStatus) {
       this.cachedStatus = {
         ...this.cachedStatus,
@@ -577,14 +574,9 @@ export class DatabaseCompactionManager {
         throw new DatabaseCompactionError(blockedBeforeVacuum);
       }
       this.setState("vacuuming");
-      const vacuumRunner = this.options.runFullVacuum
-        ?? ((path: string, abortSignal: AbortSignal) => runFullVacuumOffThread(
-          path,
-          abortSignal,
-          this.options.vacuumTimeoutMs ?? DATABASE_COMPACTION_VACUUM_TIMEOUT_MS,
-        ));
+      const vacuumRunner = this.options.runFullVacuum ?? runFullVacuumOffThread;
       await vacuumRunner(this.databasePath, signal);
-      if (!signal.aborted && this.database.open && walFileBytes(this.databasePath) > 0) {
+      if (this.database.open && walFileBytes(this.databasePath) > 0) {
         this.database.pragma("wal_checkpoint(TRUNCATE)");
       }
     } finally {

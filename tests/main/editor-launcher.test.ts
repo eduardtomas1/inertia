@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { buildWindowsCommandShimInvocation } from "../../src/node/windows-command-shim";
@@ -17,6 +22,7 @@ import {
   type EditorSpawnRequest,
 } from "../../src/main/editor-launcher";
 import { openDesktopLink } from "../../src/main/external-link-open";
+import { userWindowsCurrentDirectorySearch } from "../../src/node/windows-current-directory-search";
 
 const fileStat: EditorFileStats = {
   isFile: () => true,
@@ -431,7 +437,77 @@ describe("editor launch authorization and process hygiene", () => {
       shell: false,
     });
     expect(spawned[0]!.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
-    expect(spawned[0]!.env.OPENAI_API_KEY).toBeUndefined();
+    expect(spawned[0]!.env.OPENAI_API_KEY).toBe("secret-key");
+  });
+
+  it("launches editors with the user's environment minus runtime and Inertia variables", async () => {
+    const toolboxScript = "C:\\Users\\PC\\AppData\\Local\\JetBrains\\Toolbox\\scripts\\idea1.cmd";
+    const spawned: EditorSpawnRequest[] = [];
+    const launcher = new EditorLauncher({
+      platform: "win32",
+      env: () => ({
+        PATH: "C:\\Windows\\System32",
+        PATHEXT: ".EXE;.CMD;.BAT",
+        ComSpec: "C:\\Windows\\System32\\cmd.exe",
+        LOCALAPPDATA: "C:\\Users\\PC\\AppData\\Local",
+        JAVA_HOME: "C:\\Java\\jdk-21",
+        GOPATH: "C:\\Users\\PC\\go",
+        VIRTUAL_ENV: "C:\\repo\\.venv",
+        MY_PROJECT_FLAG: "on",
+        ELECTRON_RUN_AS_NODE: "1",
+        Electron_No_Attach_Console: "1",
+        NODE_OPTIONS: "--require hook.js",
+        NODE_CHANNEL_FD: "3",
+        INERTIA_HOST_MCP_TOKEN: "host-token",
+        INERTIA_DATA_DIR: "C:\\Users\\PC\\AppData\\Roaming\\Inertia",
+        NoDefaultCurrentDirectoryInExePath: "1",
+      }),
+      homeDir: () => "C:\\Users\\PC",
+      ...makeFakeFs({
+        platform: "win32",
+        files: [toolboxScript, "C:\\repo\\src\\app.ts"],
+        dirs: ["C:\\repo"],
+        entries: { "C:\\Users\\PC\\AppData\\Local\\JetBrains\\Toolbox\\scripts": ["idea1.cmd"] },
+      }),
+      spawnProcess: async (request) => { spawned.push(request); },
+    });
+
+    await launcher.launchEditor({ editor: "idea", targetPath: "C:\\repo\\src\\app.ts", authorizedRoot: "C:\\repo", line: 4 });
+
+    expect(spawned).toHaveLength(1);
+    const [request] = spawned;
+    expect(request).toMatchObject({ shell: false, windowsVerbatimArguments: true });
+    expect(request!.env).toMatchObject({
+      JAVA_HOME: "C:\\Java\\jdk-21",
+      GOPATH: "C:\\Users\\PC\\go",
+      VIRTUAL_ENV: "C:\\repo\\.venv",
+      MY_PROJECT_FLAG: "on",
+    });
+    for (const key of ["ELECTRON_RUN_AS_NODE", "Electron_No_Attach_Console", "NODE_OPTIONS", "NODE_CHANNEL_FD", "INERTIA_HOST_MCP_TOKEN", "INERTIA_DATA_DIR"]) {
+      expect(request!.env[key]).toBeUndefined();
+    }
+    expect(request!.env.NoDefaultCurrentDirectoryInExePath).toBe(userWindowsCurrentDirectorySearch());
+    expect(request!.args.join(" ")).not.toContain("NoDefaultCurrentDirectoryInExePath");
+    expect(request!.args.join(" ")).toContain("idea1.cmd");
+  });
+
+  it("falls back to the system file handler when the preferred editor cannot launch", async () => {
+    const shell = {
+      openExternal: vi.fn(async () => undefined),
+      openPath: vi.fn(async () => ""),
+      showItemInFolder: vi.fn(),
+    };
+    const directory = mkdtempSync(join(tmpdir(), "inertia-editor-fallback-"));
+    try {
+      const file = join(directory, "notes.txt");
+      writeFileSync(file, "notes");
+      const editorOpen = vi.fn(async () => { throw new Error("Visual Studio Code is not installed."); });
+      await expect(openDesktopLink(pathToFileURL(file).href, shell, process.platform, editorOpen)).resolves.toBeUndefined();
+      expect(editorOpen).toHaveBeenCalledOnce();
+      expect(shell.openPath).toHaveBeenCalledExactlyOnceWith(file);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("forwards line and column from file:// links to the preferred editor hook", async () => {

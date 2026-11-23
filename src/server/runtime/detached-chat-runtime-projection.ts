@@ -39,6 +39,19 @@ export function projectDetachedLibrary(
   };
 }
 
+export interface DetachedChatRecordLookup {
+  conversation(conversationId: string): AppSnapshot["conversations"][number] | null;
+  project(projectId: string): AppSnapshot["projects"][number] | null;
+}
+
+function lookedUp<T>(read: () => T | null | undefined): T | null {
+  try {
+    return read() ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export type DetachedWatcherLinkLookup = (
   linkId: string,
 ) => Pick<WatcherLinkView, "watcherConversationId" | "watchedConversationId"> | null;
@@ -82,13 +95,16 @@ export function detachedContextRequestShareable(
 export function projectDetachedChatSnapshot(
   snapshot: AppSnapshot,
   conversationId: string,
+  records?: DetachedChatRecordLookup,
 ): AppSnapshot {
-  const conversation = snapshot.conversations.find(
-    ({ id }) => id === conversationId,
-  ) ?? null;
-  const project = conversation
-    ? snapshot.projects.find(({ id }) => id === conversation.projectId) ?? null
+  const candidate = snapshot.conversations.find(({ id }) => id === conversationId)
+    ?? (records ? lookedUp(() => records.conversation(conversationId)) : null);
+  const conversation = candidate?.id === conversationId ? candidate : null;
+  const projectCandidate = conversation
+    ? snapshot.projects.find(({ id }) => id === conversation.projectId)
+      ?? (records ? lookedUp(() => records.project(conversation.projectId)) : null)
     : null;
+  const project = projectCandidate?.id === conversation?.projectId ? projectCandidate : null;
 
   return {
     projects: project ? [project] : [],
@@ -120,6 +136,7 @@ export function projectRuntimeFrameForAuthority(
   subscription: RuntimeDetailSubscription,
   authority: RuntimeClientAuthority,
   watcherLink?: DetachedWatcherLinkLookup,
+  records?: DetachedChatRecordLookup,
 ): RuntimeSequencedFrame {
   if (authority.kind === "main") {
     return projectRuntimeFrame(frame, subscription);
@@ -141,6 +158,7 @@ export function projectRuntimeFrameForAuthority(
           snapshot: projectDetachedChatSnapshot(
             frame.event.snapshot,
             authority.conversationId,
+            records,
           ),
         },
       };

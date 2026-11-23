@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import {
   metadataFromUnknown,
+  RECOVERY_IMPORT_STAGING_PATTERN,
   type PersistedAttachmentMetadata,
 } from "../../node/conversation-attachment-store-metadata";
 import {
@@ -35,8 +36,6 @@ export const RECOVERY_ATTACHMENT_DIRECTORY_MODE = 0o700;
 export const RECOVERY_ATTACHMENT_FILE_MODE = 0o600;
 export const RECOVERY_ATTACHMENT_UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const STAGING_DIRECTORY_PATTERN =
-  /^\.recovery-import-([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.partial$/iu;
 
 export interface AttachmentRootAuthority {
   readonly path: string;
@@ -496,7 +495,7 @@ export async function reconcileRecoveryAttachmentStaging(
   }
   const entries = await readdir(rootAuthority.path, { withFileTypes: true });
   for (const entry of entries) {
-    if (!STAGING_DIRECTORY_PATTERN.test(entry.name)) continue;
+    if (!RECOVERY_IMPORT_STAGING_PATTERN.test(entry.name)) continue;
     await assertAttachmentRootAuthority(rootAuthority);
     const stagingPath = join(rootAuthority.path, entry.name);
     const stagingStat = await lstat(stagingPath, { bigint: true }).catch(() => null);

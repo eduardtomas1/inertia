@@ -189,6 +189,23 @@ describe("StorageStatusSettings", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Reclaiming space…" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByText(/can't be cancelled/u)).toBeNull();
+
+    rerender(
+      <StorageStatusSettings
+        health={baseHealth}
+        healthUnavailable={false}
+        clearingCache={false}
+        clearCacheNotice={null}
+        databaseStorage={{ ...baseDatabaseStorage, compactionState: "vacuuming", busy: true }}
+        compactingDatabase={true}
+        onClearCache={vi.fn(async () => undefined)}
+        onCompactDatabase={vi.fn(async () => undefined)}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Compacting…" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getAllByRole("status").map((status) => status.textContent))
+      .toContain("Compacting… A running VACUUM can't be cancelled and will finish.");
   });
 });
 

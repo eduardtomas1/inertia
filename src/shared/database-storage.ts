@@ -3,6 +3,7 @@ export const AUTO_COMPACT_MAX_FULL_VACUUM_BYTES = 512 * 1024 * 1024;
 export const AUTO_COMPACT_MIN_RECLAIMABLE_RATIO = 0.2;
 export const INCREMENTAL_VACUUM_PAGES_PER_STEP = 256;
 export const FULL_VACUUM_DISK_MARGIN_BYTES = 64 * 1024 * 1024;
+export const DATABASE_VACUUM_UNINTERRUPTIBLE_MESSAGE = "A running VACUUM can't be cancelled and will finish.";
 
 export const DATABASE_AUTO_VACUUM_MODES = ["none", "full", "incremental"] as const;
 export type DatabaseAutoVacuumMode = (typeof DATABASE_AUTO_VACUUM_MODES)[number];

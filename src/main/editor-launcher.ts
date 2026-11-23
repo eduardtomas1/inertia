@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 
 import { buildWindowsCommandShimInvocation } from "../node/windows-command-shim";
-import { withoutWindowsCurrentDirectorySearch } from "../node/windows-current-directory-search";
+import { withoutWindowsCurrentDirectorySearch, withUserWindowsCurrentDirectorySearch } from "../node/windows-current-directory-search";
 import {
   buildEditorArguments,
   EDITORS,
@@ -231,6 +231,31 @@ export function sanitizeEditorEnvironment(
     }
   }
   return withoutWindowsCurrentDirectorySearch(sanitized, platform);
+}
+
+const EDITOR_WITHHELD_ENVIRONMENT_KEYS = new Set([
+  "NODE_OPTIONS",
+  "NODE_CHANNEL_FD",
+  "NODE_CHANNEL_SERIALIZATION_MODE",
+  "NODE_UNIQUE_ID",
+]);
+
+export function editorLaunchEnvironment(
+  source: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(source)) {
+    const normalized = key.toUpperCase();
+    if (
+      value === undefined
+      || normalized.startsWith("ELECTRON_")
+      || normalized.startsWith("INERTIA_")
+      || EDITOR_WITHHELD_ENVIRONMENT_KEYS.has(normalized)
+    ) continue;
+    environment[key] = value;
+  }
+  return withUserWindowsCurrentDirectorySearch(environment, platform);
 }
 
 async function defaultProbeVersion(
@@ -737,13 +762,14 @@ export class EditorLauncher {
       literalPath,
     });
 
-    const sanitizedEnv = sanitizeEditorEnvironment(this.deps.env(), this.deps.platform);
+    const launchEnv = editorLaunchEnvironment(this.deps.env(), this.deps.platform);
     const invocation = buildWindowsCommandShimInvocation(
       resolved.command,
       args,
-      sanitizedEnv,
+      launchEnv,
       this.deps.platform,
       {
+        guardCurrentDirectorySearch: false,
         unsafeErrorMessage: `${editor.label} cannot open a path containing control characters or double quotes.`,
       },
     );
@@ -751,7 +777,7 @@ export class EditorLauncher {
     await this.deps.spawnProcess({
       command: invocation.command,
       args: invocation.args,
-      env: sanitizedEnv,
+      env: launchEnv,
       detached: true,
       stdio: "ignore",
       shell: false,

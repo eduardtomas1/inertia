@@ -102,7 +102,9 @@ export async function initializeRuntimePersistence(
     );
     if (!runtimeSafetyLock) {
       await reconcileRecoveryAttachmentStaging(dataDirectory, store.attachments());
-      await conversationAttachments.reconcile(store.attachments());
+      await conversationAttachments.reconcile(store.attachments(), {
+        isReferenced: (id) => store.referencedAttachmentIds([id]).has(id),
+      });
       if (manuallyRetiredGenerations.length > 0
         && process.env.NODE_ENV === "test") {
         options.testOnlyBeforeLegacyInterruptedRecovery?.();

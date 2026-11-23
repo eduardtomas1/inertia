@@ -1,7 +1,7 @@
 import { useId } from "react";
 import { Database, Trash2 } from "lucide-react";
 import type { DatabaseBackupStatus } from "@shared/contracts";
-import type { DatabaseCompactionState, DatabaseStorageStatus } from "@shared/database-storage";
+import { DATABASE_VACUUM_UNINTERRUPTIBLE_MESSAGE, type DatabaseCompactionState, type DatabaseStorageStatus } from "@shared/database-storage";
 import type { AppHealthSnapshot } from "@shared/desktop";
 import {
   DATABASE_BACKUP_INTERVAL_MS,
@@ -119,6 +119,7 @@ export function StorageStatusSettings({
         {compactionBusy && (
           <small role="status" aria-live="polite">
             {compactionStateLabel(databaseStorage?.compactionState)}
+            {databaseStorage?.compactionState === "vacuuming" && ` ${DATABASE_VACUUM_UNINTERRUPTIBLE_MESSAGE}`}
           </small>
         )}
         {!compactionBusy && blockedExplanation && (

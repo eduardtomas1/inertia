@@ -51,7 +51,7 @@ export async function openDesktopLink(
       const position = (strippedLocation ? parseSourceLocationPosition(strippedLocation) : null)
         ?? (url.hash ? parseSourceLocationPosition(url.hash) : null)
         ?? {};
-      if (openInPreferredEditor && await openInPreferredEditor(path, position)) {
+      if (openInPreferredEditor && await openInPreferredEditor(path, position).catch(() => false)) {
         return;
       }
       const error = await openAuthorizedProjectPath(path, "open-link", shell, platform);

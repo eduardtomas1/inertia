@@ -50,6 +50,7 @@ import {
   isExpectedCheckpointAbsence,
 } from "./runtime/turns/turn-checkpoint-notice";
 import type { TurnCheckpointCapture } from "./runtime/turns/turn-controller-types";
+import { runDatabaseWrite, type DatabaseWriteRunner } from "./runtime/database-write-gate";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
@@ -73,6 +74,7 @@ export interface TurnGitArtifactManagerOptions {
   reportIncident?: (observation: IncidentObservation) => unknown;
   onPruneFailure?: (failure: CheckpointPruneFailure) => void;
   deleteCheckpointRefs?: PruneCheckpointRefsOptions["deleteRefs"];
+  databaseWrites?: DatabaseWriteRunner;
 }
 
 export interface TurnGitArtifactOperationOptions {
@@ -230,6 +232,7 @@ export class TurnGitArtifactManager {
   readonly #reportIncident: ((observation: IncidentObservation) => unknown) | undefined;
   readonly #onPruneFailure: ((failure: CheckpointPruneFailure) => void) | undefined;
   readonly #deleteCheckpointRefs: PruneCheckpointRefsOptions["deleteRefs"];
+  readonly #databaseWrites: DatabaseWriteRunner | undefined;
   readonly #finalizations = new Map<string, Promise<void>>();
   readonly #activeCaptureTurns = new Set<string>();
   readonly #liveComparisons = new Map<string, LiveComparison>();
@@ -263,6 +266,7 @@ export class TurnGitArtifactManager {
     this.#reportIncident = options.reportIncident;
     this.#onPruneFailure = options.onPruneFailure;
     this.#deleteCheckpointRefs = options.deleteCheckpointRefs;
+    this.#databaseWrites = options.databaseWrites;
   }
 
   beginShutdown(deadlineAt: number): void {
@@ -549,7 +553,7 @@ export class TurnGitArtifactManager {
   finalize(input: CaptureTurnGitArtifactInput): Promise<void> {
     const existing = this.#finalizations.get(input.turn.id);
     if (existing) return existing;
-    const task = this.#finalizeBounded(input).finally(() => {
+    const task = runDatabaseWrite(this.#databaseWrites, () => this.#finalizeBounded(input)).finally(() => {
       if (this.#finalizations.get(input.turn.id) === task) {
         this.#finalizations.delete(input.turn.id);
       }
@@ -558,7 +562,11 @@ export class TurnGitArtifactManager {
     return task;
   }
 
-  async reconcile(): Promise<boolean> {
+  reconcile(): Promise<boolean> {
+    return runDatabaseWrite(this.#databaseWrites, () => this.#reconcileArtifacts());
+  }
+
+  async #reconcileArtifacts(): Promise<boolean> {
     const beforeArtifacts = this.store.turnGitArtifactRevision();
     const beforeCheckpoints = this.store.checkpointExpirationRevision();
     for (const artifact of this.store.pendingTurnGitArtifacts()) {
@@ -890,7 +898,7 @@ export class TurnGitArtifactManager {
       await this.#pruneInFlight;
       return;
     }
-    const task = this.#runPruneLoop().finally(() => {
+    const task = runDatabaseWrite(this.#databaseWrites, () => this.#runPruneLoop()).finally(() => {
       if (this.#pruneInFlight === task) this.#pruneInFlight = null;
     });
     this.#pruneInFlight = task;

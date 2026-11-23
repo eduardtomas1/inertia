@@ -304,6 +304,8 @@ export class RuntimeStore {
   runIdleDatabaseCompaction(): Promise<DatabaseCompactionSummary | null> { return this.compactionManager.runIdlePass(); }
   isDatabaseCompacting(): boolean { return this.compactionManager.isCompacting(); }
   isDatabaseVacuuming(): boolean { return this.compactionManager.isHoldingExclusiveWork(); }
+  whenDatabaseWritable(): Promise<void> { return this.compactionManager.whenWritable(); }
+  whenDatabaseCompactionSettled(): Promise<void> { return this.compactionManager.whenSettled(); }
 
   createInitialBackup(options: { quietGraceMs?: number } = {}): Promise<DatabaseBackupResult | null> {
     return this.backupManager.requestInitialBackup(options.quietGraceMs ?? 0);

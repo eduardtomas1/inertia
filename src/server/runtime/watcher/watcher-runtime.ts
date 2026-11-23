@@ -36,6 +36,7 @@ import {
   WatcherWakeScheduler,
   type WatcherWakeSchedulerDependencies,
 } from "./watcher-wake-scheduler";
+import { runDatabaseWrite, type DatabaseWriteRunner } from "../database-write-gate";
 
 const WATCHER_OUTPUT_RECORD_MS = 15_000;
 export const WATCHER_PENDING_PUBLISH_MS = 1_000;
@@ -69,6 +70,7 @@ interface WatcherRuntimeDependencies {
   signal?: AbortSignal;
   platform?: NodeJS.Platform;
   turnDiff?(turnId: string): Promise<WatcherTurnDiffSnapshot>;
+  databaseWrites?: DatabaseWriteRunner;
   wakeTiming?: Pick<
     WatcherWakeSchedulerDependencies,
     "settleDelayMs" | "stallTickMs" | "quietAfterMs" | "retryBaseMs" | "retryMaxMs" | "recheckMs"
@@ -167,7 +169,7 @@ export function createWatcherRuntime(dependencies: WatcherRuntimeDependencies): 
     clock,
     ...dependencies.wakeTiming,
     onWake: async (linkId, trigger, context) => {
-      const attempt = await runner.run(linkId, trigger, context);
+      const attempt = await runDatabaseWrite(dependencies.databaseWrites, () => runner.run(linkId, trigger, context));
       if (attempt === "skipped") {
         const link = store.watcherLinks.get(linkId);
         if (!link || link.status === "detached") forget(linkId);

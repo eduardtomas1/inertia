@@ -19,6 +19,7 @@ import {
   projectDetachedChatInputRequest,
   projectDetachedChatSnapshot,
   projectRuntimeFrameForAuthority,
+  type DetachedChatRecordLookup,
   type DetachedWatcherLinkLookup,
 } from "./detached-chat-runtime-projection";
 import {
@@ -75,6 +76,7 @@ export class RuntimeSyncHub<Socket> {
     ) => void,
     private readonly sequencer = new RuntimeSequencer(),
     private readonly watcherLink?: DetachedWatcherLinkLookup,
+    private readonly detachedChatRecords?: DetachedChatRecordLookup,
   ) {}
 
   get connectionCount(): number {
@@ -175,6 +177,7 @@ export class RuntimeSyncHub<Socket> {
               subscription,
               authority,
               this.watcherLink,
+              this.detachedChatRecords,
             )
           : frame);
       }
@@ -185,7 +188,7 @@ export class RuntimeSyncHub<Socket> {
         type: "server.welcome",
         protocolVersion: PROTOCOL_VERSION,
         snapshot: authority.kind === "detached-chat"
-          ? projectDetachedChatSnapshot(snapshot, authority.conversationId)
+          ? projectDetachedChatSnapshot(snapshot, authority.conversationId, this.detachedChatRecords)
           : snapshot,
         sync,
       });
@@ -316,6 +319,7 @@ export class RuntimeSyncHub<Socket> {
         subscription,
         subscription.authority,
         this.watcherLink,
+        this.detachedChatRecords,
       );
       const payload = payloads.get(frame) ?? new SerializedRuntimeEvent(frame);
       payloads.set(frame, payload);

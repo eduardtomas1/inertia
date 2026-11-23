@@ -55,6 +55,7 @@ import {
   duoLaunchErrorMessage as errorMessage,
   type DuoWorktreeOperations,
 } from "./duo-worktree-recovery";
+import { runDatabaseWrite, type DatabaseWriteRunner } from "../database-write-gate";
 
 export type { DuoWorktreeOperations } from "./duo-worktree-recovery";
 export { reconcileInterruptedDuoLaunches } from "./duo-worktree-recovery";
@@ -118,6 +119,7 @@ class DuoLaunchCancelledError extends Error {
 }
 
 export class DuoLaunchCoordinator {
+  private readonly databaseWrites: DatabaseWriteRunner | undefined;
   private readonly prepareTasks = new Map<string, Promise<PreparedDuoLaunch>>();
   private readonly recoveryCleanupTasks = new Map<
     string,
@@ -150,8 +152,10 @@ export class DuoLaunchCoordinator {
       comparisonCheckoutAcquireTimeoutMs?: number;
       judgeRetryInitialDelayMs?: number;
       runtimeClosed?: () => boolean;
+      databaseWrites?: DatabaseWriteRunner;
     } = {},
   ) {
+    this.databaseWrites = options.databaseWrites;
     this.worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
     this.workspaceRuns = options.workspaceRuns ?? null;
     this.runtimeClosed = options.runtimeClosed ?? (() => false);
@@ -641,7 +645,7 @@ export class DuoLaunchCoordinator {
     }
     if (reservation.kind === "busy") {
       this.judgeRetries.schedule(launchId, () => {
-        void this.startComparison(launchId, false).catch(() => undefined);
+        void runDatabaseWrite(this.databaseWrites, () => this.startComparison(launchId, false)).catch(() => undefined);
       });
       return publicStatus(this.store, this.store.notePairedLaunchComparisonWaiting(
         launchId,

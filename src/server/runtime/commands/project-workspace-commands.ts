@@ -22,6 +22,7 @@ import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
 import { isWithinScratchRoot } from "../../scratch-root";
+import { WorkspacePathAuthorityError } from "../../workspace-path-authority";
 import type { TerminalManager } from "../../terminal";
 import { PROVIDER_INFO, type ProviderManager } from "../../providers";
 import type { ProviderInstallationUseTransfer } from
@@ -247,11 +248,16 @@ export function createProjectWorkspaceCommandHandler(
           }
           const projectConversationIds = latestConversations.map(({ id }) => id);
           if (projectConversationIds.length > 0) {
-            const projectRootPath = typeof dependencies.store.projectPath === "function"
-              ? dependencies.store.projectPath(projectId)
-              : dependencies.store.project(projectId).path;
+            let projectRootPath: string | undefined;
+            try {
+              projectRootPath = typeof dependencies.store.projectPath === "function"
+                ? dependencies.store.projectPath(projectId)
+                : dependencies.store.project(projectId).path;
+            } catch (error) {
+              if (!(error instanceof WorkspacePathAuthorityError)) throw error;
+            }
             const candidatePaths = new Set<string>([
-              projectRootPath,
+              ...(projectRootPath === undefined ? [] : [projectRootPath]),
               ...latestConversations.flatMap(({ worktreePath }) => worktreePath ? [worktreePath] : []),
             ]);
             const cleanedCommonDirs = new Set<string>();

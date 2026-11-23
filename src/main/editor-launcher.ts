@@ -518,7 +518,7 @@ async function wellKnownCandidates(
         && entry.endsWith(toolbox.suffix)
         && /^\d+$/u.test(entry.slice(primaryCommand.length, entry.length - toolbox.suffix.length))
       ))
-      .sort((left, right) => left.length - right.length || left.localeCompare(right));
+      .sort((left, right) => left.length - right.length || left.localeCompare(right, "en"));
     for (const entry of numbered) {
       candidates.push(api.join(toolbox.dir, entry));
     }

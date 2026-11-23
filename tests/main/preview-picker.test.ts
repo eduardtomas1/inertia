@@ -149,6 +149,138 @@ describe("isolated-world preview picker script", () => {
   });
 });
 
+type PickerEnvironment = ReturnType<typeof createIsolatedPickerEnvironment>;
+
+function stubElementsFromPoint(scope: object, hits: () => Element[]): void {
+  (scope as { elementsFromPoint: () => Element[] }).elementsFromPoint = hits;
+}
+
+async function submitPick(env: PickerEnvironment, ...hits: Element[]) {
+  env.hitTargets.splice(0, env.hitTargets.length, ...hits);
+  env.runScript(previewPickerStartScript({ point: { x: 10, y: 10 } }));
+  const shadow = env.getClosedShadow()!;
+  const target = (shadow.querySelector(".popover-target") as HTMLElement).textContent;
+  shadow.querySelector("form")!.dispatchEvent(
+    new env.win.Event("submit", { bubbles: true, cancelable: true }) as never,
+  );
+  await vi.waitFor(() => expect(env.sent).toHaveLength(1));
+  const submitted = env.sent.pop() as { type: string; payload: { selector: string; role: string; name: string } };
+  expect(submitted.type).toBe("submitted");
+  return { target, ...submitted.payload };
+}
+
+describe("isolated-world preview picker element description", () => {
+  it("uses a unique id directly and escapes special characters", async () => {
+    const env = createIsolatedPickerEnvironment('<main><button id="save:item.1" class="btn primary">Save</button></main>');
+    const button = env.win.document.getElementById("save:item.1")! as unknown as Element;
+    const { selector } = await submitPick(env, button);
+    expect(selector).toBe("#save\\:item\\.1");
+    expect(env.win.document.querySelectorAll(selector)).toHaveLength(1);
+    expect(env.win.document.querySelector(selector)).toBe(button);
+  });
+
+  it("falls back to nth-child when ids are duplicated or siblings match", async () => {
+    const env = createIsolatedPickerEnvironment(`
+      <section>
+        <ul class="items">
+          <li class="row"><button class="action">First</button></li>
+          <li class="row"><button class="action">Second</button></li>
+          <li class="row"><button class="action">Third</button></li>
+        </ul>
+      </section>
+    `);
+    const second = env.win.document.querySelectorAll("button.action")[1]! as unknown as Element;
+    const { selector } = await submitPick(env, second);
+    expect(selector).toContain(":nth-child(2)");
+    expect(env.win.document.querySelectorAll(selector)).toHaveLength(1);
+    expect(env.win.document.querySelector(selector)).toBe(second);
+
+    const dup = createIsolatedPickerEnvironment('<div><span id="dup">A</span><span id="dup">B</span></div>');
+    const spans = dup.win.document.querySelectorAll("span");
+    const duplicate = await submitPick(dup, spans[1]! as unknown as Element);
+    expect(duplicate.selector).not.toBe("#dup");
+    expect(duplicate.selector).toContain(":nth-child(2)");
+    expect(dup.win.document.querySelectorAll(duplicate.selector)).toHaveLength(1);
+    expect(dup.win.document.querySelector(duplicate.selector)).toBe(spans[1]);
+  });
+
+  it("builds shadow-piercing selectors across nested open shadow roots", async () => {
+    const env = createIsolatedPickerEnvironment('<div id="app"></div>');
+    const document = env.win.document;
+    const outerHost = document.createElement("outer-card");
+    outerHost.id = "card-1";
+    document.getElementById("app")!.appendChild(outerHost);
+    const outerRoot = outerHost.attachShadow({ mode: "open" });
+    const innerHost = document.createElement("inner-toolbar");
+    innerHost.className = "toolbar";
+    outerRoot.appendChild(innerHost);
+    const innerRoot = innerHost.attachShadow({ mode: "open" });
+    const target = document.createElement("button");
+    target.className = "confirm";
+    target.textContent = "Confirm";
+    innerRoot.appendChild(target);
+    stubElementsFromPoint(outerRoot, () => [innerHost as unknown as Element]);
+    stubElementsFromPoint(innerRoot, () => [target as unknown as Element]);
+
+    const { selector, role, name } = await submitPick(env, outerHost as unknown as Element);
+    expect(selector).toBe("#card-1 >>> inner-toolbar.toolbar >>> button.confirm");
+    expect(role).toBe("button");
+    expect(name).toBe("Confirm");
+  });
+
+  it("descends into open shadow roots while keeping closed shadow roots opaque and excluding the overlay", () => {
+    const env = createIsolatedPickerEnvironment("<div></div>");
+    const document = env.win.document;
+    const widget = document.createElement("my-widget");
+    document.body.appendChild(widget);
+    const openShadow = widget.attachShadow({ mode: "open" });
+    const button = document.createElement("button");
+    button.textContent = "Inside";
+    const closedHost = document.createElement("closed-box");
+    openShadow.append(button, closedHost);
+    const closedShadow = closedHost.attachShadow({ mode: "closed" });
+    const secret = document.createElement("span");
+    secret.textContent = "Secret";
+    closedShadow.appendChild(secret);
+    stubElementsFromPoint(closedShadow, () => [secret as unknown as Element]);
+    for (const element of [button, closedHost]) {
+      element.getBoundingClientRect = () => ({
+        left: 4, top: 30, right: 84, bottom: 60, width: 80, height: 30, x: 4, y: 30, toJSON: () => ({}),
+      }) as never;
+    }
+
+    let openHits: Element[] = [button as unknown as Element, widget as unknown as Element];
+    stubElementsFromPoint(openShadow, () => openHits);
+    env.runScript(previewPickerStartScript());
+    const overlay = env.getOverlayHost()!;
+    env.hitTargets.splice(0, env.hitTargets.length, overlay, widget as unknown as Element);
+    const badge = env.getClosedShadow()!.querySelector(".badge") as HTMLElement;
+    env.win.dispatchEvent(new env.win.Event("pointermove", { bubbles: true, cancelable: true }) as never);
+    expect(badge.textContent).toBe("button");
+
+    openHits = [closedHost as unknown as Element, widget as unknown as Element];
+    env.win.dispatchEvent(new env.win.Event("pointermove", { bubbles: true, cancelable: true }) as never);
+    expect(badge.textContent).toBe("closed-box");
+  });
+
+  it("extracts short labels and accessible role and name without leaking password values", async () => {
+    const html = `
+      <button id="submit" class="primary lg extra">Publish changes</button>
+      <label for="pw">Password</label>
+      <input id="pw" type="password" value="super-secret" />
+    `;
+    const env = createIsolatedPickerEnvironment(html);
+    const button = await submitPick(env, env.win.document.getElementById("submit")! as unknown as Element);
+    expect(button.target).toBe("button#submit.primary.lg");
+    expect({ role: button.role, name: button.name }).toEqual({ role: "button", name: "Publish changes" });
+
+    const passwordEnv = createIsolatedPickerEnvironment(html);
+    const password = await submitPick(passwordEnv, passwordEnv.win.document.getElementById("pw")! as unknown as Element);
+    expect(password.role).toBe("textbox");
+    expect(password.name).not.toContain("super-secret");
+  });
+});
+
 describe("main-process preview picker coordinator and provider assembly", () => {
   const tempDirs: string[] = [];
 

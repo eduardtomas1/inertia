@@ -9,6 +9,7 @@ import {
   type SDKMessage,
   type SDKPartialAssistantMessage,
   type SDKResultMessage,
+  type SDKStartupFailureReason,
   type SDKTaskNotificationMessage,
   type SDKTaskStartedMessage,
   type SDKUserMessage,
@@ -97,6 +98,37 @@ export type GrokPromptTerminalSurface = Pick<
   acp.PromptResponse,
   "stopReason" | "usage"
 >;
+
+export const acpSessionUpdateDispositions = {
+  user_message_chunk: "ignored",
+  agent_message_chunk: "projected",
+  agent_thought_chunk: "projected",
+  tool_call: "projected",
+  tool_call_update: "projected",
+  plan: "projected",
+  plan_update: "projected",
+  plan_removed: "projected",
+  available_commands_update: "projected",
+  current_mode_update: "projected",
+  config_option_update: "projected",
+  session_info_update: "projected",
+  usage_update: "projected",
+  compaction_update: "projected",
+  compaction_summary_chunk: "projected",
+  prompt_suggestions_update: "ignored",
+  cursor_update: "ignored",
+  notice: "refused",
+  subagent_update: "refused",
+  session_message: "refused",
+  session_message_chunk: "refused",
+} as const satisfies Record<
+  acp.SessionNotification["update"]["sessionUpdate"],
+  "projected" | "ignored" | "refused"
+>;
+export const acpPlanRepresentations = {
+  items: true,
+  markdown: true,
+} as const satisfies Record<acp.PlanUpdateContent["type"], true>;
 
 export type ClaudeQueryFactory = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>;
@@ -199,6 +231,33 @@ export const claudeHandledMessageTypes = {
   conversation_reset: true,
   command_lifecycle: true,
 } as const satisfies Record<ClaudeRuntimeMessageType, true>;
+
+export const claudeHandledStartupFailureReasons = {
+  org_pin_api_key_conflict: true,
+  provider_not_allowed: true,
+  org_verify_failed: true,
+  org_pin_mismatch: true,
+  managed_settings_invalid: true,
+  remote_settings_required_unavailable: true,
+  gateway_signin_required: true,
+  gateway_access_denied: true,
+  proxy_invalid: true,
+  temp_dir_unusable: true,
+  cwd_unavailable: true,
+  shell_tool_missing: true,
+  session_held_by_background: true,
+  worktree_resume_refused: true,
+  worktree_unverified: true,
+  cli_version_too_old: true,
+  bypass_root: true,
+  org_config_required_unavailable: true,
+  org_config_refused: true,
+  sandbox_required_unavailable: true,
+  initialize_not_first: true,
+  config_file_invalid: true,
+  managed_settings_not_delivered: true,
+  initialize_fields_not_delivered: true,
+} as const satisfies Record<SDKStartupFailureReason, true>;
 
 type ClaudeSystemMessageSurface = Extract<SDKMessage, { type: "system" }>;
 

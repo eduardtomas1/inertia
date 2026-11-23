@@ -1068,16 +1068,10 @@ function handleGrokUpdate(
           explanation: null,
           steps: planSteps(update.plan.entries),
         });
-      } else if (update.plan.type === "markdown") {
-        emitter.rich({
-          type: "plan",
-          explanation: bounded(update.plan.content),
-          steps: [],
-        });
       } else {
         emitter.rich({
           type: "plan",
-          explanation: `Grok plan: ${bounded(update.plan.uri)}`,
+          explanation: bounded(update.plan.content),
           steps: [],
         });
       }
@@ -1138,6 +1132,9 @@ function handleGrokUpdate(
       return;
     case "compaction_summary_chunk":
       compactions.observeSummaryChunk(update);
+      return;
+    case "prompt_suggestions_update":
+    case "cursor_update":
       return;
     case "notice":
       throw new Error("Grok ACP sent a notice without negotiated support.");

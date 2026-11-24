@@ -1,6 +1,7 @@
 import { cliConversationPreviewSchema, cliConversationScanSchema } from "../cli-conversations";
 import { serverEventBoundary } from "./server-event-boundary";
 import { isAttachmentStorageResult, validAttachmentStorageSettings } from "../attachment-storage";
+import { isPreferredEditor } from "../editor-ids";
 import { isDatabaseStorageResult } from "../database-storage";
 import { authoritativeRunState } from "./run-state-schema";
 import { conversationHistoryCursorSchema } from "../conversation-history";
@@ -319,6 +320,7 @@ function appSettings(value: unknown): boolean {
     && validAttachmentStorageSettings(value)
     && (value.workingIndicator === undefined || isWorkingIndicatorSettings(value.workingIndicator))
     && (value.completionSound === undefined || isCompletionSoundSettings(value.completionSound))
+    && (value.preferredEditor === undefined || isPreferredEditor(value.preferredEditor))
     && validNotificationSettings(value) && validCompactOnReturnSetting(value);
 }
 function appSnapshot(value: unknown): boolean {

@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
-  chmod,
   type FileHandle,
   lstat,
   open,
@@ -322,6 +321,7 @@ export class RecoveryTarWriter {
     const file = this.requireOpen();
     throwIfAborted(signal, "The database recovery export was cancelled.");
     await writeBufferComplete(file, Buffer.alloc(TAR_BLOCK_BYTES * 2), signal);
+    await file.chmod(FILE_MODE);
     await file.sync();
     await file.close();
     this.file = null;
@@ -329,7 +329,6 @@ export class RecoveryTarWriter {
     throwIfAborted(signal, "The database recovery export was cancelled.");
     await rename(this.partialPath, this.targetPath);
     this.published = true;
-    await chmod(this.targetPath, FILE_MODE);
   }
 
   async abort(): Promise<void> {

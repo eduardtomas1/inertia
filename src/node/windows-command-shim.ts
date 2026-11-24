@@ -9,8 +9,8 @@ export interface WindowsCommandShimInvocation {
 }
 
 const WINDOWS_CURRENT_DIRECTORY_SEARCH_GUARD = `set ${WINDOWS_NO_CURRENT_DIRECTORY_SEARCH_KEY}=1&`;
-const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;, *?])/gu;
-const UNSAFE_CMD_CHARACTERS = /[\0\r\n"]/u;
+const CMD_META_CHARACTERS = /([()\][%!^"`<>&|;,=*? ])/gu;
+const UNSAFE_CMD_CHARACTERS = /[\u0000-\u001f\u007f"]/u;
 
 function windowsEnvironmentValue(environment: NodeJS.ProcessEnv, key: string): string | undefined {
   const normalized = key.toUpperCase();

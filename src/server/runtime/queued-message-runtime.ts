@@ -420,9 +420,18 @@ export function createQueuedMessageRuntime(
   }
 
   function editedAttachmentConversations(attachmentId: string): string[] {
-    return [...new Set([...editGrants.values()]
-      .filter(({ attachmentIds }) => attachmentIds.includes(attachmentId))
-      .map(({ conversationId }) => conversationId))];
+    const owners: string[] = [];
+    for (const [grantId, grant] of editGrants.entries()) {
+      if (!grant.attachmentIds.includes(attachmentId)) continue;
+      try {
+        store.conversation(grant.conversationId);
+      } catch {
+        void releaseEditGrant(grantId).catch(() => undefined);
+        continue;
+      }
+      owners.push(grant.conversationId);
+    }
+    return [...new Set(owners)];
   }
 
   async function reconfirm(conversationId: string, id: string, confirmed: QueuedAccess | undefined): Promise<MessageQueueResult["confirmation"]> {

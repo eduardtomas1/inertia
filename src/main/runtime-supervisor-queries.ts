@@ -56,11 +56,12 @@ export class RuntimeSupervisorQueries {
     }));
   }
 
-  editorContext(filePath?: string): Promise<RuntimeEditorContextResult> {
+  editorContext(filePath?: string, conversationId?: string): Promise<RuntimeEditorContextResult> {
     return this.ask<RuntimeEditorContextResult>("editor-context", "The editor context request timed out.", (requestId) => ({
       type: "runtime.editor-context",
       requestId,
       ...(filePath ? { filePath } : {}),
+      ...(conversationId ? { conversationId } : {}),
     }));
   }
 

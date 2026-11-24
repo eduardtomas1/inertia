@@ -81,9 +81,21 @@ const URL_ATTRIBUTES = new Set([
   "data",
 ]);
 
+function decodeProtocolEntities(value: string): string {
+  return value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|(colon|tab|newline));?/giu, (match, hex?: string, dec?: string, named?: string) => {
+    const digits = hex ?? dec;
+    if (digits) {
+      const code = Number.parseInt(digits, hex ? 16 : 10);
+      return code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    }
+    return named?.toLowerCase() === "colon" ? ":" : "";
+  });
+}
+
 function hasUnsafeProtocol(value: string): boolean {
-  const normalized = value.replace(/[\u0000-\u0020\u007f]+/gu, "").toLowerCase();
-  return normalized.startsWith("javascript:") || normalized.startsWith("vbscript:");
+  return /^(?:javascript|vbscript|data):/u.test(
+    decodeProtocolEntities(value).replace(/[\u0000-\u0020\u007f]+/gu, "").toLowerCase(),
+  );
 }
 
 function sanitizeOpeningTag(rawTag: string): string {
@@ -141,13 +153,11 @@ function sanitizeOpeningTag(rawTag: string): string {
       continue;
     }
     if (isPasswordInput && attr.lowerName === "value") continue;
-    if (attr.rawValue === null) {
-      kept.push(attr.name);
-    } else if (attr.quote) {
-      kept.push(`${attr.name}=${attr.quote}${attr.rawValue}${attr.quote}`);
-    } else {
-      kept.push(`${attr.name}=${attr.rawValue}`);
-    }
+    kept.push(
+      attr.rawValue === null
+        ? attr.name
+        : `${attr.name}=${attr.quote}${attr.rawValue}${attr.quote}`,
+    );
   }
   return `<${kept.join(" ")}${selfClosing ? " />" : ">"}`;
 }

@@ -13,6 +13,7 @@ import {
   MAX_DOCUMENT_TABLE_COLUMNS,
   MAX_DOCUMENT_TABLE_ROWS,
   MAX_DOCUMENT_TEXT_OUTPUT_CHARS,
+  MAX_DOCUMENT_XML_NODES,
 } from "./document-text-errors.js";
 import { extractRtfParts } from "./document-text-rtf.js";
 import {
@@ -374,6 +375,7 @@ function* extractArchiveParts(
   const isOoxml = extension === ".docx" || extension === ".pptx";
   const files = readBoundedDocumentArchive(bytes, { allowOleEncryptedDetection: isOoxml });
   assertArchiveContainerMatches(files, mimeType);
+  const nodeBudget = { remaining: MAX_DOCUMENT_XML_NODES };
   const notes: string[] = [];
   const markSkipped = (partName: string): void => {
     notes.push(`\n[Skipped document part: ${partName} (missing or invalid XML).]\n`);
@@ -382,7 +384,7 @@ function* extractArchiveParts(
     const raw = files.get(partName);
     if (!raw) throw new DocumentExtractionError("content");
     try {
-      return parseDocumentXml(raw, extension);
+      return parseDocumentXml(raw, extension, nodeBudget);
     } catch (error) {
       if (error instanceof DocumentExtractionError || error instanceof DocumentExtractionTruncation) {
         throw error;
@@ -397,7 +399,7 @@ function* extractArchiveParts(
       return { name: "root", attrs: {}, children: [] };
     }
     try {
-      return parseDocumentXml(raw, extension);
+      return parseDocumentXml(raw, extension, nodeBudget);
     } catch (error) {
       if (error instanceof DocumentExtractionError || error instanceof DocumentExtractionTruncation) {
         throw error;
@@ -488,6 +490,7 @@ function* extractArchiveParts(
         `${posix.basename(slidePath)}.rels`,
       );
       if (!files.has(slideRelsPath)) continue;
+      const seenNotes = new Set<string>();
       for (const rel of findAllElements(readTolerantXml(slideRelsPath), "Relationship")) {
         const notesTarget = rel.attrs.Target;
         if (
@@ -500,6 +503,8 @@ function* extractArchiveParts(
         const notesPath = notesTarget.startsWith("/")
           ? notesTarget.slice(1)
           : posix.join(posix.dirname(slidePath), notesTarget);
+        if (seenNotes.has(notesPath)) continue;
+        seenNotes.add(notesPath);
         const notesPage = stripNotesPlaceholders(readTolerantXml(notesPath));
         if (!nodeHasCellContent(notesPage)) continue;
         yield "Notes:\n";

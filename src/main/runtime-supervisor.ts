@@ -314,7 +314,7 @@ export class RuntimeSupervisor {
     return Boolean(record?.ready && this.post(record.child, { type: "runtime.record-system-suspend", interval }));
   }
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> { return this.queries.resolveProjectPath(request); }
-  editorContext(filePath?: string) { return this.queries.editorContext(filePath); }
+  editorContext(filePath?: string, conversationId?: string) { return this.queries.editorContext(filePath, conversationId); }
   /** The chats whose sent messages carry a stored attachment, read from the runtime. */
   attachmentConversations(attachmentId: string): Promise<readonly string[]> { return this.queries.attachmentConversations(attachmentId); }
   /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */

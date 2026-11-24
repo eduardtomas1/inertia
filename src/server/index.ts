@@ -250,6 +250,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const commandIncidents = CommandIncidents.fromSink(options.onIncident, options.runtimeGenerationId ?? null, userCorrectableRuntimeError);
   const send = commandIncidents.sender(streamingTrace);
   let onDatabaseBackupCreated = (): void => undefined;
+  let activeRecoveryExports = 0;
   const testInitialBackupDelayMs = process.env.NODE_ENV === "test" ? Number(process.env.INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS ?? 0) : 0;
   const store = new RuntimeStore(
     databasePath,
@@ -259,12 +260,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       canStartDatabaseBackup: () =>
         !closed
         && !recoveryImportAdmission.isActive()
+        && activeRecoveryExports === 0
         && activeRuntimeCommands === 0
         && (turns?.activeConversationIds().length ?? 0) === 0
         && !store?.isDatabaseCompacting(),
       databaseCompaction: {
         blockedReason: (mode) => runtimeDatabaseCompactionBlocker(mode, {
-          closed, updatePreparing: updatePreparation.isAdmissionClosed(), recoveryActive: recoveryImportAdmission.isActive(),
+          closed, updatePreparing: updatePreparation.isAdmissionClosed(), recoveryActive: recoveryImportAdmission.isActive() || activeRecoveryExports > 0,
           activeTurns: (turns?.activeConversationIds().length ?? 0) > 0,
           activeRuns: (isolatedRuns?.activeCount() ?? 0) > 0 || store.hasRecordedActiveWorkspaceRun(),
           providerMaintenanceActive: (providerMaintenance?.activeOperations().length ?? 0) > 0, activeRuntimeCommands, activeNonStorageCommands, activeProviderRefreshes, activeBackgroundWrites: databaseWrites.activeWrites(),
@@ -304,11 +306,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   }
   const projectIdentities = new ProjectIdentityRefresher({
     apply: (projectId, identity) => {
-      try {
-        store.updateProject(projectId, identity);
-      } catch {
-        return;
-      }
+      void databaseWrites.run(async () => {
+        try {
+          store.updateProject(projectId, identity);
+        } catch {
+          return;
+        }
+      }).catch(() => undefined);
     },
   });
   const projectIdentityCandidates = store.projects()
@@ -326,7 +330,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
-  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, { reportIncident: commandIncidents.report, databaseWrites });
+  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, {
+    reportIncident: commandIncidents.report,
+    databaseWrites,
+    isConversationProtected: (conversationId) => Boolean(turns?.activeConversationIds().includes(conversationId)),
+  });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,
@@ -550,7 +558,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     merge: (budgetMs) => store.mergeMessageSearchIndex(budgetMs),
     idle: () => messageSearchIndexIdle({
       closed, safetyLocked: Boolean(runtimeSafetyLock), updatePreparing: updatePreparation.isAdmissionClosed(),
-      recoveryActive: recoveryImportAdmission.isActive(), activeRuntimeCommands,
+      recoveryActive: recoveryImportAdmission.isActive() || activeRecoveryExports > 0, activeRuntimeCommands,
       activeTurns: turns.activeConversationIds().length > 0,
       activeRuns: isolatedRuns.activeCount() > 0 || store.hasRecordedActiveWorkspaceRun(),
       providerMaintenanceActive: providerMaintenance.activeOperations().length > 0,
@@ -1041,6 +1049,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => {
       agentThreads?.secrets.sweep();
+      if (store.isDatabaseVacuuming()) {
+        void databaseWrites.run(async () => {
+          recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume);
+        }).catch(() => undefined);
+        return false;
+      }
       return recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume);
     },
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
@@ -1060,7 +1074,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         projectIdentityAuthority,
       )).absolute;
     }),
-    editorContext: (filePath) => trackRuntimeOperation(() => resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock)),
+    editorContext: (filePath, conversationId) => trackRuntimeOperation(() => resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock, conversationId)),
     privateConnectRequest: (subject, request) => {
       const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
       return refused ? Promise.resolve(refused) : trackRuntimeOperation(() => privateConnectGateway.request(subject, request));
@@ -1079,9 +1093,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     exportRecoveryData: (path, signal, exportOptions) =>
       updatePreparation.runDatabaseRecovery(async () => {
         if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
-        if (exportOptions?.includeAttachments) return await store.exportRecoveryBundle(path, { signal });
-        await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData(), { signal });
-        return { includeAttachments: false, attachments: 0, missingAttachments: 0 };
+        activeRecoveryExports += 1;
+        try {
+          await store.whenDatabaseCompactionSettled();
+          await initializedConversationAttachments.whenReconciled();
+          if (exportOptions?.includeAttachments) return await store.exportRecoveryBundle(path, { signal });
+          await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData(), { signal });
+          return { includeAttachments: false, attachments: 0, missingAttachments: 0 };
+        } finally {
+          activeRecoveryExports -= 1;
+        }
       }),
     importRecoveryData: (path, targetDirectory, signal, operationId) =>
       updatePreparation.runDatabaseRecovery(async () => {
@@ -1115,6 +1136,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         } catch (error) {
           store.reconcileRecoveryImport();
           await reconcileRecoveryAttachmentStaging(dataDirectory, store.attachments()).catch(() => undefined);
+          await initializedConversationAttachments.syncImportedReferences(store.attachments()).catch(() => undefined);
           broadcastSnapshot();
           throw error;
         } finally {

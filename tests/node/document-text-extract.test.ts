@@ -252,6 +252,45 @@ describe("hostile and unreadable documents", () => {
       "../evil.xml": "<x/>",
     }))).toBe("document-corrupt");
   });
+
+  it("enforces cumulative XML node budgets across repeated slide/notes/chapter part references and avoids quadratic Fallback parsing", () => {
+    const repeatedNotesRels = Array.from(
+      { length: 500 },
+      (_, index) => `<Relationship Id="n${index}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide1.xml"/>`,
+    ).join("");
+    const pptxBomb = documentArchive({
+      "ppt/presentation.xml": '<p:presentation xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId r:id="r1"/></p:sldIdLst></p:presentation>',
+      "ppt/_rels/presentation.xml.rels": '<Relationships><Relationship Id="r1" Target="slides/slide1.xml"/></Relationships>',
+      "ppt/slides/slide1.xml": "<p:sld><p:txBody><a:p><a:t>Hello</a:t></a:p></p:txBody></p:sld>",
+      "ppt/slides/_rels/slide1.xml.rels": `<Relationships>${repeatedNotesRels}</Relationships>`,
+      "ppt/notesSlides/notesSlide1.xml": `<p:notes><script>${"<a/>".repeat(2_000)}</script><p:txBody><a:p><a:t>Once</a:t></a:p></p:txBody></p:notes>`,
+    });
+    const pptxResult = extract("pptx", pptxBomb);
+    expect(pptxResult.text).toContain("Hello");
+    expect(pptxResult.text.match(/Once/gu)).toHaveLength(1);
+
+    const repeatedItemrefs = Array.from({ length: 1_000 }, () => '<itemref idref="c1"/>').join("");
+    const epubBomb = documentArchive({
+      "META-INF/container.xml": '<container><rootfile full-path="book.opf"/></container>',
+      "book.opf": `<package><item id="c1" href="c1.xhtml"/>${repeatedItemrefs}</package>`,
+      "c1.xhtml": `<html><body><script>${"<a/>".repeat(500)}</script><p>X</p></body></html>`,
+    });
+    const epubResult = extract("epub", epubBomb);
+    expect(epubResult.truncated).toBe(true);
+
+    const choices = "<Choice><a/></Choice>".repeat(4_000);
+    const fallbacks = "<Fallback><t>x</t></Fallback>".repeat(4_000);
+    const started = performance.now();
+    const fallbackDoc = extract("docx", docx(`<document><p>${choices}${fallbacks}</p></document>`));
+    expect(fallbackDoc.text.length).toBeGreaterThan(0);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it("caps RTF font table entries and reuses cached decoders without excessive allocations", () => {
+    const fonts = Array.from({ length: 10_000 }, (_, i) => `\\f${i}\\fcharset204`).join("");
+    const rtf = `{\\rtf1{\\fonttbl${fonts}}\\f0 Hello}`;
+    expect(extract("rtf", rtf).text).toBe("Hello");
+  });
 });
 
 describe("notebook and RTF extraction", () => {

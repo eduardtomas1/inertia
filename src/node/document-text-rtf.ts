@@ -67,6 +67,19 @@ interface RtfGroupState {
   decoder: TextDecoder;
 }
 
+const MAX_RTF_FONTS = 4_096;
+const CACHED_DECODERS = new Map<string, TextDecoder>();
+
+function cachedDecoder(label: string, fatal = false): TextDecoder {
+  const key = `${label}:${fatal ? "1" : "0"}`;
+  let decoder = CACHED_DECODERS.get(key);
+  if (!decoder) {
+    decoder = new TextDecoder(label, { fatal });
+    CACHED_DECODERS.set(key, decoder);
+  }
+  return decoder;
+}
+
 function ansiCodePageLabel(codePage: number): string | undefined {
   if (codePage === 0) return "windows-1252";
   if (codePage === 866) return "ibm866";
@@ -87,7 +100,7 @@ export function* extractRtfParts(source: string): Generator<string, void> {
     uc: 1,
     font: 0,
     fontTable: false,
-    decoder: new TextDecoder("windows-1252"),
+    decoder: cachedDecoder("windows-1252"),
   };
   const stack: RtfGroupState[] = [];
   const fonts = new Map<number, TextDecoder>();
@@ -151,7 +164,9 @@ export function* extractRtfParts(source: string): Generator<string, void> {
           if (state.fontTable) fonts.delete(value);
         } else if (control === "fcharset" && state.fontTable && Number.isSafeInteger(value)) {
           const charsetLabel = FONT_CODE_PAGES.get(value);
-          if (charsetLabel) fonts.set(state.font, new TextDecoder(charsetLabel));
+          if (charsetLabel && (fonts.has(state.font) || fonts.size < MAX_RTF_FONTS)) {
+            fonts.set(state.font, cachedDecoder(charsetLabel));
+          }
         }
 
         if (control === "deleted") {
@@ -165,13 +180,13 @@ export function* extractRtfParts(source: string): Generator<string, void> {
         }
 
         if (control === "mac" || (control === "ansicpg" && value === 10000)) {
-          state.decoder = new TextDecoder("macintosh");
+          state.decoder = cachedDecoder("macintosh");
         } else if (control === "ansicpg") {
           const label = Number.isSafeInteger(value) ? ansiCodePageLabel(value) : undefined;
           if (!label) {
             throw new DocumentExtractionError("document-corrupt");
           }
-          state.decoder = new TextDecoder(label, { fatal: true });
+          state.decoder = cachedDecoder(label, true);
         } else if (control === "uc") {
           if (!Number.isSafeInteger(value) || value < 0) {
             throw new DocumentExtractionError("document-corrupt");

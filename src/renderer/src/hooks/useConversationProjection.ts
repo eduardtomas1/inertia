@@ -774,7 +774,8 @@ export function useConversationProjection({
         ? detailStateRef.current.detail.activities.find(({ id }) => id === event.activity.id)
         : undefined;
       const materialized = materializeActivityEvent(event, previous?.activity ?? history);
-      const revision = (previous?.revision ?? 0) + (materialized.resync ? 0 : 1);
+      const statusChangedToTerminal = previous?.activity.status === "running" && materialized.activity.status !== "running";
+      const revision = (previous?.revision ?? 0) + (materialized.resync && !statusChangedToTerminal ? 0 : 1);
       streamed.delete(event.activity.id);
       if (materialized.activity.status === "running" || materialized.resync) {
         streamed.set(event.activity.id, { activity: materialized.activity, revision });
@@ -790,28 +791,34 @@ export function useConversationProjection({
         };
       });
       publish(materialized.activity);
-      if (materialized.resync && !activityResyncsRef.current.has(event.activity.id)) {
-        const { conversationId: ownerId, id: activityId } = event.activity;
+      const runResync = (ownerId: string, activityId: string, targetRevision: number): void => {
         activityResyncsRef.current.add(activityId);
         void requestRef.current({ type: "activity.detail.read", payload: { conversationId: ownerId, activityId } })
           .then((result) => {
+            const current = streamedActivitiesRef.current.get(activityId);
+            if (!current || current.revision !== targetRevision) {
+              if (current?.activity.detailTruncated) runResync(ownerId, activityId, current.revision);
+              else activityResyncsRef.current.delete(activityId);
+              return;
+            }
+            activityResyncsRef.current.delete(activityId);
             if (
               result.type !== "request.result"
               || result.result.kind !== "activity.detail"
               || result.result.conversationId !== ownerId
               || result.result.activityId !== activityId
             ) return;
-            const current = streamedActivitiesRef.current.get(activityId);
-            if (!current || current.revision !== revision) return;
             const activity = withFullActivityDetail(current.activity, result.result.detail);
             streamedActivitiesRef.current.delete(activityId);
             if (activity.status === "running") {
-              streamedActivitiesRef.current.set(activityId, { activity, revision: revision + 1 });
+              streamedActivitiesRef.current.set(activityId, { activity, revision: targetRevision + 1 });
             }
             publish(activity);
           })
-          .catch(() => undefined)
-          .finally(() => { activityResyncsRef.current.delete(activityId); });
+          .catch(() => { activityResyncsRef.current.delete(activityId); });
+      };
+      if (materialized.resync && !activityResyncsRef.current.has(event.activity.id)) {
+        runResync(event.activity.conversationId, event.activity.id, revision);
       }
       return;
     }

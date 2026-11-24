@@ -607,10 +607,11 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
-    assertTrustedChatIpc(event, args.length, 1);
+    const context = assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
+    const conversationId = context.role === "detached-chat" ? context.conversationId : undefined;
     await openDesktopLink(value, shell, process.platform, (filePath, position) =>
-      tryOpenLinkInPreferredEditor(editorLauncher, runtimeSupervisor, filePath, position));
+      tryOpenLinkInPreferredEditor(editorLauncher, runtimeSupervisor, filePath, position, conversationId));
   });
 
   ipcMain.handle(IPC.showThreadNotification, (event, ...args) => {

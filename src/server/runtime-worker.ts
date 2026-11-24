@@ -409,7 +409,7 @@ parentPort.on("message", (messageEvent) => {
       });
       return;
     }
-    void runtime.editorContext(command.filePath).then(
+    void runtime.editorContext(command.filePath, command.conversationId).then(
       (result) => post({ type: "runtime.editor-context-resolved", requestId: command.requestId, ...result }),
       (error: unknown) => {
         const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 1_000) : "";

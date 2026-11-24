@@ -297,14 +297,22 @@ export async function pruneCheckpointRefs(
 
   for (const record of checkpoints) {
     if (options.signal?.aborted) return result;
-    const checkoutPath = record.worktreePath ?? record.projectPath;
-    const bucket = await resolveBucket(checkoutPath, record.projectId, record.projectWorkspaceKind);
+    let bucket = record.worktreePath
+      ? await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind)
+      : null;
+    if (!bucket) {
+      bucket = await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
+    }
     if (bucket) bucket.checkpoints.push(record);
   }
   for (const record of artifacts) {
     if (options.signal?.aborted) return result;
-    const checkoutPath = record.worktreePath ?? record.projectPath;
-    const bucket = await resolveBucket(checkoutPath, record.projectId, record.projectWorkspaceKind);
+    let bucket = record.worktreePath
+      ? await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind)
+      : null;
+    if (!bucket) {
+      bucket = await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
+    }
     if (bucket) bucket.artifacts.push(record);
   }
 
@@ -327,7 +335,7 @@ export async function pruneCheckpointRefs(
 }
 
 async function pruneRepositoryBucket(
-  store: Pick<RuntimeStore, "markCheckpointsExpired" | "clearTurnGitArtifactRefs">,
+  store: Pick<RuntimeStore, "markCheckpointsExpired" | "clearTurnGitArtifactRefs" | "hasActiveWorkspaceRunForConversation">,
   bucket: RepositoryBucket,
   policy: CheckpointRetentionPolicy,
   fullyProtectedConversations: ReadonlySet<string>,
@@ -588,17 +596,28 @@ async function pruneRepositoryBucket(
   const refActions = new Map<string, {
     checkpointIds: string[];
     artifactUpdates: ArtifactRefClearUpdate[];
+    conversationIds: Set<string>;
+    turnIds: Set<string>;
   }>();
   const addRefAction = (
     ref: string,
     checkpointId: string | null,
     artifactUpdate: ArtifactRefClearUpdate | null,
+    conversationId: string,
+    turnId: string | null,
   ): void => {
-    const entry = refActions.get(ref) ?? { checkpointIds: [], artifactUpdates: [] };
+    const entry = refActions.get(ref) ?? {
+      checkpointIds: [],
+      artifactUpdates: [],
+      conversationIds: new Set<string>(),
+      turnIds: new Set<string>(),
+    };
     if (checkpointId && !entry.checkpointIds.includes(checkpointId)) {
       entry.checkpointIds.push(checkpointId);
     }
     if (artifactUpdate) entry.artifactUpdates.push(artifactUpdate);
+    entry.conversationIds.add(conversationId);
+    if (turnId) entry.turnIds.add(turnId);
     refActions.set(ref, entry);
   };
 
@@ -615,7 +634,7 @@ async function pruneRepositoryBucket(
     } else if (stillReferencedRefs.has(cp.ref)) {
       sharedStillRetainedCheckpointIds.push(cp.id);
     } else {
-      addRefAction(cp.ref, cp.id, null);
+      addRefAction(cp.ref, cp.id, null, cp.conversationId, cp.turnId);
     }
   }
 
@@ -627,7 +646,7 @@ async function pruneRepositoryBucket(
       } else if (stillReferencedRefs.has(artifact.beforeRef)) {
         sharedStillRetainedArtifactUpdates.push(update);
       } else {
-        addRefAction(artifact.beforeRef, null, update);
+        addRefAction(artifact.beforeRef, null, update, artifact.conversationId, artifact.turnId);
       }
     }
     if (artifact.afterRef && clearAfterTurns.has(artifact.turnId)) {
@@ -637,7 +656,7 @@ async function pruneRepositoryBucket(
       } else if (stillReferencedRefs.has(artifact.afterRef)) {
         sharedStillRetainedArtifactUpdates.push(update);
       } else {
-        addRefAction(artifact.afterRef, null, update);
+        addRefAction(artifact.afterRef, null, update, artifact.conversationId, artifact.turnId);
       }
     }
   }
@@ -658,9 +677,26 @@ async function pruneRepositoryBucket(
   const refsToDelete = [...refActions.keys()];
   if (refsToDelete.length === 0) return;
 
+  const isRefProtectedLive = (ref: string): boolean => {
+    const action = refActions.get(ref);
+    if (!action) return true;
+    for (const conversationId of action.conversationIds) {
+      if (options.isConversationProtected?.(conversationId) || store.hasActiveWorkspaceRunForConversation(conversationId)) {
+        return true;
+      }
+    }
+    for (const turnId of action.turnIds) {
+      if (options.isTurnProtected?.(turnId)) return true;
+    }
+    return false;
+  };
+
   for (let offset = 0; offset < refsToDelete.length; offset += policy.deleteBatchSize) {
     if (options.signal?.aborted) break;
-    const batchRefs = refsToDelete.slice(offset, offset + policy.deleteBatchSize);
+    const batchRefs = refsToDelete
+      .slice(offset, offset + policy.deleteBatchSize)
+      .filter((ref) => !isRefProtectedLive(ref));
+    if (batchRefs.length === 0) continue;
     try {
       const deleted = await deleteRefsFn(bucket.gitRoot, batchRefs, {
         batchSize: policy.deleteBatchSize,

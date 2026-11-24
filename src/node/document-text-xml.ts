@@ -12,6 +12,13 @@ export interface XmlElementNode {
   spaceCount?: number;
   hasText?: boolean;
   hasTextChoice?: boolean;
+  hasPtab?: boolean;
+  hasTab?: boolean;
+  hasPtabChoice?: boolean;
+}
+
+export interface DocumentXmlNodeBudget {
+  remaining: number;
 }
 
 export const HIDDEN_XML_ELEMENTS: ReadonlySet<string> = new Set([
@@ -170,28 +177,19 @@ function collapseOdfWhitespace(paragraph: XmlElementNode): void {
   }
 }
 
-function hasInlineTab(node: XmlElementNode, names: readonly string[]): boolean {
-  return (
-    !HIDDEN_XML_ELEMENTS.has(node.name)
-    && (
-      names.includes(node.name)
-      || xmlElementChildren(node).some((child) => hasInlineTab(child, names))
-    )
-  );
-}
-
 function retainCompatibilityFallback(parent: XmlElementNode, fallback: XmlElementNode): boolean {
   if (parent.hasTextChoice) {
     parent.children.pop();
     return false;
   }
-  if (fallback.hasText || hasInlineTab(fallback, ["tab", "ptab"])) {
+  if (parent.hasPtabChoice && (fallback.hasText || fallback.hasTab || fallback.hasPtab)) {
     parent.children = parent.children.filter(
       (child) =>
         typeof child === "string"
         || child.name !== "Choice"
-        || !hasInlineTab(child, ["ptab"]),
+        || !child.hasPtab,
     );
+    parent.hasPtabChoice = false;
   }
   return true;
 }
@@ -223,7 +221,11 @@ function isNameCharCode(code: number): boolean {
   );
 }
 
-export function parseDocumentXml(source: string, extension: string): XmlElementNode {
+export function parseDocumentXml(
+  source: string,
+  extension: string,
+  nodeBudget?: DocumentXmlNodeBudget,
+): XmlElementNode {
   const isOdf = extension === ".odt" || extension === ".ods" || extension === ".odp";
   const isEpub = extension === ".epub";
   const root: XmlElementNode = { name: "root", attrs: {}, children: [] };
@@ -265,7 +267,19 @@ export function parseDocumentXml(source: string, extension: string): XmlElementN
       return;
     }
     if (node.name === "Fallback" && !retainCompatibilityFallback(parent, node)) return;
-    if (HIDDEN_XML_ELEMENTS.has(node.name) || (!node.hasText && node.name !== "noBreakHyphen")) return;
+    if (HIDDEN_XML_ELEMENTS.has(node.name)) return;
+    if (node.name === "ptab" || node.hasPtab) {
+      node.hasPtab = true;
+      parent.hasPtab = true;
+    }
+    if (node.name === "tab" || node.hasTab) {
+      node.hasTab = true;
+      parent.hasTab = true;
+    }
+    if (node.name === "Choice" && node.hasPtab) {
+      parent.hasPtabChoice = true;
+    }
+    if (!node.hasText && node.name !== "noBreakHyphen") return;
     parent.hasText = true;
     if (node.name === "Choice") parent.hasTextChoice = true;
   };
@@ -384,7 +398,12 @@ export function parseDocumentXml(source: string, extension: string): XmlElementN
       scan = valueEnd + 1;
     }
     nodeCount += 1;
-    if (nodeCount > MAX_DOCUMENT_XML_NODES || stack.length > MAX_DOCUMENT_XML_DEPTH) {
+    if (nodeBudget) {
+      nodeBudget.remaining -= 1;
+      if (nodeBudget.remaining < 0 || stack.length > MAX_DOCUMENT_XML_DEPTH) {
+        throw new DocumentExtractionTruncation("XML structure limit");
+      }
+    } else if (nodeCount > MAX_DOCUMENT_XML_NODES || stack.length > MAX_DOCUMENT_XML_DEPTH) {
       throw new DocumentExtractionTruncation("XML structure limit");
     }
     const node: XmlElementNode = {

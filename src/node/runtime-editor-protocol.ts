@@ -5,6 +5,7 @@ export interface RuntimeEditorContextQuery {
   type: "runtime.editor-context";
   requestId: string;
   filePath?: string;
+  conversationId?: string;
 }
 
 export interface RuntimeEditorContextResult {
@@ -40,18 +41,21 @@ function validPath(value: unknown): value is string {
 export function parseRuntimeEditorCommand(value: unknown): RuntimeEditorContextQuery | null {
   if (!plainObject(value) || value.type !== "runtime.editor-context") return null;
   const hasFilePath = Object.hasOwn(value, "filePath");
+  const hasConversationId = Object.hasOwn(value, "conversationId");
   const keys = Object.keys(value);
   if (
-    keys.length !== (hasFilePath ? 3 : 2)
-    || !keys.every((key) => key === "type" || key === "requestId" || key === "filePath")
+    keys.length !== 2 + Number(hasFilePath) + Number(hasConversationId)
+    || !keys.every((key) => key === "type" || key === "requestId" || key === "filePath" || key === "conversationId")
     || typeof value.requestId !== "string"
     || !UUID_PATTERN.test(value.requestId)
     || (hasFilePath && !validPath(value.filePath))
+    || (hasConversationId && (typeof value.conversationId !== "string" || !UUID_PATTERN.test(value.conversationId)))
   ) return null;
   return {
     type: "runtime.editor-context",
     requestId: value.requestId,
     ...(hasFilePath ? { filePath: value.filePath as string } : {}),
+    ...(hasConversationId ? { conversationId: value.conversationId as string } : {}),
   };
 }
 

@@ -522,4 +522,63 @@ describe("editor launch authorization and process hygiene", () => {
     expect(shell.openPath).not.toHaveBeenCalled();
     expect(shell.showItemInFolder).not.toHaveBeenCalled();
   });
+
+  it("escapes '=' and rejects tabs or control characters in Windows command shim invocations", () => {
+    const escaped = buildWindowsCommandShimInvocation(
+      "C:\\Tools\\code.cmd",
+      ["C:\\repo\\a=b&calc.txt"],
+      { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      "win32",
+    );
+    expect(escaped.args.at(-1)).toContain("a^=b^&calc.txt");
+    expect(() => buildWindowsCommandShimInvocation(
+      "C:\\Tools\\code.cmd",
+      ["C:\\repo\\tab\tname.txt"],
+      { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      "win32",
+    )).toThrow();
+    expect(() => buildWindowsCommandShimInvocation(
+      "C:\\Tools\\code.cmd",
+      ["C:\\repo\\bell\x07name.txt"],
+      { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      "win32",
+    )).toThrow();
+  });
+
+  it("ignores relative PATH segments when resolving editor executables and validates projectRoot", async () => {
+    const resolved = await resolveEditorExecutable(editorById("vscode")!, {
+      platform: "linux",
+      env: () => ({ PATH: ".:./bin:relative/bin" }),
+      homeDir: () => "/home/user",
+      ...makeFakeFs({
+        platform: "linux",
+        files: ["code", "bin/code", "relative/bin/code"],
+      }),
+    });
+    expect(resolved).toBeNull();
+
+    const launcher = new EditorLauncher({
+      platform: "linux",
+      env: () => ({ PATH: "/usr/bin" }),
+      homeDir: () => "/home/user",
+      ...makeFakeFs({
+        platform: "linux",
+        files: ["/usr/bin/code", "/workspace/app/src/index.ts"],
+        dirs: ["/workspace/app", "/other"],
+      }),
+      spawnProcess: async () => undefined,
+    });
+    await expect(launcher.launchEditor({
+      editor: "vscode",
+      targetPath: "/workspace/app/src/index.ts",
+      authorizedRoot: "/workspace/app",
+      projectRoot: "relative/root",
+    })).rejects.toThrow("absolute");
+    await expect(launcher.launchEditor({
+      editor: "vscode",
+      targetPath: "/workspace/app/src/index.ts",
+      authorizedRoot: "/workspace/app",
+      projectRoot: "/other",
+    })).rejects.toThrow("outside the project root");
+  });
 });

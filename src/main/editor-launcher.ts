@@ -21,6 +21,7 @@ import {
   hasWindowsStreamOrDeviceSpelling,
 } from "./project-path-open";
 import { runtimeProcessEnvironment } from "./runtime-process-environment";
+import { forceKillRuntimeProcessTree } from "./runtime-process-tree";
 
 const DEFAULT_CACHE_TTL_MS = 60_000;
 const VERSION_PROBE_TIMEOUT_MS = 2_000;
@@ -271,6 +272,7 @@ async function defaultProbeVersion(
       const invocation = buildWindowsCommandShimInvocation(executable, args, sanitized, platform);
       child = spawn(invocation.command, invocation.args, {
         env: sanitized,
+        detached: platform !== "win32",
         shell: false,
         windowsVerbatimArguments: invocation.windowsVerbatimArguments,
         windowsHide: true,
@@ -289,10 +291,18 @@ async function defaultProbeVersion(
       resolveProbe({ exitCode, stdout, timedOut });
     };
     const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        void 0;
+      if (typeof child.pid === "number" && child.pid > 1) {
+        void forceKillRuntimeProcessTree(child.pid, {
+          platform,
+          environment: sanitized,
+          rootProcessGroup: platform !== "win32",
+        }).catch(() => undefined);
+      } else {
+        try {
+          child.kill();
+        } catch {
+          void 0;
+        }
       }
       finish(null, true);
     }, VERSION_PROBE_TIMEOUT_MS);
@@ -396,7 +406,7 @@ async function resolveCommandOnPath(
 
   for (const rawEntry of entries) {
     const trimmed = rawEntry.trim().replace(/^"(.*)"$/u, "$1");
-    if (!trimmed) continue;
+    if (!trimmed || !api.isAbsolute(trimmed)) continue;
     for (const name of names) {
       const candidate = api.join(trimmed, name);
       const key = deps.platform === "win32" ? candidate.toLocaleLowerCase("en-US") : candidate;
@@ -752,10 +762,22 @@ export class EditorLauncher {
       throw new Error(`${editor.label} is not installed.`);
     }
 
+    let canonicalProjectRoot = canonicalRoot;
+    if (options.projectRoot) {
+      if (!api.isAbsolute(options.projectRoot)) {
+        throw new Error("The project root path must be absolute.");
+      }
+      const resolvedProjectRoot = await this.deps.realpath(options.projectRoot).catch(() => null);
+      if (!resolvedProjectRoot || !isContainedPath(resolvedProjectRoot, canonicalTarget, this.deps.platform)) {
+        throw new Error("The target path is outside the project root.");
+      }
+      canonicalProjectRoot = resolvedProjectRoot;
+    }
+
     const args = buildEditorArguments(editor, {
       target: canonicalTarget,
       isDirectory: metadata.isDirectory(),
-      ...(options.projectRoot ? { projectRoot: options.projectRoot } : { projectRoot: canonicalRoot }),
+      projectRoot: canonicalProjectRoot,
       ...(position.line !== undefined ? { line: position.line } : {}),
       ...(position.column !== undefined ? { column: position.column } : {}),
       baseArgs: resolved.baseArgs,

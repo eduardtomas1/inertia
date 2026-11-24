@@ -22,6 +22,7 @@ import { startPreviewPickerInPage, stopPreviewPickerInPage } from "./preview-pic
 
 const PREVIEW_PARTITION_PATTERN = /^inertia(?:-canary)?-preview-/u;
 const MAX_SCREENSHOT_RESIZE_ATTEMPTS = 4;
+const PREVIEW_ANNOTATION_MAX_RAW_HTML_CHARS = 32 * 1024;
 
 export interface PreviewPickerSessionView {
   readonly contextId: string;
@@ -159,7 +160,9 @@ export function buildValidatedPreviewAnnotation(
   if (!bounds) {
     throw new Error("The picked element bounds were invalid.");
   }
-  const rawHtml = typeof rawPayload.html === "string" ? rawPayload.html : "";
+  const rawHtml = typeof rawPayload.html === "string"
+    ? rawPayload.html.slice(0, PREVIEW_ANNOTATION_MAX_RAW_HTML_CHARS)
+    : "";
   const { html, truncated } = sanitizePreviewAnnotationHtml(rawHtml, PREVIEW_ANNOTATION_MAX_HTML_BYTES);
 
   const viewportWidth = finiteNumber(rawPayload.viewportWidth) ?? 0;
@@ -272,6 +275,12 @@ export class PreviewPickerCoordinator {
 
     try {
       await startPreviewPickerInPage(tab.contents, point ? { point } : {});
+      if (this.#activePicks.get(session.contextId)?.generation !== generation || session.busy > 0) {
+        if (!tab.contents.isDestroyed()) {
+          void stopPreviewPickerInPage(tab.contents).catch(() => undefined);
+        }
+        return false;
+      }
       return true;
     } catch (error) {
       if (this.#activePicks.get(session.contextId)?.generation === generation) {

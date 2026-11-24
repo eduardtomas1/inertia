@@ -120,7 +120,7 @@ export interface RunningRuntime extends RuntimeHtmlRenderReader, RuntimeAgentSec
   /** Reopens admission only when operationId owns the held update gate. */
   releaseUpdatePreparation: (operationId: string) => boolean;
   resolveProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
-  editorContext: (filePath?: string) => Promise<import("../node/runtime-editor-protocol").RuntimeEditorContextResult>;
+  editorContext: (filePath?: string, conversationId?: string) => Promise<import("../node/runtime-editor-protocol").RuntimeEditorContextResult>;
   /** The chats whose sent messages carry the stored attachment. */
   attachmentConversations: (attachmentId: string) => readonly string[];
   privateConnectRequest: (

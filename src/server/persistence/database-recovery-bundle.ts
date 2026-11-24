@@ -593,6 +593,17 @@ export async function stageRecoveryBundleImport(
             extension,
           },
         });
+      } else {
+        const existingPlan = readyPlan.get(newId);
+        if (
+          !existingPlan
+          || existingPlan.rawEntryPath !== rawEntryPath
+          || existingPlan.metadata.mimeType !== entry.mimeType
+          || existingPlan.metadata.size !== entry.size
+          || existingPlan.metadata.digest !== staged.sha256
+        ) {
+          throw new Error("The recovery bundle contains conflicting attachment definitions for the same identifier.");
+        }
       }
       const messageKey = recoveryMessageKey(projectIndex, conversationIndex, messageOrdinal);
       const list = attachmentsByMessageKey.get(messageKey) ?? [];

@@ -1,4 +1,4 @@
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { isAbsolute, relative } from "node:path";
 
 import type { OpenProjectPathRequest } from "../shared/desktop";
@@ -27,10 +27,11 @@ export async function resolveEditorContext(
   filePath: string | undefined,
   authority: ProjectIdentityAuthority | undefined,
   locked: boolean,
+  conversationId?: string,
 ): Promise<{ preferredEditor: AppSettings["preferredEditor"]; authorizedPath?: string; projectRoot?: string }> {
   const preferredEditor = store.settings().preferredEditor;
   if (!filePath || locked) return { preferredEditor };
-  const authorized = await resolveAuthorizedEditorFile(store, filePath, authority);
+  const authorized = await resolveAuthorizedEditorFile(store, filePath, authority, conversationId);
   return authorized
     ? { preferredEditor, authorizedPath: authorized.absolute, projectRoot: authorized.projectRoot }
     : { preferredEditor };
@@ -82,33 +83,54 @@ export async function resolveAuthorizedEditorFile(
   store: AuthorizedEditorPathStore,
   filePath: string,
   authority?: ProjectIdentityAuthority,
+  conversationId?: string,
 ): Promise<AuthorizedEditorFile | null> {
   if (!filePath || !isAbsolute(filePath)) return null;
+  let linkCheck;
+  try {
+    linkCheck = await lstat(filePath);
+  } catch {
+    return null;
+  }
+  if (linkCheck.isSymbolicLink()) return null;
   let canonicalTarget: string;
   try {
     canonicalTarget = await realpath(filePath);
   } catch {
     return null;
   }
-  const projects = store.projects();
   const candidates: Array<{ projectId: string; projectRoot: string; root: string }> = [];
-  for (const project of projects) {
-    if (project.workspaceKind === "scratch") continue;
+  if (conversationId) {
     try {
-      const root = store.projectPath(project.id);
-      candidates.push({ projectId: project.id, projectRoot: root, root });
-    } catch {
-      continue;
-    }
-  }
-  for (const conversation of projects.flatMap((project) => store.projectConversations(project.id))) {
-    if (!conversation.worktreePath) continue;
-    try {
-      const projectRoot = store.projectPath(conversation.projectId);
+      const conversation = store.conversation(conversationId);
+      const project = store.project(conversation.projectId);
+      if (project.workspaceKind === "scratch") return null;
+      const projectRoot = store.projectPath(project.id);
       const root = store.conversationPath(conversation.id);
-      candidates.push({ projectId: conversation.projectId, projectRoot, root });
+      candidates.push({ projectId: project.id, projectRoot, root });
     } catch {
-      continue;
+      return null;
+    }
+  } else {
+    const projects = store.projects();
+    for (const project of projects) {
+      if (project.workspaceKind === "scratch") continue;
+      try {
+        const root = store.projectPath(project.id);
+        candidates.push({ projectId: project.id, projectRoot: root, root });
+      } catch {
+        continue;
+      }
+    }
+    for (const conversation of projects.flatMap((project) => store.projectConversations(project.id))) {
+      if (!conversation.worktreePath) continue;
+      try {
+        const projectRoot = store.projectPath(conversation.projectId);
+        const root = store.conversationPath(conversation.id);
+        candidates.push({ projectId: conversation.projectId, projectRoot, root });
+      } catch {
+        continue;
+      }
     }
   }
   candidates.sort((left, right) => right.root.length - left.root.length);

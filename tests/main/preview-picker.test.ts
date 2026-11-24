@@ -65,7 +65,12 @@ function createIsolatedPickerEnvironment(html: string) {
     return host ? shadows.get(host) ?? null : null;
   };
 
-  return { win, sent, hitTargets, runScript, getOverlayHost, getClosedShadow };
+  return { win, sent, hitTargets, runScript, getOverlayHost, getClosedShadow, vmContext };
+}
+
+function trusted<T extends object>(event: T): T {
+  Object.defineProperty(event, "isTrusted", { value: true, configurable: true });
+  return event;
 }
 
 describe("isolated-world preview picker script", () => {
@@ -91,14 +96,21 @@ describe("isolated-world preview picker script", () => {
     const badge = shadow.querySelector(".badge") as HTMLElement;
     expect(badge.textContent).toBe("button#cta.primary");
 
-    const pointerDown = new env.win.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 140, clientY: 135 });
+    const pointerDown = trusted(new env.win.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 140, clientY: 135 }));
     button.dispatchEvent(pointerDown);
-    const click = new env.win.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, clientX: 140, clientY: 135 });
+    const click = trusted(new env.win.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, clientX: 140, clientY: 135 }));
     button.dispatchEvent(click);
     expect(pageClick).not.toHaveBeenCalled();
 
+    const pageKeys = vi.fn();
+    env.win.addEventListener("keydown", pageKeys);
+    env.win.addEventListener("input", pageKeys);
     const textarea = shadow.querySelector("textarea") as HTMLTextAreaElement;
     expect(textarea.getAttribute("aria-label")).toBe("Describe the change");
+    textarea.dispatchEvent(trusted(new env.win.KeyboardEvent("keydown", { key: "a", bubbles: true, composed: true, cancelable: true }) as never));
+    textarea.dispatchEvent(trusted(new env.win.Event("input", { bubbles: true, composed: true }) as never));
+    expect(pageKeys).not.toHaveBeenCalled();
+    expect((env.vmContext as { __inertiaPreviewPickerHosts?: WeakSet<object> }).__inertiaPreviewPickerHosts?.has(host!)).toBe(true);
     textarea.value = "Increase contrast on this CTA";
     const form = shadow.querySelector("form")!;
     form.dispatchEvent(new env.win.Event("submit", { bubbles: true, cancelable: true }) as never);
@@ -112,6 +124,25 @@ describe("isolated-world preview picker script", () => {
     expect(submitted.payload.comment).toBe("Increase contrast on this CTA");
     expect(submitted.payload.bounds).toEqual({ x: 100, y: 120, width: 120, height: 40 });
     expect(env.getOverlayHost()).toBeNull();
+    expect((env.vmContext as { __inertiaPreviewPickerHosts?: WeakSet<object> }).__inertiaPreviewPickerHosts?.has(host!)).toBe(false);
+  });
+
+  it("ignores untrusted synthetic page events trying to hijack or cancel the picker", () => {
+    const env = createIsolatedPickerEnvironment('<button id="target">Target</button>');
+    const button = env.win.document.getElementById("target")!;
+    button.getBoundingClientRect = () => ({
+      left: 10, top: 20, right: 90, bottom: 52, width: 80, height: 32, x: 10, y: 20, toJSON: () => ({}),
+    }) as never;
+    env.hitTargets.push(button as unknown as Element);
+
+    env.runScript(previewPickerStartScript());
+    button.dispatchEvent(new env.win.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: 30 }));
+    button.dispatchEvent(new env.win.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: 30 }));
+    env.win.dispatchEvent(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never);
+    expect(env.sent).toEqual([]);
+    expect(env.getOverlayHost()).not.toBeNull();
+    const popover = env.getClosedShadow()!.querySelector(".popover") as HTMLElement;
+    expect(popover.style.display).not.toBe("block");
   });
 
   it("cancels on Escape at both hover stage and comment stage, and supports context-menu initial point", () => {
@@ -123,7 +154,7 @@ describe("isolated-world preview picker script", () => {
     env.hitTargets.push(button as unknown as Element);
 
     env.runScript(previewPickerStartScript());
-    env.win.dispatchEvent(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never);
+    env.win.dispatchEvent(trusted(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never));
     expect(env.sent).toEqual([{ type: "cancelled" }]);
     expect(env.getOverlayHost()).toBeNull();
 
@@ -134,7 +165,7 @@ describe("isolated-world preview picker script", () => {
     expect(popover.style.display).toBe("block");
 
     const textarea = shadow.querySelector("textarea")!;
-    textarea.dispatchEvent(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never);
+    textarea.dispatchEvent(trusted(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never));
     expect(env.sent).toEqual([{ type: "cancelled" }]);
     expect(env.getOverlayHost()).toBeNull();
   });
@@ -505,5 +536,37 @@ describe("main-process preview picker coordinator and provider assembly", () => 
     expect(coordinator.isActive(session.contextId)).toBe(false);
     expect(executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(2);
     expect(executeJavaScriptInIsolatedWorld.mock.calls[1]?.[1]?.[0]?.code).toContain("__inertiaPreviewPicker");
+  });
+
+  it("tears down a stale overlay if cancel() ran while startPreviewPickerInPage was in flight", async () => {
+    let resolveStart!: (value: boolean) => void;
+    const executeJavaScriptInIsolatedWorld = vi.fn<
+      (worldId: number, scripts: Array<{ code: string }>, userGesture?: boolean) => Promise<boolean>
+    >()
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { resolveStart = resolve; }))
+      .mockResolvedValue(true);
+    const contents = {
+      isDestroyed: () => false,
+      getURL: () => "http://127.0.0.1:4173/app",
+      executeJavaScriptInIsolatedWorld,
+      capturePage: vi.fn(),
+    } as unknown as WebContents;
+    const coordinator = new PreviewPickerCoordinator({ publish: vi.fn() });
+    const session: PreviewPickerSessionView = {
+      contextId: "11111111-1111-4111-8111-111111111111",
+      partition: "inertia-preview-test",
+      activeTabId: "tab-1",
+      busy: 0,
+      viewportScale: 1,
+      pickerActive: false,
+      activeTab: { id: "tab-1", documentSequence: 1, contents },
+    };
+
+    const starting = coordinator.start(session);
+    coordinator.cancel(session);
+    resolveStart(true);
+    expect(await starting).toBe(false);
+    expect(session.pickerActive).toBe(false);
+    expect(executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(3);
   });
 });

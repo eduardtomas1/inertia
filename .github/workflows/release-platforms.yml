@@ -486,14 +486,24 @@ jobs:
           if ($azureSigning -or -not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
             $suffix = "${{ matrix.windows_asset_suffix }}"
             $prefix = if ($env:INERTIA_RELEASE_CHANNEL -eq "canary") { "Inertia.Canary.Setup" } else { "Inertia.Setup" }
-            $signature = Get-AuthenticodeSignature "release/$prefix.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe"
-            if ($signature.Status -ne "Valid") {
-              throw "The Windows release signature is not valid: $($signature.Status)"
+            $appPath = "${{ matrix.app_path }}"
+            if ($env:INERTIA_RELEASE_CHANNEL -eq "canary") {
+              $appPath = $appPath -replace 'Inertia\.exe$', 'Inertia Canary.exe'
             }
-            if ($azureSigning) {
-              $signer = $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
-              if ($signer -cne $env:AZURE_TRUSTED_SIGNING_PUBLISHER_NAME) {
-                throw "The Windows release signer common name does not equal the configured publisher name."
+            $targets = @(
+              "release/$prefix.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe",
+              $appPath
+            )
+            foreach ($target in $targets) {
+              $signature = Get-AuthenticodeSignature $target
+              if ($signature.Status -ne "Valid") {
+                throw "The Windows release signature for $target is not valid: $($signature.Status)"
+              }
+              if ($azureSigning) {
+                $signer = $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+                if ($signer -cne $env:AZURE_TRUSTED_SIGNING_PUBLISHER_NAME) {
+                  throw "The Windows release signer common name for $target does not equal the configured publisher name."
+                }
               }
             }
           }

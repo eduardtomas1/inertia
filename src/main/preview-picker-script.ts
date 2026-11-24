@@ -282,12 +282,22 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     const host = document.createElement("div");
     host.setAttribute(OVERLAY_ATTR, "host");
     host.setAttribute("dir", "ltr");
+    if (!(owner.__inertiaPreviewPickerHosts instanceof WeakSet)) {
+      owner.__inertiaPreviewPickerHosts = new WeakSet();
+    }
+    owner.__inertiaPreviewPickerHosts.add(host);
     try {
       host.popover = "manual";
     } catch {}
     host.style.cssText = "position:fixed;inset:0;width:auto;height:auto;margin:0;border:0;padding:0;overflow:visible;background:transparent;color:inherit;z-index:2147483647;pointer-events:none;";
 
     const shadow = host.attachShadow({ mode: "closed" });
+    const stopOverlayEvent = (event) => {
+      event.stopPropagation();
+    };
+    for (const eventName of ["keydown", "keyup", "keypress", "beforeinput", "input", "paste", "copy", "cut", "compositionstart", "compositionupdate", "compositionend"]) {
+      shadow.addEventListener(eventName, stopOverlayEvent, false);
+    }
     const style = document.createElement("style");
     style.textContent = [
       ":host { all: initial; }",
@@ -474,7 +484,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     let selectedOnPointerDown = false;
 
     const onPointerDown = (event) => {
-      if (finished || submitting || eventTargetsOverlay(event)) return;
+      if (finished || submitting || !event.isTrusted || eventTargetsOverlay(event)) return;
       swallow(event);
       if (event.button !== 0) return;
       const target = pickAtPoint(document, event.clientX, event.clientY, isExcluded);
@@ -485,7 +495,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     };
 
     const onMouseOrClick = (event) => {
-      if (finished || submitting || eventTargetsOverlay(event)) return;
+      if (finished || submitting || !event.isTrusted || eventTargetsOverlay(event)) return;
       swallow(event);
       if (event.type === "click" && !selectedOnPointerDown && event.button === 0) {
         const target = pickAtPoint(document, event.clientX, event.clientY, isExcluded);
@@ -515,6 +525,9 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
       } catch {}
       cursorStyle.remove();
       host.remove();
+      if (owner.__inertiaPreviewPickerHosts instanceof WeakSet) {
+        owner.__inertiaPreviewPickerHosts.delete(host);
+      }
       if (owner.__inertiaPreviewPicker && owner.__inertiaPreviewPicker.host === host) {
         owner.__inertiaPreviewPicker = null;
       }
@@ -568,7 +581,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     };
 
     const onKeyDown = (event) => {
-      if (finished || submitting) return;
+      if (finished || submitting || !event.isTrusted) return;
       if (event.key === "Escape" && !event.isComposing) {
         swallow(event);
         stop(true);
@@ -576,6 +589,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     };
 
     textarea.addEventListener("keydown", (event) => {
+      if (!event.isTrusted) return;
       if (event.key === "Escape" && !event.isComposing) {
         swallow(event);
         stop(true);

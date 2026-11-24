@@ -15,6 +15,8 @@ describe("preview annotation HTML sanitization and size bounds", () => {
       '<script>window.pwned = true;</script>',
       '<scr<script>ipt>alert(2)</script>',
       '<a href="javascript:alert(3)" title="ok">Link</a>',
+      '<a href="&#106;avascript:alert(4)" title="ok2">Link2</a>',
+      '<a href="data:text/html,<script>alert(5)</script>" title="ok3">Link3</a>',
       '<input type="password" value="secret123" placeholder="Enter" />',
       '<iframe srcdoc="<script>x()</script>"></iframe>',
       '<span>Hello</span>',
@@ -27,6 +29,8 @@ describe("preview annotation HTML sanitization and size bounds", () => {
     expect(result.html.toLowerCase()).not.toContain("onmouseover");
     expect(result.html.toLowerCase()).not.toContain("onfocus");
     expect(result.html.toLowerCase()).not.toContain("javascript:");
+    expect(result.html.toLowerCase()).not.toContain("&#106;avascript:");
+    expect(result.html.toLowerCase()).not.toContain("data:text/html");
     expect(result.html.toLowerCase()).not.toContain("srcdoc");
     expect(result.html).not.toContain("secret123");
     expect(result.html).toContain('id="card"');

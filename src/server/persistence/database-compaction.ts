@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync, statfsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 
 import type Database from "better-sqlite3";
@@ -224,8 +224,9 @@ export function runFullVacuumOffThread(
   if (!regularOwnedFile(resolvedPath)) {
     return Promise.reject(new DatabaseCompactionError("The database path is not a local file."));
   }
+  const canonicalDir = resolve(realpathSync(dirname(resolvedPath)));
   const canonicalPath = resolve(realpathSync(resolvedPath));
-  if (canonicalPath !== resolvedPath) {
+  if (canonicalPath !== resolve(canonicalDir, basename(resolvedPath))) {
     return Promise.reject(new DatabaseCompactionError("The database path must not traverse a symbolic link."));
   }
   if (signal.aborted) return Promise.reject(new DatabaseCompactionCancelledError());
@@ -538,19 +539,19 @@ export class DatabaseCompactionManager {
       0,
       Math.trunc(this.options.diskMarginBytes ?? FULL_VACUUM_DISK_MARGIN_BYTES),
     );
-    await this.assertSufficientDiskSpace(before.databaseBytes + before.walBytes + marginBytes);
+    await this.assertSufficientDiskSpace(before.databaseBytes * 2 + before.walBytes + marginBytes);
     if (signal.aborted) throw new DatabaseCompactionCancelledError();
     let mmapDisabled = false;
     try {
       this.setState("backing-up");
-      if (!this.backup.hasFreshBackup()) {
+      for (let attempt = 0; attempt < 2 && !this.backup.hasFreshBackup(); attempt += 1) {
         await waitForOperationOrAbort(
           this.backup.createBackup(),
           signal,
           () => new DatabaseCompactionCancelledError(),
         );
+        if (signal.aborted) throw new DatabaseCompactionCancelledError();
       }
-      if (signal.aborted) throw new DatabaseCompactionCancelledError();
       const blockedAfterBackup = this.blockedReason(mode);
       if (blockedAfterBackup !== null) {
         throw new DatabaseCompactionError(blockedAfterBackup);
@@ -562,9 +563,12 @@ export class DatabaseCompactionManager {
         this.blockedReason("manual"),
       );
       this.cachedStatus = preVacuum;
-      await this.assertSufficientDiskSpace(preVacuum.databaseBytes + preVacuum.walBytes + marginBytes);
+      await this.assertSufficientDiskSpace(preVacuum.databaseBytes * 2 + preVacuum.walBytes + marginBytes);
       if (signal.aborted) throw new DatabaseCompactionCancelledError();
       this.setState("checkpointing");
+      if (!this.backup.hasFreshBackup()) {
+        throw new DatabaseCompactionError("The database changed during backup; please retry compaction.");
+      }
       this.database.pragma("mmap_size = 0");
       mmapDisabled = true;
       this.database.pragma("wal_checkpoint(TRUNCATE)");

@@ -255,4 +255,42 @@ describe("Browser main-world credential signal", () => {
     await expect(agentPageEvidencePrivacy(contents as never, "semantic"))
       .resolves.toEqual({ withheld: "credential-signal" });
   });
+
+  it("ignores trusted input events from the preview picker host while still withholding unregistered closed shadow hosts", async () => {
+    const inputListeners: Array<(event: Record<string, unknown>) => void> = [];
+    const state = {
+      privacyGuardInstalled: false,
+      refs: new Map(), nodes: new WeakMap(), next: 1,
+      passwordNodes: new WeakSet(), passwordValues: new Set<string>(),
+    } as Record<string, unknown>;
+    class MutationObserver {
+      observe(): void {}
+    }
+    const pickerHost = { tagName: "DIV" };
+    const untrustedHost = { tagName: "DIV" };
+    const context: Record<string, unknown> = {
+      __inertiaAgentBrowser: state,
+      __pickerHost: pickerHost,
+      MutationObserver,
+      document: { documentElement: null, addEventListener: vi.fn(), getElementsByTagName: () => [] },
+      addEventListener: (name: string, listener: (event: Record<string, unknown>) => void) => {
+        if (name === "input") inputListeners.push(listener);
+      },
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (_world: number, scripts: Array<{ code: string }>) =>
+        runInNewContext(scripts[0]!.code, context)),
+    };
+    runInNewContext("globalThis.__inertiaPreviewPickerHosts = new WeakSet([__pickerHost]);", context);
+    await installAgentPagePrivacyGuard(contents as never);
+    expect(inputListeners.length).toBeGreaterThan(0);
+    for (const listener of inputListeners) {
+      listener({ isTrusted: true, composedPath: () => [pickerHost] });
+    }
+    await expect(agentPageEvidencePrivacy(contents as never, "semantic")).resolves.toEqual({ withheld: null });
+    for (const listener of inputListeners) {
+      listener({ isTrusted: true, composedPath: () => [untrustedHost] });
+    }
+    await expect(agentPageEvidencePrivacy(contents as never, "semantic")).resolves.toEqual({ withheld: "hidden-input" });
+  });
 });

@@ -497,6 +497,63 @@ describe("portable recovery bundles with attachments", () => {
       fullBytes.subarray(0, TAR_BLOCK_BYTES * 2),
       /truncated/u,
     );
+
+    const parsedExport = JSON.parse(exportBytes.toString("utf8")) as {
+      projects: Array<{ conversations: Array<{ messages: Array<Record<string, unknown>> }> }>;
+    };
+    const secondPayload = Buffer.from("%PDF-1.4\nconflicting payload\n", "utf8");
+    const secondSha256 = createHash("sha256").update(secondPayload).digest("hex");
+    const secondEntryName = `attachments/${attachmentId}.pdf`;
+    const firstMsg = parsedExport.projects[0]!.conversations[0]!.messages[0]!;
+    const collidingExport = Buffer.from(
+      JSON.stringify({
+        ...parsedExport,
+        projects: [{
+          ...parsedExport.projects[0]!,
+          conversations: [{
+            ...parsedExport.projects[0]!.conversations[0]!,
+            messages: [firstMsg, { ...firstMsg, ordinal: 1, content: "Second message" }],
+          }],
+        }],
+      }),
+      "utf8",
+    );
+    const fullManifest = JSON.parse(manifestBytes.toString("utf8")) as {
+      attachments: Array<{ messageReference: Record<string, unknown> } & Record<string, unknown>>;
+    };
+    const firstAttachment = fullManifest.attachments[0]!;
+    const collidingManifest = Buffer.from(
+      JSON.stringify({
+        ...fullManifest,
+        exportSize: collidingExport.byteLength,
+        exportSha256: createHash("sha256").update(collidingExport).digest("hex"),
+        attachments: [
+          firstAttachment,
+          {
+            ...firstAttachment,
+            messageReference: {
+              ...firstAttachment.messageReference,
+              messageOrdinal: 1,
+            },
+            name: "spoofed.pdf",
+            mimeType: "application/pdf",
+            size: secondPayload.byteLength,
+            sha256: secondSha256,
+            entryPath: secondEntryName,
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await verifyRejectedCleanly(
+      buildRawTar([
+        { name: "export.json", payload: collidingExport },
+        { name: entryName, payload: attachmentBytes },
+        { name: secondEntryName, payload: secondPayload },
+        { name: "manifest.json", payload: collidingManifest },
+      ]),
+      /conflicting attachment definitions/u,
+    );
   });
 
   it("cleans up staging on interrupted import and reconciles leftover staging on next start", async () => {

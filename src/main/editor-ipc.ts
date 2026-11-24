@@ -1,3 +1,6 @@
+import { lstat } from "node:fs/promises";
+import { extname } from "node:path";
+
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 
 import type { RuntimeEditorContextResult } from "../node/runtime-editor-protocol.js";
@@ -22,7 +25,7 @@ export interface EditorIpcOptions {
 }
 
 export interface EditorRuntimeBridge {
-  editorContext(filePath?: string): Promise<RuntimeEditorContextResult>;
+  editorContext(filePath?: string, conversationId?: string): Promise<RuntimeEditorContextResult>;
 }
 
 export function registerEditorIpc(options: EditorIpcOptions): void {
@@ -82,15 +85,23 @@ export async function tryOpenLinkInPreferredEditor(
   runtime: EditorRuntimeBridge | null,
   filePath: string,
   position: EditorPosition,
+  conversationId?: string,
 ): Promise<boolean> {
   if (!runtime) return false;
   let context: RuntimeEditorContextResult;
   try {
-    context = await runtime.editorContext(filePath);
+    context = await runtime.editorContext(filePath, conversationId);
   } catch {
     return false;
   }
   if (!isEditorId(context.preferredEditor) || !context.authorizedPath || !context.projectRoot) {
+    return false;
+  }
+  const metadata = await lstat(context.authorizedPath).catch(() => null);
+  if (!metadata || !metadata.isFile() || metadata.isSymbolicLink()) {
+    return false;
+  }
+  if (extname(context.authorizedPath).toLowerCase() === ".code-workspace") {
     return false;
   }
   await launcher.launchEditor({

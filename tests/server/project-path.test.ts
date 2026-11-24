@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
-import { resolveAuthoritativeProjectPath } from "../../src/server/project-path";
+import { resolveAuthoritativeProjectPath, resolveAuthorizedEditorFile } from "../../src/server/project-path";
 import { resolveWorkspacePathForOpen } from "../../src/server/workspace";
 
 const temporaryDirectories: string[] = [];
@@ -133,6 +133,29 @@ describe("authoritative project-path resolution", () => {
         relativePath: ".",
         action: "open-externally",
       })).rejects.toThrow("does not belong");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("scopes resolveAuthorizedEditorFile to the owning conversation workspace when conversationId is provided", async () => {
+    const directory = await temporaryDirectory("inertia-editor-scope-");
+    const firstRoot = join(directory, "first");
+    const secondRoot = join(directory, "second");
+    await Promise.all([mkdir(firstRoot), mkdir(secondRoot)]);
+    const firstFile = join(firstRoot, "a.ts");
+    const secondFile = join(secondRoot, "b.ts");
+    await Promise.all([writeFile(firstFile, "a"), writeFile(secondFile, "b")]);
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), firstRoot);
+    try {
+      const first = store.createProject("First", firstRoot);
+      store.createProject("Second", secondRoot);
+      const conversation = store.createConversation(first.id, "First thread");
+      expect(await resolveAuthorizedEditorFile(store, firstFile, undefined, conversation.id)).toEqual({
+        absolute: await realpath(firstFile),
+        projectRoot: await realpath(firstRoot),
+      });
+      expect(await resolveAuthorizedEditorFile(store, secondFile, undefined, conversation.id)).toBeNull();
     } finally {
       store.close();
     }

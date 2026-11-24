@@ -875,12 +875,18 @@ export async function assertCheckpointExists(
   ref: string,
   options: CheckpointOperationOptions = {},
 ): Promise<void> {
+  if (!isValidCheckpointRef(ref)) {
+    throw new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    );
+  }
   const objectType = (
     await runGit(
       repositoryPath,
       checkpointGitArguments([
         "for-each-ref",
         "--format=%(objecttype)",
+        "--",
         ref,
       ]),
       {},

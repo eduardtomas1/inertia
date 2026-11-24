@@ -320,7 +320,11 @@ test("keeps runtime support and application update checks explicit in settings",
       filePath: path,
     }));
   }, exportPath);
-  await page.getByRole("button", { name: "Export recovery file" }).click();
+  await page.getByRole("button", { name: "Export recovery file", exact: true }).click();
+  const exportOptions = page.getByRole("group", { name: "Export recovery options" });
+  await expect(exportOptions.getByRole("checkbox", { name: "Include attachments" })).not.toBeChecked();
+  await exportOptions.getByRole("button", { name: "Export recovery file…", exact: true }).click();
+  await expect(exportOptions).toHaveCount(0);
   await expect(page.getByText("Recovery file exported.", { exact: false }))
     .toBeVisible();
   const exported = JSON.parse(await readFile(exportPath, "utf8")) as {

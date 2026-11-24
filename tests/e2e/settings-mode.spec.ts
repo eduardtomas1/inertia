@@ -112,7 +112,9 @@ test("keeps an action row's height when its notice appears", async () => {
     Reflect.set(dialog, "showSaveDialog", async () => ({ canceled: true }));
   });
   try {
-    await recoveryRow.getByRole("button", { name: "Export recovery file" }).click();
+    await recoveryRow.getByRole("button", { name: "Export recovery file", exact: true }).click();
+    await page.getByRole("group", { name: "Export recovery options" })
+      .getByRole("button", { name: "Export recovery file…", exact: true }).click();
     await expect(recoveryRow.getByText("Recovery export cancelled.", { exact: true })).toBeVisible();
     expect(await rowHeight()).toBe(idleHeight);
   } finally {

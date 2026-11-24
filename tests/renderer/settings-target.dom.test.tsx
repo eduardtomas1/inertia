@@ -203,7 +203,7 @@ describe("Settings external section targets", () => {
     expect(document.querySelector('[data-setting-id="database-backup"] time')).not.toHaveAttribute("title");
     expect(screen.getByText("Portable conversation recovery export"))
       .toBeVisible();
-    expect(screen.getByText("Project paths and messages only. Imports create new supervised identities."))
+    expect(screen.getByText("Project paths and messages as JSON, or optionally bundled with retained attachments. Imports create new supervised identities."))
       .toBeVisible();
     expect(screen.queryByText(/Provider credentials stay outside Inertia/u)).toBeNull();
   });

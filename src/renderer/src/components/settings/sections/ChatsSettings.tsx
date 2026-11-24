@@ -135,16 +135,16 @@ export function ChatsSettings(props: NewChatDefaultsProps): React.JSX.Element {
       </SettingsGroup>
 
       <SettingsGroup title="Review and terminal" headingId="source-heading">
-        <SettingSelect
-          id="preferred-editor"
-          title="Preferred editor"
-          description="Used when opening files, folders, and line links in your editor."
-          value={preferredEditor}
-          options={editorOptions}
-          disabled={disabled}
-          onChange={(nextEditor) => onUpdate({ preferredEditor: nextEditor })}
-        />
         <div className="settings-rows">
+          <SettingSelect
+            id="preferred-editor"
+            title="Preferred editor"
+            description="Used when opening files, folders, and line links in your editor."
+            value={preferredEditor}
+            options={editorOptions}
+            disabled={disabled}
+            onChange={(nextEditor) => onUpdate({ preferredEditor: nextEditor })}
+          />
           <SettingSwitch id="wrap-diffs" title="Wrap long diff lines" checked={settings.wrapDiffs} disabled={disabled} onChange={(wrapDiffs) => onUpdate({ wrapDiffs })} />
           <SettingSwitch id="ignore-whitespace" title="Ignore whitespace" checked={settings.ignoreWhitespace} disabled={disabled} onChange={(ignoreWhitespace) => onUpdate({ ignoreWhitespace })} />
         </div>

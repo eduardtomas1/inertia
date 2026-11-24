@@ -909,6 +909,10 @@ export class DatabaseBackupManager {
     return { lastValidatedAt: this.lastValidatedAt };
   }
 
+  isBackingUp(): boolean {
+    return this.inFlight !== null;
+  }
+
   hasFreshBackup(): boolean {
     if (this.lastValidatedAt === null || this.publishedChanges === null) return false;
     const current = this.changeMarker();

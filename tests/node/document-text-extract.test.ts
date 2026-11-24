@@ -203,6 +203,17 @@ describe("hostile and unreadable documents", () => {
       .toBe("## Chapter 1\nPlain chapter");
   });
 
+  it("decodes the HTML4 named entities of an EPUB2 chapter and keeps unknown ones literal", () => {
+    const book = (chapter: string) => documentArchive({
+      "META-INF/container.xml": '<container><rootfile full-path="book.opf"/></container>',
+      "book.opf": '<package><item id="a" href="a.xhtml"/><itemref idref="a"/></package>',
+      "a.xhtml": chapter,
+    });
+    const doctype = '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">';
+    expect(extract("epub", book(`${doctype}<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Caf&eacute; Sch&ouml;n Espa&ntilde;a &Agrave;&yuml; &Omega;&hearts;&OElig;&rArr;&amp;&unknownentity;</p></body></html>`)).text)
+      .toBe("## Chapter 1\nCafé Schön España Àÿ Ω♥Œ⇒&&unknownentity;");
+  });
+
   it("distinguishes truncated archives, renamed non-archives and empty files", () => {
     const archive = docx("<document><p>Complete</p></document>");
     expect(failure("docx", archive.subarray(0, archive.length - 10))).toBe("document-corrupt");

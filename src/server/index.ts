@@ -65,8 +65,7 @@ import { createDetachedChatRuntimeSecurity } from "./runtime/detached-chat-runti
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import { startProjectAutoPull } from "./runtime/project-auto-pull";
-import { startMessageSearchIndexing } from "./runtime/message-search-indexing";
-import { MessageSearchIndexWorker } from "./persistence/message-search-index-worker-client";
+import { messageSearchIndexIdle, startMessageSearchIndexing } from "./runtime/message-search-indexing";
 import {
   createRuntimeCommandExecutor,
 } from "./runtime/commands/command-router";
@@ -544,13 +543,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       && !recoveryImportAdmission.isActive() && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
     reportIncident: commandIncidents.report, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed,
   });
-  const messageSearchIndexer = new MessageSearchIndexWorker(databasePath);
-  runtimeLifetimeAbort.signal.addEventListener("abort", () => { void messageSearchIndexer.close(); }, { once: true });
+  const testMessageSearchIndexStartMs = process.env.NODE_ENV === "test" ? Number(process.env.INERTIA_TEST_MESSAGE_SEARCH_INDEX_START_MS ?? Number.NaN) : Number.NaN;
   startMessageSearchIndexing({
     signal: runtimeLifetimeAbort.signal, writes: databaseWrites,
-    index: (options) => messageSearchIndexer.batch(options),
-    availability: () => closed || runtimeSafetyLock || store.isDatabaseVacuuming() || updatePreparation.isAdmissionClosed() || recoveryImportAdmission.isActive() || activeRuntimeCommands > 0
-      ? "blocked" : turns.activeConversationIds().length > 0 || isolatedRuns.activeCount() > 0 ? "busy" : "idle",
+    index: (budgetMs) => store.indexMessageSearchBatch(budgetMs),
+    merge: (budgetMs) => store.mergeMessageSearchIndex(budgetMs),
+    idle: () => messageSearchIndexIdle({
+      closed, safetyLocked: Boolean(runtimeSafetyLock), updatePreparing: updatePreparation.isAdmissionClosed(),
+      recoveryActive: recoveryImportAdmission.isActive(), activeRuntimeCommands,
+      activeTurns: turns.activeConversationIds().length > 0,
+      activeRuns: isolatedRuns.activeCount() > 0 || store.hasRecordedActiveWorkspaceRun(),
+      providerMaintenanceActive: providerMaintenance.activeOperations().length > 0,
+      backingUp: store.isDatabaseBackingUp(), compacting: store.isDatabaseCompacting(),
+    }),
+    ...(Number.isFinite(testMessageSearchIndexStartMs) ? { delays: { start: testMessageSearchIndexStartMs, busy: 50, settled: 200 } } : {}),
   });
   const rateLimitChanges = createRateLimitChangeSignal();
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {

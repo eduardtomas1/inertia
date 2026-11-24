@@ -29,16 +29,18 @@ export interface MessageSearchIndexProgress {
 
 export function indexMessageSearchBatch(
   database: Database.Database,
-  options: { budgetMs: number; mergeMs?: number; now?: () => number },
+  options: { budgetMs: number; now?: () => number },
 ): MessageSearchIndexProgress {
   const now = options.now ?? performance.now.bind(performance);
-  const indexed = indexMessageSearchDocuments(database, now, now() + options.budgetMs);
-  const mergeMs = options.mergeMs ?? 0;
-  const merging = mergeMs > 0 && mergeMessageSearchIndex(database, now, now() + mergeMs);
-  return { remaining: indexed.remaining || merging, backfillComplete: indexed.backfillComplete };
+  return indexMessageSearchDocuments(database, now, now() + options.budgetMs);
 }
 
-function mergeMessageSearchIndex(database: Database.Database, now: () => number, deadline: number): boolean {
+export function mergeMessageSearchIndex(
+  database: Database.Database,
+  options: { budgetMs: number; now?: () => number },
+): boolean {
+  const now = options.now ?? performance.now.bind(performance);
+  const deadline = now() + options.budgetMs;
   return database.transaction((): boolean => {
     const changes = cachedStatement(database, "SELECT total_changes()").pluck();
     let merging = false;
@@ -48,7 +50,7 @@ function mergeMessageSearchIndex(database: Database.Database, now: () => number,
       merging = (changes.get() as number) - before >= 2;
     } while (merging && now() < deadline);
     return merging;
-  })();
+  }).immediate();
 }
 
 function indexMessageSearchDocuments(
@@ -86,7 +88,7 @@ function indexMessageSearchDocuments(
 
     const backfilled = backfillBatch(database, spent, () => { worked = true; }, indexable, index);
     return { remaining: staleRemaining || backfilled.remaining, backfillComplete: backfilled.complete };
-  })();
+  }).immediate();
 }
 
 function backfillBatch(

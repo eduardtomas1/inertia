@@ -97,7 +97,6 @@ export default defineConfig({
           "snapshot-shortcut-worker": resolve("src/main/snapshot-shortcut-worker.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
           "message-search-worker": resolve("src/server/persistence/message-search-worker.ts"),
-          "message-search-index-worker": resolve("src/server/persistence/message-search-index-worker.ts"),
           "app-update-candidate-viability-worker": resolve(
             "src/server/app-update-candidate-viability-worker.ts",
           ),

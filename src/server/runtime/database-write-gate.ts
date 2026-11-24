@@ -24,8 +24,9 @@ export class DatabaseWriteGate {
     while (this.database.isDatabaseVacuuming()) await this.database.whenDatabaseWritable();
   }
 
-  async run<T>(operation: () => Promise<T>): Promise<T> {
+  async run<T>(operation: () => Promise<T>, options: { yieldsToCompaction?: boolean } = {}): Promise<T> {
     while (this.database.isDatabaseVacuuming()) await this.database.whenDatabaseWritable();
+    if (options.yieldsToCompaction) return await operation();
     this.#active += 1;
     try {
       return await operation();

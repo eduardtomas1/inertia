@@ -146,6 +146,14 @@ describe("message search index maintenance", () => {
     const shadowStatistics = () => context.reader.prepare(`
       SELECT tbl FROM sqlite_stat1 WHERE tbl LIKE 'message_search_index%' ORDER BY tbl
     `).pluck().all();
+    const dataRangePlan = () => {
+      const liveDatabase = (context.store as unknown as { database: Database.Database }).database;
+      return (liveDatabase.prepare(
+        "EXPLAIN QUERY PLAN SELECT id, block FROM message_search_index_data WHERE id >= ? AND id <= ? ORDER BY id ASC",
+      ).all(1, 100) as Array<{ detail: string }>).map(({ detail }) => detail).join(" ");
+    };
+    expect(shadowStatistics()).toEqual([]);
+    expect(dataRangePlan()).toContain("USING INTEGER PRIMARY KEY");
     context.store.createMessage(context.conversation.id, "statistics needle");
     indexEverything(context.store);
     context.writer.exec("ANALYZE");
@@ -153,6 +161,8 @@ describe("message search index maintenance", () => {
     context.restart();
     expect(shadowStatistics()).toEqual([]);
     expect(context.reader.prepare("SELECT count(*) FROM sqlite_stat1 WHERE tbl = 'messages'").pluck().get()).toBeGreaterThan(0);
+    context.restart();
+    expect(dataRangePlan()).toContain("USING INTEGER PRIMARY KEY");
   });
 
   it("removes index rows with their messages, conversations and projects", async () => {

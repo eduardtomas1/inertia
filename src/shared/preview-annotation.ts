@@ -11,7 +11,6 @@ export const PREVIEW_ANNOTATION_MAX_COMMENT_CHARS = 2_000;
 export const PREVIEW_ANNOTATION_MAX_TAG_CHARS = 64;
 export const PREVIEW_ANNOTATION_MAX_BYTES = 12 * 1024;
 export const PREVIEW_ANNOTATION_SCREENSHOT_MARGIN_PX = 16;
-export const PREVIEW_PICKER_EVENT_CHANNEL = "inertia:preview-picker-event";
 
 const utf8Encoder = new TextEncoder();
 

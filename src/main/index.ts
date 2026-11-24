@@ -40,7 +40,7 @@ import {
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
-import { PREVIEW_PICKER_EVENT_CHANNEL } from "../shared/preview-annotation.js";
+import { PREVIEW_PICKER_EVENT_CHANNEL } from "../shared/preview-picker-channel.js";
 import { previewAnnotationImportDocument } from "./preview-picker.js";
 import { openDesktopLink } from "./external-link-open.js";
 import { inertiaWindowInForeground } from "./desktop-notification-gate.js";

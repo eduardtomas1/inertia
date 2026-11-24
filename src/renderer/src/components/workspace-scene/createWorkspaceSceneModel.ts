@@ -682,12 +682,11 @@ export function createWorkspaceSceneModel({
       onCancelAppUpdateDownload: appUpdate.cancelDownload,
       onInstallAppUpdate: appUpdate.install,
       onOpenAppRelease: appUpdate.openRelease,
-      onUnarchive: (thread) => {
-        void actions.run("conversation.unarchive", {
+      onUnarchive: (thread) =>
+        actions.run("conversation.unarchive", {
           type: "conversation.unarchive",
           payload: { conversationId: thread.id },
-        }).catch(() => undefined);
-      },
+        }),
       onOpenConversation: actions.openConversation,
       onLoadBackendProfile: backendProfileActions.loadBackendProfile,
       onCreateBackendProfile: backendProfileActions.createBackendProfile,

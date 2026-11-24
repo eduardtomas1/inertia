@@ -67,7 +67,7 @@ export interface SettingsViewProps {
   onCancelAppUpdateDownload: () => Promise<void>;
   onInstallAppUpdate: () => Promise<void>;
   onOpenAppRelease: () => Promise<void>;
-  onUnarchive: (conversation: Conversation) => void;
+  onUnarchive: (conversation: Conversation) => void | Promise<unknown>;
   onOpenConversation?: (conversationId: string) => boolean;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
   onCreateBackendProfile: (draft: ModelBackendProfileCreateDraft) => Promise<ModelBackendProfileDetail>;

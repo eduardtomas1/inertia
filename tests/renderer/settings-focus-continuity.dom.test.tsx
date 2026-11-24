@@ -283,4 +283,13 @@ describe("focus survives controls that close themselves", () => {
     press(await screen.findByRole("button", { name: "Restore Only" }));
     expect(screen.getByText("No archived chats.")).toHaveFocus();
   });
+
+  it("restores the archive row so the user can retry when unarchiving fails", async () => {
+    const chat = archivedChat("a", "Retry me", "2026-10-01T00:00:00.000Z");
+    const onUnarchive = vi.fn(() => Promise.reject(new Error("Runtime unavailable")));
+    render(<ArchivedChats count={1} load={archivedLoader([chat])} providers={[provider]} disabled={false} onUnarchive={onUnarchive} />);
+    press(await screen.findByRole("button", { name: "Restore Retry me" }));
+    expect(onUnarchive).toHaveBeenCalledExactlyOnceWith(chat);
+    expect(await screen.findByRole("button", { name: "Restore Retry me" })).toBeInTheDocument();
+  });
 });

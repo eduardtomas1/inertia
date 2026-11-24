@@ -35,7 +35,7 @@ export function ArchivedChats({
   load: ArchivedConversationsLoader | undefined;
   providers: ProviderInfo[];
   disabled: boolean;
-  onUnarchive: (conversation: Conversation) => void;
+  onUnarchive: (conversation: Conversation) => void | Promise<unknown>;
 }): React.JSX.Element {
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(ARCHIVED_CHATS_PAGE_SIZE);
@@ -50,6 +50,11 @@ export function ArchivedChats({
   const filter = useRef<HTMLInputElement>(null);
   const empty = useRef<HTMLParagraphElement>(null);
   const restoring = useRef<{ id: string; index: number } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const providerLabels = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
   const needle = query.trim().toLocaleLowerCase(INTERFACE_LOCALE);
   const providerIds = useMemo(() => needle
@@ -162,7 +167,16 @@ export function ArchivedChats({
                       <button type="button" className="secondary-button" aria-label={`Restore ${chat.title}`} disabled={disabled} onClick={() => {
                         restoring.current = { id: chat.id, index };
                         setRestored((current) => new Set([...current, chat.id]));
-                        onUnarchive(chat);
+                        void Promise.resolve(onUnarchive(chat)).catch(() => {
+                          if (!mounted.current) return;
+                          if (restoring.current?.id === chat.id) restoring.current = null;
+                          setRestored((current) => {
+                            if (!current.has(chat.id)) return current;
+                            const next = new Set(current);
+                            next.delete(chat.id);
+                            return next;
+                          });
+                        });
                       }}>
                         <ArchiveRestore size={14} aria-hidden="true" />Restore
                       </button>

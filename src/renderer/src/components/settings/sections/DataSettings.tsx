@@ -113,7 +113,7 @@ export interface DataSettingsProps {
   hasActiveTurns?: boolean;
   onReportCommand?: IssueReportSettingsProps["request"];
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
-  onUnarchive: (conversation: Conversation) => void;
+  onUnarchive: (conversation: Conversation) => void | Promise<unknown>;
   onOpenConversation?: (conversationId: string) => boolean;
   onRestoreDefaults: () => Promise<void>;
 }

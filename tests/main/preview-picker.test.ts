@@ -101,30 +101,19 @@ describe("isolated-world preview picker script", () => {
     const click = trusted(new env.win.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, clientX: 140, clientY: 135 }));
     button.dispatchEvent(click);
     expect(pageClick).not.toHaveBeenCalled();
-
-    const pageKeys = vi.fn();
-    env.win.addEventListener("keydown", pageKeys);
-    env.win.addEventListener("input", pageKeys);
-    const textarea = shadow.querySelector("textarea") as HTMLTextAreaElement;
-    expect(textarea.getAttribute("aria-label")).toBe("Describe the change");
-    textarea.dispatchEvent(trusted(new env.win.KeyboardEvent("keydown", { key: "a", bubbles: true, composed: true, cancelable: true }) as never));
-    textarea.dispatchEvent(trusted(new env.win.Event("input", { bubbles: true, composed: true }) as never));
-    expect(pageKeys).not.toHaveBeenCalled();
-    expect((env.vmContext as { __inertiaPreviewPickerHosts?: WeakSet<object> }).__inertiaPreviewPickerHosts?.has(host!)).toBe(true);
-    textarea.value = "Increase contrast on this CTA";
-    const form = shadow.querySelector("form")!;
-    form.dispatchEvent(new env.win.Event("submit", { bubbles: true, cancelable: true }) as never);
+    expect(shadow.querySelector("textarea")).toBeNull();
+    expect(shadow.querySelector("input")).toBeNull();
 
     await vi.waitFor(() => expect(env.sent).toHaveLength(1));
-    const submitted = env.sent[0] as { type: string; payload: Record<string, unknown> };
-    expect(submitted.type).toBe("submitted");
-    expect(submitted.payload.selector).toBe("#cta");
-    expect(submitted.payload.role).toBe("button");
-    expect(submitted.payload.name).toBe("Buy now");
-    expect(submitted.payload.comment).toBe("Increase contrast on this CTA");
-    expect(submitted.payload.bounds).toEqual({ x: 100, y: 120, width: 120, height: 40 });
+    const selected = env.sent[0] as { type: string; generation: number; payload: Record<string, unknown> };
+    expect(selected.type).toBe("selected");
+    expect(selected.generation).toBe(0);
+    expect(selected.payload.selector).toBe("#cta");
+    expect(selected.payload.role).toBe("button");
+    expect(selected.payload.name).toBe("Buy now");
+    expect(selected.payload.label).toBe("button#cta.primary");
+    expect(selected.payload.bounds).toEqual({ x: 100, y: 120, width: 120, height: 40 });
     expect(env.getOverlayHost()).toBeNull();
-    expect((env.vmContext as { __inertiaPreviewPickerHosts?: WeakSet<object> }).__inertiaPreviewPickerHosts?.has(host!)).toBe(false);
   });
 
   it("ignores untrusted synthetic page events trying to hijack or cancel the picker", () => {
@@ -135,17 +124,15 @@ describe("isolated-world preview picker script", () => {
     }) as never;
     env.hitTargets.push(button as unknown as Element);
 
-    env.runScript(previewPickerStartScript());
+    env.runScript(previewPickerStartScript({ generation: 7 }));
     button.dispatchEvent(new env.win.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: 30 }));
     button.dispatchEvent(new env.win.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: 30 }));
     env.win.dispatchEvent(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never);
     expect(env.sent).toEqual([]);
     expect(env.getOverlayHost()).not.toBeNull();
-    const popover = env.getClosedShadow()!.querySelector(".popover") as HTMLElement;
-    expect(popover.style.display).not.toBe("block");
   });
 
-  it("cancels on Escape at both hover stage and comment stage, and supports context-menu initial point", () => {
+  it("cancels on Escape and immediately selects an element for context-menu initial point", async () => {
     const env = createIsolatedPickerEnvironment('<button id="edit">Edit</button>');
     const button = env.win.document.getElementById("edit")!;
     button.getBoundingClientRect = () => ({
@@ -153,28 +140,25 @@ describe("isolated-world preview picker script", () => {
     }) as never;
     env.hitTargets.push(button as unknown as Element);
 
-    env.runScript(previewPickerStartScript());
+    env.runScript(previewPickerStartScript({ generation: 3 }));
     env.win.dispatchEvent(trusted(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never));
-    expect(env.sent).toEqual([{ type: "cancelled" }]);
+    expect(env.sent).toEqual([{ type: "cancelled", generation: 3 }]);
     expect(env.getOverlayHost()).toBeNull();
 
     env.sent.length = 0;
-    env.runScript(previewPickerStartScript({ point: { x: 70, y: 75 } }));
-    const shadow = env.getClosedShadow()!;
-    const popover = shadow.querySelector(".popover") as HTMLElement;
-    expect(popover.style.display).toBe("block");
-
-    const textarea = shadow.querySelector("textarea")!;
-    textarea.dispatchEvent(trusted(new env.win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }) as never));
-    expect(env.sent).toEqual([{ type: "cancelled" }]);
+    env.runScript(previewPickerStartScript({ point: { x: 70, y: 75 }, generation: 4 }));
+    await vi.waitFor(() => expect(env.sent).toHaveLength(1));
+    expect(env.sent[0]).toMatchObject({ type: "selected", generation: 4, payload: { selector: "#edit" } });
     expect(env.getOverlayHost()).toBeNull();
   });
 
-  it("tears down cleanly without notifying main when stopped externally", () => {
+  it("tears down cleanly without notifying main only when stop generation matches", () => {
     const env = createIsolatedPickerEnvironment("<div>Hi</div>");
-    env.runScript(previewPickerStartScript());
+    env.runScript(previewPickerStartScript({ generation: 5 }));
     expect(env.getOverlayHost()).not.toBeNull();
-    expect(env.runScript(previewPickerStopScript())).toBe(true);
+    expect(env.runScript(previewPickerStopScript(4))).toBe(false);
+    expect(env.getOverlayHost()).not.toBeNull();
+    expect(env.runScript(previewPickerStopScript(5))).toBe(true);
     expect(env.getOverlayHost()).toBeNull();
     expect(env.sent).toEqual([]);
   });
@@ -188,16 +172,12 @@ function stubElementsFromPoint(scope: object, hits: () => Element[]): void {
 
 async function submitPick(env: PickerEnvironment, ...hits: Element[]) {
   env.hitTargets.splice(0, env.hitTargets.length, ...hits);
-  env.runScript(previewPickerStartScript({ point: { x: 10, y: 10 } }));
-  const shadow = env.getClosedShadow()!;
-  const target = (shadow.querySelector(".popover-target") as HTMLElement).textContent;
-  shadow.querySelector("form")!.dispatchEvent(
-    new env.win.Event("submit", { bubbles: true, cancelable: true }) as never,
-  );
+  env.runScript(previewPickerStartScript({ point: { x: 10, y: 10 }, generation: 1 }));
   await vi.waitFor(() => expect(env.sent).toHaveLength(1));
-  const submitted = env.sent.pop() as { type: string; payload: { selector: string; role: string; name: string } };
-  expect(submitted.type).toBe("submitted");
-  return { target, ...submitted.payload };
+  const selected = env.sent.pop() as { type: string; generation: number; payload: { label: string; selector: string; role: string; name: string } };
+  expect(selected.type).toBe("selected");
+  expect(selected.generation).toBe(1);
+  return { target: selected.payload.label, ...selected.payload };
 }
 
 describe("isolated-world preview picker element description", () => {
@@ -393,6 +373,10 @@ describe("main-process preview picker coordinator and provider assembly", () => 
         } as never,
         channel: "inertia:preview-annotation-ready",
       },
+      privacy: {
+        checkEvidencePrivacy: vi.fn(async () => ({ withheld: null })),
+        checkScreenshotPrivacy: vi.fn(async () => "clear" as const),
+      },
     });
 
     const session: PreviewPickerSessionView = {
@@ -402,6 +386,7 @@ describe("main-process preview picker coordinator and provider assembly", () => 
       busy: 1,
       viewportScale: 1,
       pickerActive: false,
+      pickerSelection: null,
       activeTab: { id: "tab-1", documentSequence: 1, contents },
     };
 
@@ -417,22 +402,28 @@ describe("main-process preview picker coordinator and provider assembly", () => 
     );
 
     coordinator.handleGuestEvent(contents, {
-      type: "submitted",
+      type: "selected",
+      generation: 1,
       payload: {
         selector: "button#save",
         role: "button",
         name: "Save",
         tagName: "button",
+        label: "button#save",
         bounds: { x: 100, y: 80, width: 120, height: 40 },
         html: '<button id="save" onclick="evil()"><script>bad()</script>Save</button>',
-        comment: "Make it wider",
         viewportWidth: 800,
         viewportHeight: 600,
       },
     }, session);
 
-    await vi.waitFor(() => expect(sentToMainWindow).toHaveLength(1));
+    await vi.waitFor(() => expect(session.pickerSelection).toEqual({ label: "button#save", selector: "button#save" }));
     expect(capturePage).toHaveBeenCalledWith({ x: 84, y: 64, width: 152, height: 72 });
+    expect(sentToMainWindow).toHaveLength(0);
+
+    expect(await coordinator.submit(session, "Make it wider")).toBe(true);
+    expect(session.pickerActive).toBe(false);
+    expect(session.pickerSelection).toBeNull();
     expect(setPreviewAnnotation).toHaveBeenCalledOnce();
     const [channel, delivery] = sentToMainWindow[0]!;
     expect(channel).toBe("inertia:preview-annotation-ready");
@@ -455,6 +446,69 @@ describe("main-process preview picker coordinator and provider assembly", () => 
           }),
         ],
       },
+    });
+  });
+
+  it("refuses element annotation when the page shows a password or sensitive screenshot", async () => {
+    const sentToMainWindow: Array<[string, unknown]> = [];
+    const capturePage = vi.fn();
+    const contents = {
+      isDestroyed: () => false,
+      getURL: () => "http://127.0.0.1:4173/login",
+      executeJavaScriptInIsolatedWorld: vi.fn(async () => true),
+      capturePage,
+    } as unknown as WebContents;
+    const coordinator = new PreviewPickerCoordinator({
+      publish: vi.fn(),
+      annotations: {
+        window: () => ({
+          isDestroyed: () => false,
+          webContents: { isDestroyed: () => false, send: (ch: string, payload: unknown) => sentToMainWindow.push([ch, payload]) },
+        }) as never,
+        document: () => ({ owner: contents, processId: 1, frameId: 1, frameToken: "frame" }) as never,
+        registry: () => ({ import: vi.fn(), setPreviewAnnotation: vi.fn() }) as never,
+        imports: { begin: vi.fn(), importSelection: vi.fn(), cancel: vi.fn() } as never,
+        channel: "inertia:preview-annotation-ready",
+      },
+      privacy: {
+        checkEvidencePrivacy: vi.fn(async () => ({ withheld: "password" as const })),
+        checkScreenshotPrivacy: vi.fn(async () => "sensitive" as const),
+      },
+    });
+    const session: PreviewPickerSessionView = {
+      contextId: "11111111-1111-4111-8111-111111111111",
+      partition: "inertia-preview-test",
+      activeTabId: "tab-1",
+      busy: 0,
+      viewportScale: 1,
+      pickerActive: false,
+      pickerSelection: null,
+      activeTab: { id: "tab-1", documentSequence: 1, contents },
+    };
+
+    await coordinator.start(session);
+    coordinator.handleGuestEvent(contents, {
+      type: "selected",
+      generation: 1,
+      payload: {
+        selector: "input#pw",
+        role: "textbox",
+        name: "Password",
+        tagName: "input",
+        bounds: { x: 10, y: 10, width: 120, height: 32 },
+        html: '<input id="pw" type="text" value="hunter2">',
+        viewportWidth: 800,
+        viewportHeight: 600,
+      },
+    }, session);
+
+    await vi.waitFor(() => expect(sentToMainWindow).toHaveLength(1));
+    expect(capturePage).not.toHaveBeenCalled();
+    expect(session.pickerSelection).toBeNull();
+    expect(session.pickerActive).toBe(false);
+    expect(sentToMainWindow[0]?.[1]).toMatchObject({
+      conversationId: session.contextId,
+      error: expect.stringMatching(/password|secret/iu),
     });
   });
 
@@ -524,6 +578,7 @@ describe("main-process preview picker coordinator and provider assembly", () => 
       busy: 0,
       viewportScale: 1,
       pickerActive: false,
+      pickerSelection: null,
       activeTab: { id: "tab-1", documentSequence: 1, contents },
     };
 
@@ -559,6 +614,7 @@ describe("main-process preview picker coordinator and provider assembly", () => 
       busy: 0,
       viewportScale: 1,
       pickerActive: false,
+      pickerSelection: null,
       activeTab: { id: "tab-1", documentSequence: 1, contents },
     };
 
@@ -568,5 +624,6 @@ describe("main-process preview picker coordinator and provider assembly", () => 
     expect(await starting).toBe(false);
     expect(session.pickerActive).toBe(false);
     expect(executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(3);
+    expect(executeJavaScriptInIsolatedWorld.mock.calls[2]?.[1]?.[0]?.code).toContain("expectedGeneration = 1");
   });
 });

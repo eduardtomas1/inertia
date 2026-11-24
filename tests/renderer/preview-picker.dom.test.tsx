@@ -201,8 +201,30 @@ describe("composer page annotation attachment chip and conversation ownership", 
   });
 });
 
-describe("preview picker overlay comment box in Happy DOM", () => {
-  it("opens a labelled comment box anchored to the clicked element and cancels on Escape at each stage", () => {
+describe("PreviewPanel trusted element comment bar", () => {
+  it("renders the trusted comment dialog in PreviewPanel and submits or cancels cleanly", () => {
+    const onSubmitPickerComment = vi.fn();
+    const onCancelPicker = vi.fn();
+    renderPreviewPanel({
+      pickerActive: true,
+      pickerSelection: { label: "button#checkout-btn.cta", selector: "#checkout-btn" },
+      onSubmitPickerComment,
+      onCancelPicker,
+    });
+    const dialog = screen.getByRole("dialog", { name: "Comment on selected element" });
+    expect(within(dialog).getByText("button#checkout-btn.cta")).toBeInTheDocument();
+    const textarea = within(dialog).getByRole("textbox", { name: "Describe the change" });
+    fireEvent.change(textarea, { target: { value: "Tighten padding" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Attach" }));
+    expect(onSubmitPickerComment).toHaveBeenCalledExactlyOnceWith("Tighten padding");
+
+    fireEvent.keyDown(textarea, { key: "Escape" });
+    expect(onCancelPicker).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("preview picker overlay selection in Happy DOM", () => {
+  it("selects a clicked element without mounting any comment input in the preview document and cancels on Escape", async () => {
     const sent: unknown[] = [];
     const shadows = new WeakMap<Element, ShadowRoot>();
     const origAttachShadow = Element.prototype.attachShadow;
@@ -233,37 +255,33 @@ describe("preview picker overlay comment box in Happy DOM", () => {
         eventTarget.dispatchEvent(event);
       };
 
-      const run = new Function(previewPickerStartScript());
+      const run = new Function(previewPickerStartScript({ generation: 2 }));
       run();
       const host = document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)!;
       expect(host.shadowRoot).toBeNull();
       expect(shadows.get(host)).not.toBeNull();
+      expect(shadows.get(host)!.querySelector("textarea")).toBeNull();
 
       fireEvent.keyDown(window, { key: "Escape" });
       expect(sent).toEqual([]);
       expect(document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)).not.toBeNull();
 
       dispatchTrusted(window, new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-      expect(sent).toEqual([{ type: "cancelled" }]);
+      expect(sent).toEqual([{ type: "cancelled", generation: 2 }]);
       expect(document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)).toBeNull();
 
       sent.length = 0;
       run();
-      const host2 = document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)!;
-      const shadow2 = shadows.get(host2)!;
-
       dispatchTrusted(target, new PointerEvent("pointerdown", { button: 0, clientX: 150, clientY: 110, bubbles: true, cancelable: true }));
       dispatchTrusted(target, new MouseEvent("click", { button: 0, clientX: 150, clientY: 110, bubbles: true, cancelable: true }));
       expect(pageClicked).not.toHaveBeenCalled();
 
-      const dialog = shadow2.querySelector('[role="dialog"]') as HTMLElement;
-      expect(dialog.getAttribute("aria-label")).toBe("Comment on selected element");
-      expect(dialog.style.display).toBe("block");
-
-      const textarea = shadow2.querySelector("textarea") as HTMLTextAreaElement;
-      expect(textarea.getAttribute("aria-label")).toBe("Describe the change");
-      dispatchTrusted(textarea, new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-      expect(sent).toEqual([{ type: "cancelled" }]);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      expect(sent[0]).toMatchObject({
+        type: "selected",
+        generation: 2,
+        payload: { selector: "#checkout-btn", label: "button#checkout-btn.cta" },
+      });
       expect(document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)).toBeNull();
       target.remove();
     } finally {

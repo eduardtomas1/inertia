@@ -380,11 +380,36 @@ function* extractArchiveParts(
   const markSkipped = (partName: string): void => {
     notes.push(`\n[Skipped document part: ${partName} (missing or invalid XML).]\n`);
   };
+  const parsedXmlCache = new Map<
+    string,
+    { ok: true; node: XmlElementNode; nodesUsed: number } | { ok: false; error: unknown }
+  >();
+  const parseCachedXml = (partName: string, raw: string): XmlElementNode => {
+    const cached = parsedXmlCache.get(partName);
+    if (cached) {
+      if (cached.ok) {
+        nodeBudget.remaining -= cached.nodesUsed;
+        if (nodeBudget.remaining < 0) throw new DocumentExtractionTruncation("xml-node-limit");
+        return cached.node;
+      }
+      throw cached.error;
+    }
+    const beforeRemaining = nodeBudget.remaining;
+    try {
+      const node = parseDocumentXml(raw, extension, nodeBudget);
+      const nodesUsed = Math.max(1, beforeRemaining - nodeBudget.remaining);
+      parsedXmlCache.set(partName, { ok: true, node, nodesUsed });
+      return node;
+    } catch (error) {
+      parsedXmlCache.set(partName, { ok: false, error });
+      throw error;
+    }
+  };
   const readStrictXml = (partName: string): XmlElementNode => {
     const raw = files.get(partName);
     if (!raw) throw new DocumentExtractionError("content");
     try {
-      return parseDocumentXml(raw, extension, nodeBudget);
+      return parseCachedXml(partName, raw);
     } catch (error) {
       if (error instanceof DocumentExtractionError || error instanceof DocumentExtractionTruncation) {
         throw error;
@@ -399,7 +424,7 @@ function* extractArchiveParts(
       return { name: "root", attrs: {}, children: [] };
     }
     try {
-      return parseDocumentXml(raw, extension, nodeBudget);
+      return parseCachedXml(partName, raw);
     } catch (error) {
       if (error instanceof DocumentExtractionError || error instanceof DocumentExtractionTruncation) {
         throw error;

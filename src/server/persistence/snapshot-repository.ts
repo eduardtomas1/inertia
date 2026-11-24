@@ -117,10 +117,14 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
 
 const unicodeLowerRegistered = new WeakSet<PersistenceContext["database"]>();
 
+function foldUnicodeSearchText(value: string): string {
+  return value.toLocaleLowerCase("en").replaceAll("\u03c2", "\u03c3");
+}
+
 function ensureUnicodeLowerFunction(database: PersistenceContext["database"]): void {
   if (unicodeLowerRegistered.has(database)) return;
   database.function("inertia_unicode_lower", { deterministic: true }, (value: unknown) =>
-    typeof value === "string" ? value.toLocaleLowerCase("en") : null);
+    typeof value === "string" ? foldUnicodeSearchText(value) : null);
   unicodeLowerRegistered.add(database);
 }
 
@@ -237,7 +241,7 @@ export class SnapshotRepository {
       const providers = request.providerIds ?? [];
       filters.push(`(instr(inertia_unicode_lower(conversations.title), ?) > 0${providers.length
         ? ` OR conversations.provider_id IN (${providers.map(() => "?").join(", ")})` : ""})`);
-      parameters.push(query.toLocaleLowerCase("en"), ...providers);
+      parameters.push(foldUnicodeSearchText(query), ...providers);
     }
     const where = filters.join(" AND ");
     const total = (this.context.database.prepare(

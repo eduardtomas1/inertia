@@ -1,6 +1,8 @@
 import type { BrowserWindow, Rectangle, WebContents } from "electron";
 
 import { MAX_IMAGE_ATTACHMENT_BYTES } from "../shared/attachments.js";
+import { browserEvidenceTextContainsSensitiveCredential } from "../shared/browser-evidence.js";
+import type { PreviewPickerSelection } from "../shared/desktop.js";
 import {
   PREVIEW_ANNOTATION_MAX_COMMENT_CHARS,
   PREVIEW_ANNOTATION_MAX_HTML_BYTES,
@@ -11,6 +13,7 @@ import {
   PREVIEW_ANNOTATION_SCREENSHOT_MARGIN_PX,
   previewAnnotationSchema,
   sanitizePreviewAnnotationHtml,
+  shortPreviewAnnotationSelector,
   type PreviewAnnotation,
   type PreviewAnnotationBounds,
   type PreviewAnnotationDelivery,
@@ -18,11 +21,15 @@ import {
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import type { AttachmentImportDocument, RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
+import { withheldEvidenceMessage } from "./preview-agent-messages.js";
+import { agentPageEvidencePrivacy } from "./preview-agent-page.js";
+import { agentPageScreenshotPrivacy } from "./preview-agent-screenshot.js";
 import { startPreviewPickerInPage, stopPreviewPickerInPage } from "./preview-picker-script.js";
 
 const PREVIEW_PARTITION_PATTERN = /^inertia(?:-canary)?-preview-/u;
 const MAX_SCREENSHOT_RESIZE_ATTEMPTS = 4;
 const PREVIEW_ANNOTATION_MAX_RAW_HTML_CHARS = 32 * 1024;
+const PICKER_SENSITIVE_SCREENSHOT_MESSAGE = "Element annotations are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.";
 
 export interface PreviewPickerSessionView {
   readonly contextId: string;
@@ -31,6 +38,7 @@ export interface PreviewPickerSessionView {
   readonly busy: number;
   readonly viewportScale: number;
   pickerActive: boolean;
+  pickerSelection: PreviewPickerSelection | null;
   readonly activeTab: {
     readonly id: string;
     readonly documentSequence: number;
@@ -227,14 +235,28 @@ interface ActivePickState {
   readonly generation: number;
 }
 
+interface PendingSelectionState {
+  readonly generation: number;
+  readonly url: string;
+  readonly rawPayload: Record<string, unknown>;
+  readonly png: Buffer;
+}
+
+export interface PreviewPickerPrivacyChecks {
+  readonly checkEvidencePrivacy?: (contents: WebContents) => Promise<{ withheld: Parameters<typeof withheldEvidenceMessage>[0] | null }>;
+  readonly checkScreenshotPrivacy?: (contents: WebContents) => Promise<"clear" | "sensitive" | "unreadable">;
+}
+
 export class PreviewPickerCoordinator {
   readonly #activePicks = new Map<string, ActivePickState>();
+  readonly #pendingSelections = new Map<string, PendingSelectionState>();
   readonly #sessionGenerations = new Map<string, number>();
 
   constructor(
     private readonly options: {
       readonly publish: (contextId: string) => void;
       readonly annotations?: PreviewAnnotationImportBridge;
+      readonly privacy?: PreviewPickerPrivacyChecks;
     },
   ) {}
 
@@ -244,8 +266,32 @@ export class PreviewPickerCoordinator {
     return next;
   }
 
+  #sendError(contextId: string, error: unknown): void {
+    const bridge = this.options.annotations;
+    if (!bridge) return;
+    const window = bridge.window();
+    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+    const message = error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : "The picked element could not be attached.";
+    window.webContents.send(bridge.channel, { conversationId: contextId, error: message } satisfies PreviewAnnotationDelivery);
+  }
+
+  async #assertPageAllowsAnnotation(contents: WebContents): Promise<void> {
+    const checkEvidence = this.options.privacy?.checkEvidencePrivacy ?? agentPageEvidencePrivacy;
+    const checkScreenshot = this.options.privacy?.checkScreenshotPrivacy ?? agentPageScreenshotPrivacy;
+    const evidence = await checkEvidence(contents);
+    if (evidence.withheld) {
+      throw new Error(withheldEvidenceMessage(evidence.withheld, "Element annotations are"));
+    }
+    const screenshot = await checkScreenshot(contents);
+    if (screenshot === "sensitive") {
+      throw new Error(PICKER_SENSITIVE_SCREENSHOT_MESSAGE);
+    }
+  }
+
   isActive(contextId: string): boolean {
-    return this.#activePicks.has(contextId);
+    return this.#activePicks.has(contextId) || this.#pendingSelections.has(contextId);
   }
 
   async start(
@@ -265,19 +311,21 @@ export class PreviewPickerCoordinator {
     }
 
     const generation = this.#nextGeneration(session.contextId);
+    this.#pendingSelections.delete(session.contextId);
     this.#activePicks.set(session.contextId, {
       tabId: tab.id,
       documentSequence: tab.documentSequence,
       generation,
     });
     session.pickerActive = true;
+    session.pickerSelection = null;
     this.options.publish(session.contextId);
 
     try {
-      await startPreviewPickerInPage(tab.contents, point ? { point } : {});
+      await startPreviewPickerInPage(tab.contents, point ? { point, generation } : { generation });
       if (this.#activePicks.get(session.contextId)?.generation !== generation || session.busy > 0) {
         if (!tab.contents.isDestroyed()) {
-          void stopPreviewPickerInPage(tab.contents).catch(() => undefined);
+          void stopPreviewPickerInPage(tab.contents, generation).catch(() => undefined);
         }
         return false;
       }
@@ -286,6 +334,7 @@ export class PreviewPickerCoordinator {
       if (this.#activePicks.get(session.contextId)?.generation === generation) {
         this.#activePicks.delete(session.contextId);
         session.pickerActive = false;
+        session.pickerSelection = null;
         this.options.publish(session.contextId);
       }
       throw error;
@@ -294,8 +343,12 @@ export class PreviewPickerCoordinator {
 
   cancel(session: PreviewPickerSessionView, publish = true): void {
     this.#nextGeneration(session.contextId);
-    const hadPick = this.#activePicks.delete(session.contextId) || session.pickerActive;
+    const hadPick = this.#activePicks.delete(session.contextId)
+      || this.#pendingSelections.delete(session.contextId)
+      || session.pickerActive
+      || session.pickerSelection !== null;
     session.pickerActive = false;
+    session.pickerSelection = null;
     if (!hadPick) return;
     const tab = session.activeTab;
     if (tab && !tab.contents.isDestroyed()) {
@@ -312,58 +365,69 @@ export class PreviewPickerCoordinator {
     if (!session || !isPlainObject(rawEvent)) return;
     const pick = this.#activePicks.get(session.contextId);
     const tab = session.activeTab;
-    if (!pick || !tab || tab.contents !== contents || tab.id !== pick.tabId || tab.documentSequence !== pick.documentSequence) {
+    if (
+      !pick
+      || !tab
+      || tab.contents !== contents
+      || tab.id !== pick.tabId
+      || tab.documentSequence !== pick.documentSequence
+      || rawEvent.generation !== pick.generation
+    ) {
       return;
     }
 
     if (rawEvent.type === "cancelled") {
       this.#activePicks.delete(session.contextId);
+      this.#pendingSelections.delete(session.contextId);
       session.pickerActive = false;
+      session.pickerSelection = null;
       this.options.publish(session.contextId);
       return;
     }
 
-    if (rawEvent.type !== "submitted") return;
+    if (rawEvent.type !== "selected") return;
 
     this.#activePicks.delete(session.contextId);
-    session.pickerActive = false;
-    this.options.publish(session.contextId);
+    if (session.busy > 0 || contents.isDestroyed()) {
+      session.pickerActive = false;
+      session.pickerSelection = null;
+      this.options.publish(session.contextId);
+      return;
+    }
 
-    if (session.busy > 0 || contents.isDestroyed()) return;
-
-    void this.#finalizeAnnotation(session, tab, pick.generation, rawEvent.payload);
+    void this.#prepareSelection(session, tab, pick.generation, rawEvent.payload);
   }
 
-  async #finalizeAnnotation(
+  async #prepareSelection(
     session: PreviewPickerSessionView,
     tab: NonNullable<PreviewPickerSessionView["activeTab"]>,
     generation: number,
     rawPayload: unknown,
   ): Promise<void> {
-    const bridge = this.options.annotations;
-    if (!bridge) return;
-    const sendDelivery = (delivery: PreviewAnnotationDelivery): void => {
-      const window = bridge.window();
-      if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-      window.webContents.send(bridge.channel, delivery);
-    };
-
-    const document = bridge.document();
-    if (!document) return;
-
-    let batchId: string | null = null;
     try {
+      if (!isPlainObject(rawPayload)) {
+        throw new Error("The picked element payload was malformed.");
+      }
       const url = tab.contents.getURL();
       if (!isPickablePreviewPage(session.partition, url)) {
         throw new Error("Element picking is only available on local preview pages.");
       }
-      const { annotation, viewport } = buildValidatedPreviewAnnotation(rawPayload, url);
+      await this.#assertPageAllowsAnnotation(tab.contents);
+      const { annotation, viewport } = buildValidatedPreviewAnnotation({ ...rawPayload, comment: "" }, url);
+      if (
+        browserEvidenceTextContainsSensitiveCredential(annotation.html)
+        || browserEvidenceTextContainsSensitiveCredential(annotation.name)
+        || browserEvidenceTextContainsSensitiveCredential(annotation.selector)
+      ) {
+        throw new Error(PICKER_SENSITIVE_SCREENSHOT_MESSAGE);
+      }
       const png = await captureCroppedElementScreenshot(
         tab.contents,
         annotation.bounds,
         viewport,
         session.viewportScale,
       );
+      await this.#assertPageAllowsAnnotation(tab.contents);
       if (
         session.busy > 0
         || tab.contents.isDestroyed()
@@ -371,32 +435,78 @@ export class PreviewPickerCoordinator {
       ) {
         return;
       }
+      const rawLabel = typeof rawPayload.label === "string"
+        ? rawPayload.label.replace(/\0/gu, "").trim().slice(0, 120)
+        : "";
+      const label = rawLabel || shortPreviewAnnotationSelector(annotation.selector);
+      this.#pendingSelections.set(session.contextId, {
+        generation,
+        url,
+        rawPayload: { ...rawPayload, comment: "" },
+        png,
+      });
+      session.pickerActive = true;
+      session.pickerSelection = { label, selector: annotation.selector };
+      this.options.publish(session.contextId);
+    } catch (error) {
+      if (this.#sessionGenerations.get(session.contextId) === generation) {
+        this.#pendingSelections.delete(session.contextId);
+        session.pickerActive = false;
+        session.pickerSelection = null;
+        this.options.publish(session.contextId);
+      }
+      this.#sendError(session.contextId, error);
+    }
+  }
+
+  async submit(session: PreviewPickerSessionView, comment: string): Promise<boolean> {
+    const pending = this.#pendingSelections.get(session.contextId);
+    if (!pending) return false;
+    this.#pendingSelections.delete(session.contextId);
+    this.#activePicks.delete(session.contextId);
+    session.pickerActive = false;
+    session.pickerSelection = null;
+    this.options.publish(session.contextId);
+
+    const bridge = this.options.annotations;
+    if (!bridge || session.busy > 0) return false;
+    const document = bridge.document();
+    if (!document) return false;
+
+    const sendDelivery = (delivery: PreviewAnnotationDelivery): void => {
+      const window = bridge.window();
+      if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+      window.webContents.send(bridge.channel, delivery);
+    };
+
+    let batchId: string | null = null;
+    try {
+      const { annotation } = buildValidatedPreviewAnnotation({ ...pending.rawPayload, comment }, pending.url);
       batchId = bridge.imports.begin(document);
       const fileName = `preview-annotation-${annotation.capturedAt.replace(/[:.]/gu, "-")}.png`;
       const attachments = await bridge.imports.importSelection(document, batchId, async (signal) => {
         const imported = await bridge.registry().import([{
           name: fileName,
           mimeType: "image/png",
-          data: png,
+          data: pending.png,
         }], signal);
         return imported.map((item) => bridge.registry().setPreviewAnnotation(item.id, annotation));
       });
-      if (session.busy > 0 || this.#sessionGenerations.get(session.contextId) !== generation) {
+      if (session.busy > 0 || this.#sessionGenerations.get(session.contextId) !== pending.generation) {
         await bridge.imports.cancel(document, batchId).catch(() => undefined);
-        return;
+        return false;
       }
       sendDelivery({
         conversationId: session.contextId,
         selection: { batchId, attachments },
       });
+      return true;
     } catch (error) {
       if (batchId) {
         await bridge.imports.cancel(document, batchId).catch(() => undefined);
       }
-      const message = error instanceof Error && error.message.trim()
-        ? error.message.trim()
-        : "The picked element could not be attached.";
-      sendDelivery({ conversationId: session.contextId, error: message });
+      this.#sendError(session.contextId, error);
+      return false;
     }
   }
 }

@@ -152,11 +152,12 @@ describe("archived conversation pages", () => {
     expect(store.archivedConversations({ query: "missing" })).toEqual({
       kind: "conversation.archived", conversations: [], total: 0, next: null,
     });
-    const unicodeChat = store.createConversation(first.id, "Überprüfung und École");
+    const unicodeChat = store.createConversation(first.id, "Überprüfung und École ΟΣ");
     store.archiveConversation(unicodeChat.id, true);
     expect(store.archivedConversations({ query: "über" }).conversations.map(({ id }) => id)).toEqual([unicodeChat.id]);
     expect(store.archivedConversations({ query: "Über" }).conversations.map(({ id }) => id)).toEqual([unicodeChat.id]);
     expect(store.archivedConversations({ query: "école" }).conversations.map(({ id }) => id)).toEqual([unicodeChat.id]);
+    expect(store.archivedConversations({ query: "Σ" }).conversations.map(({ id }) => id)).toEqual([unicodeChat.id]);
     expect(first.id).toBeTruthy();
     const event: ServerEvent = { type: "request.result", requestId: "archived", result: page };
     expect(parseServerEvent(event)).toEqual(event);

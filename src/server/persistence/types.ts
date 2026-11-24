@@ -212,6 +212,7 @@ export interface RetainedCheckpointRecord {
   conversationId: string;
   projectId: string;
   projectWorkspaceKind: string | null;
+  projectRepositoryIdentity: string | null;
   projectPath: string;
   worktreePath: string | null;
   archivedAt: string | null;
@@ -228,6 +229,7 @@ export interface RetainedArtifactRefRecord {
   conversationId: string;
   projectId: string;
   projectWorkspaceKind: string | null;
+  projectRepositoryIdentity: string | null;
   projectPath: string;
   worktreePath: string | null;
   archivedAt: string | null;

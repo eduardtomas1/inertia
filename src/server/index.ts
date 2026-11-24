@@ -443,7 +443,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     return turns?.isActive(run.conversationId)
       || isolatedRuns?.ownsWorkspaceRun(run.id);
   };
+  let cachedSnapshot: AppSnapshot | null = null;
+  let deferredSnapshotBroadcast = false;
+  const schedulePostVacuumSnapshot = (): void => {
+    if (deferredSnapshotBroadcast || closed) return;
+    deferredSnapshotBroadcast = true;
+    void store.whenDatabaseWritable().then(() => {
+      deferredSnapshotBroadcast = false;
+      if (!closed) snapshotBroadcasts.request();
+    });
+  };
   const currentSnapshot = (sync: RuntimeSyncCursor = runtimeSync.cursor()): AppSnapshot => {
+    if (store.isDatabaseVacuuming() && cachedSnapshot) {
+      schedulePostVacuumSnapshot();
+      return { ...cachedSnapshot, sync };
+    }
     const snapshot = store.shellSnapshot(providerInfo);
     const approvalConversationIds = new Set([...pendingApprovals.values()].map(({ conversationId }) => conversationId));
     const inputConversationIds = new Set([...pendingInputs.values()].map(({ conversationId }) => conversationId));
@@ -463,7 +477,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }));
     const activeConversationIds = turns?.activeConversationIds()
       ?? providerRunOwnership.map(({ conversationId }) => conversationId);
-    return {
+    const assembled: AppSnapshot = {
       ...snapshot,
       backendProfiles: backendProfileController.profiles(providerInfo),
       backendDefaults: backendProfileController.defaults(),
@@ -486,6 +500,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       sync,
     };
+    cachedSnapshot = assembled;
+    return assembled;
   };
   const detachedChatRuntimeSecurity = createDetachedChatRuntimeSecurity({ websocketPath, store, snapshot: currentSnapshot, pendingApprovals, pendingInputs });
   const broadcast = (event: RuntimeMutationEvent): void => {
@@ -514,17 +530,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       })),
     });
   };
-  let deferredSnapshotBroadcast = false;
   const snapshotBroadcasts = new SnapshotBroadcastCoalescer(() => {
     if (closed) return;
     if (store.isDatabaseVacuuming()) {
-      if (!deferredSnapshotBroadcast) {
-        deferredSnapshotBroadcast = true;
-        void store.whenDatabaseWritable().then(() => {
-          deferredSnapshotBroadcast = false;
-          if (!closed) snapshotBroadcasts.request();
-        });
-      }
+      schedulePostVacuumSnapshot();
       return;
     }
     runtimeSync.broadcastSnapshot(currentSnapshot);
@@ -920,6 +929,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
+    if (recoveryImportAdmission.isActive()) {
+      send(socket, {
+        type: "request.error",
+        requestId: command.requestId,
+        message: "Database recovery is in progress. Try again after it finishes.",
+      });
+      return;
+    }
+    if (store.isDatabaseVacuuming() && command.type !== "database.storage.get") {
+      return send(socket, { type: "request.error", requestId: command.requestId, message: DATABASE_VACUUM_REFUSAL });
+    }
     const detachedAuthorizationError = detachedChatRuntimeSecurity.authorizationError(authority, command);
     if (detachedAuthorizationError) { send(socket, detachedAuthorizationError); return; }
     if (updatePreparation.isAdmissionClosed()) {
@@ -937,17 +957,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         message: runtimeSafetyError("Changes are unavailable in recovery safety mode."),
       });
       return;
-    }
-    if (recoveryImportAdmission.isActive()) {
-      send(socket, {
-        type: "request.error",
-        requestId: command.requestId,
-        message: "Database recovery is in progress. Try again after it finishes.",
-      });
-      return;
-    }
-    if (store.isDatabaseVacuuming() && command.type !== "database.storage.get") {
-      return send(socket, { type: "request.error", requestId: command.requestId, message: DATABASE_VACUUM_REFUSAL });
     }
     const isStorageCommand = command.type === "database.storage.get" || command.type === "database.storage.compact";
     activeRuntimeCommands += 1;
@@ -1071,22 +1080,36 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
-    readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
-    attachmentConversations: (attachmentId) => [...new Set([...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
-      ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? []])],
+    readHtmlRender: (renderId) => {
+      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      return store.htmlRenders.read(renderId);
+    },
+    attachmentConversations: (attachmentId) => {
+      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      return [...new Set([...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+        ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? []])];
+    },
     deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
     resolveProjectPath: (request) => trackRuntimeOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
       }
+      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
       return (await resolveAuthoritativeProjectPath(
         store,
         request,
         projectIdentityAuthority,
       )).absolute;
     }),
-    editorContext: (filePath, conversationId) => trackRuntimeOperation(() => resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock, conversationId)),
+    editorContext: (filePath, conversationId) => trackRuntimeOperation(async () => {
+      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      return await resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock, conversationId);
+    }),
     privateConnectRequest: (subject, request) => {
       const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
       return refused ? Promise.resolve(refused) : trackRuntimeOperation(() => privateConnectGateway.request(subject, request));

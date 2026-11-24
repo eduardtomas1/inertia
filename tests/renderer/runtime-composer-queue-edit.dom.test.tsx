@@ -284,4 +284,47 @@ describe("the composer with an editable queue that accepts documents", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Keep this for chat one"));
     expect(await screen.findByRole("button", { name: "Remove attachment spec.png" })).toBeInTheDocument();
   });
+
+  it("preserves an attachment in the original chat's draft if the user switches chats while reattach is in flight", async () => {
+    const first = conversation("77777777-7777-4777-8777-777777777771");
+    const second = conversation("77777777-7777-4777-8777-777777777772");
+    const stored = { id: "77777777-7777-4777-8777-777777777773", name: "late.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
+    const fresh: ChatAttachment = { id: "77777777-7777-4777-8777-777777777774", name: "late.png", path: "/private/tmp/late.png", mimeType: "image/png", size: 64 };
+    const queuedEntry: QueuedMessage = { ...entry(1), conversationId: first.id, content: "Edit with slow reattach", attachments: [stored] };
+    let resolveReattach: ((value: { batchId: string; attachments: ChatAttachment[] }) => void) | null = null;
+    const reattachAttachment = vi.fn(() => new Promise<{ batchId: string; attachments: ChatAttachment[] }>((resolve) => {
+      resolveReattach = resolve;
+    }));
+    const commitAttachmentImport = vi.fn(async () => undefined);
+    const cancelAttachmentImport = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", { configurable: true, value: {
+      reattachAttachment, commitAttachmentImport, cancelAttachmentImport,
+    } });
+    let entries = [queuedEntry];
+    const run = vi.fn<QueueCommandRunner>(async (command) => {
+      if (command.type === "message.queue.edit") {
+        const edited = entries[0]!;
+        entries = [];
+        return { kind: "message.queue", conversationId: first.id, entries, receipt: null, edited };
+      }
+      return { kind: "message.queue", conversationId: command.payload.conversationId, entries: command.payload.conversationId === first.id ? entries : [], receipt: null };
+    });
+
+    const rendered = render(<Composer {...composerProps(first, { running: true, latestTurn: running, onQueueCommand: run })} />);
+    const edit = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
+    fireEvent.click(edit);
+    await waitFor(() => expect(resolveReattach).not.toBeNull());
+
+    rendered.rerender(<Composer {...composerProps(second, { running: false, latestTurn: null, onQueueCommand: run })} />);
+    await act(async () => {
+      resolveReattach!({ batchId: "77777777-7777-4777-8777-777777777775", attachments: [fresh] });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(commitAttachmentImport).toHaveBeenCalledWith("77777777-7777-4777-8777-777777777775", [fresh.id]));
+    expect(cancelAttachmentImport).not.toHaveBeenCalled();
+
+    rendered.rerender(<Composer {...composerProps(first, { running: false, latestTurn: null, onQueueCommand: run })} />);
+    expect(await screen.findByRole("button", { name: "Remove attachment late.png" })).toBeInTheDocument();
+  });
 });

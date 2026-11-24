@@ -54,7 +54,7 @@ function transferContext(options: ComposerQueueHandoffOptions, snapshot: readonl
   const {
     conversationId, message, attachmentFallback, onQueueCommand, refs,
     setAttachments, setAttachmentError, setPendingAttachmentIds, setMessage, setQueueEditPending,
-    flushDraftPersistence, markEditorChanged, resetHistory, updateMessage, reattachAttachment,
+    flushDraftPersistence, markEditorChanged, resetHistory, updateMessage,
   } = options;
   const { attachmentsRef, conversationIdRef, draftValueRef, mountedRef, releaseAttachmentRef, textareaRef } = refs;
   const showsConversation = (id: string): boolean => mountedRef.current && conversationIdRef.current === id;
@@ -120,27 +120,24 @@ function transferContext(options: ComposerQueueHandoffOptions, snapshot: readonl
           failed.push(attachment.name);
           continue;
         }
-        if (!showsConversation(editedConversationId)) {
+        try {
+          const lease = await openReattachLease(bridge, editedConversationId, attachment.id);
           try {
-            const lease = await openReattachLease(bridge, editedConversationId, attachment.id);
-            try {
-              const adopted = lease.attachments;
-              await lease.commit(adopted.map(({ id }) => id));
-              returnAttachmentsToDraft(editedConversationId, adopted);
-            } catch {
+            const adopted = lease.attachments;
+            if (adopted.length === 0) {
               await lease.cancel().catch(() => undefined);
               failed.push(attachment.name);
+              continue;
             }
+            await lease.commit(adopted.map(({ id }) => id));
+            returnAttachmentsToDraft(editedConversationId, adopted);
           } catch {
+            await lease.cancel().catch(() => undefined);
             failed.push(attachment.name);
           }
-          continue;
+        } catch {
+          failed.push(attachment.name);
         }
-        const outcome = await reattachAttachment(
-          { id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, size: attachment.size },
-          async () => await openReattachLease(bridge, editedConversationId, attachment.id),
-        );
-        if (outcome.status !== "attached") failed.push(attachment.name);
       }
     } finally {
       if (showsConversation(editedConversationId)) {

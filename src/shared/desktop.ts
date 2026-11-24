@@ -289,6 +289,10 @@ export interface PreviewAgentActivity {
   x?: number;
   y?: number;
 }
+export interface PreviewPickerSelection {
+  label: string;
+  selector: string;
+}
 export interface PreviewState {
   url: string;
   loading: boolean;
@@ -302,6 +306,7 @@ export interface PreviewState {
   viewport?: AgentBrowserViewport;
   agentBusy?: boolean;
   pickerActive?: boolean;
+  pickerSelection?: PreviewPickerSelection | null;
 }
 export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";
@@ -1008,8 +1013,9 @@ export interface DesktopBridge {
   previewCommand: (request: {
     ownerId: string;
     contextId: string;
-    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel";
+    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel" | "pick-submit";
     viewport?: AgentBrowserViewportRequest;
+    comment?: string;
   }) => Promise<PreviewState>;
   previewTab: (request: {
     ownerId: string;

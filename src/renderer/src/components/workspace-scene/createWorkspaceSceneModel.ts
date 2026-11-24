@@ -1197,6 +1197,7 @@ export function createWorkspaceSceneModel({
         viewport: desktopTools.previewNavigation.viewport,
         agentBusy: desktopTools.previewNavigation.agentBusy ?? false,
         pickerActive: desktopTools.previewNavigation.pickerActive ?? false,
+        pickerSelection: desktopTools.previewNavigation.pickerSelection ?? null,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),
@@ -1205,6 +1206,8 @@ export function createWorkspaceSceneModel({
         onTogglePicker: () => desktopTools.previewCommand(
           desktopTools.previewNavigation.pickerActive ? "pick-cancel" : "pick-start",
         ),
+        onSubmitPickerComment: (comment) => desktopTools.previewCommand("pick-submit", undefined, comment),
+        onCancelPicker: () => desktopTools.previewCommand("pick-cancel"),
         onOpenTab: () => desktopTools.previewTab("open"),
         onActivateTab: (tabId) => desktopTools.previewTab("activate", tabId),
         onCloseTab: (tabId) => desktopTools.previewTab("close", tabId),

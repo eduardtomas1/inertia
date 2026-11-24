@@ -317,8 +317,9 @@ export function useDesktopTools({
   }, [previewContextId, previewOwnerId, previewIsCurrent, setActionError]);
 
   const previewCommand = useCallback((
-    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel",
+    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel" | "pick-submit",
     viewport?: AgentBrowserViewportRequest,
+    comment?: string,
   ) => {
     const contextId = previewContextId;
     if (!contextId) return;
@@ -327,6 +328,7 @@ export function useDesktopTools({
       contextId,
       action,
       ...(viewport ? { viewport } : {}),
+      ...(comment !== undefined ? { comment } : {}),
     })
       .then((state) => {
         if (!previewIsCurrent()) return;

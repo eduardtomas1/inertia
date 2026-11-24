@@ -535,6 +535,7 @@ export class RuntimeStore {
 
   assertProjectDeletionAllowed(projectId: string): void {
     this.pairedLaunchRepository.assertProjectDeletionAllowed(projectId);
+    this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
   }
 
   assertDuoComparisonTurnAllowed(conversationId: string, authorizedLaunchId?: string): void {

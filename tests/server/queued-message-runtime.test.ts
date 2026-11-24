@@ -119,6 +119,41 @@ describe("stop and send", () => {
     } finally { await f.close(); }
   });
 
+  it("preserves stop-and-send authority across a transient dispatch failure and an update hold", async () => {
+    const f = await fixture();
+    try {
+      const first = startRunning(f);
+      const id1 = randomUUID();
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission").mockResolvedValueOnce(null);
+      await f.stopAndSend(id1, first.turn.id, "Retry after transient failure");
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id1)?.state).toBe("accepted"));
+      await f.drain();
+      expect(admission).toHaveBeenCalledTimes(2);
+      expect(f.provider.runCount).toBe(2);
+      admission.mockRestore();
+
+      const second = f.store.latestAgentTurnForConversation(f.conversationId)!;
+      const id2 = randomUUID();
+      const cleanup = f.controller.waitForProviderCleanup.bind(f.controller);
+      let heldOnce = false;
+      const cleanupSpy = vi.spyOn(f.controller, "waitForProviderCleanup").mockImplementation(async (ids, deadline) => {
+        const ready = await cleanup(ids, deadline);
+        if (!heldOnce && deadline !== undefined) {
+          heldOnce = true;
+          hold();
+        }
+        return ready;
+      });
+      await f.stopAndSend(id2, second.id, "Resume after update hold");
+      await vi.waitFor(() => expect(heldOnce).toBe(true));
+      cleanupSpy.mockRestore();
+      release();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id2)?.state).toBe("accepted"), { timeout: 5_000 });
+      await f.drain();
+      expect(f.provider.runCount).toBe(3);
+    } finally { release(); await f.close(); }
+  });
+
   it("keeps a repeated Stop and send explicit when provider cleanup outlasts the dispatch wait", async () => {
     const f = await fixture();
     try {

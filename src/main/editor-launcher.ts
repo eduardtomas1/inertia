@@ -762,6 +762,29 @@ export class EditorLauncher {
       throw new Error(`${editor.label} is not installed.`);
     }
 
+    const metadataAfter = await this.deps.lstat(options.targetPath);
+    if (
+      !metadataAfter
+      || metadataAfter.isSymbolicLink()
+      || metadataAfter.isDirectory() !== metadata.isDirectory()
+      || (!metadataAfter.isFile() && !metadataAfter.isDirectory())
+    ) {
+      throw new Error("The target path changed while preparing the editor launch.");
+    }
+    const [canonicalRootAfter, canonicalTargetAfter] = await Promise.all([
+      this.deps.realpath(options.authorizedRoot).catch(() => null),
+      this.deps.realpath(options.targetPath).catch(() => null),
+    ]);
+    if (
+      !canonicalRootAfter
+      || !canonicalTargetAfter
+      || canonicalRootAfter !== canonicalRoot
+      || canonicalTargetAfter !== canonicalTarget
+      || !isContainedPath(canonicalRootAfter, canonicalTargetAfter, this.deps.platform)
+    ) {
+      throw new Error("The target path changed while preparing the editor launch.");
+    }
+
     let canonicalProjectRoot = canonicalRoot;
     if (options.projectRoot) {
       if (!api.isAbsolute(options.projectRoot)) {

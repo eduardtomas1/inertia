@@ -581,4 +581,37 @@ describe("editor launch authorization and process hygiene", () => {
       projectRoot: "/other",
     })).rejects.toThrow("outside the project root");
   });
+
+  it("rejects launching if the target path is replaced with a symlink during editor discovery", async () => {
+    let swapped = false;
+    const base = makeFakeFs({
+      platform: "linux",
+      files: ["/usr/bin/zed", "/workspace/app/src/index.ts", "/etc/passwd"],
+      dirs: ["/workspace/app"],
+    });
+    const spawned: EditorSpawnRequest[] = [];
+    const launcher = new EditorLauncher({
+      platform: "linux",
+      env: () => ({ PATH: "/usr/bin" }),
+      homeDir: () => "/home/user",
+      ...base,
+      realpath: async (filePath: string) => (
+        swapped && filePath === "/workspace/app/src/index.ts"
+          ? "/etc/passwd"
+          : await base.realpath!(filePath)
+      ),
+      probeVersion: async () => {
+        swapped = true;
+        return { exitCode: 0, stdout: "Zed 0.180.0", timedOut: false };
+      },
+      spawnProcess: async (request) => { spawned.push(request); },
+    });
+
+    await expect(launcher.launchEditor({
+      editor: "zed",
+      targetPath: "/workspace/app/src/index.ts",
+      authorizedRoot: "/workspace/app",
+    })).rejects.toThrow("changed");
+    expect(spawned).toEqual([]);
+  });
 });

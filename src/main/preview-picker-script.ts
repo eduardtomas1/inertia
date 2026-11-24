@@ -1,7 +1,6 @@
 import type { WebContents } from "electron";
 
 import {
-  PREVIEW_ANNOTATION_MAX_COMMENT_CHARS,
   PREVIEW_ANNOTATION_MAX_NAME_CHARS,
   PREVIEW_ANNOTATION_MAX_ROLE_CHARS,
   PREVIEW_ANNOTATION_MAX_SELECTOR_CHARS,
@@ -11,6 +10,7 @@ import { AGENT_BROWSER_WORLD_ID } from "./preview-agent-page.js";
 
 export interface PreviewPickerStartOptions {
   readonly point?: { readonly x: number; readonly y: number };
+  readonly generation?: number;
 }
 
 export const PREVIEW_PICKER_OVERLAY_ATTR = "data-inertia-preview-picker";
@@ -22,16 +22,19 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     && Number.isFinite(options.point.y)
     ? { x: options.point.x, y: options.point.y }
     : null;
+  const generation = typeof options.generation === "number" && Number.isSafeInteger(options.generation) && options.generation >= 0
+    ? options.generation
+    : 0;
 
   return `(() => {
     const OVERLAY_ATTR = ${JSON.stringify(PREVIEW_PICKER_OVERLAY_ATTR)};
     const MAX_SELECTOR = ${PREVIEW_ANNOTATION_MAX_SELECTOR_CHARS};
     const MAX_ROLE = ${PREVIEW_ANNOTATION_MAX_ROLE_CHARS};
     const MAX_NAME = ${PREVIEW_ANNOTATION_MAX_NAME_CHARS};
-    const MAX_COMMENT = ${PREVIEW_ANNOTATION_MAX_COMMENT_CHARS};
     const MAX_TAG = ${PREVIEW_ANNOTATION_MAX_TAG_CHARS};
     const MAX_RAW_HTML = ${RAW_HTML_PRE_TRANSPORT_LIMIT};
     const INITIAL_POINT = ${JSON.stringify(initialPoint)};
+    const GENERATION = ${generation};
     const owner = globalThis;
     if (owner.__inertiaPreviewPicker && typeof owner.__inertiaPreviewPicker.stop === "function") {
       owner.__inertiaPreviewPicker.stop(false);
@@ -40,7 +43,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     const sendEvent = (payload) => {
       const bridge = owner.__inertiaPreviewPickerBridge;
       if (bridge && typeof bridge.send === "function") {
-        bridge.send(payload);
+        bridge.send({ ...payload, generation: GENERATION });
       }
     };
 
@@ -282,43 +285,18 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     const host = document.createElement("div");
     host.setAttribute(OVERLAY_ATTR, "host");
     host.setAttribute("dir", "ltr");
-    if (!(owner.__inertiaPreviewPickerHosts instanceof WeakSet)) {
-      owner.__inertiaPreviewPickerHosts = new WeakSet();
-    }
-    owner.__inertiaPreviewPickerHosts.add(host);
     try {
       host.popover = "manual";
     } catch {}
     host.style.cssText = "position:fixed;inset:0;width:auto;height:auto;margin:0;border:0;padding:0;overflow:visible;background:transparent;color:inherit;z-index:2147483647;pointer-events:none;";
 
     const shadow = host.attachShadow({ mode: "closed" });
-    const stopOverlayEvent = (event) => {
-      event.stopPropagation();
-    };
-    for (const eventName of ["keydown", "keyup", "keypress", "beforeinput", "input", "paste", "copy", "cut", "compositionstart", "compositionupdate", "compositionend"]) {
-      shadow.addEventListener(eventName, stopOverlayEvent, false);
-    }
     const style = document.createElement("style");
     style.textContent = [
       ":host { all: initial; }",
       ".layer { position: fixed; inset: 0; pointer-events: none; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #f4f4f5; }",
       ".box { position: fixed; display: none; pointer-events: none; border: 2px solid #3b82f6; background: rgba(59, 130, 246, 0.14); border-radius: 3px; box-sizing: border-box; }",
-      ".box.selected { border-color: #2563eb; background: rgba(37, 99, 235, 0.16); }",
       ".badge { position: fixed; display: none; pointer-events: none; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: #1d4ed8; color: #ffffff; font-size: 11px; font-weight: 600; line-height: 16px; padding: 2px 7px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }",
-      ".popover { position: fixed; display: none; pointer-events: auto; width: min(320px, calc(100vw - 16px)); background: #18181b; color: #f4f4f5; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); padding: 10px; box-sizing: border-box; }",
-      ".popover-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }",
-      ".popover-target { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-      ".popover-close { appearance: none; border: 0; background: transparent; color: #a1a1aa; cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 4px; }",
-      ".popover-close:hover, .popover-close:focus-visible { background: rgba(255, 255, 255, 0.1); color: #ffffff; outline: 2px solid #3b82f6; outline-offset: 1px; }",
-      ".popover-form { display: flex; flex-direction: column; gap: 8px; margin: 0; }",
-      ".popover-input { width: 100%; min-height: 54px; max-height: 120px; resize: vertical; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; background: #09090b; color: #f4f4f5; padding: 7px 9px; font: inherit; font-size: 13px; line-height: 1.4; }",
-      ".popover-input:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; border-color: #3b82f6; }",
-      ".popover-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }",
-      ".popover-btn { appearance: none; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 500; padding: 5px 10px; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.16); background: #27272a; color: #f4f4f5; }",
-      ".popover-btn:hover, .popover-btn:focus-visible { background: #3f3f46; outline: 2px solid #3b82f6; outline-offset: 1px; }",
-      ".popover-btn.primary { background: #2563eb; border-color: #2563eb; color: #ffffff; }",
-      ".popover-btn.primary:hover, .popover-btn.primary:focus-visible { background: #1d4ed8; }",
-      ".popover-btn:disabled { opacity: 0.55; cursor: default; }",
     ].join("\\n");
     shadow.appendChild(style);
 
@@ -328,50 +306,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     hoverBox.className = "box";
     const hoverBadge = document.createElement("div");
     hoverBadge.className = "badge";
-    const selectedBox = document.createElement("div");
-    selectedBox.className = "box selected";
-    const selectedBadge = document.createElement("div");
-    selectedBadge.className = "badge";
-
-    const popover = document.createElement("div");
-    popover.className = "popover";
-    popover.setAttribute("role", "dialog");
-    popover.setAttribute("aria-label", "Comment on selected element");
-
-    const header = document.createElement("div");
-    header.className = "popover-header";
-    const targetLabel = document.createElement("span");
-    targetLabel.className = "popover-target";
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "popover-close";
-    closeBtn.textContent = "\\u00d7";
-    closeBtn.setAttribute("aria-label", "Cancel element comment");
-    header.append(targetLabel, closeBtn);
-
-    const form = document.createElement("form");
-    form.className = "popover-form";
-    const textarea = document.createElement("textarea");
-    textarea.className = "popover-input";
-    textarea.placeholder = "Describe the change\\u2026";
-    textarea.setAttribute("aria-label", "Describe the change");
-    textarea.maxLength = MAX_COMMENT;
-    textarea.rows = 2;
-
-    const actions = document.createElement("div");
-    actions.className = "popover-actions";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "popover-btn";
-    cancelBtn.textContent = "Cancel";
-    const attachBtn = document.createElement("button");
-    attachBtn.type = "submit";
-    attachBtn.className = "popover-btn primary";
-    attachBtn.textContent = "Attach";
-    actions.append(cancelBtn, attachBtn);
-    form.append(textarea, actions);
-    popover.append(header, form);
-    layer.append(hoverBox, hoverBadge, selectedBox, selectedBadge, popover);
+    layer.append(hoverBox, hoverBadge);
     shadow.appendChild(layer);
 
     const cursorStyle = document.createElement("style");
@@ -380,8 +315,6 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
 
     let finished = false;
     let submitting = false;
-    let selectedElement = null;
-    let selectedRect = null;
 
     const isOverlayTarget = (node) => {
       if (!node) return false;
@@ -418,40 +351,6 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
       return r;
     };
 
-    const positionPopover = (rect) => {
-      const vw = window.innerWidth || 800;
-      const vh = window.innerHeight || 600;
-      const width = Math.min(320, Math.max(200, vw - 16));
-      const height = 156;
-      const left = Math.max(8, Math.min(rect.x, vw - width - 8));
-      const below = rect.y + rect.height + 8;
-      const above = rect.y - height - 8;
-      const top = below + height <= vh - 8 ? below : above >= 8 ? above : Math.max(8, vh - height - 8);
-      popover.style.display = "block";
-      popover.style.left = Math.round(left) + "px";
-      popover.style.top = Math.round(top) + "px";
-    };
-
-    const selectElement = (el) => {
-      selectedElement = el;
-      hoverBox.style.display = "none";
-      hoverBadge.style.display = "none";
-      selectedRect = positionHighlight(selectedBox, selectedBadge, el) || rectFromElement(el);
-      targetLabel.textContent = describeElement(el);
-      positionPopover(selectedRect);
-      if (typeof textarea.focus === "function") {
-        textarea.focus({ preventScroll: true });
-      }
-    };
-
-    const refreshLayout = () => {
-      if (finished || submitting || !selectedElement) return;
-      if (selectedElement.isConnected) {
-        selectedRect = positionHighlight(selectedBox, selectedBadge, selectedElement) || selectedRect;
-        if (selectedRect) positionPopover(selectedRect);
-      }
-    };
-
     const eventTargetsOverlay = (event) => {
       const path = typeof event.composedPath === "function" ? event.composedPath() : [];
       for (const item of path) {
@@ -466,8 +365,76 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
       if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
     };
 
+    const stop = (notifyMain) => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("pointermove", onPointerMove, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("mousedown", onMouseOrClick, true);
+      window.removeEventListener("mouseup", onMouseOrClick, true);
+      window.removeEventListener("click", onMouseOrClick, true);
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (document.documentElement) {
+        document.documentElement.removeAttribute(OVERLAY_ATTR + "-active");
+      }
+      try {
+        if (host.matches && host.matches(":popover-open") && typeof host.hidePopover === "function") {
+          host.hidePopover();
+        }
+      } catch {}
+      cursorStyle.remove();
+      host.remove();
+      if (owner.__inertiaPreviewPicker && owner.__inertiaPreviewPicker.host === host) {
+        owner.__inertiaPreviewPicker = null;
+      }
+      if (notifyMain) sendEvent({ type: "cancelled" });
+    };
+
+    const selectElement = (el) => {
+      if (finished || submitting || !el) return;
+      submitting = true;
+      const bounds = rectFromElement(el);
+      const selector = buildSelector(el);
+      const { role, name } = extractRoleAndName(el);
+      const tagName = String(el.tagName || "").toLowerCase().slice(0, MAX_TAG);
+      const rawHtml = typeof el.outerHTML === "string"
+        ? el.outerHTML.slice(0, MAX_RAW_HTML)
+        : "";
+      const payload = {
+        selector,
+        role,
+        name,
+        tagName,
+        label: describeElement(el),
+        bounds,
+        html: rawHtml,
+        devicePixelRatio: Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1,
+        viewportWidth: Number.isFinite(window.innerWidth) && window.innerWidth > 0 ? window.innerWidth : 0,
+        viewportHeight: Number.isFinite(window.innerHeight) && window.innerHeight > 0 ? window.innerHeight : 0,
+      };
+      host.style.visibility = "hidden";
+      host.style.display = "none";
+      const dispatch = () => {
+        if (finished) return;
+        stop(false);
+        sendEvent({ type: "selected", payload });
+      };
+      if (typeof window.requestAnimationFrame === "function") {
+        let dispatched = false;
+        const once = () => {
+          if (dispatched) return;
+          dispatched = true;
+          dispatch();
+        };
+        window.requestAnimationFrame(once);
+        if (typeof window.setTimeout === "function") window.setTimeout(once, 60);
+      } else {
+        dispatch();
+      }
+    };
+
     const onPointerMove = (event) => {
-      if (finished || submitting || selectedElement) return;
+      if (finished || submitting) return;
       if (eventTargetsOverlay(event)) {
         hoverBox.style.display = "none";
         hoverBadge.style.display = "none";
@@ -484,9 +451,9 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     let selectedOnPointerDown = false;
 
     const onPointerDown = (event) => {
-      if (finished || submitting || !event.isTrusted || eventTargetsOverlay(event)) return;
+      if (finished || !event.isTrusted || eventTargetsOverlay(event)) return;
       swallow(event);
-      if (event.button !== 0) return;
+      if (submitting || event.button !== 0) return;
       const target = pickAtPoint(document, event.clientX, event.clientY, isExcluded);
       if (target) {
         selectedOnPointerDown = true;
@@ -495,89 +462,17 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     };
 
     const onMouseOrClick = (event) => {
-      if (finished || submitting || !event.isTrusted || eventTargetsOverlay(event)) return;
+      if (finished || !event.isTrusted || eventTargetsOverlay(event)) return;
       swallow(event);
+      if (submitting) {
+        if (event.type === "click") selectedOnPointerDown = false;
+        return;
+      }
       if (event.type === "click" && !selectedOnPointerDown && event.button === 0) {
         const target = pickAtPoint(document, event.clientX, event.clientY, isExcluded);
         if (target) selectElement(target);
       }
       if (event.type === "click") selectedOnPointerDown = false;
-    };
-
-    const stop = (notifyMain) => {
-      if (finished) return;
-      finished = true;
-      window.removeEventListener("pointermove", onPointerMove, true);
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("mousedown", onMouseOrClick, true);
-      window.removeEventListener("mouseup", onMouseOrClick, true);
-      window.removeEventListener("click", onMouseOrClick, true);
-      window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("scroll", refreshLayout, true);
-      window.removeEventListener("resize", refreshLayout);
-      if (document.documentElement) {
-        document.documentElement.removeAttribute(OVERLAY_ATTR + "-active");
-      }
-      try {
-        if (host.matches && host.matches(":popover-open") && typeof host.hidePopover === "function") {
-          host.hidePopover();
-        }
-      } catch {}
-      cursorStyle.remove();
-      host.remove();
-      if (owner.__inertiaPreviewPickerHosts instanceof WeakSet) {
-        owner.__inertiaPreviewPickerHosts.delete(host);
-      }
-      if (owner.__inertiaPreviewPicker && owner.__inertiaPreviewPicker.host === host) {
-        owner.__inertiaPreviewPicker = null;
-      }
-      if (notifyMain) sendEvent({ type: "cancelled" });
-    };
-
-    const submit = () => {
-      if (finished || submitting || !selectedElement) return;
-      submitting = true;
-      attachBtn.disabled = true;
-      const liveRect = selectedElement.isConnected ? rectFromElement(selectedElement) : null;
-      const bounds = liveRect && (liveRect.width > 0 || liveRect.height > 0) ? liveRect : (selectedRect || { x: 0, y: 0, width: 0, height: 0 });
-      const selector = buildSelector(selectedElement);
-      const { role, name } = extractRoleAndName(selectedElement);
-      const tagName = String(selectedElement.tagName || "").toLowerCase().slice(0, MAX_TAG);
-      const rawHtml = typeof selectedElement.outerHTML === "string"
-        ? selectedElement.outerHTML.slice(0, MAX_RAW_HTML)
-        : "";
-      const comment = String(textarea.value || "").trim().slice(0, MAX_COMMENT);
-      const payload = {
-        selector,
-        role,
-        name,
-        tagName,
-        bounds,
-        html: rawHtml,
-        comment,
-        devicePixelRatio: Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1,
-        viewportWidth: Number.isFinite(window.innerWidth) && window.innerWidth > 0 ? window.innerWidth : 0,
-        viewportHeight: Number.isFinite(window.innerHeight) && window.innerHeight > 0 ? window.innerHeight : 0,
-      };
-      host.style.visibility = "hidden";
-      host.style.display = "none";
-      const dispatch = () => {
-        if (finished) return;
-        stop(false);
-        sendEvent({ type: "submitted", payload });
-      };
-      if (typeof window.requestAnimationFrame === "function") {
-        let dispatched = false;
-        const once = () => {
-          if (dispatched) return;
-          dispatched = true;
-          dispatch();
-        };
-        window.requestAnimationFrame(once);
-        if (typeof window.setTimeout === "function") window.setTimeout(once, 60);
-      } else {
-        dispatch();
-      }
     };
 
     const onKeyDown = (event) => {
@@ -588,33 +483,12 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
       }
     };
 
-    textarea.addEventListener("keydown", (event) => {
-      if (!event.isTrusted) return;
-      if (event.key === "Escape" && !event.isComposing) {
-        swallow(event);
-        stop(true);
-        return;
-      }
-      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-        event.preventDefault();
-        submit();
-      }
-    });
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      submit();
-    });
-    cancelBtn.addEventListener("click", () => stop(true));
-    closeBtn.addEventListener("click", () => stop(true));
-
     window.addEventListener("pointermove", onPointerMove, true);
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("mousedown", onMouseOrClick, true);
     window.addEventListener("mouseup", onMouseOrClick, true);
     window.addEventListener("click", onMouseOrClick, true);
     window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("scroll", refreshLayout, true);
-    window.addEventListener("resize", refreshLayout);
 
     const mountRoot = document.documentElement || document.body;
     if (mountRoot) {
@@ -626,7 +500,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
       if (typeof host.showPopover === "function") host.showPopover();
     } catch {}
 
-    owner.__inertiaPreviewPicker = { host, stop };
+    owner.__inertiaPreviewPicker = { host, generation: GENERATION, stop };
 
     if (INITIAL_POINT) {
       const target = pickAtPoint(document, INITIAL_POINT.x, INITIAL_POINT.y, isExcluded);
@@ -638,10 +512,18 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
   })()`;
 }
 
-export function previewPickerStopScript(): string {
+export function previewPickerStopScript(expectedGeneration?: number): string {
+  const expected = typeof expectedGeneration === "number" && Number.isSafeInteger(expectedGeneration)
+    ? expectedGeneration
+    : null;
   return `(() => {
     const picker = globalThis.__inertiaPreviewPicker;
-    if (picker && typeof picker.stop === "function") {
+    const expectedGeneration = ${JSON.stringify(expected)};
+    if (
+      picker
+      && typeof picker.stop === "function"
+      && (expectedGeneration === null || picker.generation === expectedGeneration)
+    ) {
       picker.stop(false);
       return true;
     }
@@ -660,11 +542,14 @@ export async function startPreviewPickerInPage(
   );
 }
 
-export async function stopPreviewPickerInPage(contents: WebContents): Promise<void> {
+export async function stopPreviewPickerInPage(
+  contents: WebContents,
+  expectedGeneration?: number,
+): Promise<void> {
   if (contents.isDestroyed()) return;
   await contents.executeJavaScriptInIsolatedWorld(
     AGENT_BROWSER_WORLD_ID,
-    [{ code: previewPickerStopScript() }],
+    [{ code: previewPickerStopScript(expectedGeneration) }],
     true,
   );
 }

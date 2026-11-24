@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,6 +21,7 @@ import {
   RESTORE_BACKUP_CHECKPOINT_LABEL,
 } from "../../src/server/checkpoint-retention";
 import { RuntimeStore } from "../../src/server/database";
+import { normalizeIdentityPath } from "../../src/server/project-identity";
 import { restoreConversationCheckpoint } from "../../src/server/runtime/checkpoint-restoration";
 import { createConversationCommandHandler } from "../../src/server/runtime/commands/conversation-commands";
 import { createProjectWorkspaceCommandHandler } from "../../src/server/runtime/commands/project-workspace-commands";
@@ -381,6 +382,135 @@ describe("bounded retention for Git checkpoint refs", () => {
       expect(listAllRefs(fixture.repository, "refs/heads/")).toEqual(["refs/heads/main"]);
       expect(listAllRefs(fixture.repository, "refs/tags/")).toEqual(["refs/tags/v1.0.0"]);
       expect(listAllRefs(fixture.repository, "refs/custom/")).toEqual(["refs/custom/keep"]);
+    } finally {
+      fixture.store.close();
+    }
+  });
+
+  it("rejects project.remove before deleting checkpoint refs when an isolated chat worktree blocks removal", async () => {
+    const fixture = createRepoFixture("project-remove-blocked");
+    try {
+      const ref = (await createCheckpoint(
+        fixture.repository,
+        join(fixture.data, "checkpoint-indexes"),
+        fixture.conversation.id,
+      )).ref;
+      fixture.store.conversationWorktrees.beginCreation(
+        fixture.conversation.id,
+        join(fixture.root, "wt-owned"),
+        "inertia/wt-owned",
+        randomUUID(),
+      );
+
+      const providerTerminalResumes = new ProviderTerminalResumeRegistry(fixture.store.conversationWork);
+      const handler = createProjectWorkspaceCommandHandler({
+        store: fixture.store,
+        dataDirectory: fixture.data,
+        conversationAttachments: { release: async () => undefined } as never,
+        workspaceRuns: {} as never,
+        turns: { hasActiveCheckout: () => false } as never,
+        providers: {} as never,
+        providerTerminalResumes,
+        terminals: {} as never,
+        secureFiles: {} as never,
+        secureFileAuthorities: {} as never,
+        workspacePath: () => fixture.repository,
+        rememberDeletedConversation: () => undefined,
+        forgetRemoteTranscript: () => undefined,
+        broadcastSnapshot: () => undefined,
+        send: () => undefined,
+      });
+
+      await expect(handler({} as WebSocket, {
+        type: "project.remove",
+        requestId: randomUUID(),
+        payload: { projectId: fixture.project.id },
+      })).rejects.toThrow("Resolve this project's isolated chat worktrees before removing it.");
+
+      expect(listAllRefs(fixture.repository, `refs/inertia/checkpoints/${fixture.conversation.id}/`)).toEqual([ref]);
+      expect(fixture.store.project(fixture.project.id).id).toBe(fixture.project.id);
+    } finally {
+      fixture.store.close();
+    }
+  });
+
+  it("does not fall back to projectPath during retention pruning when project repository identity is missing or mismatched", async () => {
+    const fixture = createRepoFixture("fallback-identity");
+    try {
+      const missingWorktree = join(fixture.root, "missing-worktree");
+      git(fixture.repository, ["worktree", "add", "-b", "wt-temp", missingWorktree]);
+      const convMissingId = fixture.store.createConversation(fixture.project.id, "Detached Missing Id", {
+        worktreePath: missingWorktree,
+      });
+
+      const nestedDir = join(fixture.repository, "nested-subproject");
+      mkdirSync(nestedDir);
+      const repoRoot = realpathSync(fixture.repository);
+      const repoCommonDir = realpathSync(join(fixture.repository, ".git"));
+      const mismatchedProject = fixture.store.createProject("Mismatched Repo", nestedDir, {
+        repositoryIdentity: `git:${normalizeIdentityPath(repoCommonDir)}`,
+        repositoryRoot: normalizeIdentityPath(repoRoot),
+        repositoryRelativePath: "nested-subproject",
+      });
+      const convMismatchedId = fixture.store.createConversation(mismatchedProject.id, "Detached Mismatched Id", {
+        worktreePath: missingWorktree,
+      });
+      git(fixture.repository, ["worktree", "remove", "--force", missingWorktree]);
+      rmSync(missingWorktree, { recursive: true, force: true });
+
+      git(nestedDir, ["init", "-b", "main"]);
+      git(nestedDir, ["config", "core.autocrlf", "false"]);
+      git(nestedDir, ["config", "user.name", "Inertia Test"]);
+      git(nestedDir, ["config", "user.email", "test@inertia.local"]);
+      writeFileSync(join(nestedDir, "nested.txt"), "nested\n");
+      git(nestedDir, ["add", "nested.txt"]);
+      git(nestedDir, ["commit", "-m", "nested initial"]);
+
+      const missingRefs: string[] = [];
+      const mismatchedRefs: string[] = [];
+      for (let i = 1; i <= 3; i += 1) {
+        const createdA = await createCheckpoint(
+          fixture.repository,
+          join(fixture.data, "checkpoint-indexes"),
+          convMissingId.id,
+        );
+        fixture.store.addCheckpoint({
+          conversationId: convMissingId.id,
+          ref: createdA.ref,
+          label: `Turn ${i}`,
+          turnIndex: i,
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0,
+        });
+        missingRefs.push(createdA.ref);
+
+        const createdB = await createCheckpoint(
+          nestedDir,
+          join(fixture.data, "checkpoint-indexes"),
+          convMismatchedId.id,
+        );
+        fixture.store.addCheckpoint({
+          conversationId: convMismatchedId.id,
+          ref: createdB.ref,
+          label: `Turn ${i}`,
+          turnIndex: i,
+          filesChanged: 1,
+          insertions: 1,
+          deletions: 0,
+        });
+        mismatchedRefs.push(createdB.ref);
+      }
+
+      const pruned = await pruneCheckpointRefs(fixture.store, {
+        policy: {
+          maxTurnCheckpointsPerConversation: 1,
+          maxRefsPerRepository: 1,
+        },
+      });
+      expect(pruned.deletedRefCount).toBe(0);
+      expect(listAllRefs(fixture.repository, `refs/inertia/checkpoints/${convMissingId.id}/`).sort()).toEqual(missingRefs.sort());
+      expect(listAllRefs(nestedDir, `refs/inertia/checkpoints/${convMismatchedId.id}/`).sort()).toEqual(mismatchedRefs.sort());
     } finally {
       fixture.store.close();
     }

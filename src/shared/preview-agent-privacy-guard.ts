@@ -917,8 +917,6 @@ export function installPreviewAgentPrivacyGuard(
       if (event.isTrusted === true) withhold("hidden-input");
       return;
     }
-    const pickerHosts = (globalThis as { __inertiaPreviewPickerHosts?: unknown }).__inertiaPreviewPickerHosts;
-    if (pickerHosts instanceof WeakSet && path[0] && pickerHosts.has(path[0])) return;
     const inspection = event.isTrusted === true ? "type" : "observe";
     for (const node of path) {
       const input = inputElement(node);

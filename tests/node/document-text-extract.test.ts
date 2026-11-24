@@ -375,4 +375,18 @@ describe("notebook and RTF extraction", () => {
       .toBe("Fee $700 visible\tnext");
     expect(failure("rtf", "Plain text renamed to rtf")).toBe("content");
   });
+
+  it("caches parsed XML entries across repeated EPUB spine references", () => {
+    const repeatedSpine = Array.from({ length: 400 }, () => '<itemref idref="c1"/>').join("");
+    const paddedChapter = `<html><body><!--${"x".repeat(20_000)}--><p>Hi</p></body></html>`;
+    const epub = documentArchive({
+      "META-INF/container.xml": '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>',
+      "OEBPS/content.opf": `<package><manifest><item id="c1" href="ch1.xhtml"/></manifest><spine>${repeatedSpine}</spine></package>`,
+      "OEBPS/ch1.xhtml": paddedChapter,
+    });
+    const startedAt = Date.now();
+    const extracted = extract("epub", epub);
+    expect(extracted.text).toContain("## Chapter 1\nHi");
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+  });
 });

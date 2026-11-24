@@ -43,7 +43,7 @@ export function createQueuedMessageRuntime(
   const enqueueing = new Map<string, Promise<void>>();
   const again = new Set<string>();
   const deferred = new Set<string>();
-  const manualRetries = new Map<string, string>();
+  const manualRetries = new Map<string, { id: string; retriesLeft: number }>();
   const result = (conversationId: string, id?: string): MessageQueueResult => ({
     kind: "message.queue", conversationId, entries: store.queuedMessages.list(conversationId),
     receipt: id ? store.queuedMessages.get(conversationId, id) : null,
@@ -74,8 +74,8 @@ export function createQueuedMessageRuntime(
       return false;
     }
   };
-  const retryAfterCleanup = (conversationId: string, manualId?: string): void => {
-    if (manualId) manualRetries.set(conversationId, manualId);
+  const retryAfterCleanup = (conversationId: string, manual?: { id: string; retriesLeft: number }): void => {
+    if (manual) manualRetries.set(conversationId, manual);
     void turns.waitForProviderCleanup([conversationId]).then(() => schedule(conversationId)).catch(() => undefined);
   };
 
@@ -86,7 +86,11 @@ export function createQueuedMessageRuntime(
     const retry = manualRetries.get(conversationId);
     manualRetries.delete(conversationId);
     if (!first || (manualId && first.id !== manualId)) return;
-    const manual = manualId ?? (retry === first.id && first.state === "waiting" ? retry : undefined);
+    const manual = manualId
+      ? { id: manualId, retriesLeft: 1 }
+      : retry && retry.id === first.id && first.state === "waiting"
+        ? retry
+        : undefined;
     if (!manual && first.state !== "waiting") return;
     if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
       retryAfterCleanup(conversationId, manual);
@@ -106,6 +110,7 @@ export function createQueuedMessageRuntime(
       return;
     }
     if (isHeld()) {
+      if (manual) manualRetries.set(conversationId, manual);
       retryAfterAdmission(conversationId);
       return;
     }
@@ -123,7 +128,12 @@ export function createQueuedMessageRuntime(
       });
     } catch (error) {
       if (options.signal.aborted || turns.isClosing()) store.queuedMessages.release(conversationId, first.id);
-      else if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId, manualId);
+      else if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) {
+        retryAfterCleanup(
+          conversationId,
+          manual && manual.retriesLeft > 0 ? { id: manual.id, retriesLeft: manual.retriesLeft - 1 } : undefined,
+        );
+      }
       else block(conversationId, first, routeChanged(conversationId, first) ? QUEUED_ROUTE_CHANGED_ERROR : publicRuntimeError(error));
     } finally {
       changed(conversationId);
@@ -305,7 +315,7 @@ export function createQueuedMessageRuntime(
       void schedule(conversationId).catch(() => undefined);
       return;
     }
-    retryAfterCleanup(conversationId, id);
+    retryAfterCleanup(conversationId, { id, retriesLeft: 1 });
   }
 
   async function sendDuringTurn(conversationId: string, id: string): Promise<void> {

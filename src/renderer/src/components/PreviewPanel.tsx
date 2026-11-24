@@ -1,8 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   PreviewBounds,
+  PreviewPickerSelection,
   PreviewTabState,
 } from "@shared/desktop";
+import { PREVIEW_ANNOTATION_MAX_COMMENT_CHARS } from "@shared/preview-annotation";
 import type {
   BrowserEvidenceSnapshot,
 } from "@shared/browser-evidence";
@@ -46,6 +48,7 @@ export type PreviewPanelProps = {
   viewport?: AgentBrowserViewport;
   agentBusy?: boolean;
   pickerActive?: boolean;
+  pickerSelection?: PreviewPickerSelection | null;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -56,6 +59,8 @@ export type PreviewPanelProps = {
   onCloseTab?: (tabId: string) => void;
   onViewportChange?: (request: AgentBrowserViewportRequest) => void;
   onTogglePicker?: () => void;
+  onSubmitPickerComment?: (comment: string) => void;
+  onCancelPicker?: () => void;
   onInspectEvidenceImage?: (evidenceId: string) => Promise<boolean>;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
@@ -139,6 +144,7 @@ export function PreviewPanel({
   viewport,
   agentBusy = false,
   pickerActive = false,
+  pickerSelection = null,
   onNavigate,
   onOpenExternal,
   onBack,
@@ -149,11 +155,15 @@ export function PreviewPanel({
   onCloseTab,
   onViewportChange,
   onTogglePicker,
+  onSubmitPickerComment,
+  onCancelPicker,
   onInspectEvidenceImage,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
   const [draftUrl, setDraftUrl] = useState(url);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [pickerComment, setPickerComment] = useState("");
+  const pickerInputRef = useRef<HTMLTextAreaElement>(null);
   const [openEvidenceContextId, setOpenEvidenceContextId] = useState<string | null>(null);
   const evidenceOpen = openEvidenceContextId === contextId;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -224,16 +234,23 @@ export function PreviewPanel({
   }, [evidenceOpen, onBoundsChange]);
 
   useEffect(() => {
+    setPickerComment("");
+    if (pickerSelection) {
+      pickerInputRef.current?.focus();
+    }
+  }, [pickerSelection]);
+
+  useEffect(() => {
     if (!pickerActive || !onTogglePicker) return;
     const cancelOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.isComposing) return;
       event.preventDefault();
       event.stopPropagation();
-      onTogglePicker();
+      (onCancelPicker ?? onTogglePicker)();
     };
     window.addEventListener("keydown", cancelOnEscape);
     return () => window.removeEventListener("keydown", cancelOnEscape);
-  }, [onTogglePicker, pickerActive]);
+  }, [onCancelPicker, onTogglePicker, pickerActive]);
 
   const closeEvidence = useCallback(() => {
     setOpenEvidenceContextId(null);
@@ -460,6 +477,58 @@ export function PreviewPanel({
       </header>
 
       {validationError && <p className="preview-address-error" id="preview-url-error" role="alert">{validationError}</p>}
+
+      {pickerSelection && !evidenceOpen && (
+        <div className="preview-picker-comment" role="dialog" aria-label="Comment on selected element">
+          <div className="preview-picker-comment-header">
+            <span className="preview-picker-comment-target" title={pickerSelection.selector}>{pickerSelection.label}</span>
+            <IconButton
+              label="Cancel element comment"
+              onClick={() => (onCancelPicker ?? onTogglePicker)?.()}
+            >
+              <X size={14} />
+            </IconButton>
+          </div>
+          <form
+            className="preview-picker-comment-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSubmitPickerComment?.(pickerComment.trim());
+            }}
+          >
+            <textarea
+              ref={pickerInputRef}
+              className="preview-picker-comment-input"
+              aria-label="Describe the change"
+              placeholder="Describe the change…"
+              maxLength={PREVIEW_ANNOTATION_MAX_COMMENT_CHARS}
+              rows={2}
+              value={pickerComment}
+              onChange={(event) => setPickerComment(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  (onCancelPicker ?? onTogglePicker)?.();
+                } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  onSubmitPickerComment?.(pickerComment.trim());
+                }
+              }}
+            />
+            <div className="preview-picker-comment-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => (onCancelPicker ?? onTogglePicker)?.()}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="primary-button">Attach</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {evidenceOpen ? (
         <Suspense fallback={null}>

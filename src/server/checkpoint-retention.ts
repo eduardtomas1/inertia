@@ -11,6 +11,7 @@ import {
 import type { RuntimeStore } from "./database";
 import { mayBeInsideGitRepository } from "./git/paths";
 import { isGitProcessTreeTerminationFailure } from "./git/types";
+import { normalizeIdentityPath } from "./project-identity";
 import type {
   ArtifactRefClearUpdate,
   RetainedArtifactRefRecord,
@@ -221,7 +222,7 @@ export async function pruneCheckpointRefs(
         || options.isTurnProtected?.(record.turnId)
       ) {
         protectedTurns.add(record.turnId);
-        }
+      }
     }
   }
   for (const record of artifacts) {
@@ -295,24 +296,35 @@ export async function pruneCheckpointRefs(
     }
   };
 
+  const resolveFallbackBucket = async (
+    projectPath: string,
+    projectId: string,
+    workspaceKind: string | null,
+    expectedRepositoryIdentity: string | null,
+  ): Promise<RepositoryBucket | null> => {
+    if (!expectedRepositoryIdentity) return null;
+    const candidate = await resolveBucket(projectPath, projectId, workspaceKind);
+    if (!candidate) return null;
+    if (`git:${normalizeIdentityPath(candidate.commonGitDir)}` !== expectedRepositoryIdentity) {
+      return null;
+    }
+    return candidate;
+  };
+
   for (const record of checkpoints) {
     if (options.signal?.aborted) return result;
-    let bucket = record.worktreePath
-      ? await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind)
-      : null;
-    if (!bucket) {
-      bucket = await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
-    }
+    const bucket = record.worktreePath
+      ? (await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind))
+        ?? (await resolveFallbackBucket(record.projectPath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity))
+      : await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
     if (bucket) bucket.checkpoints.push(record);
   }
   for (const record of artifacts) {
     if (options.signal?.aborted) return result;
-    let bucket = record.worktreePath
-      ? await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind)
-      : null;
-    if (!bucket) {
-      bucket = await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
-    }
+    const bucket = record.worktreePath
+      ? (await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind))
+        ?? (await resolveFallbackBucket(record.projectPath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity))
+      : await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
     if (bucket) bucket.artifacts.push(record);
   }
 

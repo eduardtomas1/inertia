@@ -346,6 +346,7 @@ export class GitArtifactRepository {
         a.conversation_id,
         conv.project_id,
         p.workspace_kind AS project_workspace_kind,
+        p.repository_identity AS project_repository_identity,
         p.path AS project_path,
         conv.worktree_path,
         conv.archived_at,
@@ -367,6 +368,7 @@ export class GitArtifactRepository {
       conversation_id: string;
       project_id: string;
       project_workspace_kind: string | null;
+      project_repository_identity: string | null;
       project_path: string;
       worktree_path: string | null;
       archived_at: string | null;
@@ -383,6 +385,7 @@ export class GitArtifactRepository {
       conversationId: row.conversation_id,
       projectId: row.project_id,
       projectWorkspaceKind: row.project_workspace_kind,
+      projectRepositoryIdentity: row.project_repository_identity,
       projectPath: row.project_path,
       worktreePath: row.worktree_path,
       archivedAt: row.archived_at,

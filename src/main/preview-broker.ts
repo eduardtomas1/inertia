@@ -76,6 +76,7 @@ interface PreviewSession extends AgentOperationSession {
   operation: AgentOperationScope | null;
   unloadStayUntil: Map<string, number>;
   pickerActive: boolean;
+  pickerSelection: import("../shared/desktop.js").PreviewPickerSelection | null;
 }
 
 interface PreviewBrokerOptions {
@@ -195,6 +196,7 @@ export class PreviewBroker {
       contextId?: unknown;
       action?: unknown;
       viewport?: unknown;
+      comment?: unknown;
     };
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
@@ -213,6 +215,12 @@ export class PreviewBroker {
     }
     if (action === "pick-cancel") {
       if (session) this.#picker.cancel(this.#pickerView(session));
+      return this.#state(ownerId, contextId);
+    }
+    if (action === "pick-submit") {
+      if (session && typeof request.comment === "string") {
+        await this.#picker.submit(this.#pickerView(session), request.comment);
+      }
       return this.#state(ownerId, contextId);
     }
     if (
@@ -650,6 +658,7 @@ export class PreviewBroker {
       ...(session ? { viewport: agentViewportState(session) } : {}),
       ...(session?.busy ? { agentBusy: true } : {}),
       ...(session?.pickerActive ? { pickerActive: true } : {}),
+      ...(session?.pickerSelection ? { pickerSelection: session.pickerSelection } : {}),
     };
   }
   #agentState(session: PreviewSession): AgentBrowserState {
@@ -877,6 +886,7 @@ export class PreviewBroker {
       operation: null,
       unloadStayUntil: new Map(),
       pickerActive: false,
+      pickerSelection: null,
     };
     const tab = this.#openTab(session);
     session.activeTabId = tab.id;
@@ -1102,6 +1112,8 @@ export class PreviewBroker {
       get viewportScale() { return session.viewportScale; },
       get pickerActive() { return session.pickerActive; },
       set pickerActive(value: boolean) { session.pickerActive = value; },
+      get pickerSelection() { return session.pickerSelection; },
+      set pickerSelection(value: import("../shared/desktop.js").PreviewPickerSelection | null) { session.pickerSelection = value; },
       activeTab: active && contents
         ? { id: active.id, documentSequence: active.documentSequence, contents }
         : null,

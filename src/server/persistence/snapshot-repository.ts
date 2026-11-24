@@ -115,6 +115,15 @@ type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
   contextPackets(conversationId: string, messageIds?: string[]): ConversationContextPacketSummary[];
 };
 
+const unicodeLowerRegistered = new WeakSet<PersistenceContext["database"]>();
+
+function ensureUnicodeLowerFunction(database: PersistenceContext["database"]): void {
+  if (unicodeLowerRegistered.has(database)) return;
+  database.function("inertia_unicode_lower", { deterministic: true }, (value: unknown) =>
+    typeof value === "string" ? value.toLocaleLowerCase("en") : null);
+  unicodeLowerRegistered.add(database);
+}
+
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
   readonly todos: TodoRepository;
@@ -224,10 +233,11 @@ export class SnapshotRepository {
     const parameters: string[] = [];
     const query = request.query?.trim() ?? "";
     if (query) {
+      ensureUnicodeLowerFunction(this.context.database);
       const providers = request.providerIds ?? [];
-      filters.push(`(instr(lower(conversations.title), lower(?)) > 0${providers.length
+      filters.push(`(instr(inertia_unicode_lower(conversations.title), ?) > 0${providers.length
         ? ` OR conversations.provider_id IN (${providers.map(() => "?").join(", ")})` : ""})`);
-      parameters.push(query, ...providers);
+      parameters.push(query.toLocaleLowerCase("en"), ...providers);
     }
     const where = filters.join(" AND ");
     const total = (this.context.database.prepare(

@@ -36,7 +36,9 @@ export function composerQueueHandoff(options: ComposerQueueHandoffOptions): {
   };
   const restoreQueuedMessage = async (entry: QueuedMessage): Promise<void> => {
     if (entry.conversationId !== options.conversationId) return;
-    options.setQueueEditPending(true);
+    if (options.refs.mountedRef.current && options.refs.conversationIdRef.current === entry.conversationId) {
+      options.setQueueEditPending(true);
+    }
     await (await transfers()).restoreQueuedMessageToDraft(options, entry);
   };
   return {

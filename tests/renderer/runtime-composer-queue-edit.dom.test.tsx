@@ -235,4 +235,53 @@ describe("the composer with an editable queue that accepts documents", () => {
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Retry with the picture"));
     expect(await screen.findByRole("alert")).toHaveTextContent("An attachment could not be restored: gone.png. Attach it again.");
   });
+
+  it("routes an async queued edit into the original chat's saved draft when switching chats or unmounting", async () => {
+    const first = conversation("76767676-7676-4676-8676-767676767671");
+    const second = conversation("76767676-7676-4676-8676-767676767672");
+    const stored = { id: "76767676-7676-4676-8676-767676767673", name: "spec.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
+    const fresh: ChatAttachment = { id: "76767676-7676-4676-8676-767676767674", name: "spec.png", path: "/private/tmp/spec.png", mimeType: "image/png", size: 64 };
+    const queuedEntry: QueuedMessage = { ...entry(1), conversationId: first.id, content: "Keep this for chat one", attachments: [stored] };
+    const reattachAttachment = vi.fn(async () => ({ batchId: "76767676-7676-4676-8676-767676767675", attachments: [fresh] }));
+    const commitAttachmentImport = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", { configurable: true, value: {
+      reattachAttachment, commitAttachmentImport, cancelAttachmentImport: vi.fn(async () => undefined),
+    } });
+    let resolveEdit: ((result: MessageQueueResult) => void) | null = null;
+    const run = vi.fn<QueueCommandRunner>((command) => {
+      if (command.type === "message.queue.edit") {
+        return new Promise<MessageQueueResult>((resolve) => {
+          resolveEdit = resolve;
+        });
+      }
+      return Promise.resolve({
+        kind: "message.queue",
+        conversationId: command.payload.conversationId,
+        entries: command.payload.conversationId === first.id ? [queuedEntry] : [],
+        receipt: null,
+      });
+    });
+
+    const rendered = render(<Composer {...composerProps(first, { running: true, latestTurn: running, onQueueCommand: run })} />);
+    const edit = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
+    fireEvent.click(edit);
+    await waitFor(() => expect(resolveEdit).not.toBeNull());
+
+    rendered.rerender(<Composer {...composerProps(second, { running: false, latestTurn: null, onQueueCommand: run })} />);
+    const secondInput = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(secondInput, { target: { value: "Draft for chat two" } });
+
+    await act(async () => {
+      resolveEdit!({ kind: "message.queue", conversationId: first.id, entries: [], receipt: null, edited: queuedEntry });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(commitAttachmentImport).toHaveBeenCalledWith("76767676-7676-4676-8676-767676767675", [fresh.id]));
+    expect(secondInput).toHaveValue("Draft for chat two");
+    expect(secondInput).not.toBeDisabled();
+
+    rendered.rerender(<Composer {...composerProps(first, { running: false, latestTurn: null, onQueueCommand: run })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Keep this for chat one"));
+    expect(await screen.findByRole("button", { name: "Remove attachment spec.png" })).toBeInTheDocument();
+  });
 });

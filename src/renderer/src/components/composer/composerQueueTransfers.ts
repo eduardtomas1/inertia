@@ -4,7 +4,11 @@ import type { ChatAttachment } from "@shared/contracts";
 import type { QueuedMessage } from "@shared/queued-messages";
 import { mergeComposerAttachments } from "../../utils/composerAttachments";
 import { keepComposerDraftAttachments } from "../../utils/composerDraftAttachments";
-import { clearPersistedComposerDraft } from "../../utils/composerDraftPersistence";
+import {
+  clearPersistedComposerDraft,
+  persistComposerDraft,
+  readComposerDraft,
+} from "../../utils/composerDraftPersistence";
 import { openReattachLease } from "./composerAttachmentReattach";
 import type { ComposerAttachmentActions } from "./composerAttachmentActions";
 import type { QueueCommandRunner } from "./runtimeQueueClient";
@@ -96,17 +100,40 @@ function transferContext(options: ComposerQueueHandoffOptions, snapshot: readonl
     markEditorChanged(); resetHistory(""); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const restoreQueuedMessage = async (entry: QueuedMessage): Promise<void> => {
-    const editedConversationId = conversationId;
-    setAttachmentError(null);
+    const editedConversationId = entry.conversationId;
+    if (showsConversation(editedConversationId)) setAttachmentError(null);
     const failed: string[] = [];
     try {
       const content = entry.attachments.length > 0 && QUEUED_ATTACHMENT_FALLBACKS.has(entry.content) ? "" : entry.content;
-      const existing = draftValueRef.current;
-      if (content) updateMessage(existing.trim() ? `${existing}\n\n${content}` : content);
+      if (content) {
+        if (showsConversation(editedConversationId)) {
+          const existing = draftValueRef.current;
+          updateMessage(existing.trim() ? `${existing}\n\n${content}` : content);
+        } else {
+          const saved = readComposerDraft(editedConversationId);
+          persistComposerDraft(editedConversationId, saved.trim() ? `${saved}\n\n${content}` : content);
+        }
+      }
       const bridge = typeof window === "undefined" ? undefined : window.inertia;
       for (const attachment of entry.attachments) {
-        if (!showsConversation(editedConversationId) || !bridge?.reattachAttachment) {
+        if (!bridge?.reattachAttachment) {
           failed.push(attachment.name);
+          continue;
+        }
+        if (!showsConversation(editedConversationId)) {
+          try {
+            const lease = await openReattachLease(bridge, editedConversationId, attachment.id);
+            try {
+              const adopted = lease.attachments;
+              await lease.commit(adopted.map(({ id }) => id));
+              returnAttachmentsToDraft(editedConversationId, adopted);
+            } catch {
+              await lease.cancel().catch(() => undefined);
+              failed.push(attachment.name);
+            }
+          } catch {
+            failed.push(attachment.name);
+          }
           continue;
         }
         const outcome = await reattachAttachment(

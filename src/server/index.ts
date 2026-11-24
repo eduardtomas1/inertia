@@ -199,7 +199,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       Promise.resolve(watchers?.resume()),
     ]),
     reconcileArtifacts: () => turnGitArtifacts.reconcile(),
-    snapshotDigest: () => shellSnapshotDigest(currentSnapshot()),
+    snapshotDigest: () => (store.isDatabaseVacuuming() ? "" : shellSnapshotDigest(currentSnapshot())),
     broadcastSnapshot: () => broadcastSnapshot(),
     startProviderDiscovery: () => {
       if (!enableProviders) return;
@@ -514,7 +514,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       })),
     });
   };
+  let deferredSnapshotBroadcast = false;
   const snapshotBroadcasts = new SnapshotBroadcastCoalescer(() => {
+    if (closed) return;
+    if (store.isDatabaseVacuuming()) {
+      if (!deferredSnapshotBroadcast) {
+        deferredSnapshotBroadcast = true;
+        void store.whenDatabaseWritable().then(() => {
+          deferredSnapshotBroadcast = false;
+          if (!closed) snapshotBroadcasts.request();
+        });
+      }
+      return;
+    }
     runtimeSync.broadcastSnapshot(currentSnapshot);
   });
   const broadcastSnapshot = (): void => snapshotBroadcasts.request();

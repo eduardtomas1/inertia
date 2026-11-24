@@ -228,6 +228,11 @@ describe("preview picker overlay comment box in Happy DOM", () => {
         send: (payload: unknown) => sent.push(payload),
       };
 
+      const dispatchTrusted = (eventTarget: EventTarget, event: Event): void => {
+        Object.defineProperty(event, "isTrusted", { value: true });
+        eventTarget.dispatchEvent(event);
+      };
+
       const run = new Function(previewPickerStartScript());
       run();
       const host = document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)!;
@@ -235,6 +240,10 @@ describe("preview picker overlay comment box in Happy DOM", () => {
       expect(shadows.get(host)).not.toBeNull();
 
       fireEvent.keyDown(window, { key: "Escape" });
+      expect(sent).toEqual([]);
+      expect(document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)).not.toBeNull();
+
+      dispatchTrusted(window, new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect(sent).toEqual([{ type: "cancelled" }]);
       expect(document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)).toBeNull();
 
@@ -243,8 +252,8 @@ describe("preview picker overlay comment box in Happy DOM", () => {
       const host2 = document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)!;
       const shadow2 = shadows.get(host2)!;
 
-      fireEvent.pointerDown(target, { button: 0, clientX: 150, clientY: 110 });
-      fireEvent.click(target, { button: 0, clientX: 150, clientY: 110 });
+      dispatchTrusted(target, new PointerEvent("pointerdown", { button: 0, clientX: 150, clientY: 110, bubbles: true, cancelable: true }));
+      dispatchTrusted(target, new MouseEvent("click", { button: 0, clientX: 150, clientY: 110, bubbles: true, cancelable: true }));
       expect(pageClicked).not.toHaveBeenCalled();
 
       const dialog = shadow2.querySelector('[role="dialog"]') as HTMLElement;
@@ -253,7 +262,7 @@ describe("preview picker overlay comment box in Happy DOM", () => {
 
       const textarea = shadow2.querySelector("textarea") as HTMLTextAreaElement;
       expect(textarea.getAttribute("aria-label")).toBe("Describe the change");
-      fireEvent.keyDown(textarea, { key: "Escape" });
+      dispatchTrusted(textarea, new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
       expect(sent).toEqual([{ type: "cancelled" }]);
       expect(document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)).toBeNull();
       target.remove();

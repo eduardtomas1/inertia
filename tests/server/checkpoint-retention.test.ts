@@ -725,7 +725,7 @@ describe("bounded retention for Git checkpoint refs", () => {
       const resolved = await resolveCheckpointRepository(fixture.repository, {
         allowedRoot: fixture.root,
       });
-      expect(resolved.toLowerCase()).toBe(fixture.repository.toLowerCase());
+      expect(resolved.toLowerCase()).toBe(realpathSync(fixture.repository).toLowerCase());
 
       await expect(
         resolveCheckpointRepository(fixture.repository, { allowedRoot: outsideRoot }),

@@ -5,7 +5,8 @@ import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
-import type { QueueCommandRunner } from "./runtimeQueueClient";
+import type { QueueCommandRunner, QueuedMessageEdit } from "./runtimeQueueClient";
+import { discardComposerDraftAttachments } from "../../utils/composerDraftAttachments";
 import { IconButton } from "../ui";
 import { TooltipText } from "../TooltipText";
 import { RuntimeComposerQueuedActions } from "./RuntimeComposerQueuedActions";
@@ -31,6 +32,7 @@ export async function releaseDeletedComposerQueue(
   conversationId: string,
   releaseAttachment: (attachmentId: string) => Promise<void>,
 ): Promise<void> {
+  discardComposerDraftAttachments(conversationId);
   const drain = async (): Promise<void> => {
     const prompts = takeComposerQueuedPrompts(conversationId);
     await Promise.allSettled(prompts.flatMap(({ attachments }) =>
@@ -267,14 +269,17 @@ function LegacyComposerQueuedActions({
   return queueHost ? createPortal(queueElement, queueHost) : queueElement;
 }
 
-export function ComposerQueuedActions(props: React.ComponentProps<typeof LegacyComposerQueuedActions> & {
+export function ComposerQueuedActions({ onQueueCommand, queueEdit, onFocusInput, ...props }: React.ComponentProps<typeof LegacyComposerQueuedActions> & {
   onQueueCommand?: QueueCommandRunner;
+  queueEdit?: QueuedMessageEdit;
+  onFocusInput?: () => void;
 }): React.JSX.Element {
-  if (!props.onQueueCommand) return <LegacyComposerQueuedActions {...props} />;
+  if (!onQueueCommand) return <LegacyComposerQueuedActions {...props} />;
   return <>
-    <RuntimeComposerQueuedActions conversationId={props.conversationId} onCommand={props.onQueueCommand}
-      canSend={props.canSendQueuedNow} latestTurnId={props.latestTurnId}
-      latestTurnStatus={props.latestTurnStatus} queueHost={props.queueHost} />
+    <RuntimeComposerQueuedActions conversationId={props.conversationId} onCommand={onQueueCommand}
+      canSend={props.canSendQueuedNow} running={props.running} latestTurnId={props.latestTurnId}
+      latestTurnStatus={props.latestTurnStatus} queueHost={props.queueHost}
+      edit={queueEdit} onFocusInput={onFocusInput} />
     {/* Older local drafts retain their explicit retry control; an unknown old
         delivery must never be silently re-admitted as a new runtime intent. */}
     <LegacyComposerQueuedActions {...props} automaticEnabled={false} />

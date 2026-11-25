@@ -114,3 +114,56 @@ describe("opaque conversation attachment preview responses", () => {
     )).resolves.toBeNull();
   });
 });
+
+describe("retained structured document previews", () => {
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
+
+  async function retainedDocument() {
+    const bytes = Buffer.from("PK\x03\x04 archive bytes", "latin1");
+    const metadata = metadataFor({
+      attachment: { id: attachmentId, name: "plan.docx", mimeType: DOCX, size: bytes.length, path: "/unused" },
+      bytes,
+    });
+    const runner = vi.fn(() => ({
+      result: Promise.resolve({ missing: false, bytes, metadata: JSON.stringify(metadata) }),
+      stopped: Promise.resolve(),
+    })) as unknown as ConversationAttachmentStoreAnyOperationRunner;
+    const directory = await mkdtemp(join(tmpdir(), "inertia-retained-document-"));
+    const store = await openConversationAttachments(directory, runner);
+    cleanups.push(async () => {
+      await store.close();
+      await rm(directory, { recursive: true, force: true });
+    });
+    return { store, bytes };
+  }
+
+  it("extracts retained document text in the import utility, never in main", async () => {
+    const parser = vi.spyOn(attachmentImport, "validateAttachmentImport")
+      .mockImplementation(() => { throw new Error("Main must not parse attachment structure."); });
+    const { store, bytes } = await retainedDocument();
+    const extract = vi.fn(() => ({
+      result: Promise.resolve({ text: "Quarterly plan", truncated: true }),
+      stopped: Promise.resolve(),
+    }));
+    const response = await resolveAttachmentPreviewResponse(null, Promise.resolve(store), attachmentId, extract);
+    expect(extract).toHaveBeenCalledWith({ mimeType: DOCX, bytes }, undefined);
+    expect(response?.headers.get("content-type")).toBe(DOCX);
+    expect(response?.headers.get("x-attachment-truncated")).toBe("true");
+    expect(response?.headers.get("x-attachment-size")).toBe(String(bytes.length));
+    expect(await response?.text()).toBe("Quarterly plan");
+    expect(parser).not.toHaveBeenCalled();
+  });
+
+  it("serves no preview when extraction is unavailable or fails", async () => {
+    const { store } = await retainedDocument();
+    await expect(resolveAttachmentPreviewResponse(null, Promise.resolve(store), attachmentId)).resolves.toBeNull();
+    const stopped = vi.fn(async () => undefined);
+    const extract = vi.fn(() => ({
+      result: Promise.reject(new Error("The document is corrupt or unreadable.")),
+      stopped: stopped(),
+    }));
+    await expect(resolveAttachmentPreviewResponse(null, Promise.resolve(store), attachmentId, extract))
+      .resolves.toBeNull();
+    expect(stopped).toHaveBeenCalled();
+  });
+});

@@ -1,10 +1,12 @@
 import type { KeyboardEvent, MouseEvent } from "react";
-import type {
-  ContextMenuAction,
-  ContextMenuAnchor,
-  ContextMenuRequest,
+import {
+  parseOpenInEditorAction,
+  type ContextMenuAction,
+  type ContextMenuAnchor,
+  type ContextMenuRequest,
 } from "@shared/context-menu";
 import { UUID_PATTERN } from "@shared/request-identifiers";
+import type { WorkspaceFileLocation } from "./workspaceFileReference";
 import { COPY_FAILURE_MESSAGE, writeClipboardText } from "./clipboard";
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -132,10 +134,18 @@ export interface ProjectPathMenuTarget {
   conversationId?: string;
   projectRoot: string;
   relativePath: string;
+  location?: WorkspaceFileLocation;
   open?: () => void;
-  /** Changes-panel index actions offered on a `diff-file` menu. */
   stage?: () => void;
   unstage?: () => void;
+}
+
+function editorLocationFields(location?: WorkspaceFileLocation): { line?: number; column?: number } {
+  if (!location) return {};
+  return {
+    line: location.startLine,
+    ...(location.startColumn !== undefined ? { column: location.startColumn } : {}),
+  };
 }
 
 function performProjectPathAction(
@@ -147,7 +157,15 @@ function performProjectPathAction(
     ...(target.conversationId ? { conversationId: target.conversationId } : {}),
     relativePath: target.relativePath,
   };
-  if (action === "open") {
+  const editorChoice = parseOpenInEditorAction(action);
+  if (editorChoice !== null) {
+    void window.inertia.openProjectPath({
+      ...request,
+      action: "open-in-editor",
+      ...(editorChoice !== "preferred" ? { editor: editorChoice } : {}),
+      ...editorLocationFields(target.location),
+    }).catch(() => undefined);
+  } else if (action === "open") {
     if (target.open) target.open();
     else void window.inertia.openProjectPath({ ...request, action: "open-externally" }).catch(() => undefined);
   } else if (action === "reveal") {
@@ -161,6 +179,41 @@ function performProjectPathAction(
   } else if (action === "git-unstage") {
     target.unstage?.();
   }
+}
+
+export function showEditorPickMenu(
+  target: Pick<ProjectPathMenuTarget, "projectId" | "conversationId" | "relativePath" | "location" | "open">,
+  element: Element,
+  coordinates?: { x: number; y: number },
+): void {
+  if (!isContextMenuId(target.projectId)) return;
+  const conversation = isContextMenuId(target.conversationId)
+    ? { conversationId: target.conversationId }
+    : {};
+  const bounds = element.getBoundingClientRect();
+  const anchor = clampedAnchor(
+    coordinates ? coordinates.x : bounds.left,
+    coordinates ? coordinates.y : bounds.bottom,
+  );
+  showContextMenu(
+    { kind: "editor-pick", projectId: target.projectId, ...conversation, relativePath: target.relativePath },
+    anchor,
+    (action) => {
+      const editorChoice = parseOpenInEditorAction(action);
+      if (editorChoice !== null) {
+        void window.inertia.openProjectPath({
+          projectId: target.projectId,
+          ...conversation,
+          relativePath: target.relativePath,
+          action: "open-in-editor",
+          ...(editorChoice !== "preferred" ? { editor: editorChoice } : {}),
+          ...editorLocationFields(target.location),
+        }).catch(() => undefined);
+      } else if (action === "open") {
+        target.open?.();
+      }
+    },
+  );
 }
 
 export function projectPathContextMenu<Surface extends HTMLElement>(

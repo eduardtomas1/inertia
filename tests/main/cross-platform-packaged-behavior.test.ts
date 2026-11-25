@@ -322,6 +322,34 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsBuild).toContain('if [[ -z "${!name:-}" ]]');
     expect(windowsBuild).toContain('unset "$name"');
     expect(windowsBuild).not.toContain("MACOS_CSC_LINK");
+    const azureSecrets = {
+      AZURE_TENANT_ID: "WINDOWS_AZURE_TENANT_ID",
+      AZURE_CLIENT_ID: "WINDOWS_AZURE_CLIENT_ID",
+      AZURE_CLIENT_SECRET: "WINDOWS_AZURE_CLIENT_SECRET",
+      AZURE_TRUSTED_SIGNING_ENDPOINT: "WINDOWS_TRUSTED_SIGNING_ENDPOINT",
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME",
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "WINDOWS_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+      AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "WINDOWS_TRUSTED_SIGNING_PUBLISHER_NAME",
+    } as const;
+    const windowsBuildStep = (parse(workflow).jobs.build.steps as Array<{
+      name: string;
+      env?: Record<string, string>;
+      run?: string;
+    }>).find((step) => step.name === "Build Windows release package")!;
+    const unsetLoop = windowsBuildStep.run!.match(/for name in ([^;]+); do/u)![1]!
+      .replace(/\\\s+/gu, " ").trim().split(/\s+/u);
+    expect(unsetLoop).toEqual(["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD", ...Object.keys(azureSecrets)]);
+    for (const [name, secret] of Object.entries(azureSecrets)) {
+      expect(windowsBuildStep.env?.[name]).toBe(`\${{ secrets.${secret} }}`);
+    }
+    expect(macBuild).not.toContain("AZURE_");
+    const windowsSignature = workflowStep(workflow, "Verify Windows Authenticode signature when configured");
+    expect(windowsSignature).toContain(
+      "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.WINDOWS_TRUSTED_SIGNING_PUBLISHER_NAME }}",
+    );
+    expect(windowsSignature).toContain("X509NameType]::SimpleName");
+    expect(windowsSignature).toContain("$signer -cne $env:AZURE_TRUSTED_SIGNING_PUBLISHER_NAME");
+    expect(windowsSignature).not.toContain("AZURE_CLIENT_SECRET");
 
     expect(workflow).not.toContain(
       "Refresh Windows app bundle after portable helper rebuild",
@@ -334,6 +362,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(linuxBuild).toContain("PACKAGE_SCRIPT: ${{ matrix.package_script }}");
     expect(linuxBuild).not.toContain("_CSC_");
     expect(linuxBuild).not.toContain("APPLE_API_");
+    expect(linuxBuild).not.toContain("AZURE_");
 
     const releaseUpload = workflowStep(
       workflow,

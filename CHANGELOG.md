@@ -2,6 +2,18 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Dependencies
+
+- Updated the Claude Agent SDK to 0.3.329. If a wrapper script keeps Claude
+  Code from reading the settings Inertia sends at start-up, the chat now says
+  so instead of showing a generic failure.
+- Updated the Agent Client Protocol SDK used by Cursor, Kimi and Grok to
+  2.8.0, the Anthropic SDK to 1.11.0 and the OpenCode SDK to 1.19.6. Plans
+  an agent writes as a link to a file are no longer shown; the protocol
+  dropped them.
+
 ## 0.0.84 — 2026-11-22
 
 Agents that work in AutoCAD and SketchUp, four new colour themes and a dark

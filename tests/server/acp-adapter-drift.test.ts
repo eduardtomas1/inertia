@@ -28,6 +28,7 @@ function fixture(
   stalledMethod?: string,
   update?: object | object[],
   replay?: object,
+  exitMidPrompt = false,
 ) {
   const root = portableFixtureRoot(`${providerId} adapter drift`);
   roots.push(root);
@@ -59,6 +60,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   if (message.method === "session/prompt") {
     const updates = [${JSON.stringify(update ?? null)}].flat().filter(Boolean);
     let burst = updates.map((value) => frame({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: value } })).join("");
+    if (${JSON.stringify(exitMidPrompt)}) return process.stdout.end(burst, () => process.exit(0));
     burst += frame({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: {
       sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done" }
     } } });
@@ -142,6 +144,64 @@ describe.each(["cursor", "kimi", "grok"] as const)("%s ACP drift regressions", (
     const result = await start().result;
     expect(result).toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
     expect(result.error).toBeUndefined();
+  });
+
+  it("ignores unnegotiated ACP 2.8 prompt suggestions and session cursors and completes the turn", async () => {
+    const { start, marker } = fixture(providerId, undefined, [
+      { sessionUpdate: "prompt_suggestions_update", suggestions: [{ prompt: [{ type: "text", text: "Run the tests" }] }] },
+      { sessionUpdate: "cursor_update", cursorId: "cursor-1", anchor: { type: "agent_message", messageId: "message-1", position: "after" } },
+    ]);
+    const events: string[] = [];
+    const result = await start({ onEvent: (event) => {
+      if (event.type === "extension" && "event" in event) events.push(event.event.type);
+    } }).result;
+    expect(result).toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
+    expect(result.error).toBeUndefined();
+    expect(events).toEqual([]);
+    const requests = readFileSync(marker, "utf8").trim().split("\n").map((line) => (
+      JSON.parse(line) as { method: string; params?: { clientCapabilities?: object } }
+    ));
+    const capabilities = requests.find((request) => request.method === "initialize")?.params?.clientCapabilities;
+    expect(capabilities).not.toHaveProperty("session.promptSuggestions");
+    expect(capabilities).not.toHaveProperty("session.cursors");
+  });
+
+  it("drops a pre-2.8 file plan the ACP schema rejects, shows a markdown plan that names its file, and completes the turn", async () => {
+    const { start } = fixture(providerId, undefined, [
+      { sessionUpdate: "plan_update", plan: { type: "file", planId: "plan-1", uri: "file:///work/PLAN.md" } },
+      { sessionUpdate: "plan_update", plan: { type: "markdown", planId: "plan-1", content: "Ship the fix.", path: "/work/PLAN.md" } },
+    ]);
+    const explanations: Array<string | null> = [];
+    const result = await start({ onEvent: (event) => {
+      if (event.type === "extension" && "event" in event && event.event.type === "plan") {
+        explanations.push(event.event.explanation);
+      }
+    } }).result;
+    expect(result).toMatchObject({ status: "completed", text: "Done", cleanupConfirmed: true });
+    expect(explanations).toEqual(["Ship the fix."]);
+  });
+
+  it("projects the updates an agent sent before it exited mid-prompt and fails the turn once", async () => {
+    const { start } = fixture(providerId, undefined, [
+      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Partial" } },
+      { sessionUpdate: "plan_update", plan: { type: "markdown", planId: "plan-1", content: "Half done." } },
+    ], undefined, true);
+    const events: string[] = [];
+    let settled = false;
+    let lateEvents = 0;
+    const result = await start({ onEvent: (event) => {
+      if (settled) lateEvents += 1;
+      if (event.type === "text") events.push(`text:${event.text}`);
+      if (event.type === "extension" && "event" in event && event.event.type === "plan") {
+        events.push(`plan:${event.event.explanation}`);
+      }
+    } }).result;
+    settled = true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(result.status).toBe("failed");
+    expect(["process-exit", "transport-closed"]).toContain(result.failure?.reason);
+    expect(events).toEqual(["text:Partial", "plan:Half done."]);
+    expect(lateEvents).toBe(0);
   });
 
   it("keeps ACP session references out of tool output and completes the turn", async () => {

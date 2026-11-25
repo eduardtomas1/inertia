@@ -119,6 +119,42 @@ describe("app update checks", () => {
     });
   });
 
+  it("explains why an unsigned macOS build updates from the release page", async () => {
+    const capability = { delivery: "manual", reason: "macos-signing-unavailable" } as const;
+    const service = new AppUpdateService({
+      currentVersion: "0.0.50",
+      capability,
+      fetch: vi.fn<typeof globalThis.fetch>(async () => release("v0.0.51")),
+    });
+
+    expect(service.current()).toMatchObject({
+      state: "idle",
+      delivery: "manual",
+      deliveryReason: "macos-signing-unavailable",
+      message: "Inertia will check for releases shortly. This macOS build updates manually because it was published without Developer ID signing and notarization.",
+    });
+    await expect(service.check()).resolves.toMatchObject({
+      state: "available",
+      delivery: "manual",
+      deliveryReason: "macos-signing-unavailable",
+      releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/v0.0.51",
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases",
+      message: "Inertia 0.0.51 is available. This macOS build updates manually because it was published without Developer ID signing and notarization. Open the official release, verify the disk image checksum, quit Inertia, and replace it in Applications with the app from the disk image.",
+    });
+
+    const current = new AppUpdateService({
+      currentVersion: "0.0.51",
+      capability,
+      fetch: vi.fn<typeof globalThis.fetch>(async () => release("v0.0.51")),
+    });
+    await expect(current.check()).resolves.toMatchObject({
+      state: "current",
+      deliveryReason: "macos-signing-unavailable",
+      releasesUrl: "https://github.com/eduardtomas1/inertia/releases",
+      message: "Inertia is up to date. This macOS build updates manually because it was published without Developer ID signing and notarization.",
+    });
+  });
+
   it("checks only the isolated Canary feed and reports its immutable release tag", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       expect(String(input)).toBe(

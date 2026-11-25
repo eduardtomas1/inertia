@@ -59,6 +59,7 @@ import type {
   ThreadUsageRow,
 } from "./rows";
 import type {
+  RetainedCheckpointRecord,
   UpsertSubagentTraceInput,
   UpsertSubagentTraceResult,
 } from "./types";
@@ -805,6 +806,86 @@ export class ExecutionLedgerRepository {
     ).get(checkpointId) as CheckpointRow | undefined;
     if (!row) throw new RecordNotFoundError("Checkpoint not found.");
     return checkpointFromRow(row);
+  }
+
+  markCheckpointsExpired(
+    checkpointIds: readonly string[],
+    expiredAt = new Date().toISOString(),
+  ): number {
+    if (checkpointIds.length === 0) return 0;
+    const statement = this.context.database.prepare(
+      "UPDATE checkpoints SET expired_at = ? WHERE id = ? AND expired_at IS NULL",
+    );
+    return this.context.database.transaction(() => {
+      let updated = 0;
+      for (const checkpointId of checkpointIds) {
+        updated += statement.run(expiredAt, checkpointId).changes;
+      }
+      return updated;
+    })();
+  }
+
+  activeCheckpointsForRetention(): RetainedCheckpointRecord[] {
+    const rows = this.context.database.prepare(`
+      SELECT
+        c.id,
+        c.conversation_id,
+        conv.project_id,
+        p.workspace_kind AS project_workspace_kind,
+        p.repository_identity AS project_repository_identity,
+        p.path AS project_path,
+        conv.worktree_path,
+        conv.archived_at,
+        c.turn_id,
+        t.status AS turn_status,
+        c.ref,
+        c.label,
+        c.turn_index,
+        c.created_at
+      FROM checkpoints c
+      JOIN conversations conv ON conv.id = c.conversation_id
+      JOIN projects p ON p.id = conv.project_id
+      LEFT JOIN agent_turns t ON t.id = c.turn_id
+      WHERE c.expired_at IS NULL
+      ORDER BY c.created_at DESC, c.turn_index DESC, c.id DESC
+    `).all() as Array<{
+      id: string;
+      conversation_id: string;
+      project_id: string;
+      project_workspace_kind: string | null;
+      project_repository_identity: string | null;
+      project_path: string;
+      worktree_path: string | null;
+      archived_at: string | null;
+      turn_id: string | null;
+      turn_status: AgentTurn["status"] | null;
+      ref: string;
+      label: string;
+      turn_index: number;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      conversationId: row.conversation_id,
+      projectId: row.project_id,
+      projectWorkspaceKind: row.project_workspace_kind,
+      projectRepositoryIdentity: row.project_repository_identity,
+      projectPath: row.project_path,
+      worktreePath: row.worktree_path,
+      archivedAt: row.archived_at,
+      turnId: row.turn_id,
+      turnStatus: row.turn_status,
+      ref: row.ref,
+      label: row.label,
+      turnIndex: row.turn_index,
+      createdAt: row.created_at,
+    }));
+  }
+
+  checkpointExpirationRevision(): string {
+    return JSON.stringify(this.context.database.prepare(
+      "SELECT id, expired_at FROM checkpoints WHERE expired_at IS NOT NULL ORDER BY id ASC",
+    ).all());
   }
 
   private linkSubagentChildren(parentTraceId: string): void {

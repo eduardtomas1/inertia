@@ -7,6 +7,7 @@ import type { IpcMain, IpcMainInvokeEvent } from "electron";
 
 import { FILE_OPEN_NO_FOLLOW } from "../node/platform-file-open-flags.js";
 import type { ConversationAttachmentPreview } from "../node/conversation-attachment-store.js";
+import type { RuntimeAttachmentReattachMetadata } from "../node/runtime-attachment-protocol.js";
 import { MAX_ATTACHMENT_BYTES, chatAttachmentStorageExtension } from "../shared/attachments.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 import {
@@ -91,10 +92,11 @@ async function copyRetainedAttachment(
  * again and the renderer only receives an opaque capability id.
  */
 export async function importRetainedAttachment(
-  registry: Pick<AttachmentRegistry, "importFromWriter">,
+  registry: Pick<AttachmentRegistry, "importFromWriter"> & Partial<Pick<AttachmentRegistry, "setPreviewAnnotation" | "setSnapshotSource">>,
   store: RetainedAttachmentSource,
   attachmentId: string,
   signal: AbortSignal,
+  metadata?: RuntimeAttachmentReattachMetadata | null,
 ): Promise<ChatAttachment[]> {
   signal.throwIfAborted();
   let resolved: ConversationAttachmentPreview | null;
@@ -159,7 +161,15 @@ export async function importRetainedAttachment(
         }
       },
     };
-    const imported = await registry.importFromWriter(writer, signal);
+    let imported = await registry.importFromWriter(writer, signal);
+    if (imported && imported.mimeType === "image/png" && metadata) {
+      if (metadata.previewAnnotation && registry.setPreviewAnnotation) {
+        imported = registry.setPreviewAnnotation(imported.id, metadata.previewAnnotation);
+      }
+      if (metadata.snapshot && registry.setSnapshotSource) {
+        imported = registry.setSnapshotSource(imported.id, metadata.snapshot);
+      }
+    }
     return imported ? [imported] : [];
   } finally {
     await file.close().catch(() => undefined);
@@ -187,6 +197,10 @@ export function registerAttachmentReattachIpc(options: {
    * runtime. When provided, a chat may only re-attach its own files.
    */
   attachmentConversations?(attachmentId: string): Promise<readonly string[]>;
+  attachmentReattachContext?(attachmentId: string): Promise<{
+    conversationIds: readonly string[];
+    metadata?: RuntimeAttachmentReattachMetadata;
+  }>;
 }): void {
   options.ipcMain.handle(options.channel, async (event, ...args): Promise<DesktopAttachmentImportSelection> => {
     const context = options.assertTrusted(event, args.length, 1);
@@ -195,10 +209,17 @@ export function registerAttachmentReattachIpc(options: {
     if (context.role === "detached-chat" && context.conversationId !== request.conversationId) {
       throw new Error(REATTACH_INVALID_ERROR);
     }
-    if (options.attachmentConversations) {
+    let metadata: RuntimeAttachmentReattachMetadata | undefined;
+    if (options.attachmentReattachContext || options.attachmentConversations) {
       let owners: readonly string[];
       try {
-        owners = await options.attachmentConversations(request.attachmentId);
+        if (options.attachmentReattachContext) {
+          const resolved = await options.attachmentReattachContext(request.attachmentId);
+          owners = resolved.conversationIds;
+          metadata = resolved.metadata;
+        } else {
+          owners = await options.attachmentConversations!(request.attachmentId);
+        }
       } catch {
         throw new Error(REATTACH_UNAVAILABLE_ERROR);
       }
@@ -218,7 +239,7 @@ export function registerAttachmentReattachIpc(options: {
       const attachments = await options.imports.importSelection(
         document,
         batchId,
-        async (signal) => await importRetainedAttachment(options.registry(), store, request.attachmentId, signal),
+        async (signal) => await importRetainedAttachment(options.registry(), store, request.attachmentId, signal, metadata),
       );
       if (attachments.length !== 1) throw new Error(REATTACH_GENERIC_ERROR);
       return { batchId, attachments };

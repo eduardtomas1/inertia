@@ -15,6 +15,7 @@ import { TodoRepositoryError } from "./persistence/todo-repository";
 import { CustomAgentRepositoryError } from "./persistence/custom-agent-repository";
 import { LibraryRepositoryError } from "./persistence/library-repository";
 import { ConversationAttachmentDiskFullError, ConversationAttachmentStorageFullError } from "../node/conversation-attachment-store-capacity";
+import { DatabaseCompactionError } from "./persistence/database-compaction";
 import {
   ATTACHMENT_RESOLUTION_PUBLIC_ERROR,
   AttachmentResolutionError,
@@ -37,6 +38,7 @@ export function userCorrectableRuntimeError(error: unknown): boolean {
   return error instanceof TodoRepositoryError
     || error instanceof CustomAgentRepositoryError
     || error instanceof LibraryRepositoryError
+    || error instanceof DatabaseCompactionError
     || (error instanceof RuntimeRequestError && error.code === USER_CORRECTABLE_REQUEST);
 }
 
@@ -65,6 +67,7 @@ export function publicRuntimeError(error: unknown): string {
     || error instanceof LibraryRepositoryError
     || error instanceof ConversationAttachmentDiskFullError
     || error instanceof ConversationAttachmentStorageFullError
+    || error instanceof DatabaseCompactionError
   ) return error.message;
   return "The request could not be completed.";
 }

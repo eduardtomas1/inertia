@@ -92,6 +92,14 @@ export interface RuntimeDatabaseRecoverySummary {
   conversations: number;
   messages: number;
   alreadyImported: boolean;
+  attachments?: number;
+  missingAttachments?: number;
+}
+
+export interface RuntimeDatabaseRecoveryExportSummary {
+  includeAttachments: boolean;
+  attachments: number;
+  missingAttachments: number;
 }
 
 export interface RuntimeSystemSuspendInterval {
@@ -140,6 +148,7 @@ export type RuntimeWorkerCommand =
       operation: RuntimeDatabaseRecoveryOperation;
       path: string;
       targetDirectory?: string;
+      includeAttachments?: boolean;
     }
   | {
       type: "runtime.database-recovery-cancel";
@@ -226,6 +235,7 @@ export type RuntimeWorkerEvent =
       operation: RuntimeDatabaseRecoveryOperation;
       ok: true;
       summary: RuntimeDatabaseRecoverySummary | null;
+      exportSummary?: RuntimeDatabaseRecoveryExportSummary;
     }
   | {
       type: "runtime.database-recovery-result";
@@ -471,13 +481,28 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     && (value.operation === "export" || value.operation === "import")
     && runtimePath(value.path)
   ) {
-    if (value.operation === "export" && Object.keys(value).length === 5) return {
-      type: "runtime.database-recovery",
-      operationId: value.operationId,
-      generation: value.generation,
-      operation: "export",
-      path: value.path,
-    };
+    if (value.operation === "export") {
+      if (Object.keys(value).length === 5) return {
+        type: "runtime.database-recovery",
+        operationId: value.operationId,
+        generation: value.generation,
+        operation: "export",
+        path: value.path,
+      };
+      if (
+        Object.keys(value).length === 6
+        && Object.hasOwn(value, "includeAttachments")
+        && typeof value.includeAttachments === "boolean"
+      ) return {
+        type: "runtime.database-recovery",
+        operationId: value.operationId,
+        generation: value.generation,
+        operation: "export",
+        path: value.path,
+        includeAttachments: value.includeAttachments,
+      };
+      return null;
+    }
     if (
       value.operation === "import"
       && Object.keys(value).length === 6
@@ -876,9 +901,32 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
           }
         : null;
     }
-    if (Object.keys(value).length !== 6) return null;
+    const hasExportSummary = Object.hasOwn(value, "exportSummary");
+    if (Object.keys(value).length !== 6 + Number(hasExportSummary)) return null;
     if (value.summary === null) {
       if (value.operation !== "export") return null;
+      if (!hasExportSummary) {
+        return {
+          type: "runtime.database-recovery-result",
+          operationId: value.operationId,
+          generation: value.generation,
+          operation: value.operation,
+          ok: true,
+          summary: null,
+        };
+      }
+      const exportSummary = value.exportSummary;
+      if (
+        !plainObject(exportSummary)
+        || Object.keys(exportSummary).length !== 3
+        || typeof exportSummary.includeAttachments !== "boolean"
+        || typeof exportSummary.attachments !== "number"
+        || !Number.isSafeInteger(exportSummary.attachments)
+        || exportSummary.attachments < 0
+        || typeof exportSummary.missingAttachments !== "number"
+        || !Number.isSafeInteger(exportSummary.missingAttachments)
+        || exportSummary.missingAttachments < 0
+      ) return null;
       return {
         type: "runtime.database-recovery-result",
         operationId: value.operationId,
@@ -886,17 +934,29 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
         operation: value.operation,
         ok: true,
         summary: null,
+        exportSummary: {
+          includeAttachments: exportSummary.includeAttachments,
+          attachments: exportSummary.attachments,
+          missingAttachments: exportSummary.missingAttachments,
+        },
       };
     }
-    if (!plainObject(value.summary) || Object.keys(value.summary).length !== 4) {
+    if (hasExportSummary || !plainObject(value.summary)) {
       return null;
     }
     if (value.operation !== "import") return null;
     const summary = value.summary;
+    const hasAttachments = Object.hasOwn(summary, "attachments");
+    const hasMissingAttachments = Object.hasOwn(summary, "missingAttachments");
+    if (Object.keys(summary).length !== 4 + Number(hasAttachments) + Number(hasMissingAttachments)) {
+      return null;
+    }
     if (![
       summary.projects,
       summary.conversations,
       summary.messages,
+      ...(hasAttachments ? [summary.attachments] : []),
+      ...(hasMissingAttachments ? [summary.missingAttachments] : []),
     ].every((count) =>
       typeof count === "number"
       && Number.isSafeInteger(count)
@@ -913,6 +973,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
         conversations: summary.conversations as number,
         messages: summary.messages as number,
         alreadyImported: summary.alreadyImported,
+        ...(hasAttachments ? { attachments: summary.attachments as number } : {}),
+        ...(hasMissingAttachments ? { missingAttachments: summary.missingAttachments as number } : {}),
       },
     };
   }

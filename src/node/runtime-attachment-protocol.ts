@@ -2,7 +2,13 @@ import { isAbsolute } from "node:path";
 
 import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_BYTES } from "../shared/attachments";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments";
-import { snapshotSourceSchema } from "../shared/snapshots";
+import { snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots";
+import { previewAnnotationSchema, type PreviewAnnotation } from "../shared/preview-annotation";
+
+export interface RuntimeAttachmentReattachMetadata {
+  previewAnnotation?: PreviewAnnotation;
+  snapshot?: SnapshotSource;
+}
 
 export type RuntimeAttachmentFailureCode = "not-found" | "unavailable" | "invalid";
 
@@ -40,7 +46,12 @@ export interface RuntimeAttachmentConversationsQuery {
 export const MAX_RUNTIME_ATTACHMENT_CONVERSATIONS = 4_096;
 
 export type RuntimeAttachmentConversationsEvent =
-  | { type: "runtime.attachment-conversations-resolved"; requestId: string; conversationIds: string[] }
+  | {
+    type: "runtime.attachment-conversations-resolved";
+    requestId: string;
+    conversationIds: string[];
+    metadata?: RuntimeAttachmentReattachMetadata;
+  }
   | { type: "runtime.attachment-conversations-rejected"; requestId: string; message: string };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -102,9 +113,13 @@ export function parseRuntimeAttachmentResult(
     || !plainObject(value.attachment)
   ) return null;
   const attachment = value.attachment;
+  const expectedKeyCount = 6
+    + Number(attachment.snapshot !== undefined)
+    + Number(attachment.previewAnnotation !== undefined);
   if (
-    Object.keys(attachment).length !== (attachment.snapshot === undefined ? 6 : 7)
+    Object.keys(attachment).length !== expectedKeyCount
     || (attachment.snapshot !== undefined && !snapshotSourceSchema.safeParse(attachment.snapshot).success)
+    || (attachment.previewAnnotation !== undefined && !previewAnnotationSchema.safeParse(attachment.previewAnnotation).success)
     || typeof attachment.id !== "string"
     || !UUID_PATTERN.test(attachment.id)
     || typeof attachment.name !== "string"
@@ -134,6 +149,7 @@ export function parseRuntimeAttachmentResult(
       size: attachment.size,
       digest: attachment.digest,
       ...(attachment.snapshot ? { snapshot: snapshotSourceSchema.parse(attachment.snapshot) } : {}),
+      ...(attachment.previewAnnotation ? { previewAnnotation: previewAnnotationSchema.parse(attachment.previewAnnotation) } : {}),
     },
   };
 }
@@ -152,20 +168,49 @@ export function parseRuntimeAttachmentConversationsQuery(
   return { type: "runtime.attachment-conversations", requestId: value.requestId, attachmentId: value.attachmentId };
 }
 
+function parseReattachMetadata(value: unknown): RuntimeAttachmentReattachMetadata | null {
+  if (!plainObject(value)) return null;
+  const hasAnnotation = Object.hasOwn(value, "previewAnnotation") && value.previewAnnotation !== undefined;
+  const hasSnapshot = Object.hasOwn(value, "snapshot") && value.snapshot !== undefined;
+  if (Object.keys(value).length !== Number(hasAnnotation) + Number(hasSnapshot)) return null;
+  if (!hasAnnotation && !hasSnapshot) return {};
+  const previewAnnotation = hasAnnotation ? previewAnnotationSchema.safeParse(value.previewAnnotation) : null;
+  if (previewAnnotation && !previewAnnotation.success) return null;
+  const snapshot = hasSnapshot ? snapshotSourceSchema.safeParse(value.snapshot) : null;
+  if (snapshot && !snapshot.success) return null;
+  return {
+    ...(previewAnnotation?.success ? { previewAnnotation: previewAnnotation.data } : {}),
+    ...(snapshot?.success ? { snapshot: snapshot.data } : {}),
+  };
+}
+
 export function parseRuntimeAttachmentConversationsEvent(
   value: unknown,
 ): RuntimeAttachmentConversationsEvent | null {
-  if (!plainObject(value) || Object.keys(value).length !== 3 || !identified(value)) return null;
+  if (!plainObject(value) || !identified(value)) return null;
   if (value.type === "runtime.attachment-conversations-resolved") {
+    const hasMetadata = Object.hasOwn(value, "metadata") && value.metadata !== undefined;
+    if (Object.keys(value).length !== 3 + Number(hasMetadata)) return null;
     const ids = value.conversationIds;
     if (
       !Array.isArray(ids)
       || ids.length > MAX_RUNTIME_ATTACHMENT_CONVERSATIONS
       || !ids.every((id) => typeof id === "string" && UUID_PATTERN.test(id))
     ) return null;
-    return { type: "runtime.attachment-conversations-resolved", requestId: value.requestId, conversationIds: [...ids] as string[] };
+    const metadata = hasMetadata ? parseReattachMetadata(value.metadata) : undefined;
+    if (hasMetadata && metadata === null) return null;
+    return {
+      type: "runtime.attachment-conversations-resolved",
+      requestId: value.requestId,
+      conversationIds: [...ids] as string[],
+      ...(metadata && (metadata.previewAnnotation || metadata.snapshot) ? { metadata } : {}),
+    };
   }
-  if (value.type === "runtime.attachment-conversations-rejected" && typeof value.message === "string") {
+  if (
+    value.type === "runtime.attachment-conversations-rejected"
+    && Object.keys(value).length === 3
+    && typeof value.message === "string"
+  ) {
     const message = value.message.trim();
     return message && message.length <= 1_000
       ? { type: "runtime.attachment-conversations-rejected", requestId: value.requestId, message }

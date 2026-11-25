@@ -10,6 +10,7 @@ import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import { parseWorkingIndicatorSettings } from "../../shared/working-indicator";
 import { COMPLETION_SOUND_JSON_MAX_LENGTH, parseCompletionSoundSettings } from "../../shared/completion-sound";
+import { parsePreferredEditor } from "../../shared/editors";
 
 type SettingsPersistenceContext = Pick<PersistenceContext, "database">;
 
@@ -74,7 +75,8 @@ export class SettingsRepository {
         compact_before_cache_expires = ?,
         claude_auto_compact_window = ?,
         codex_auto_compact_token_limit = ?,
-        muted_custom_colors = ?
+        muted_custom_colors = ?,
+        preferred_editor = ?
       WHERE id = 1
     `).run(
       next.theme,
@@ -122,6 +124,7 @@ export class SettingsRepository {
       next.claudeAutoCompactWindow,
       next.codexAutoCompactTokenLimit,
       Number(mutedCustomColors),
+      parsePreferredEditor(next.preferredEditor),
     );
   }
 

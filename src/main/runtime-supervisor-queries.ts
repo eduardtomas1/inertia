@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { RuntimeAttachmentReattachMetadata } from "../node/runtime-attachment-protocol.js";
+import type { RuntimeEditorContextResult } from "../node/runtime-editor-protocol.js";
 import type { RuntimeWorkerCommand, RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
 import { drainRuntimeRecordRequests } from "./runtime-supervisor-process-record.js";
@@ -10,14 +12,23 @@ type RuntimeSupervisorQueryEvent = Extract<RuntimeWorkerEvent, {
     | "runtime.project-path-resolved"
     | "runtime.project-path-rejected"
     | "runtime.attachment-conversations-resolved"
-    | "runtime.attachment-conversations-rejected";
+    | "runtime.attachment-conversations-rejected"
+    | "runtime.editor-context-resolved"
+    | "runtime.editor-context-rejected";
 }>;
+
+export interface RuntimeAttachmentReattachContext {
+  conversationIds: readonly string[];
+  metadata?: RuntimeAttachmentReattachMetadata;
+}
+
+type QueryValue = string | RuntimeAttachmentReattachContext | RuntimeEditorContextResult;
 
 interface PendingQuery {
   record: RuntimeProcessRecord;
-  kind: "project-path" | "attachment-conversations";
+  kind: "project-path" | "attachment-conversations" | "editor-context";
   timer: RuntimeSupervisorTimer;
-  resolve: (value: string | readonly string[]) => void;
+  resolve: (value: QueryValue) => void;
   reject: (error: Error) => void;
 }
 
@@ -45,19 +56,45 @@ export class RuntimeSupervisorQueries {
     }));
   }
 
-  attachmentConversations(attachmentId: string): Promise<readonly string[]> {
-    return this.ask<readonly string[]>("attachment-conversations", "The attachment owner request timed out.", (requestId) => ({
+  attachmentReattachContext(attachmentId: string): Promise<RuntimeAttachmentReattachContext> {
+    return this.ask<RuntimeAttachmentReattachContext>("attachment-conversations", "The attachment owner request timed out.", (requestId) => ({
       type: "runtime.attachment-conversations", requestId, attachmentId,
+    }));
+  }
+
+  attachmentConversations(attachmentId: string): Promise<readonly string[]> {
+    return this.attachmentReattachContext(attachmentId).then(({ conversationIds }) => conversationIds);
+  }
+
+  editorContext(filePath?: string, conversationId?: string): Promise<RuntimeEditorContextResult> {
+    return this.ask<RuntimeEditorContextResult>("editor-context", "The editor context request timed out.", (requestId) => ({
+      type: "runtime.editor-context",
+      requestId,
+      ...(filePath ? { filePath } : {}),
+      ...(conversationId ? { conversationId } : {}),
     }));
   }
 
   handle(record: RuntimeProcessRecord, event: RuntimeWorkerEvent): event is RuntimeSupervisorQueryEvent {
     let kind: PendingQuery["kind"];
-    let value: string | readonly string[] | Error;
+    let value: QueryValue | Error;
     if (event.type === "runtime.project-path-resolved") [kind, value] = ["project-path", event.path];
     else if (event.type === "runtime.project-path-rejected") [kind, value] = ["project-path", new Error(event.message)];
-    else if (event.type === "runtime.attachment-conversations-resolved") [kind, value] = ["attachment-conversations", event.conversationIds];
+    else if (event.type === "runtime.attachment-conversations-resolved") {
+      [kind, value] = ["attachment-conversations", {
+        conversationIds: event.conversationIds,
+        ...(event.metadata ? { metadata: event.metadata } : {}),
+      }];
+    }
     else if (event.type === "runtime.attachment-conversations-rejected") [kind, value] = ["attachment-conversations", new Error(event.message)];
+    else if (event.type === "runtime.editor-context-resolved") {
+      [kind, value] = ["editor-context", {
+        preferredEditor: event.preferredEditor,
+        ...(event.authorizedPath ? { authorizedPath: event.authorizedPath } : {}),
+        ...(event.projectRoot ? { projectRoot: event.projectRoot } : {}),
+      }];
+    }
+    else if (event.type === "runtime.editor-context-rejected") [kind, value] = ["editor-context", new Error(event.message)];
     else return false;
     const pending = this.pending.get(event.requestId);
     if (!pending || pending.record !== record || pending.kind !== kind) return true;
@@ -75,7 +112,7 @@ export class RuntimeSupervisorQueries {
     });
   }
 
-  private ask<Value extends string | readonly string[]>(
+  private ask<Value extends QueryValue>(
     kind: PendingQuery["kind"],
     timeoutMessage: string,
     command: (requestId: string) => RuntimeWorkerCommand,
@@ -92,7 +129,7 @@ export class RuntimeSupervisorQueries {
         record,
         kind,
         timer,
-        resolve: resolve as (value: string | readonly string[]) => void,
+        resolve: resolve as (value: QueryValue) => void,
         reject,
       });
       this.options.post(record, command(requestId));

@@ -535,6 +535,27 @@ describe("Tasks view", () => {
     expect(view.onOpenConversation).toHaveBeenCalledWith(chat);
   });
 
+  it("shows a task linked to an archived chat that is only a snapshot reference, and opens it", async () => {
+    const user = userEvent.setup();
+    const onOpenArchivedConversation = vi.fn();
+    const view = harness(snapshot([
+      todo(firstId, "Clean the downloads folder", { conversationId }),
+    ], {
+      archivedConversationRefs: [{
+        id: conversationId, projectId: firstProjectId, title: "Clean the downloads folder",
+        providerId: "codex", archivedAt: NOW.toISOString(),
+      }],
+    }), { onOpenArchivedConversation });
+    expect(row("Clean the downloads folder").querySelector(".task-status")).toHaveTextContent("Chat archived");
+    await user.click(screen.getByRole("button", { name: "Actions for Clean the downloads folder" }));
+    const menu = screen.getByRole("menu", { name: "Actions for Clean the downloads folder" });
+    const open = within(menu).getByRole("menuitem", { name: "Open chat" });
+    expect(open).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(open);
+    expect(onOpenArchivedConversation).toHaveBeenCalledWith(conversationId);
+    expect(view.onOpenConversation).not.toHaveBeenCalled();
+  });
+
   it("closes the detail with Escape and returns focus to the row", async () => {
     const user = userEvent.setup();
     harness(snapshot([todo(firstId, "Write release notes")]));

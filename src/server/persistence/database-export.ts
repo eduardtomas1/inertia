@@ -1,15 +1,37 @@
+import { basename } from "node:path";
+
 import { z } from "zod";
 
+import { MAX_RETAINED_ATTACHMENTS } from "../../shared/attachment-storage";
+import {
+  ACCEPTED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENT_BYTES,
+  chatAttachmentStorageExtension,
+  storedAttachmentTypeMatchesName,
+  type ChatAttachmentMimeType,
+} from "../../shared/attachments";
 import { providerNativeModelSelection } from "../../shared/model-routing";
+import { previewAnnotationSchema } from "../../shared/preview-annotation";
+import { snapshotSourceSchema } from "../../shared/snapshots";
 import type { ProviderId } from "../../shared/contracts";
 import type { NewConversationOptions } from "./types";
 
 export const DATABASE_RECOVERY_EXPORT_FORMAT = "inertia-recovery-export";
 export const DATABASE_RECOVERY_EXPORT_VERSION = 3;
+export const DATABASE_RECOVERY_BUNDLE_FORMAT = "inertia-recovery-bundle";
+export const DATABASE_RECOVERY_BUNDLE_VERSION = 4;
 export const DATABASE_RECOVERY_EXPORT_MAX_BYTES = 256 * 1024 * 1024;
+export const DATABASE_RECOVERY_BUNDLE_MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
+export const DATABASE_RECOVERY_BUNDLE_MAX_ATTACHMENTS = MAX_RETAINED_ATTACHMENTS;
+export const DATABASE_RECOVERY_BUNDLE_MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_BYTES;
+export const DATABASE_RECOVERY_BUNDLE_MAX_TOTAL_ATTACHMENT_BYTES = 16 * 1024 * 1024 * 1024;
 export const DATABASE_RECOVERY_EXPORT_MAX_PROJECTS = 10_000;
 export const DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS = 100_000;
 export const DATABASE_RECOVERY_EXPORT_MAX_MESSAGES = 250_000;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
 const timestampSchema = z.string().datetime({ offset: true });
 
@@ -160,21 +182,147 @@ export const databaseRecoveryExportSchema = z.object({
     .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
 }).strict().superRefine(validateRecoveryExportCounts);
 
+export const databaseRecoveryBundleExportSchema = z.object({
+  format: z.literal(DATABASE_RECOVERY_EXPORT_FORMAT),
+  version: z.literal(DATABASE_RECOVERY_BUNDLE_VERSION),
+  exportedAt: timestampSchema,
+  projects: z.array(recoveryProjectSchema)
+    .max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS),
+}).strict().superRefine(validateRecoveryExportCounts);
+
 const supportedDatabaseRecoveryExportSchema = z.union([
   databaseRecoveryExportSchema,
   version2DatabaseRecoveryExportSchema,
   legacyDatabaseRecoveryExportSchema,
 ]);
 
+const supportedDatabaseRecoveryBundleOrLegacySchema = z.union([
+  databaseRecoveryBundleExportSchema,
+  databaseRecoveryExportSchema,
+  version2DatabaseRecoveryExportSchema,
+  legacyDatabaseRecoveryExportSchema,
+]);
+
+function isSafeAttachmentLeafName(name: string): boolean {
+  return name.length >= 1
+    && name.length <= 255
+    && !/[\0-\x1f\x7f]/u.test(name)
+    && !/[\\/]/u.test(name)
+    && name !== "."
+    && name !== ".."
+    && basename(name) === name;
+}
+
+export const recoveryBundleMessageReferenceSchema = z.object({
+  projectIndex: z.number().int().min(0).max(DATABASE_RECOVERY_EXPORT_MAX_PROJECTS - 1),
+  conversationIndex: z.number().int().min(0).max(DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS - 1),
+  messageOrdinal: z.number().int().min(0).max(DATABASE_RECOVERY_EXPORT_MAX_MESSAGES - 1),
+  messageId: z.string().min(1).max(200).refine((value) => !/[\0\r\n]/u.test(value)),
+}).strict();
+
+export const recoveryBundleAttachmentSchema = z.object({
+  id: z.string().regex(UUID_PATTERN),
+  conversationId: z.string().regex(UUID_PATTERN),
+  messageReference: recoveryBundleMessageReferenceSchema,
+  name: z.string().min(1).max(255).refine(
+    isSafeAttachmentLeafName,
+    "Expected a safe attachment file name.",
+  ),
+  mimeType: z.enum(ACCEPTED_ATTACHMENT_MIME_TYPES),
+  size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
+  sha256: z.string().regex(SHA256_PATTERN).nullable(),
+  status: z.enum(["included", "missing"]),
+  entryPath: z.string().min(1).max(100).nullable(),
+  previewAnnotation: previewAnnotationSchema.optional(),
+  snapshot: snapshotSourceSchema.optional(),
+}).strict().superRefine((value, context) => {
+  if ((value.previewAnnotation || value.snapshot) && value.mimeType !== "image/png") {
+    context.addIssue({
+      code: "custom",
+      path: ["mimeType"],
+      message: "Attachment annotation or snapshot metadata requires a PNG image.",
+    });
+  }
+  if (!storedAttachmentTypeMatchesName(value.name, value.mimeType)) {
+    context.addIssue({
+      code: "custom",
+      path: ["mimeType"],
+      message: "Attachment MIME type does not match its file name.",
+    });
+  }
+  if (value.status === "included") {
+    if (value.sha256 === null) {
+      context.addIssue({
+        code: "custom",
+        path: ["sha256"],
+        message: "Included attachments must record a SHA-256 digest.",
+      });
+    }
+    const expectedEntryPath = `attachments/${value.id}.${chatAttachmentStorageExtension(
+      value.mimeType as ChatAttachmentMimeType,
+    )}`;
+    if (value.entryPath !== expectedEntryPath) {
+      context.addIssue({
+        code: "custom",
+        path: ["entryPath"],
+        message: "Included attachment entry path is invalid.",
+      });
+    }
+  } else {
+    if (value.sha256 !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["sha256"],
+        message: "Missing attachments must not record a SHA-256 digest.",
+      });
+    }
+    if (value.entryPath !== null) {
+      context.addIssue({
+        code: "custom",
+        path: ["entryPath"],
+        message: "Missing attachments must not record an archive path.",
+      });
+    }
+  }
+});
+
+export const recoveryBundleManifestSchema = z.object({
+  format: z.literal(DATABASE_RECOVERY_BUNDLE_FORMAT),
+  version: z.literal(DATABASE_RECOVERY_BUNDLE_VERSION),
+  exportedAt: timestampSchema,
+  exportEntry: z.literal("export.json"),
+  exportSize: z.number().int().min(1).max(DATABASE_RECOVERY_EXPORT_MAX_BYTES),
+  exportSha256: z.string().regex(SHA256_PATTERN),
+  attachments: z.array(recoveryBundleAttachmentSchema)
+    .max(DATABASE_RECOVERY_BUNDLE_MAX_ATTACHMENTS),
+}).strict();
+
 export type DatabaseRecoveryExport = z.infer<
   typeof databaseRecoveryExportSchema
 >;
+export type DatabaseRecoveryBundleExport = z.infer<
+  typeof databaseRecoveryBundleExportSchema
+>;
+export type RecoveryBundleManifest = z.infer<
+  typeof recoveryBundleManifestSchema
+>;
+export type RecoveryBundleAttachmentEntry = z.infer<
+  typeof recoveryBundleAttachmentSchema
+>;
+
+export interface DatabaseRecoveryExportResultSummary {
+  readonly includeAttachments: boolean;
+  readonly attachments: number;
+  readonly missingAttachments: number;
+}
 
 export interface DatabaseRecoveryImportResult {
   readonly projects: number;
   readonly conversations: number;
   readonly messages: number;
   readonly alreadyImported: boolean;
+  readonly attachments?: number;
+  readonly missingAttachments?: number;
 }
 
 export function serializeDatabaseRecoveryExport(
@@ -188,8 +336,39 @@ export function serializeDatabaseRecoveryExport(
   return serialized;
 }
 
+export function serializeDatabaseRecoveryBundleExport(
+  value: DatabaseRecoveryBundleExport,
+): string {
+  const validated = databaseRecoveryBundleExportSchema.parse(value);
+  const serialized = `${JSON.stringify(validated, null, 2)}\n`;
+  if (Buffer.byteLength(serialized, "utf8") > DATABASE_RECOVERY_EXPORT_MAX_BYTES) {
+    throw new Error("The recovery export exceeds its safe size limit.");
+  }
+  return serialized;
+}
+
+export function parseRecoveryBundleManifest(
+  serialized: string,
+): RecoveryBundleManifest {
+  if (Buffer.byteLength(serialized, "utf8") > DATABASE_RECOVERY_BUNDLE_MAX_MANIFEST_BYTES) {
+    throw new Error("The recovery bundle manifest exceeds its safe size limit.");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch {
+    throw new Error("The recovery bundle manifest is not valid JSON.");
+  }
+  const result = recoveryBundleManifestSchema.safeParse(value);
+  if (!result.success) {
+    throw new Error("The recovery bundle manifest does not match the supported format.");
+  }
+  return result.data;
+}
+
 export function parseDatabaseRecoveryExport(
   serialized: string,
+  options: { readonly allowBundleVersion?: boolean } = {},
 ): DatabaseRecoveryExport {
   if (Buffer.byteLength(serialized, "utf8") > DATABASE_RECOVERY_EXPORT_MAX_BYTES) {
     throw new Error("The recovery export exceeds its safe size limit.");
@@ -200,14 +379,20 @@ export function parseDatabaseRecoveryExport(
   } catch {
     throw new Error("The recovery export is not valid JSON.");
   }
-  const result = supportedDatabaseRecoveryExportSchema.safeParse(value);
+  const schema = options.allowBundleVersion
+    ? supportedDatabaseRecoveryBundleOrLegacySchema
+    : supportedDatabaseRecoveryExportSchema;
+  const result = schema.safeParse(value);
   if (!result.success) {
     throw new Error("The recovery export does not match the supported format.");
   }
   if (result.data.version === DATABASE_RECOVERY_EXPORT_VERSION) {
     return result.data;
   }
-  if (result.data.version === 2) {
+  if (
+    result.data.version === DATABASE_RECOVERY_BUNDLE_VERSION
+    || result.data.version === 2
+  ) {
     return { ...result.data, version: DATABASE_RECOVERY_EXPORT_VERSION };
   }
   return {

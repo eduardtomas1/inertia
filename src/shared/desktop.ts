@@ -18,6 +18,13 @@ import type { DiagnosticPage, DiagnosticQuery, RendererDiagnostic } from "./appl
 import type { CompletionSoundImport } from "./completion-sound";
 import type { CustomAgentDraft, CustomAgentExport } from "./custom-agents";
 import type { ContextMenuAction, ContextMenuRequest } from "./context-menu";
+import {
+  isEditorId,
+  isPositiveEditorInt,
+  type DetectedEditor,
+  type EditorId,
+  type GetAvailableEditorsRequest,
+} from "./editor-ids";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 import {
   parseTerminalHandoffIds,
@@ -93,20 +100,47 @@ export type SendDiscordReleaseInfoResult =
   | { sent: true; comparisonLimited: boolean; incidentId?: string }
   | { sent: false; code: import("./application-diagnostics").DiagnosticCode; incidentId?: string };
 
+export interface DatabaseRecoveryExportOptions {
+  includeAttachments?: boolean;
+}
+
+export interface DatabaseRecoveryExportSummary {
+  includeAttachments: boolean;
+  attachments: number;
+  missingAttachments: number;
+}
+
 export interface DatabaseRecoveryImportSummary {
   projects: number;
   conversations: number;
   messages: number;
   alreadyImported: boolean;
+  attachments?: number;
+  missingAttachments?: number;
 }
 
 export type DatabaseRecoveryExportResult =
   | { status: "cancelled" }
-  | { status: "exported" };
+  | { status: "exported"; summary?: DatabaseRecoveryExportSummary };
 
 export type DatabaseRecoveryImportResult =
   | { status: "cancelled" }
   | { status: "imported"; summary: DatabaseRecoveryImportSummary };
+
+export function parseDatabaseRecoveryExportOptions(
+  value: unknown,
+): DatabaseRecoveryExportOptions | null {
+  if (value === undefined) return { includeAttachments: false };
+  if (!plainObject(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return { includeAttachments: false };
+  if (
+    keys.length !== 1
+    || keys[0] !== "includeAttachments"
+    || typeof value.includeAttachments !== "boolean"
+  ) return null;
+  return { includeAttachments: value.includeAttachments };
+}
 
 export type AppUpdateState =
   | "idle"
@@ -186,6 +220,7 @@ export interface CanaryRollbackStatus {
 
 export interface DesktopAttachment {
   snapshot?: import("./snapshots").SnapshotSource;
+  previewAnnotation?: import("./preview-annotation").PreviewAnnotation;
   id: string;
   name: string;
   path: string;
@@ -254,6 +289,10 @@ export interface PreviewAgentActivity {
   x?: number;
   y?: number;
 }
+export interface PreviewPickerSelection {
+  label: string;
+  selector: string;
+}
 export interface PreviewState {
   url: string;
   loading: boolean;
@@ -265,6 +304,9 @@ export interface PreviewState {
   evidence: BrowserEvidenceSnapshot;
   pageFocused?: boolean;
   viewport?: AgentBrowserViewport;
+  agentBusy?: boolean;
+  pickerActive?: boolean;
+  pickerSelection?: PreviewPickerSelection | null;
 }
 export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";
@@ -273,13 +315,16 @@ export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   evidence?: BrowserEvidenceSnapshot;
 }
 
-export type ProjectPathAction = "open-externally" | "reveal";
+export type ProjectPathAction = "open-externally" | "reveal" | "open-in-editor";
 
 export interface OpenProjectPathRequest {
   projectId: string;
   conversationId?: string;
   relativePath: string;
   action: ProjectPathAction;
+  editor?: EditorId;
+  line?: number;
+  column?: number;
 }
 
 export type DesktopNotificationKind =
@@ -636,20 +681,45 @@ export function parseOpenProjectPathRequest(value: unknown): OpenProjectPathRequ
   const candidate = value as Partial<Record<keyof OpenProjectPathRequest, unknown>>;
   const keys = Object.keys(value);
   const hasConversationId = Object.prototype.hasOwnProperty.call(value, "conversationId");
+  const hasEditor = Object.prototype.hasOwnProperty.call(value, "editor");
+  const hasLine = Object.prototype.hasOwnProperty.call(value, "line");
+  const hasColumn = Object.prototype.hasOwnProperty.call(value, "column");
+  const allowedAction = candidate.action === "open-externally"
+    || candidate.action === "reveal"
+    || candidate.action === "open-in-editor";
+  const expectedKeyCount = 3
+    + Number(hasConversationId)
+    + Number(hasEditor)
+    + Number(hasLine)
+    + Number(hasColumn);
   if (
-    keys.length !== (hasConversationId ? 4 : 3)
-    || !keys.every((key) => key === "projectId" || key === "conversationId" || key === "relativePath" || key === "action")
+    keys.length !== expectedKeyCount
+    || !keys.every((key) =>
+      key === "projectId"
+      || key === "conversationId"
+      || key === "relativePath"
+      || key === "action"
+      || key === "editor"
+      || key === "line"
+      || key === "column")
     || typeof candidate.projectId !== "string"
     || !UUID_PATTERN.test(candidate.projectId)
     || (hasConversationId && (typeof candidate.conversationId !== "string" || !UUID_PATTERN.test(candidate.conversationId)))
     || !isProjectRelativePath(candidate.relativePath)
-    || (candidate.action !== "open-externally" && candidate.action !== "reveal")
+    || !allowedAction
+    || (candidate.action !== "open-in-editor" && (hasEditor || hasLine || hasColumn))
+    || (hasEditor && !isEditorId(candidate.editor))
+    || (hasLine && !isPositiveEditorInt(candidate.line))
+    || (hasColumn && (!hasLine || !isPositiveEditorInt(candidate.column)))
   ) return null;
   return {
     projectId: candidate.projectId,
     ...(hasConversationId ? { conversationId: candidate.conversationId as string } : {}),
     relativePath: candidate.relativePath,
-    action: candidate.action,
+    action: candidate.action as ProjectPathAction,
+    ...(hasEditor ? { editor: candidate.editor as EditorId } : {}),
+    ...(hasLine ? { line: candidate.line as number } : {}),
+    ...(hasColumn ? { column: candidate.column as number } : {}),
   };
 }
 
@@ -841,7 +911,9 @@ export interface DesktopBridge {
   onLaunchRequest: (listener: () => void) => () => void;
   selectCodexExecutable: () => Promise<string | null>;
   /** Writes a bounded transcript-only recovery export chosen by the user. */
-  exportRecoveryData: () => Promise<DatabaseRecoveryExportResult>;
+  exportRecoveryData: (
+    options?: DatabaseRecoveryExportOptions,
+  ) => Promise<DatabaseRecoveryExportResult>;
   /** Imports a strictly validated recovery export under fresh local identities. */
   importRecoveryData: () => Promise<DatabaseRecoveryImportResult>;
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
@@ -912,6 +984,7 @@ export interface DesktopBridge {
   openAttachmentExternally: (id: string) => Promise<void>;
   /** Internal file selection stays in the renderer; only scoped OS actions cross this bridge. */
   openProjectPath: (request: OpenProjectPathRequest) => Promise<string>;
+  getAvailableEditors: (request?: GetAvailableEditorsRequest) => Promise<DetectedEditor[]>;
   openExternal: (url: string) => Promise<void>;
   showContextMenu: (request: ContextMenuRequest) => Promise<ContextMenuAction | null>;
   /** Shows a generic privacy-safe notification; prompt and output text are never accepted. */
@@ -940,8 +1013,9 @@ export interface DesktopBridge {
   previewCommand: (request: {
     ownerId: string;
     contextId: string;
-    action: "back" | "forward" | "reload" | "viewport";
+    action: "back" | "forward" | "reload" | "viewport" | "pick-start" | "pick-cancel" | "pick-submit";
     viewport?: AgentBrowserViewportRequest;
+    comment?: string;
   }) => Promise<PreviewState>;
   previewTab: (request: {
     ownerId: string;
@@ -969,6 +1043,9 @@ export interface DesktopBridge {
   }) => Promise<boolean>;
   /** Subscribes to navigation initiated inside an owned desktop preview. */
   onPreviewState: (listener: (state: PreviewStateUpdate) => void) => () => void;
+  onPreviewAnnotation: (
+    listener: (event: import("./preview-annotation").PreviewAnnotationDelivery) => void,
+  ) => () => void;
   syncThemePreference: (preference: "system" | "light" | "dark") => Promise<void>;
   /** The keys the app shortcuts are bound to, which a focused Browser page hands back to the app. */
   syncAppShortcutKeys: (keys: readonly AppShortcutKey[]) => Promise<void>;

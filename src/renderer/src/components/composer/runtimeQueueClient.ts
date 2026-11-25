@@ -1,5 +1,5 @@
 import type { ChatAttachment } from "@shared/contracts";
-import type { MessageQueueResult } from "@shared/queued-messages";
+import type { MessageQueueResult, QueuedMessage } from "@shared/queued-messages";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
 import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import { RUNTIME_QUEUE_CHANGED } from "./runtimeQueueEvents";
@@ -69,4 +69,9 @@ export async function enqueueRuntimePrompt(run: QueueCommandRunner, conversation
   if (!result.receipt || result.receipt.id !== id || result.receipt.conversationId !== conversationId) throw new Error("The queue did not confirm this draft. Try again to check its receipt.");
   finishQueueIntent(conversationId, id);
   if (result.receipt.state === "cancelled") throw new Error("That queued message was removed. Queue the draft again to send it.");
+}
+
+export interface QueuedMessageEdit {
+  blockedReason: string | null;
+  onEdit(entry: QueuedMessage): Promise<void>;
 }

@@ -25,8 +25,10 @@ import type {
   TurnGitArtifactRow,
 } from "./rows";
 import type {
+  ArtifactRefClearUpdate,
   CompleteTurnGitArtifactInput,
   CreateTurnGitArtifactInput,
+  RetainedArtifactRefRecord,
   StoredTurnGitArtifact,
 } from "./types";
 import type Database from "better-sqlite3";
@@ -300,5 +302,100 @@ export class GitArtifactRepository {
       SET patch_state = 'expired', updated_at = ?
       WHERE patch_digest = ? AND patch_state IN ('available', 'truncated')
     `).run(new Date().toISOString(), validated);
+  }
+
+  clearRefs(
+    updates: readonly ArtifactRefClearUpdate[],
+    updatedAt = new Date().toISOString(),
+  ): number {
+    if (updates.length === 0) return 0;
+    const clearBoth = this.context.database.prepare(`
+      UPDATE turn_git_artifacts
+      SET before_ref = NULL, after_ref = NULL, updated_at = ?
+      WHERE turn_id = ? AND (before_ref IS NOT NULL OR after_ref IS NOT NULL)
+    `);
+    const clearBefore = this.context.database.prepare(`
+      UPDATE turn_git_artifacts
+      SET before_ref = NULL, updated_at = ?
+      WHERE turn_id = ? AND before_ref IS NOT NULL
+    `);
+    const clearAfter = this.context.database.prepare(`
+      UPDATE turn_git_artifacts
+      SET after_ref = NULL, updated_at = ?
+      WHERE turn_id = ? AND after_ref IS NOT NULL
+    `);
+    return this.context.database.transaction(() => {
+      let changed = 0;
+      for (const update of updates) {
+        if (update.clearBeforeRef && update.clearAfterRef) {
+          changed += clearBoth.run(updatedAt, update.turnId).changes;
+        } else if (update.clearBeforeRef) {
+          changed += clearBefore.run(updatedAt, update.turnId).changes;
+        } else if (update.clearAfterRef) {
+          changed += clearAfter.run(updatedAt, update.turnId).changes;
+        }
+      }
+      return changed;
+    })();
+  }
+
+  retainedRefsForRetention(): RetainedArtifactRefRecord[] {
+    const rows = this.context.database.prepare(`
+      SELECT
+        a.turn_id,
+        a.conversation_id,
+        conv.project_id,
+        p.workspace_kind AS project_workspace_kind,
+        p.repository_identity AS project_repository_identity,
+        p.path AS project_path,
+        conv.worktree_path,
+        conv.archived_at,
+        t.status AS turn_status,
+        a.before_checkpoint_id,
+        a.before_ref,
+        a.after_ref,
+        a.status,
+        a.patch_state,
+        a.created_at
+      FROM turn_git_artifacts a
+      JOIN conversations conv ON conv.id = a.conversation_id
+      JOIN projects p ON p.id = conv.project_id
+      JOIN agent_turns t ON t.id = a.turn_id
+      WHERE a.before_ref IS NOT NULL OR a.after_ref IS NOT NULL
+      ORDER BY a.created_at DESC, a.id DESC
+    `).all() as Array<{
+      turn_id: string;
+      conversation_id: string;
+      project_id: string;
+      project_workspace_kind: string | null;
+      project_repository_identity: string | null;
+      project_path: string;
+      worktree_path: string | null;
+      archived_at: string | null;
+      turn_status: AgentTurn["status"];
+      before_checkpoint_id: string | null;
+      before_ref: string | null;
+      after_ref: string | null;
+      status: TurnGitArtifact["status"];
+      patch_state: TurnGitArtifact["patchState"];
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      turnId: row.turn_id,
+      conversationId: row.conversation_id,
+      projectId: row.project_id,
+      projectWorkspaceKind: row.project_workspace_kind,
+      projectRepositoryIdentity: row.project_repository_identity,
+      projectPath: row.project_path,
+      worktreePath: row.worktree_path,
+      archivedAt: row.archived_at,
+      turnStatus: row.turn_status,
+      beforeCheckpointId: row.before_checkpoint_id,
+      beforeRef: row.before_ref,
+      afterRef: row.after_ref,
+      status: row.status,
+      patchState: row.patch_state,
+      createdAt: row.created_at,
+    }));
   }
 }

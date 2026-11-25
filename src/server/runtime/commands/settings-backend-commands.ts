@@ -56,6 +56,8 @@ export function createSettingsBackendCommandHandler(
     "settings.update",
     "attachment.storage.get",
     "attachment.storage.cleanup",
+    "database.storage.get",
+    "database.storage.compact",
     "prompt-preset.create",
     "prompt-preset.update",
     "prompt-preset.duplicate",
@@ -83,6 +85,27 @@ export function createSettingsBackendCommandHandler(
         const storage = await dependencies.conversationAttachments.storageStatus(order);
         dependencies.send(socket, { type: "request.result", requestId: command.requestId,
           result: { kind: "attachment.storage", storage, ...(removed ? { removed } : {}) } });
+        return "handled";
+      }
+      case "database.storage.get": {
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: {
+            kind: "database.storage",
+            storage: dependencies.store.databaseStorageStatus(),
+          },
+        });
+        return "handled";
+      }
+      case "database.storage.compact": {
+        const { storage, compaction } = await dependencies.store.compactDatabase();
+        dependencies.broadcastSnapshot();
+        dependencies.send(socket, {
+          type: "request.result",
+          requestId: command.requestId,
+          result: { kind: "database.storage", storage, compaction },
+        });
         return "handled";
       }
       case "settings.update": {
@@ -121,7 +144,7 @@ export function createSettingsBackendCommandHandler(
         }
         dependencies.store.updateSettings(command.payload);
         if (command.payload.attachmentStorageGiB !== undefined || command.payload.autoRemoveOldAttachments !== undefined) {
-          const settings = dependencies.store.shellSnapshot().settings;
+          const settings = dependencies.store.settings();
           dependencies.conversationAttachments.setStoragePolicy(
             settings.attachmentStorageGiB * 1024 ** 3, settings.autoRemoveOldAttachments,
           );
@@ -310,7 +333,7 @@ export function createSettingsBackendCommandHandler(
         return "mutation";
       case "settings.restore-defaults": {
         assertMaintenanceIdle("codex");
-        const restored = restoredDefaultSettings(dependencies.store.shellSnapshot().settings);
+        const restored = restoredDefaultSettings(dependencies.store.settings());
         dependencies.backendProfileController.replaceGlobalDefaultWithSettings(restored);
         dependencies.providers.setCommand("codex", undefined);
         dependencies.conversationAttachments.setStoragePolicy(

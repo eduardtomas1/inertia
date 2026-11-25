@@ -1,4 +1,4 @@
-import type { ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
+import type { ArchivedConversationsLoader, ConversationBackgroundTasksLoader } from "../../hooks/useAppRuntimeActions";
 import type { DraftSkillsProjection } from "../../hooks/useDraftSkills";
 import type { ProviderCommandsLoader } from "../../hooks/useAgentWorkflows";
 import type { LimitResetCommandRunner } from "../composer/limitResetClient";
@@ -343,6 +343,7 @@ export interface WorkspaceSceneActions {
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
   loadBackgroundTasks?: ConversationBackgroundTasksLoader;
+  loadArchivedConversations?: ArchivedConversationsLoader;
 }
 
 export interface WorkspaceSceneModelInput {
@@ -644,9 +645,8 @@ export function createWorkspaceSceneModel({
       conversations: connection.snapshot?.conversations.filter(
         ({ archivedAt }) => archivedAt === null,
       ) ?? [],
-      archived: connection.snapshot?.conversations.filter(
-        ({ archivedAt }) => archivedAt !== null,
-      ) ?? [],
+      archivedCount: connection.snapshot?.archivedConversationCount ?? 0,
+      onLoadArchived: actions.loadArchivedConversations,
       databaseBackup: connection.snapshot?.databaseBackup,
       customAgents: connection.snapshot?.customAgents ?? EMPTY_LIST,
       skills: currentWorkflow?.skills ?? EMPTY_LIST,
@@ -682,12 +682,11 @@ export function createWorkspaceSceneModel({
       onCancelAppUpdateDownload: appUpdate.cancelDownload,
       onInstallAppUpdate: appUpdate.install,
       onOpenAppRelease: appUpdate.openRelease,
-      onUnarchive: (thread) => {
-        void actions.run("conversation.unarchive", {
+      onUnarchive: (thread) =>
+        actions.run("conversation.unarchive", {
           type: "conversation.unarchive",
           payload: { conversationId: thread.id },
-        }).catch(() => undefined);
-      },
+        }),
       onOpenConversation: actions.openConversation,
       onLoadBackendProfile: backendProfileActions.loadBackendProfile,
       onCreateBackendProfile: backendProfileActions.createBackendProfile,
@@ -1196,11 +1195,19 @@ export function createWorkspaceSceneModel({
         evidence: desktopTools.previewNavigation.evidence,
         pageFocused: desktopTools.previewNavigation.pageFocused ?? false,
         viewport: desktopTools.previewNavigation.viewport,
+        agentBusy: desktopTools.previewNavigation.agentBusy ?? false,
+        pickerActive: desktopTools.previewNavigation.pickerActive ?? false,
+        pickerSelection: desktopTools.previewNavigation.pickerSelection ?? null,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),
         onReload: () => desktopTools.previewCommand("reload"),
         onViewportChange: (viewport) => desktopTools.previewCommand("viewport", viewport),
+        onTogglePicker: () => desktopTools.previewCommand(
+          desktopTools.previewNavigation.pickerActive ? "pick-cancel" : "pick-start",
+        ),
+        onSubmitPickerComment: (comment) => desktopTools.previewCommand("pick-submit", undefined, comment),
+        onCancelPicker: () => desktopTools.previewCommand("pick-cancel"),
         onOpenTab: () => desktopTools.previewTab("open"),
         onActivateTab: (tabId) => desktopTools.previewTab("activate", tabId),
         onCloseTab: (tabId) => desktopTools.previewTab("close", tabId),

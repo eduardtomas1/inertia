@@ -19,7 +19,9 @@ import {
   chatAttachmentKind,
   chatAttachmentTypeLabel,
 } from "@shared/attachments";
+import { previewAnnotationChipLabel } from "@shared/preview-annotation";
 import {
+  attachmentIconKind,
   attachmentPreviewKind,
   attachmentPreviewUrl,
   formatAttachmentSize,
@@ -61,7 +63,9 @@ function SentAttachment({
   const unavailable = state === "unavailable";
   const Icon = kind === "image"
     ? unavailable ? TriangleAlert : ImageIcon
-    : previewKind === "spreadsheet" ? FileSpreadsheet : previewKind === "file" ? File : FileText;
+    : attachmentIconKind(attachment) === "spreadsheet"
+      ? FileSpreadsheet
+      : previewKind === "file" ? File : FileText;
   const previewButton = (node: Element | null): HTMLButtonElement | null =>
     node?.closest(".sent-attachment")?.querySelector<HTMLButtonElement>(".sent-attachment-open") ?? null;
   const openMenu = actions ? (event: MouseEvent<HTMLLIElement>): void => {
@@ -104,9 +108,11 @@ function SentAttachment({
           {state !== "ready" && <Icon size={16} />}
         </span>
         <span className="sent-attachment-copy">
-          <strong title={attachment.snapshot?.windowTitle ?? attachment.name}>{attachment.snapshot?.appName ?? attachment.name}</strong>
+          <strong title={attachment.snapshot?.windowTitle ?? (attachment.previewAnnotation ? `${attachment.previewAnnotation.selector} · ${attachment.previewAnnotation.pageUrl}` : attachment.name)}>
+            {attachment.snapshot?.appName ?? (attachment.previewAnnotation ? previewAnnotationChipLabel(attachment.previewAnnotation).title : attachment.name)}
+          </strong>
           <small id={metadataId}>
-            {attachment.snapshot?.windowTitle ?? `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`}
+            {attachment.snapshot?.windowTitle ?? (attachment.previewAnnotation ? previewAnnotationChipLabel(attachment.previewAnnotation).subtitle : `${chatAttachmentTypeLabel(attachment.mimeType)} · ${formatAttachmentSize(attachment.size)}`)}
             {unavailable && " · no longer stored"}
           </small>
         </span>

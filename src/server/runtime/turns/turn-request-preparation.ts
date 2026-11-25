@@ -184,7 +184,7 @@ function providerCommandCarriesContext(
 ): boolean {
   const context = request.context;
   return attachments.some((attachment) =>
-    attachment.snapshot !== undefined || chatAttachmentKind(attachment.mimeType) !== "image")
+    attachment.snapshot !== undefined || attachment.previewAnnotation !== undefined || chatAttachmentKind(attachment.mimeType) !== "image")
     || (request.documentContexts?.length ?? 0) > 0
     || [
       context?.fileReferences,

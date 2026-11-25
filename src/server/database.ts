@@ -48,24 +48,15 @@ import {
   createDuoConversationsAtomically,
   type DuoConversationPlan,
 } from "./persistence/duo-conversation-creation";
-import {
-  DatabaseBackupManager,
-  type DatabaseBackupResult,
-  type DatabaseRecoveryReport,
-  recoverDatabaseOnStartup,
-} from "./persistence/database-recovery";
+import { DatabaseBackupManager, type DatabaseBackupResult, type DatabaseRecoveryReport, recoverDatabaseOnStartup } from "./persistence/database-recovery";
+import { DatabaseCompactionManager, type DatabaseCompactionOptions } from "./persistence/database-compaction";
+import type { DatabaseCompactionSummary, DatabaseStorageStatus } from "../shared/database-storage";
 import { reconcileRecoveryImportJournal } from "./persistence/database-recovery-import";
-import {
-  DATABASE_RECOVERY_EXPORT_MAX_BYTES,
-  type DatabaseRecoveryImportResult,
-} from "./persistence/database-export";
+import { DATABASE_RECOVERY_EXPORT_MAX_BYTES, type DatabaseRecoveryExportResultSummary, type DatabaseRecoveryImportResult } from "./persistence/database-export";
+import { exportDatabaseRecoveryBundle, importDatabaseRecoveryFile } from "./persistence/database-recovery-bundle";
 import { recoveryImportWriters } from "./persistence/recovery-import-writers";
 import { isWithinScratchRoot, SCRATCH_RECOVERY_TARGET_REFUSAL } from "./scratch-root";
-import {
-  exportDatabaseRecoveryData,
-  importDatabaseRecoveryData,
-  type DatabaseRecoveryImportOptions,
-} from "./persistence/database-recovery-store";
+import { exportDatabaseRecoveryData, importDatabaseRecoveryData, type DatabaseRecoveryImportOptions } from "./persistence/database-recovery-store";
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
@@ -93,7 +84,10 @@ import type { UsagePricing } from "./usage/price-list";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import { backgroundTasks } from "./persistence/background-task-repository";
+import { indexMessageSearchBatch, mergeMessageSearchIndex, type MessageSearchIndexProgress } from "./persistence/message-search-indexer";
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "../shared/background-tasks";
+import type { ArchivedConversationsPage, ArchivedConversationsRequest } from "../shared/archived-conversations";
+import type { ActivityDetailReadResult } from "../shared/activity-detail";
 import type {
   AgentTurnRow,
   ConversationRow,
@@ -123,6 +117,7 @@ export type * from "./database-public-types";
 export class RuntimeStore {
   private readonly database: Database.Database;
   private readonly backupManager: DatabaseBackupManager;
+  private readonly compactionManager: DatabaseCompactionManager;
   private readonly recoveryReport: DatabaseRecoveryReport;
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
@@ -159,6 +154,7 @@ export class RuntimeStore {
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
       databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
+      databaseCompaction?: DatabaseCompactionOptions;
       recoverInterruptedRuns?: boolean;
       recoveryExportMaxBytes?: number;
     } = {},
@@ -182,6 +178,12 @@ export class RuntimeStore {
         },
         onCreated: options.onDatabaseBackupCreated,
       },
+    );
+    this.compactionManager = new DatabaseCompactionManager(
+      this.database,
+      databasePath,
+      this.backupManager,
+      options.databaseCompaction,
     );
     this.backendProfileRepository = new BackendProfileRepository({
       database: this.database,
@@ -287,6 +289,7 @@ export class RuntimeStore {
   }
 
   close(): void {
+    this.compactionManager.stop();
     this.backupManager.stop();
     this.conversationWork.clear();
     if (this.database.open) this.database.close();
@@ -295,6 +298,16 @@ export class RuntimeStore {
   startBackups(): void {
     this.backupManager.start();
   }
+
+  startCompaction(): void { this.compactionManager.start(); }
+  databaseStorageStatus(): DatabaseStorageStatus { return this.compactionManager.status(); }
+  compactDatabase(): Promise<{ storage: DatabaseStorageStatus; compaction: DatabaseCompactionSummary }> { return this.compactionManager.compactNow(); }
+  runIdleDatabaseCompaction(): Promise<DatabaseCompactionSummary | null> { return this.compactionManager.runIdlePass(); }
+  isDatabaseCompacting(): boolean { return this.compactionManager.isCompacting(); }
+  isDatabaseVacuuming(): boolean { return this.compactionManager.isHoldingExclusiveWork(); }
+  isDatabaseBackingUp(): boolean { return this.backupManager.isBackingUp(); }
+  whenDatabaseWritable(): Promise<void> { return this.compactionManager.whenWritable(); }
+  whenDatabaseCompactionSettled(): Promise<void> { return this.compactionManager.whenSettled(); }
 
   createInitialBackup(options: { quietGraceMs?: number } = {}): Promise<DatabaseBackupResult | null> {
     return this.backupManager.requestInitialBackup(options.quietGraceMs ?? 0);
@@ -308,27 +321,25 @@ export class RuntimeStore {
     return this.recoveryReport;
   }
 
-  exportRecoveryData(): string {
-    return exportDatabaseRecoveryData(
-      this.database,
-      this.recoveryExportMaxBytes,
-    );
-  }
-
-  async importRecoveryData(
-    serialized: string,
-    authorizedRoot: string,
-    options: DatabaseRecoveryImportOptions = {},
-  ): Promise<DatabaseRecoveryImportResult> {
-    if (isWithinScratchRoot(dirname(resolve(this.database.name)), authorizedRoot)) {
-      throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
-    }
-    return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, recoveryImportWriters({
-      database: this.database,
-      createProject: (name, path, identity) => this.createProject(name, path, identity),
+  private recoveryWriters() {
+    return recoveryImportWriters({
+      database: this.database, createProject: (name, path, identity) => this.createProject(name, path, identity),
       createConversation: (projectId, title, conversation) => this.createConversation(projectId, title, conversation),
       createRecoveredMessage: (...message) => { this.transcriptRepository.createRecoveredMessage(...message); },
-    }), options);
+    });
+  }
+  exportRecoveryData(): string { return exportDatabaseRecoveryData(this.database, this.recoveryExportMaxBytes); }
+  exportRecoveryBundle(outputPath: string, options: { readonly signal?: AbortSignal; readonly maxAttachmentBytes?: number; readonly maxTotalAttachmentBytes?: number } = {}): Promise<DatabaseRecoveryExportResultSummary> {
+    return exportDatabaseRecoveryBundle({ database: this.database, dataDirectory: dirname(resolve(this.database.name)), outputPath, maxExportBytes: this.recoveryExportMaxBytes, ...options });
+  }
+  async importRecoveryData(serialized: string, authorizedRoot: string, options: DatabaseRecoveryImportOptions = {}): Promise<DatabaseRecoveryImportResult> {
+    if (isWithinScratchRoot(dirname(resolve(this.database.name)), authorizedRoot)) throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+    return importDatabaseRecoveryData(this.database, serialized, authorizedRoot, this.recoveryWriters(), options);
+  }
+  async importRecoveryFile(recoveryPath: string, authorizedRoot: string, options: DatabaseRecoveryImportOptions = {}): Promise<DatabaseRecoveryImportResult> {
+    const dataDirectory = dirname(resolve(this.database.name));
+    if (isWithinScratchRoot(dataDirectory, authorizedRoot)) throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
+    return importDatabaseRecoveryFile({ database: this.database, dataDirectory, recoveryPath, authorizedRoot, writers: this.recoveryWriters(), importOptions: options, maxExportBytes: this.recoveryExportMaxBytes });
   }
 
   reconcileRecoveryImport(): void {
@@ -336,7 +347,7 @@ export class RuntimeStore {
   }
 
   async backupAndClose(): Promise<void> {
-    return closeDatabaseAfterBackupCancellation(this.database, this.backupManager);
+    return closeDatabaseAfterBackupCancellation(this.database, this.backupManager, this.compactionManager);
   }
 
   snapshot(providers: ProviderInfo[] = []): RuntimeStoreSnapshot {
@@ -360,6 +371,12 @@ export class RuntimeStore {
   conversationShell(conversationId: string): ConversationShell | null {
     return this.snapshotRepository.conversationShell(conversationId);
   }
+
+  projects(): Project[] { return this.snapshotRepository.projects(); }
+  conversationIds(): string[] { return this.snapshotRepository.conversationIds(); }
+  projectConversations(projectId: string): ConversationShell[] { return this.snapshotRepository.projectConversations(projectId); }
+  archivedConversations(request: ArchivedConversationsRequest): ArchivedConversationsPage { return this.snapshotRepository.archivedConversations(request); }
+  activityDetail(conversationId: string, activityId: string): ActivityDetailReadResult | null { return this.snapshotRepository.activityDetail(conversationId, activityId); }
 
   conversationDetail(conversationId: string): ConversationDetail | null {
     return this.snapshotRepository.conversationDetail(conversationId);
@@ -518,6 +535,7 @@ export class RuntimeStore {
 
   assertProjectDeletionAllowed(projectId: string): void {
     this.pairedLaunchRepository.assertProjectDeletionAllowed(projectId);
+    this.conversationWorktrees.assertProjectRemovalAllowed(projectId);
   }
 
   assertDuoComparisonTurnAllowed(conversationId: string, authorizedLaunchId?: string): void {
@@ -790,6 +808,25 @@ export class RuntimeStore {
     this.gitArtifactRepository.expirePatch(digest);
   }
 
+  clearTurnGitArtifactRefs(
+    updates: readonly import("./persistence/types").ArtifactRefClearUpdate[],
+    updatedAt?: string,
+  ): number {
+    return this.gitArtifactRepository.clearRefs(updates, updatedAt);
+  }
+
+  retainedTurnGitArtifactRefsForRetention(): import("./persistence/types").RetainedArtifactRefRecord[] { return this.gitArtifactRepository.retainedRefsForRetention(); }
+
+  markCheckpointsExpired(
+    checkpointIds: readonly string[],
+    expiredAt?: string,
+  ): number {
+    return this.executionLedgerRepository.markCheckpointsExpired(checkpointIds, expiredAt);
+  }
+
+  activeCheckpointsForRetention(): import("./persistence/types").RetainedCheckpointRecord[] { return this.executionLedgerRepository.activeCheckpointsForRetention(); }
+  checkpointExpirationRevision(): string { return this.executionLedgerRepository.checkpointExpirationRevision(); }
+
   updateAgentTurnLifecycle(turnId: string, update: AgentTurnLifecycleUpdate): AgentTurn {
     return this.turnLedgerRepository.updateLifecycle(turnId, update);
   }
@@ -861,6 +898,8 @@ export class RuntimeStore {
   evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] { return this.queuedMessages.excludeQueuedAttachments(this.transcriptRepository.evictableAttachmentIds(conversationIds)); }
   attachmentConversationIds(attachmentIds: readonly string[], options?: { includeUnreadable?: boolean }): string[] { return this.transcriptRepository.attachmentConversationIds(attachmentIds, options); }
   messageSearchTarget(messageId: string): MessageSearchTarget | null { return this.transcriptRepository.messageSearchTarget(messageId); }
+  indexMessageSearchBatch(budgetMs: number): MessageSearchIndexProgress { return indexMessageSearchBatch(this.database, { budgetMs }); }
+  mergeMessageSearchIndex(budgetMs: number): boolean { return mergeMessageSearchIndex(this.database, { budgetMs }); }
   message(messageId: string): ChatMessage { return this.transcriptRepository.message(messageId); }
   continuationHistory(...input: Parameters<TranscriptRepository["continuationHistory"]>) { return this.transcriptRepository.continuationHistory(...input); }
 

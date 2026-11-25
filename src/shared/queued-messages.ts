@@ -1,14 +1,17 @@
 import { z } from "zod";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_BYTES } from "./attachments";
 import { snapshotSourceSchema } from "./snapshots";
+import { previewAnnotationSchema } from "./preview-annotation";
 import { watcherNoteAttributionSchema } from "./watcher";
 
 export const MAX_QUEUED_MESSAGES = 3;
+export const QUEUED_ROUTE_CHANGED_ERROR = "This chat's model, access or workspace changed. Send it with the current settings, edit it, or remove it.";
 export const queuedMessageStateSchema = z.enum(["waiting", "dispatching", "blocked", "accepted", "cancelled"]);
 const queuedAttachmentSchema = z.strictObject({
   id: z.uuid(), name: z.string().min(1).max(255), path: z.string().min(1).max(4096),
   mimeType: z.enum(ACCEPTED_ATTACHMENT_MIME_TYPES), size: z.number().int().min(1).max(MAX_ATTACHMENT_BYTES),
   snapshot: snapshotSourceSchema.optional(),
+  previewAnnotation: previewAnnotationSchema.optional(),
 });
 export const queuedMessageSchema = z.strictObject({
   id: z.uuid(), conversationId: z.uuid(), content: z.string().max(20_000),
@@ -17,10 +20,17 @@ export const queuedMessageSchema = z.strictObject({
   error: z.string().max(1000).nullable(), turnId: z.string().nullable(), userMessageId: z.string().nullable(),
   watcherNote: watcherNoteAttributionSchema.optional(),
 });
+export const queuedAccessSchema = z.strictObject({
+  interactionMode: z.enum(["build", "plan"]),
+  accessMode: z.enum(["supervised", "auto-edit", "full"]),
+});
 export const messageQueueResultSchema = z.strictObject({
   kind: z.literal("message.queue"), conversationId: z.uuid(),
   entries: z.array(queuedMessageSchema).max(MAX_QUEUED_MESSAGES),
   receipt: queuedMessageSchema.nullable(),
+  edited: queuedMessageSchema.optional(),
+  confirmation: z.strictObject({ id: z.uuid(), queued: queuedAccessSchema, current: queuedAccessSchema }).optional(),
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
+export type QueuedAccess = z.infer<typeof queuedAccessSchema>;
 export type MessageQueueResult = z.infer<typeof messageQueueResultSchema>;

@@ -155,13 +155,14 @@ export class TranscriptRepository {
     content: string,
     role: ChatMessage["role"],
     createdAt: string,
+    attachments: ChatAttachment[] = [],
   ): ChatMessage {
     return this.createMessageWithId(
       id,
       conversationId,
       content,
       role,
-      [],
+      attachments,
       null,
       createdAt,
       { activateConversation: false },

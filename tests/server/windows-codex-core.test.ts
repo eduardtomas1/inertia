@@ -100,7 +100,7 @@ describe("Windows Codex discovery primitives", () => {
         "/s",
         "/v:off",
         "/c",
-        "\"set NoDefaultCurrentDirectoryInExePath=1&C:\\Users\\Calm^ Dev\\AppData\\Roaming\\npm\\opencode.cmd ^\"serve^\" ^\"--pure^\" ^\"--hostname=127.0.0.1^\" ^\"--port=0^\"\"",
+        "\"set NoDefaultCurrentDirectoryInExePath=1&C:\\Users\\Calm^ Dev\\AppData\\Roaming\\npm\\opencode.cmd ^\"serve^\" ^\"--pure^\" ^\"--hostname^=127.0.0.1^\" ^\"--port^=0^\"\"",
       ],
       windowsVerbatimArguments: true,
     });

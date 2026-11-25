@@ -290,7 +290,7 @@ test("offers link and navigation actions for a user's right-click in the Browser
     });
     expect(items).toEqual([
       ...process.platform === "darwin" ? ["Copy", "-"] : [],
-      "Copy link address", "-", "Back (disabled)", "Forward (disabled)", "Reload",
+      "Copy link address", "-", "Comment on this element", "-", "Back (disabled)", "Forward (disabled)", "Reload",
     ]);
     await chooseSurfaceItem(app, { label: "Copy link address" });
     await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()))

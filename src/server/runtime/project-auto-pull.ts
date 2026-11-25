@@ -31,7 +31,7 @@ export function startProjectAutoPull(dependencies: Dependencies): void {
   const tick = (): void => {
     if (dependencies.signal.aborted) return;
     if (!dependencies.idle()) { schedule(); return; }
-    const projects = dependencies.store.shellSnapshot().projects.filter((project) =>
+    const projects = dependencies.store.projects().filter((project) =>
       project.preferences?.autoPull && project.repositoryRoot && project.status === "ready");
     const project = projects[(projects.findIndex(({ id }) => id === lastProjectId) + 1) % projects.length];
     if (!project) { schedule(); return; }

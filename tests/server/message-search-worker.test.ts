@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { runMessageSearchWorker as RunWorker } from "../../src/server/persistence/message-search-worker-client";
 import { RuntimeStore } from "../../src/server/database";
+import { indexMessageSearchBatch } from "../../src/server/persistence/message-search-indexer";
 
 let directory: string;
 let databasePath: string;
@@ -48,9 +49,10 @@ beforeAll(async () => {
     `).run(conversationId, "a".repeat(500));
     expect(db.prepare("SELECT count(*) AS count, sum(length(content)) AS characters FROM messages").get())
       .toEqual({ count: 100_000, characters: 49_999_515 });
+    while (indexMessageSearchBatch(db, { budgetMs: 1_000 }).remaining) continue;
   } finally { db.close(); }
 
-}, 30_000);
+}, 60_000);
 
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
@@ -67,6 +69,11 @@ describe("actual isolated search worker", () => {
       // Slow CI hosts may legitimately reach the explicit two-second budget.
       expect(result.hasMore).toBe(false);
       expect(heartbeats).toBeGreaterThan(2);
+      expect(result).toMatchObject({ continuation: null, indexing: false, incomplete: false });
+      const older = await run(databasePath, "rare needle", new AbortController().signal, {
+        createdAt: "2026-09-07T00:00:00.000Z", messageId: "message-099998",
+      });
+      expect(older).toMatchObject({ hits: [], continuation: null, incomplete: false });
     } finally { clearInterval(timer); writer.close(); }
   });
 

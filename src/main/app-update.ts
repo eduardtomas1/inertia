@@ -164,6 +164,26 @@ function normalizedProgress(progress: {
   };
 }
 
+function unsignedBuildGuidance(
+  capability: AppUpdateCapability,
+  productName: string,
+): { reason: string; install: string } | null {
+  if (capability.delivery !== "manual") return null;
+  if (capability.reason === "windows-signing-unavailable") {
+    return {
+      reason: "This Windows build updates manually because it was published without code signing.",
+      install: `Open the official release, verify the installer checksum, quit ${productName}, and wait for it to close before running Setup.`,
+    };
+  }
+  if (capability.reason === "macos-signing-unavailable") {
+    return {
+      reason: "This macOS build updates manually because it was published without Developer ID signing and notarization.",
+      install: `Open the official release, verify the disk image checksum, quit ${productName}, and replace it in Applications with the app from the disk image.`,
+    };
+  }
+  return null;
+}
+
 function snapshot(status: AppUpdateStatus): AppUpdateStatus {
   return {
     ...status,
@@ -207,6 +227,7 @@ export class AppUpdateService {
     this.now = options.now ?? Date.now;
     this.cacheMs = Math.max(60_000, options.cacheMs ?? DEFAULT_CACHE_MS);
     this.timeoutMs = Math.max(1_000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const unsigned = unsignedBuildGuidance(this.capability, this.productName);
     this.status = {
       revision: 0,
       channel: this.channel,
@@ -227,8 +248,8 @@ export class AppUpdateService {
       lastAttemptedAt: null,
       message: this.capability.delivery === "in-app"
         ? `${this.productName} will check for updates shortly.`
-        : this.capability.reason === "windows-signing-unavailable"
-          ? `${this.productName} will check for releases shortly. This Windows build updates manually because it was published without code signing.`
+        : unsigned
+          ? `${this.productName} will check for releases shortly. ${unsigned.reason}`
           : `${this.productName} will check for releases shortly; this installation updates manually.`,
     };
   }
@@ -404,6 +425,7 @@ export class AppUpdateService {
         available ? this.releaseHistory(latestVersion) : { releases: [], omitted: 0 },
       ]);
       const checkedAt = new Date(this.now()).toISOString();
+      const unsigned = unsignedBuildGuidance(this.capability, this.productName);
       const cached: CachedCheck = {
         state: available ? "available" : "current",
         latestVersion,
@@ -413,11 +435,10 @@ export class AppUpdateService {
         releaseHistoryOmitted: history.omitted,
         releasesUrl: releasesPageUrl(),
         checkedAt,
-        message: this.capability.delivery === "manual"
-          && this.capability.reason === "windows-signing-unavailable"
+        message: unsigned
           ? available
-            ? `${this.productName} ${latestVersion} is available. This Windows build updates manually because it was published without code signing. Open the official release, verify the installer checksum, quit ${this.productName}, and wait for it to close before running Setup.`
-            : `${this.productName} is up to date. This Windows build updates manually because it was published without code signing.`
+            ? `${this.productName} ${latestVersion} is available. ${unsigned.reason} ${unsigned.install}`
+            : `${this.productName} is up to date. ${unsigned.reason}`
           : available
             ? `${this.productName} ${latestVersion} is available.`
             : `${this.productName} is up to date.`,

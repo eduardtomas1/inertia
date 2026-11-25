@@ -1,8 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   PreviewBounds,
+  PreviewPickerSelection,
   PreviewTabState,
 } from "@shared/desktop";
+import { PREVIEW_ANNOTATION_MAX_COMMENT_CHARS } from "@shared/preview-annotation";
 import type {
   BrowserEvidenceSnapshot,
 } from "@shared/browser-evidence";
@@ -24,7 +26,7 @@ import {
   usePreviewTabCloseFocus,
   type WorkspacePreviewOwner,
 } from "../utils/workspacePreviewFocus";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Crosshair, ExternalLink, Globe, History, Lock, Plus, RefreshCw, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
 import { TooltipButton } from "./TooltipButton";
 import { usePanelTabRow } from "../hooks/usePanelTabRow";
@@ -44,6 +46,9 @@ export type PreviewPanelProps = {
   evidence?: BrowserEvidenceSnapshot;
   pageFocused?: boolean;
   viewport?: AgentBrowserViewport;
+  agentBusy?: boolean;
+  pickerActive?: boolean;
+  pickerSelection?: PreviewPickerSelection | null;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -53,6 +58,9 @@ export type PreviewPanelProps = {
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
   onViewportChange?: (request: AgentBrowserViewportRequest) => void;
+  onTogglePicker?: () => void;
+  onSubmitPickerComment?: (comment: string) => void;
+  onCancelPicker?: () => void;
   onInspectEvidenceImage?: (evidenceId: string) => Promise<boolean>;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
@@ -134,6 +142,9 @@ export function PreviewPanel({
   evidence = { revision: 0, entries: [], omitted: false },
   pageFocused = false,
   viewport,
+  agentBusy = false,
+  pickerActive = false,
+  pickerSelection = null,
   onNavigate,
   onOpenExternal,
   onBack,
@@ -143,11 +154,16 @@ export function PreviewPanel({
   onActivateTab,
   onCloseTab,
   onViewportChange,
+  onTogglePicker,
+  onSubmitPickerComment,
+  onCancelPicker,
   onInspectEvidenceImage,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
   const [draftUrl, setDraftUrl] = useState(url);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [pickerComment, setPickerComment] = useState("");
+  const pickerInputRef = useRef<HTMLTextAreaElement>(null);
   const [openEvidenceContextId, setOpenEvidenceContextId] = useState<string | null>(null);
   const evidenceOpen = openEvidenceContextId === contextId;
   const stageRef = useRef<HTMLDivElement>(null);
@@ -159,6 +175,22 @@ export function PreviewPanel({
     registerWorkspacePreviewAddress(owner, address);
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
+  const canPickPage = Boolean(
+    url
+    && !loading
+    && !evidenceOpen
+    && currentLocation
+    && !("error" in currentLocation)
+    && currentLocation.target === "embed",
+  );
+  const pickerDisabled = agentBusy || !canPickPage;
+  const pickerTooltip = agentBusy
+    ? "Element picking is unavailable while the agent is controlling this page."
+    : !canPickPage
+      ? "Open a local preview page to pick an element."
+      : pickerActive
+        ? "Cancel picking element (Escape)"
+        : "Pick element";
   const selectedViewport = viewportSelection(viewport);
   const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs, addressElementRef);
   const tabRow = usePanelTabRow({ keys: tabs.map((tab) => tab.id), activeKey: activeTabId });
@@ -200,6 +232,25 @@ export function PreviewPanel({
       onBoundsChange(null);
     };
   }, [evidenceOpen, onBoundsChange]);
+
+  useEffect(() => {
+    setPickerComment("");
+    if (pickerSelection) {
+      pickerInputRef.current?.focus();
+    }
+  }, [pickerSelection]);
+
+  useEffect(() => {
+    if (!pickerActive || !onTogglePicker) return;
+    const cancelOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      (onCancelPicker ?? onTogglePicker)();
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  }, [onCancelPicker, onTogglePicker, pickerActive]);
 
   const closeEvidence = useCallback(() => {
     setOpenEvidenceContextId(null);
@@ -387,6 +438,20 @@ export function PreviewPanel({
             )}
           </select>
         )}
+        {onTogglePicker && (
+          <TooltipButton
+            tooltip={pickerTooltip}
+            describeTooltip={pickerDisabled || pickerActive}
+            className={`preview-picker-toggle${pickerActive ? " is-active" : ""}`}
+            aria-label="Pick element"
+            aria-pressed={pickerActive}
+            disabled={pickerDisabled}
+            title={pickerDisabled ? pickerTooltip : undefined}
+            onClick={onTogglePicker}
+          >
+            <Crosshair size={14} aria-hidden="true" />
+          </TooltipButton>
+        )}
         <TooltipButton
           ref={evidenceToggleRef}
           tooltip="Browser evidence"
@@ -395,9 +460,12 @@ export function PreviewPanel({
           aria-label={`Evidence ${evidence.entries.length}`}
           aria-expanded={evidenceOpen}
           aria-controls={`browser-evidence-${owner}`}
-          onClick={() => setOpenEvidenceContextId((current) => (
-            current === contextId ? null : contextId
-          ))}
+          onClick={() => {
+            if (!evidenceOpen && pickerActive) onTogglePicker?.();
+            setOpenEvidenceContextId((current) => (
+              current === contextId ? null : contextId
+            ));
+          }}
         >
           <History size={14} aria-hidden="true" />
         </TooltipButton>
@@ -409,6 +477,58 @@ export function PreviewPanel({
       </header>
 
       {validationError && <p className="preview-address-error" id="preview-url-error" role="alert">{validationError}</p>}
+
+      {pickerSelection && !evidenceOpen && (
+        <div className="preview-picker-comment" role="dialog" aria-label="Comment on selected element">
+          <div className="preview-picker-comment-header">
+            <span className="preview-picker-comment-target" title={pickerSelection.selector}>{pickerSelection.label}</span>
+            <IconButton
+              label="Cancel element comment"
+              onClick={() => (onCancelPicker ?? onTogglePicker)?.()}
+            >
+              <X size={14} />
+            </IconButton>
+          </div>
+          <form
+            className="preview-picker-comment-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSubmitPickerComment?.(pickerComment.trim());
+            }}
+          >
+            <textarea
+              ref={pickerInputRef}
+              className="preview-picker-comment-input"
+              aria-label="Describe the change"
+              placeholder="Describe the change…"
+              maxLength={PREVIEW_ANNOTATION_MAX_COMMENT_CHARS}
+              rows={2}
+              value={pickerComment}
+              onChange={(event) => setPickerComment(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  (onCancelPicker ?? onTogglePicker)?.();
+                } else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  onSubmitPickerComment?.(pickerComment.trim());
+                }
+              }}
+            />
+            <div className="preview-picker-comment-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => (onCancelPicker ?? onTogglePicker)?.()}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="primary-button">Attach</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {evidenceOpen ? (
         <Suspense fallback={null}>

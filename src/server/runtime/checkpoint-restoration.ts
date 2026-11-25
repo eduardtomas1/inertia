@@ -2,7 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CheckpointSummary } from "../../shared/contracts";
-import { assertCheckpointExists, createCheckpoint, restoreCheckpoint } from "../checkpoints";
+import {
+  assertCheckpointExists,
+  CheckpointError,
+  createCheckpoint,
+  restoreCheckpoint,
+} from "../checkpoints";
 import type { RuntimeStore } from "../database";
 import { assertCheckpointPreservesIgnoredFiles } from "../git/checkpoint-ignored-paths";
 import { getRepositoryStatus } from "../git/status";
@@ -13,6 +18,11 @@ export async function restoreConversationCheckpoint(
   checkpoint: CheckpointSummary,
   recoveryPersisted: () => void,
 ): Promise<void> {
+  if (checkpoint.expiredAt) {
+    throw new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    );
+  }
   const repositoryPath = store.conversationPath(checkpoint.conversationId);
   const deadlineAt = Date.now() + 60_000;
   const storage = await mkdtemp(join(tmpdir(), "inertia-checkpoint-recovery-"));

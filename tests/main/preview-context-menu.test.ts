@@ -192,4 +192,46 @@ describe("Browser pane context menu", () => {
     closed.show();
     expect(electron.build).not.toHaveBeenCalled();
   });
+
+  it("offers 'Comment on this element' when wired, disables it while busy or unpickable, and passes right-click coordinates", () => {
+    const commentOnElement = vi.fn();
+    let busy = false;
+    let pickable = true;
+    createPreviewTab({
+      navigate: vi.fn(),
+      agentBusy: () => busy,
+      commentOnElement,
+      canCommentOnElement: () => pickable,
+      partition: "inertia-preview-test",
+      pageNumber: 1,
+      captureLocked: new WeakSet<WebContents>(),
+      ownerWindow: () => ownerWindow as never,
+      targetContents: () => null,
+      guardNavigation: vi.fn(),
+      publish: vi.fn(),
+      navigated: vi.fn(),
+      consoleError: vi.fn(),
+    });
+    const contents = electron.views.at(-1)!.webContents as Contents;
+    const trigger = (x: number, y: number) => {
+      contents.emit("input-event", {}, { type: "mouseDown", x, y });
+      contents.emit("context-menu", {}, {
+        x, y, frame: null, isEditable: false, selectionText: "", linkURL: "", editFlags,
+      });
+    };
+
+    trigger(145, 220);
+    expect(labels()).toEqual(["Comment on this element", "-", "Back", "Forward (disabled)", "Reload"]);
+    choose("Comment on this element");
+    expect(commentOnElement).toHaveBeenCalledExactlyOnceWith({ x: 145, y: 220 });
+
+    busy = true;
+    trigger(10, 20);
+    expect(labels()[0]).toBe("Comment on this element (disabled)");
+
+    busy = false;
+    pickable = false;
+    trigger(10, 20);
+    expect(labels()[0]).toBe("Comment on this element (disabled)");
+  });
 });

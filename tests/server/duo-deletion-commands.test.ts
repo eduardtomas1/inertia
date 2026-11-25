@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
-  AppSnapshot,
   ClientCommand,
   Conversation,
 } from "../../src/shared/contracts";
@@ -191,7 +190,7 @@ describe("Duo deletion command preflights", () => {
         get: vi.fn(() => ownedWorktree),
       } as never,
       projectPath: vi.fn(() => "/workspace"),
-      shellSnapshot: vi.fn(),
+      projectConversations: vi.fn(),
       deleteConversation: vi.fn(),
     };
     const dependencies = conversationDependencies(store);
@@ -206,7 +205,7 @@ describe("Duo deletion command preflights", () => {
     );
     expect(sideEffects.removeOwnedWorktree).not.toHaveBeenCalled();
     expect(sideEffects.deleteCheckpoints).not.toHaveBeenCalled();
-    expect(store.shellSnapshot).not.toHaveBeenCalled();
+    expect(store.projectConversations).not.toHaveBeenCalled();
     expect(store.deleteConversation).not.toHaveBeenCalled();
     expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
     expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();
@@ -229,9 +228,7 @@ describe("Duo deletion command preflights", () => {
         get: vi.fn(() => ownedWorktree),
       } as never,
       projectPath: vi.fn(() => "/workspace"),
-      shellSnapshot: vi.fn(() => ({
-        conversations: [conversation],
-      }) as AppSnapshot),
+      projectConversations: vi.fn(() => [conversation] as never),
       attachments: vi.fn(() => (
         [{ id: attachmentId }, { id: sharedAttachmentId }]
       ) as never),
@@ -298,7 +295,7 @@ describe("Duo deletion command preflights", () => {
         get: vi.fn(() => ownedWorktree),
       } as never,
       projectPath: vi.fn(() => "/workspace"),
-      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as AppSnapshot),
+      projectConversations: vi.fn(() => [conversation] as never),
       deleteConversation,
     };
     const dependencies = conversationDependencies(store);
@@ -328,7 +325,7 @@ describe("Duo deletion command preflights", () => {
         get: vi.fn(() => ownedWorktree),
       } as never,
       projectPath: vi.fn(() => "/workspace"),
-      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as AppSnapshot),
+      projectConversations: vi.fn(() => [conversation] as never),
       deleteConversation: vi.fn(),
     };
     const dependencies = conversationDependencies(store);
@@ -423,7 +420,7 @@ describe("Duo deletion command preflights", () => {
     });
     const store: Partial<RuntimeStore> = {
       assertProjectDeletionAllowed,
-      shellSnapshot: vi.fn(() => ({ conversations: [] }) as never),
+      projectConversations: vi.fn(() => [] as never),
       removeProject: vi.fn(),
     };
     const dependencies = projectDependencies(store);
@@ -434,7 +431,7 @@ describe("Duo deletion command preflights", () => {
     );
 
     expect(assertProjectDeletionAllowed).toHaveBeenCalledWith(projectId);
-    expect(store.shellSnapshot).toHaveBeenCalledTimes(2);
+    expect(store.projectConversations).toHaveBeenCalledTimes(2);
     expect(store.removeProject).not.toHaveBeenCalled();
     expect(dependencies.rememberDeletedConversation).not.toHaveBeenCalled();
     expect(dependencies.forgetRemoteTranscript).not.toHaveBeenCalled();
@@ -447,7 +444,7 @@ describe("Duo deletion command preflights", () => {
     });
     const removeProject = vi.fn();
     const store: Partial<RuntimeStore> = {
-      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as never),
+      projectConversations: vi.fn(() => [conversation] as never),
       assertProjectDeletionAllowed: vi.fn(),
       removeProject,
     };
@@ -479,9 +476,7 @@ describe("Duo deletion command preflights", () => {
     const sharedAttachmentId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const store: Partial<RuntimeStore> = {
       assertProjectDeletionAllowed,
-      shellSnapshot: vi.fn(() => ({
-        conversations: [conversation],
-      }) as AppSnapshot),
+      projectConversations: vi.fn(() => [conversation] as never),
       attachments: vi.fn(() => (
         [{ id: removedAttachmentId }, { id: sharedAttachmentId }]
       ) as never),
@@ -524,9 +519,7 @@ describe("Duo deletion command preflights", () => {
         id: projectId,
         path: missingProjectPath,
       }) as never),
-      shellSnapshot: vi.fn(() => ({
-        conversations: [missingConversation],
-      }) as AppSnapshot),
+      projectConversations: vi.fn(() => [missingConversation] as never),
       assertProjectDeletionAllowed: vi.fn(),
       removeProject,
     };
@@ -574,7 +567,7 @@ describe("Duo deletion command preflights", () => {
         id: projectId,
         path: missingProjectPath,
       }) as never),
-      shellSnapshot: vi.fn(() => ({ conversations: [] }) as unknown as AppSnapshot),
+      projectConversations: vi.fn(() => [] as never),
       removeProject,
     });
     vi.mocked(dependencies.store.conversationWork.reserveProviderCheckouts)
@@ -596,7 +589,7 @@ describe("Duo deletion command preflights", () => {
     const removeProject = vi.fn();
     const store: Partial<RuntimeStore> = {
       assertProjectDeletionAllowed: vi.fn(),
-      shellSnapshot: vi.fn(() => ({ conversations: [conversation] }) as AppSnapshot),
+      projectConversations: vi.fn(() => [conversation] as never),
       removeProject,
     };
     const dependencies = projectDependencies(store);

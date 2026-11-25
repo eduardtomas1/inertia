@@ -56,7 +56,7 @@ describe("Codex compaction limit migration", () => {
       const before = state(database);
       const history = database.prepare("SELECT * FROM schema_migrations ORDER BY version").all();
 
-      migrateRuntimeDatabase(database);
+      migrateRuntimeDatabase(database, CODEX_COMPACTION_LIMIT_SCHEMA_VERSION);
 
       const after = state(database);
       expect(after).toEqual({ ...before, codex_auto_compact_token_limit: 300_000 });

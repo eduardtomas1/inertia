@@ -186,7 +186,7 @@ describe("dead selectors", () => {
     expect(css).not.toContain(".diff-review-toolbar select");
     expect(block(".terminal-resume-picker")).not.toContain("min-width");
     expect(css.match(/\.terminal-header \{/gu)).toHaveLength(2);
-    expect(/\.preview-evidence-toggle \{([^}]*)\}/u.exec(preview)?.[1]).not.toContain("font-size");
+    expect(/\.preview-evidence-toggle(?:,\s*\.[\w-]+)*\s*\{([^}]*)\}/u.exec(preview)?.[1]).not.toContain("font-size");
     const forced = usage.slice(usage.indexOf("@media (forced-colors: active)"));
     expect(forced).toContain(".usage-overview-chart-point-core { stroke: Canvas; }");
     expect(forced).not.toContain("fill: Canvas; }\n  .usage-overview-model-meter > i");

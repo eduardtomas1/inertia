@@ -1,3 +1,4 @@
+import type { ArchivedConversationsLoader } from "./sections/ArchivedChats";
 import type {
   AgentSkillSummary,
   AppSettings,
@@ -39,7 +40,8 @@ export interface SettingsViewProps {
   backendDefaults: ModelBackendDefault[];
   projects: Project[];
   conversations: Conversation[];
-  archived: Conversation[];
+  archivedCount?: number;
+  onLoadArchived?: ArchivedConversationsLoader;
   customAgents?: readonly CustomAgent[];
   skills?: readonly AgentSkillSummary[];
   databaseBackup?: DatabaseBackupStatus;
@@ -65,7 +67,7 @@ export interface SettingsViewProps {
   onCancelAppUpdateDownload: () => Promise<void>;
   onInstallAppUpdate: () => Promise<void>;
   onOpenAppRelease: () => Promise<void>;
-  onUnarchive: (conversation: Conversation) => void;
+  onUnarchive: (conversation: Conversation) => void | Promise<unknown>;
   onOpenConversation?: (conversationId: string) => boolean;
   onLoadBackendProfile: (profileId: string) => Promise<ModelBackendProfileDetail>;
   onCreateBackendProfile: (draft: ModelBackendProfileCreateDraft) => Promise<ModelBackendProfileDetail>;
@@ -82,7 +84,6 @@ export interface SettingsViewProps {
 export interface SettingsSectionContext extends Omit<SettingsViewProps, "target" | "initialSection" | "onSectionChange"> {
   target: SettingsTarget | null;
   regularProjects: Project[];
-  allConversations: Conversation[];
   onNavigate: (section: SettingsSection) => void;
   memory: SettingsSectionMemory;
 }

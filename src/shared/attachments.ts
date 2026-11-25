@@ -28,6 +28,17 @@ export const MAX_CHAT_ATTACHMENTS = 8;
 export const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_CHAT_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
 
+export const EXTRACTED_DOCUMENT_ATTACHMENT_MIME_TYPES = [
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/rtf",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation",
+  "application/x-ipynb+json",
+  "application/epub+zip",
+] as const;
+
 export const ACCEPTED_DOCUMENT_MIME_TYPES = [
   "application/octet-stream",
   "application/pdf",
@@ -36,6 +47,7 @@ export const ACCEPTED_DOCUMENT_MIME_TYPES = [
   "text/csv",
   "application/json",
   ...SPREADSHEET_ATTACHMENT_MIME_TYPES,
+  ...EXTRACTED_DOCUMENT_ATTACHMENT_MIME_TYPES,
 ] as const;
 
 export const ACCEPTED_ATTACHMENT_MIME_TYPES = [
@@ -46,6 +58,8 @@ export const ACCEPTED_ATTACHMENT_MIME_TYPES = [
 export type ImageAttachmentMimeType = (typeof IMAGE_ATTACHMENT_MIME_TYPES)[number];
 export type SpreadsheetAttachmentMimeType =
   (typeof SPREADSHEET_ATTACHMENT_MIME_TYPES)[number];
+export type ExtractedDocumentAttachmentMimeType =
+  (typeof EXTRACTED_DOCUMENT_ATTACHMENT_MIME_TYPES)[number];
 export type DocumentAttachmentMimeType = (typeof ACCEPTED_DOCUMENT_MIME_TYPES)[number];
 export type ChatAttachmentMimeType = (typeof ACCEPTED_ATTACHMENT_MIME_TYPES)[number];
 export type ChatAttachmentKind = "image" | "document";
@@ -76,6 +90,7 @@ export function attachmentLimitError(attachments: readonly { mimeType: string; s
   return imageBytes > MAX_IMAGE_ATTACHMENT_TOTAL_BYTES ? "Images exceed the 80 MiB message limit." : null;
 }
 export const MAX_SPREADSHEET_ATTACHMENT_EXPANDED_BYTES = 64 * 1024 * 1024;
+export const MAX_EXTRACTED_DOCUMENT_EXPANDED_BYTES = 32 * 1024 * 1024;
 
 const attachmentMimeByExtension: Readonly<Record<string, ChatAttachmentMimeType>> = {
   png: "image/png",
@@ -140,6 +155,51 @@ const attachmentDeclaredMimeAliases: Readonly<
     "application/x-xls",
     "application/xls",
   ],
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
+    "application/x-docx",
+    "application/docx",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/msword",
+  ],
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
+    "application/x-pptx",
+    "application/pptx",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/vnd.ms-powerpoint",
+  ],
+  "application/rtf": ["text/rtf", "text/richtext", "application/x-rtf"],
+  "application/vnd.oasis.opendocument.text": [
+    "application/x-odt",
+    "application/odt",
+    "application/zip",
+    "application/x-zip-compressed",
+  ],
+  "application/vnd.oasis.opendocument.spreadsheet": [
+    "application/x-ods",
+    "application/ods",
+    "application/zip",
+    "application/x-zip-compressed",
+  ],
+  "application/vnd.oasis.opendocument.presentation": [
+    "application/x-odp",
+    "application/odp",
+    "application/zip",
+    "application/x-zip-compressed",
+  ],
+  "application/x-ipynb+json": [
+    "application/json",
+    "application/x-json",
+    "text/json",
+    "text/plain",
+  ],
+  "application/epub+zip": [
+    "application/epub",
+    "application/x-epub+zip",
+    "application/zip",
+    "application/x-zip-compressed",
+  ],
 };
 
 const attachmentTypeLabels: Readonly<Record<ChatAttachmentMimeType, string>> = {
@@ -156,6 +216,16 @@ const attachmentTypeLabels: Readonly<Record<ChatAttachmentMimeType, string>> = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     "Excel workbook",
   "application/vnd.ms-excel": "Legacy Excel workbook",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    "Word document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+    "PowerPoint presentation",
+  "application/rtf": "RTF document",
+  "application/vnd.oasis.opendocument.text": "OpenDocument text",
+  "application/vnd.oasis.opendocument.spreadsheet": "OpenDocument spreadsheet",
+  "application/vnd.oasis.opendocument.presentation": "OpenDocument presentation",
+  "application/x-ipynb+json": "Jupyter notebook",
+  "application/epub+zip": "EPUB book",
 };
 
 const attachmentStorageExtension: Readonly<
@@ -173,6 +243,27 @@ const attachmentStorageExtension: Readonly<
   "application/json": "json",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
   "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/rtf": "rtf",
+  "application/vnd.oasis.opendocument.text": "odt",
+  "application/vnd.oasis.opendocument.spreadsheet": "ods",
+  "application/vnd.oasis.opendocument.presentation": "odp",
+  "application/x-ipynb+json": "ipynb",
+  "application/epub+zip": "epub",
+};
+
+const extendedAttachmentMimeByExtension: Readonly<
+  Record<string, ExtractedDocumentAttachmentMimeType>
+> = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  rtf: "application/rtf",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  ipynb: "application/x-ipynb+json",
+  epub: "application/epub+zip",
 };
 
 export function chatAttachmentKind(
@@ -199,7 +290,7 @@ export function chatAttachmentMimeTypeForName(
  * active content. Text previews independently validate a bounded prefix.
  */
 const PLAIN_TEXT_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set((
-  "log text rst tex tsv jsonl ndjson jsonc json5 ipynb mdx "
+  "log text rst tex tsv jsonl ndjson jsonc json5 mdx "
   + "yaml yml toml ini cfg conf properties xml html htm "
   + "css scss less js mjs cjs jsx ts tsx vue svelte "
   + "py rb go rs java kt kts scala c h cc cpp hpp "
@@ -223,7 +314,7 @@ const PLAIN_TEXT_DECLARED_MIME_TYPES: ReadonlySet<string> = new Set([
   "application/x-python", "application/x-python-code", "application/x-ruby",
   "application/x-perl", "application/x-tex", "application/x-latex",
   "application/x-ndjson", "application/jsonl", "application/json", "application/json5",
-  "application/graphql", "application/x-protobuf", "application/x-ipynb+json",
+  "application/graphql", "application/x-protobuf",
   "application/vnd.dart", "application/x-tiled-tsx", "application/x-genesis-32x-rom",
   // Chromium classifies a .ts file by extension as an MPEG transport stream.
   "video/mp2t", "video/vnd.dlna.mpeg-tts",
@@ -251,6 +342,7 @@ function isPlainTextAttachmentName(name: string): boolean {
   const extension = attachmentNameExtension(name);
   return extension !== null
     && !Object.hasOwn(attachmentMimeByExtension, extension)
+    && !Object.hasOwn(extendedAttachmentMimeByExtension, extension)
     && PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension);
 }
 
@@ -266,12 +358,18 @@ export function safeChatAttachmentMimeTypeForName(
   if (Object.hasOwn(attachmentMimeByExtension, extension)) {
     return attachmentMimeByExtension[extension]!;
   }
+  if (Object.hasOwn(extendedAttachmentMimeByExtension, extension)) {
+    return extendedAttachmentMimeByExtension[extension]!;
+  }
   return PLAIN_TEXT_ATTACHMENT_EXTENSIONS.has(extension)
     || PLAIN_TEXT_ATTACHMENT_NAMES.has(leaf) ? "text/plain" : "application/octet-stream";
 }
 
 export function storedAttachmentTypeMatchesName(name: string, mimeType: string): boolean {
-  return mimeType === "application/octet-stream" || safeChatAttachmentMimeTypeForName(name) === mimeType;
+  if (mimeType === "application/octet-stream") return true;
+  const inferred = safeChatAttachmentMimeTypeForName(name);
+  if (inferred === mimeType) return true;
+  return inferred === "application/x-ipynb+json" && mimeType === "text/plain";
 }
 
 export function isPotentialChatAttachment(
@@ -300,6 +398,13 @@ export function isSpreadsheetAttachmentMimeType(
   mimeType: ChatAttachmentMimeType,
 ): mimeType is SpreadsheetAttachmentMimeType {
   return (SPREADSHEET_ATTACHMENT_MIME_TYPES as readonly string[])
+    .includes(mimeType);
+}
+
+export function isExtractedDocumentAttachmentMimeType(
+  mimeType: string,
+): mimeType is ExtractedDocumentAttachmentMimeType {
+  return (EXTRACTED_DOCUMENT_ATTACHMENT_MIME_TYPES as readonly string[])
     .includes(mimeType);
 }
 

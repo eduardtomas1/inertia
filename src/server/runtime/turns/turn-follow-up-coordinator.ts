@@ -1,4 +1,5 @@
 import { snapshotPromptContext } from "../../../shared/snapshots";
+import { previewAnnotationPromptContext } from "../../../shared/preview-annotation";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { MAX_DOCUMENT_CONTEXT_TOTAL_BYTES } from "../attachments/document-attachment-context";
 import type { ChatAttachment } from "../../../shared/contracts";
@@ -121,7 +122,10 @@ export class TurnFollowUpCoordinator {
       || !this.options.providers.steer
       || signal?.aborted
     ) return { kind: "unavailable" };
-    const snapshotContext = snapshotPromptContext(attachments);
+    const snapshotContext = [
+      snapshotPromptContext(attachments),
+      previewAnnotationPromptContext(attachments),
+    ].filter(Boolean).join("\n\n");
     if (Buffer.byteLength(snapshotContext, "utf8") > MAX_DOCUMENT_CONTEXT_TOTAL_BYTES) {
       throw new Error("Snapshot accessibility context exceeds the follow-up attachment limit.");
     }

@@ -6,6 +6,9 @@ import type {
   ServerEvent,
   WorkspaceRun,
 } from "@shared/contracts";
+import type { EditorId } from "@shared/editor-ids";
+
+import { useEditorPreference } from "../../hooks/useAvailableEditors";
 
 import type { useActivityActions } from "../../hooks/useActivityActions";
 import type { useWorkspaceLayout } from "../../hooks/useWorkspaceLayout";
@@ -71,6 +74,7 @@ export function DetachedChatHeader({
 }: DetachedChatHeaderProps): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [pullRequestDialogOpen, setPullRequestDialogOpen] = useState(false);
+  const { preferredEditor, detectedEditors } = useEditorPreference();
   const controls = <DetachedWindowActions {...windowActions} />;
   const gitStatus = tools.gitStatus;
   const rootRepository = rootGitMutationScope(gitStatus);
@@ -109,6 +113,13 @@ export function DetachedChatHeader({
     relativePath: ".",
     action,
   });
+  const openCheckoutInEditor = (editor: EditorId): void => openProjectPath({
+    projectId: project.id,
+    conversationId: conversation.id,
+    relativePath: ".",
+    action: "open-in-editor",
+    editor,
+  });
   const openPullRequest = (): void => {
     if (!rootRepository) {
       setActionError("Refresh repository status before opening a pull request.");
@@ -134,6 +145,8 @@ export function DetachedChatHeader({
         runs={toolScene?.runs ?? null}
         busy={Boolean(busyAction)}
         checkoutPath={conversation.worktreePath ?? project.path}
+        preferredEditor={preferredEditor}
+        detectedEditors={detectedEditors}
         conversationMenu={conversationMenu}
         onOpenSettings={ignoreConversation}
         onCloseSettings={ignoreConversation}
@@ -141,6 +154,7 @@ export function DetachedChatHeader({
         onOpenFolder={() => openCheckout("open-externally")}
         onRevealFolder={() => openCheckout("reveal")}
         onOpenFiles={() => layout.openSurface("files")}
+        onOpenInEditor={openCheckoutInEditor}
         onRefreshBranches={() => tools.loadBranches()}
         onSwitchBranch={(name, remote) => tools.mutateBranch("git.branch.switch", name, remote)}
         onCreateBranch={(name) => tools.mutateBranch("git.branch.create", name)}

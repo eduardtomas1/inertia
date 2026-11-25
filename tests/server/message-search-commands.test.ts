@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type WebSocket from "ws";
 import { describe, expect, it, vi } from "vitest";
 import { MessageSearchController, createMessageSearchCommandHandler } from "../../src/server/runtime/commands/message-search-commands";
-import type { MessageSearchResult, MessageSearchTarget } from "../../src/shared/message-search";
+import type { MessageSearchContinuation, MessageSearchResult, MessageSearchTarget } from "../../src/shared/message-search";
 import type { RuntimeStore } from "../../src/server/database";
 
 const socket = (): WebSocket => new EventEmitter() as WebSocket;
@@ -47,6 +47,20 @@ describe("message search runtime ownership", () => {
     expect(signals[0]?.aborted).toBe(true);
     await searches.close();
     await Promise.all(pending);
+  });
+
+  it("forwards a validated continuation to the isolated worker", async () => {
+    const worker = vi.fn(async (_path: string, query: string, _signal: AbortSignal, _continuation?: MessageSearchContinuation | null) => result(query));
+    const searches = new MessageSearchController("private.sqlite", worker);
+    const send = vi.fn();
+    const handler = createMessageSearchCommandHandler({ searches, store: { messageSearchTarget: () => null }, reveal: vi.fn(), send });
+    const client = socket();
+    const continuation = { createdAt: "2026-09-07T00:00:00.000Z", messageId: "message-1" };
+    await handler(client, { type: "conversation.messages.search", requestId: "older", payload: { query: "needle", continuation } });
+    await handler(client, { type: "conversation.messages.search", requestId: "first", payload: { query: "needle" } });
+    expect(worker.mock.calls.map((call) => call[3])).toEqual([continuation, null]);
+    expect(send).toHaveBeenCalledWith(client, { type: "request.result", requestId: "older", result: result("needle") });
+    await searches.close();
   });
 
   it("revalidates all result identities and archive state before routing focus", async () => {

@@ -35,6 +35,10 @@ import {
   type CompactOnReturnSetting,
   type ConversationCompactionState,
 } from "../compact-on-return";
+import {
+  DEFAULT_PREFERRED_EDITOR,
+  type PreferredEditor,
+} from "../editor-ids";
 import type { AgentTurnStatus } from "../turn-lifecycle";
 import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
@@ -245,6 +249,7 @@ export interface AppSettings {
   codexBinaryPath: string;
   /** Public GitHub or GitLab repository URL used to load releases for Discord announcements. */
   discordReleaseRepositoryUrl: string;
+  preferredEditor: PreferredEditor;
 }
 
 export type AppSettingsUpdate = Omit<Partial<AppSettings>, "workingIndicator" | "completionSound" | "quotaWarnings"> & {
@@ -342,9 +347,15 @@ export interface RuntimeSyncCursor {
   latestSequence: number;
 }
 
+export type ArchivedConversationRef = Pick<Conversation, "id" | "projectId" | "title" | "providerId"> & {
+  archivedAt: string;
+};
+
 export interface AppSnapshot {
   projects: Project[];
   conversations: ConversationShell[];
+  archivedConversationRefs?: ArchivedConversationRef[];
+  archivedConversationCount?: number;
   runs: WorkspaceRun[];
   providers: ProviderInfo[];
   /**
@@ -418,4 +429,5 @@ export const defaultSettings: AppSettings = {
   defaultInteractionMode: "build",
   codexBinaryPath: "",
   discordReleaseRepositoryUrl: "",
+  preferredEditor: DEFAULT_PREFERRED_EDITOR,
 };

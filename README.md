@@ -50,7 +50,7 @@ Inertia is a desktop app for working with coding agents. Each chat belongs to a 
 
 ## Find anything
 
-Press **Ctrl/Cmd+K** to find commands, settings, projects, chats and saved messages. Type at least two characters to search your own messages and the agents' final answers across every unarchived chat, then open a match to jump to its turn.
+Press **Ctrl/Cmd+K** to find commands, settings, projects, chats and saved messages. Type at least two characters to search your own messages and the agents' final answers across every unarchived chat, then open a match to jump to its turn. Matches come newest first; choose **Search older messages** to keep going back through your whole history.
 
 <img src="docs/screenshots/inertia-message-search.png" alt="The command palette searching messages and agent answers across projects" />
 

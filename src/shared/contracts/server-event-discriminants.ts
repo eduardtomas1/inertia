@@ -303,12 +303,16 @@ export function snapshotIdentityCollectionsCoherent(value: IdentityRecord): bool
   const profiles = (value.backendProfiles ?? []) as IdentityRecord[];
   const defaults = (value.backendDefaults ?? []) as IdentityRecord[];
   const projectIds = new Set(projects.map((project) => project.id));
-  const conversationProjects = new Map(conversations.map((conversation) => [
+  const archivedRefs = (value.archivedConversationRefs ?? []) as IdentityRecord[];
+  const conversationProjects = new Map([...archivedRefs, ...conversations].map((conversation) => [
     conversation.id, conversation.projectId,
   ]));
   const defaultKeys = defaults.map((entry) => `${String(entry.scope)}:${String(entry.projectId)}`);
   return uniqueIdentity(projects)
     && uniqueIdentity(conversations)
+    && uniqueIdentity(archivedRefs)
+    && conversationProjects.size === conversations.length + archivedRefs.length
+    && archivedRefs.every((ref) => projectIds.has(ref.projectId))
     && uniqueIdentity(runs)
     && uniqueIdentity(providers)
     && uniqueIdentity(operations)

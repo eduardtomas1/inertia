@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import clsx from "clsx";
 
 import type { SettingsSection, SettingsTarget } from "../lib/settingsTarget";
+import { loadAvailableEditors } from "../hooks/useAvailableEditors";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { structurallyEqual } from "../utils/structuralEquality";
 import { SettingsPage } from "./settings/SettingsLayout";
@@ -120,6 +121,7 @@ const SettingsShell = memo(function SettingsShell({
   const settlingRow = useRef<MutationObserver | null>(null);
   useEffect(() => {
     if (focusRootOnMount.current) rootRef.current?.focus();
+    void loadAvailableEditors(true);
     return () => settlingRow.current?.disconnect();
   }, []);
   const resolveFocus = useCallback(() => {
@@ -171,16 +173,11 @@ const SettingsShell = memo(function SettingsShell({
     setQuery("");
     setLocalTarget({ base: externalTarget, target: { section: row.sectionId, anchor: row.id, ...(projectId ? { projectId } : {}) } });
   }, [externalTarget, memory, regularProjects, target]);
-  const allConversations = useMemo(
-    () => [...view.conversations, ...view.archived],
-    [view.archived, view.conversations],
-  );
   const definition = settingsSectionDefinition(section);
   const context: SettingsSectionContext = {
     ...view,
     target,
     regularProjects,
-    allConversations,
     onNavigate: navigate,
     memory,
   };

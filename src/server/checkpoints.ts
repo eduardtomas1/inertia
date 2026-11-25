@@ -17,15 +17,32 @@ import {
 } from "./git/runner";
 import { GitError, isGitProcessTreeTerminationFailure } from "./git/types";
 import { headCommit } from "./git/status";
-
-export class CheckpointError extends Error {}
+import {
+  CheckpointError,
+  INERTIA_CHECKPOINT_REF_PREFIX,
+  isValidCheckpointRef,
+  resolveCheckpointRepository,
+  type CheckpointOperationOptions,
+  type CheckpointRepositoryOptions,
+} from "./checkpoint-refs";
+export {
+  checkpointConversationIdFromRef,
+  CheckpointError,
+  deleteCheckpointRefs,
+  deleteCheckpoints,
+  deleteCheckpointsForConversations,
+  INERTIA_CHECKPOINT_REF_PREFIX,
+  isValidCheckpointRef,
+  listCheckpointRefs,
+  resolveCheckpointCommonGitDir,
+  resolveCheckpointRepository,
+  type CheckpointOperationOptions,
+  type CheckpointRepositoryOptions,
+  type DeleteCheckpointRefsOptions,
+  type ListCheckpointRefsOptions,
+} from "./checkpoint-refs";
 
 type RunResult = { stdout: Buffer; stderr: Buffer };
-
-export interface CheckpointOperationOptions {
-  deadlineAt?: number;
-  signal?: AbortSignal;
-}
 
 const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
 const CHECKPOINT_FAILURE = "Git could not create the checkpoint.";
@@ -858,12 +875,18 @@ export async function assertCheckpointExists(
   ref: string,
   options: CheckpointOperationOptions = {},
 ): Promise<void> {
+  if (!isValidCheckpointRef(ref)) {
+    throw new CheckpointError(
+      "This checkpoint is no longer in the repository, so it cannot be restored.",
+    );
+  }
   const objectType = (
     await runGit(
       repositoryPath,
       checkpointGitArguments([
         "for-each-ref",
         "--format=%(objecttype)",
+        "--",
         ref,
       ]),
       {},
@@ -963,21 +986,19 @@ export async function deleteCheckpoint(
   repositoryPath: string,
   ref: string,
   conversationId: string,
+  options: CheckpointRepositoryOptions = {},
 ): Promise<void> {
-  const prefix = `refs/inertia/checkpoints/${conversationId}/`;
-  if (
-    !ref.startsWith(prefix)
-    || !/^refs\/inertia\/checkpoints\/[0-9a-f-]{36}\/[0-9a-f-]{36}$/u
-      .test(ref)
-  ) {
+  const prefix = `${INERTIA_CHECKPOINT_REF_PREFIX}${conversationId}/`;
+  if (!ref.startsWith(prefix) || !isValidCheckpointRef(ref)) {
     throw new CheckpointError("The checkpoint reference is invalid.");
   }
+  const gitRoot = await resolveCheckpointRepository(repositoryPath, options);
   const hooksDirectory = await mkdtemp(
     join(tmpdir(), "inertia-checkpoint-hooks-"),
   );
   try {
     await runGit(
-      repositoryPath,
+      gitRoot,
       checkpointGitArguments([
         "-c",
         `core.hooksPath=${hooksDirectory}`,
@@ -985,34 +1006,11 @@ export async function deleteCheckpoint(
         "-d",
         ref,
       ]),
-    );
-  } finally {
-    await rm(hooksDirectory, {
-      force: true,
-      recursive: true,
-    }).catch(() => undefined);
-  }
-}
-
-export async function deleteCheckpoints(repositoryPath: string, conversationId: string): Promise<void> {
-  if (!/^[0-9a-f-]{36}$/u.test(conversationId)) throw new CheckpointError("The checkpoint namespace is invalid.");
-  const prefix = `refs/inertia/checkpoints/${conversationId}/`;
-  const refs = (await runGit(repositoryPath, ["for-each-ref", "--format=%(refname)", prefix])).stdout.toString("utf8").split("\n").map((ref) => ref.trim()).filter((ref) => ref.startsWith(prefix));
-  if (refs.length === 0) return;
-  const hooksDirectory = await mkdtemp(
-    join(tmpdir(), "inertia-checkpoint-hooks-"),
-  );
-  try {
-    await runGit(
-      repositoryPath,
-      checkpointGitArguments([
-        "-c",
-        `core.hooksPath=${hooksDirectory}`,
-        "update-ref",
-        "--stdin",
-      ]),
       {},
-      Buffer.from(refs.map((ref) => `delete ${ref}\n`).join(""), "utf8"),
+      undefined,
+      1024 * 1024,
+      options.deadlineAt,
+      options.signal,
     );
   } finally {
     await rm(hooksDirectory, {

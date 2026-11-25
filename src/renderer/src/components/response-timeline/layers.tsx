@@ -3,7 +3,11 @@ import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
-import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "@shared/turn-checkpoint";
+import {
+  CHECKPOINT_EXPIRED_DESCRIPTION,
+  CHECKPOINT_EXPIRED_LABEL,
+  TURN_CHECKPOINT_UNAVAILABLE_TITLE,
+} from "@shared/turn-checkpoint";
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
@@ -150,10 +154,30 @@ export function UserRequestLayer({
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
+  const checkpointExpired = Boolean(turn.checkpoint?.expiredAt);
+  const revertDisabled = props.checkpointRestoreDisabled || checkpointExpired;
   const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
     <div className="message-meta">
       <MessageOrigin message={turn.userMessage} />
-      {turn.checkpoint && <TooltipButton className="message-revert" tooltip={props.checkpointRestoreDisabled ? "Stop the active run before restoring a checkpoint" : "Restore the project to before this turn"} disabled={props.checkpointRestoreDisabled} onClick={() => props.onRevertCheckpoint(turn.checkpoint!)}><RotateCcw size={14} />Revert</TooltipButton>}
+      {turn.checkpoint && (
+        <TooltipButton
+          className="message-revert"
+          data-checkpoint-expired={checkpointExpired ? "true" : undefined}
+          aria-label={checkpointExpired ? `Revert (${CHECKPOINT_EXPIRED_LABEL.toLowerCase()})` : undefined}
+          tooltip={checkpointExpired
+            ? CHECKPOINT_EXPIRED_DESCRIPTION
+            : props.checkpointRestoreDisabled
+              ? "Stop the active run before restoring a checkpoint"
+              : "Restore the project to before this turn"}
+          disabled={revertDisabled}
+          onClick={() => {
+            if (!checkpointExpired) props.onRevertCheckpoint(turn.checkpoint!);
+          }}
+        >
+          <RotateCcw size={14} aria-hidden="true" />
+          {checkpointExpired ? CHECKPOINT_EXPIRED_LABEL : "Revert"}
+        </TooltipButton>
+      )}
       {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
     </div>
   );
@@ -571,6 +595,7 @@ export function SupportingLedgerLayer({
   turn,
   props,
   previousArtifactTurnId,
+  previousArtifactCompareExpired = false,
   durationShownAbove = false,
   onBeforeToggle,
   onAfterToggle,
@@ -578,6 +603,7 @@ export function SupportingLedgerLayer({
   turn: ResponseTurn;
   props: ResponseTimelineProps;
   previousArtifactTurnId: string | null;
+  previousArtifactCompareExpired?: boolean;
   durationShownAbove?: boolean;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
@@ -622,6 +648,7 @@ export function SupportingLedgerLayer({
         <ChangedFilesSummary
           artifact={turn.gitArtifact}
           previousTurnId={previousArtifactTurnId}
+          previousCompareExpired={previousArtifactCompareExpired}
           props={props}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}

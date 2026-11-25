@@ -3,7 +3,8 @@ import type {
   Dispatch,
   SetStateAction,
 } from "react";
-import { lazy, memo, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { EditorId } from "@shared/editor-ids";
 import type {
   AppSettings,
   AppSnapshot,
@@ -29,6 +30,7 @@ import type {
   WorkspacePanelActions,
 } from "../hooks/useWorkspaceLayout";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { EditorPreferenceContext, useAvailableEditors } from "../hooks/useAvailableEditors";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { useStableActions } from "../hooks/useStableController";
 import { forgetCalledAgent } from "./composer/calledAgentStorage";
@@ -532,6 +534,11 @@ export const AppLayout = memo(function AppLayout({
       actions.selectConversation(thread);
       setView("workspace");
     },
+    openArchivedConversation: (conversationId: string) => {
+      void actions.run("conversation.select", { type: "conversation.select", payload: { conversationId } })
+        .then(() => setView("workspace"))
+        .catch(() => undefined);
+    },
     open: () => setView("tasks"),
     openTask: (id: string) => {
       setOpenTaskRequest((current) => ({ id, nonce: (current?.nonce ?? 0) + 1 }));
@@ -613,6 +620,11 @@ export const AppLayout = memo(function AppLayout({
     ...workspaceBodyStyle,
     "--workspace-corner-controls-width": `${cornerControlsVisible ? cornerControlsWidth : 0}px`,
   } as CSSProperties;
+  const { editors: detectedEditors } = useAvailableEditors();
+  const editorPreference = useMemo(() => ({
+    preferredEditor: settings.preferredEditor,
+    detectedEditors,
+  }), [detectedEditors, settings.preferredEditor]);
   const openCheckout = (action: "open-externally" | "reveal"): void => {
     if (!project) return;
     actions.openProjectPath({
@@ -620,6 +632,16 @@ export const AppLayout = memo(function AppLayout({
       ...(conversation ? { conversationId: conversation.id } : {}),
       relativePath: ".",
       action,
+    });
+  };
+  const openCheckoutInEditor = (editor: EditorId): void => {
+    if (!project) return;
+    actions.openProjectPath({
+      projectId: project.id,
+      ...(conversation ? { conversationId: conversation.id } : {}),
+      relativePath: ".",
+      action: "open-in-editor",
+      editor,
     });
   };
   const openPullRequest = (): void => {
@@ -704,6 +726,7 @@ export const AppLayout = memo(function AppLayout({
   const sidebarMotion = useSidebarCollapseMotion(sidebarCollapsed, mobileNavigation, appShellRef);
 
   return (
+    <EditorPreferenceContext.Provider value={editorPreference}>
     <div
       ref={appShellRef}
       className={`app-shell platform-${platform}${
@@ -848,6 +871,8 @@ export const AppLayout = memo(function AppLayout({
             busy={Boolean(busyAction)}
             checkoutPath={headerConversation?.worktreePath ?? project?.path ?? null}
             filesAvailable={!workspaceToolsUnavailableReason}
+            preferredEditor={settings.preferredEditor}
+            detectedEditors={detectedEditors}
             conversationMenu={headerConversationMenu}
             linkedTask={linkedTask}
             onOpenTask={tasksActions.openTask}
@@ -867,6 +892,7 @@ export const AppLayout = memo(function AppLayout({
             onOpenFolder={() => openCheckout("open-externally")}
             onRevealFolder={() => openCheckout("reveal")}
             onOpenFiles={() => scenePanel.openSurface("files")}
+            onOpenInEditor={openCheckoutInEditor}
             {...(project && actions.openProjectSettings ? {
               onAddAction: () => actions.openProjectSettings?.(project.id),
             } : {})}
@@ -946,6 +972,7 @@ export const AppLayout = memo(function AppLayout({
                   projectScopeId={projectScopeId}
                   request={tasksActions.request}
                   onOpenConversation={tasksActions.openConversation}
+                  onOpenArchivedConversation={tasksActions.openArchivedConversation}
                   onError={setActionError}
                   openTaskRequest={openTaskRequest}
                   focusAddRequest={tasksFocusAddRequest}
@@ -1175,5 +1202,6 @@ export const AppLayout = memo(function AppLayout({
         onLoadError={setActionError}
       />
     </div>
+    </EditorPreferenceContext.Provider>
   );
 });

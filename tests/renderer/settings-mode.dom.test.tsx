@@ -7,6 +7,7 @@ import { SettingsView } from "../../src/renderer/src/components/SettingsView";
 import { useSettingsMode } from "../../src/renderer/src/hooks/useSettingsMode";
 import { conversation } from "./composer-fixtures";
 import { settingsViewProps } from "./settings-view-fixtures";
+import { archivedChatsProps } from "./archived-chats-fixtures";
 
 type SettingsOverrides = Parameters<typeof settingsViewProps>[0];
 
@@ -199,20 +200,20 @@ describe("Settings as a mode", () => {
 
   it("clears the archived chats filter with Escape before leaving", async () => {
     const archived = { ...conversation("33333333-3333-4333-8333-333333333333"), title: "Old investigation", archivedAt: "2026-09-01T00:00:00.000Z" };
-    render(<Harness overrides={{ archived: [archived] }} />);
+    render(<Harness overrides={archivedChatsProps([archived])} />);
     openFrom("Open settings");
     fireEvent.click(screen.getByRole("button", { name: "Data" }));
     await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Data" })).toHaveFocus());
     const filter = await screen.findByRole("searchbox", { name: "Filter archived chats" });
     filter.focus();
     fireEvent.change(filter, { target: { value: "zebra" } });
-    expect(screen.getByText("No archived chats match this filter.")).toBeInTheDocument();
+    expect(await screen.findByText("No archived chats match this filter.")).toBeInTheDocument();
 
     const first = pressEscape(filter);
     expect(first.defaultPrevented).toBe(true);
     expect(filter).toHaveValue("");
     expect(filter).toHaveFocus();
-    expect(screen.getByText("Old investigation")).toBeInTheDocument();
+    expect(await screen.findByText("Old investigation")).toBeInTheDocument();
     expect(screen.getByLabelText("Current view")).toHaveTextContent("settings");
   });
 

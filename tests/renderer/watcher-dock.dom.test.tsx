@@ -512,6 +512,27 @@ describe("watcher dock", () => {
     expect(announced).not.toContain("You paused it.");
   });
 
+  it("keeps Resume unavailable when the archived watcher chat is only a snapshot reference", async () => {
+    const paused = link({ status: "paused", pauseReason: "user" });
+    const runtime = watcherRuntime({ link: () => paused });
+    render(<Dock model={surfaceModel({
+      watchers: [paused],
+      request: runtime.request,
+      shells: [shell(WATCHED_ID, "Refactor parser")],
+      archivedConversations: new Map([[paused.watcherConversationId, {
+        id: paused.watcherConversationId, projectId: paused.projectId, title: "Watcher",
+        providerId: "codex", archivedAt: NOW,
+      }]]),
+    })}
+    />);
+    const aside = await dock();
+    expect(within(aside.querySelector<HTMLElement>(".watcher-notices")!).getByText("Unarchive the watcher chat to resume it.")).toBeInTheDocument();
+    const resume = within(aside).getByRole("button", { name: "Resume" });
+    expect(resume).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(resume);
+    expect(runtime.commands.some(({ type }) => type === "watcher.resume")).toBe(false);
+  });
+
   it("keeps Resume unavailable while the watched chat is archived, whatever the pause reason", async () => {
     const paused = link({ status: "paused", pauseReason: "user" });
     const runtime = watcherRuntime({ link: () => paused });

@@ -2,6 +2,7 @@ import type {
   GitStatusSnapshot,
   ProjectAction,
 } from "@shared/contracts";
+import type { DetectedEditor, EditorId, PreferredEditor } from "@shared/editor-ids";
 
 import type { WorkspaceRunsModel } from "../../utils/workspaceRuns";
 import { FocusFirstMenuItem } from "./FocusFirstMenuItem";
@@ -21,6 +22,8 @@ export interface WorkspaceHeaderActionsProps {
   runs: WorkspaceRunsModel | null;
   checkoutPath: string | null;
   filesAvailable: boolean;
+  preferredEditor?: PreferredEditor;
+  detectedEditors?: readonly DetectedEditor[];
   gitStatus: GitStatusSnapshot | null;
   busy: boolean;
   gitNotice: string | null;
@@ -29,6 +32,7 @@ export interface WorkspaceHeaderActionsProps {
   onOpenFolder: () => void;
   onRevealFolder: () => void;
   onOpenFiles: () => void;
+  onOpenInEditor?: (editor: EditorId) => void;
   onCommit: () => void;
   onPush: () => void;
   onPull: () => void;
@@ -50,6 +54,8 @@ export function WorkspaceHeaderActions({
   runs,
   checkoutPath,
   filesAvailable,
+  preferredEditor,
+  detectedEditors,
   gitStatus,
   busy,
   gitNotice,
@@ -58,6 +64,7 @@ export function WorkspaceHeaderActions({
   onOpenFolder,
   onRevealFolder,
   onOpenFiles,
+  onOpenInEditor,
   onCommit,
   onPush,
   onPull,
@@ -88,9 +95,12 @@ export function WorkspaceHeaderActions({
         checkoutName={projectName}
         checkoutPath={checkoutPath}
         filesAvailable={filesAvailable}
+        {...(preferredEditor ? { preferredEditor } : {})}
+        {...(detectedEditors ? { detectedEditors } : {})}
         onOpenFolder={onOpenFolder}
         onRevealFolder={onRevealFolder}
         onOpenFiles={onOpenFiles}
+        {...(onOpenInEditor ? { onOpenInEditor } : {})}
         onRequestMenuClose={onRequestMenuClose}
       />
       {showGit && collapsed && <div role="separator" className="header-menu-separator" />}

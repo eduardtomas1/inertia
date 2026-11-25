@@ -66,7 +66,9 @@ export function buildComposerTurnRequest(
 ): { visibleContent: string; context?: TurnRequestContext } {
   const visibleContent = message.trim()
     || (attachments.length > 0
-      ? "Please inspect the attached file."
+      ? (attachments.some(({ previewAnnotation }) => Boolean(previewAnnotation))
+          ? "Please inspect the attached page annotation."
+          : "Please inspect the attached file.")
       : previewUrl
         ? "Please inspect the current preview."
         : conversationContextPacketIds.length > 0

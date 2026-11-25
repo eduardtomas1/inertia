@@ -1,7 +1,7 @@
 import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
-import { HtmlRenderRuntimeStatusContext } from "./components/response-timeline/html-render-runtime";
+import { TimelineRuntimeProviders } from "./components/response-timeline/TimelineRuntimeProviders";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SettingsProfilePanel, SettingsSection, SettingsTarget } from "./lib/settingsTarget";
 import { useSettingsMode } from "./hooks/useSettingsMode";
@@ -1187,7 +1187,7 @@ export default function App(): React.JSX.Element {
   return (
     <UsageLimitsProvider request={request} status={connection.status}>
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
-    <HtmlRenderRuntimeStatusContext.Provider value={connection.status}>
+    <TimelineRuntimeProviders status={connection.status} request={request}>
     <DuoJudgeNoticeContext.Provider value={duoJudgeNotices}>
     <LibraryAnswerContext.Provider value={libraryAnswers}>
     <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
@@ -1242,7 +1242,7 @@ export default function App(): React.JSX.Element {
     </WatcherContext.Provider>
     </LibraryAnswerContext.Provider>
     </DuoJudgeNoticeContext.Provider>
-    </HtmlRenderRuntimeStatusContext.Provider>
+    </TimelineRuntimeProviders>
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>
   );

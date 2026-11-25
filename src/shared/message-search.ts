@@ -8,8 +8,10 @@ export type MessageSearchTarget = {
 export type MessageSearchHit = MessageSearchTarget & {
   role: "user" | "assistant"; createdAt: string; snippet: string; matchStart: number; matchEnd: number;
 };
+export type MessageSearchContinuation = { createdAt: string; messageId: string };
 export type MessageSearchResult = {
   kind: "conversation.messages.search"; query: string; hits: MessageSearchHit[]; hasMore: boolean; incomplete: boolean;
+  continuation?: MessageSearchContinuation | null; indexing?: boolean;
 };
 
 /** Literal Unicode-aware matching; punctuation never becomes query syntax. */

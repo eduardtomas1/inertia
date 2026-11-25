@@ -17,12 +17,13 @@ import {
   type RuntimeSyncCursor,
 } from "../shared/contracts";
 import { RuntimeStore } from "./database";
+import { runtimeDatabaseCompactionBlocker } from "./persistence/database-compaction";
 import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { createConversationTitleRuntime } from "./runtime/conversation-title-service";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
-import { resolveAuthoritativeProjectPath } from "./project-path";
+import { resolveAuthoritativeProjectPath, resolveEditorContext } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { createManualUsageRefresh, createRateLimitChangeSignal, createTurnUsageRefresh, startIdleRateLimitRefresh, type ProviderUsageRefreshDependencies } from "./runtime/provider-usage-refresh";
@@ -64,6 +65,7 @@ import { createDetachedChatRuntimeSecurity } from "./runtime/detached-chat-runti
 import { SnapshotBroadcastCoalescer } from "./runtime/snapshot-broadcast-coalescer";
 import { WorkspaceRunController } from "./runtime/workspace-run-controller";
 import { startProjectAutoPull } from "./runtime/project-auto-pull";
+import { messageSearchIndexIdle, startMessageSearchIndexing } from "./runtime/message-search-indexing";
 import {
   createRuntimeCommandExecutor,
 } from "./runtime/commands/command-router";
@@ -122,11 +124,14 @@ import {
 import {
   writeDatabaseRecoveryExportFile,
 } from "./persistence/database-export-file";
+import { reconcileRecoveryAttachmentStaging } from "./persistence/database-recovery-bundle";
 import { runRecoveryImportWorker } from "./persistence/database-recovery-import-worker-client";
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
 import { DatabaseRecoveryImportAdmission } from "./database-recovery-import-admission";
+import { DATABASE_VACUUM_REFUSAL, DatabaseWriteGate } from "./runtime/database-write-gate";
+import { privateConnectRefusal } from "./runtime/private-connect-admission";
 import { gitScanCoordinator } from "./git/scan-coordinator";
 import { gitInspectionLifecycle } from "./git/inspection-lifecycle";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
@@ -185,7 +190,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   // that never became usable.
   const postReady = new PostReadyWork({
     isClosed: () => closed, isBlocked: () => runtimeSafetyLock, track: (operation) => trackRuntimeOperation(operation),
-    startBackups: () => store.startBackups(),
+    startBackups: () => { store.startBackups(); store.startCompaction(); },
     refreshProjectIdentities: () => projectIdentities.refreshAll(projectIdentityCandidates),
     afterProjectIdentityRefresh: () => testOnlyProjectIdentityRefresh,
     reconcileWorkspaces: () => Promise.all([
@@ -194,7 +199,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       Promise.resolve(watchers?.resume()),
     ]),
     reconcileArtifacts: () => turnGitArtifacts.reconcile(),
-    snapshotDigest: () => shellSnapshotDigest(currentSnapshot()),
+    snapshotDigest: () => (store.isDatabaseVacuuming() ? "" : shellSnapshotDigest(currentSnapshot())),
     broadcastSnapshot: () => broadcastSnapshot(),
     startProviderDiscovery: () => {
       if (!enableProviders) return;
@@ -217,7 +222,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   });
   const recoveryImportAdmission = new DatabaseRecoveryImportAdmission();
-  let activeRuntimeCommands = 0;
+  let activeRuntimeCommands = 0, activeNonStorageCommands = 0;
   const updatePreparation = new RuntimeUpdatePreparationGate({
     isClosed: () => closed,
     activeRuntimeCommands: () => activeRuntimeCommands,
@@ -236,12 +241,23 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       await postReady.artifactReconciliation;
     },
   });
-  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
-    updatePreparation.track(operation);
+  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> => updatePreparation.track(operation);
+  const trackNonStorageOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    activeNonStorageCommands += 1;
+    try { return await trackRuntimeOperation(operation); } finally { activeNonStorageCommands -= 1; }
+  };
+  const assertDatabaseReadable = (): void => {
+    if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+    if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+  };
+  const databaseWrites = new DatabaseWriteGate({ isDatabaseVacuuming: () => store.isDatabaseVacuuming(), whenDatabaseWritable: () => store.whenDatabaseWritable() });
+  const trackDatabaseWrite = <T>(operation: () => Promise<T>): Promise<T> => databaseWrites.run(() => trackRuntimeOperation(operation));
+  const admitBackgroundWork = <T>(operation: () => Promise<T>): Promise<T> => recoveryImportAdmission.admit(() => trackDatabaseWrite(operation));
   const streamingTrace = createTestStreamingTrace(dataDirectory);
   const commandIncidents = CommandIncidents.fromSink(options.onIncident, options.runtimeGenerationId ?? null, userCorrectableRuntimeError);
   const send = commandIncidents.sender(streamingTrace);
   let onDatabaseBackupCreated = (): void => undefined;
+  let activeRecoveryExports = 0;
   const testInitialBackupDelayMs = process.env.NODE_ENV === "test" ? Number(process.env.INERTIA_TEST_DATABASE_INITIAL_BACKUP_DELAY_MS ?? 0) : 0;
   const store = new RuntimeStore(
     databasePath,
@@ -251,8 +267,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       canStartDatabaseBackup: () =>
         !closed
         && !recoveryImportAdmission.isActive()
+        && activeRecoveryExports === 0
         && activeRuntimeCommands === 0
-        && (turns?.activeConversationIds().length ?? 0) === 0,
+        && (turns?.activeConversationIds().length ?? 0) === 0
+        && !store?.isDatabaseCompacting(),
+      databaseCompaction: {
+        blockedReason: (mode) => runtimeDatabaseCompactionBlocker(mode, {
+          closed, updatePreparing: updatePreparation.isAdmissionClosed(), recoveryActive: recoveryImportAdmission.isActive() || activeRecoveryExports > 0,
+          activeTurns: (turns?.activeConversationIds().length ?? 0) > 0,
+          activeRuns: (isolatedRuns?.activeCount() ?? 0) > 0 || store.hasRecordedActiveWorkspaceRun(),
+          providerMaintenanceActive: (providerMaintenance?.activeOperations().length ?? 0) > 0, activeRuntimeCommands, activeNonStorageCommands, activeProviderRefreshes, activeBackgroundWrites: databaseWrites.activeWrites(),
+        }),
+        trackOperation: trackRuntimeOperation,
+      },
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
       ...(testInitialBackupDelayMs > 0 ? { databaseBackupInitialDelayMs: testInitialBackupDelayMs } : {}),
     },
@@ -286,14 +313,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   }
   const projectIdentities = new ProjectIdentityRefresher({
     apply: (projectId, identity) => {
-      try {
-        store.updateProject(projectId, identity);
-      } catch {
-        return;
-      }
+      void databaseWrites.run(async () => {
+        try {
+          store.updateProject(projectId, identity);
+        } catch {
+          return;
+        }
+      }).catch(() => undefined);
     },
   });
-  const projectIdentityCandidates = store.shellSnapshot().projects
+  const projectIdentityCandidates = store.projects()
     .filter(({ workspaceKind }) => workspaceKind !== "scratch")
     .map(({ id, path }) => ({ id, path }));
   const projectIdentityAuthority = {
@@ -308,14 +337,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
-  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
+  const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
+  const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, {
+    reportIncident: commandIncidents.report,
+    databaseWrites,
+    isConversationProtected: (conversationId) =>
+      Boolean(turns?.activeConversationIds().includes(conversationId))
+      || providerTerminalResumes.isActive(conversationId),
+  });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
     windowsTerminalAuthority: options.windowsTerminalAuthority,
     onOwnedProcessCleanupUnconfirmed:
       options.onOwnedProcessCleanupUnconfirmed,
   });
-  const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const compactions = new ConversationCompactionStates();
   const metadataCache = new ProviderMetadataCache({
     persistence: {
@@ -323,7 +358,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       save: (metadata) => store.saveProviderMetadata(metadata),
     },
   });
-  const savedSettings = store.shellSnapshot().settings;
+  const savedSettings = store.settings();
   const backendProfileController = BackendProfileController.open({
     store,
     credentials: options.backendCredentials,
@@ -389,7 +424,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   ));
   let providerInfo = initialProviderSnapshots(enableProviders, cachedProviderMetadata, recoveryBlockedProviders);
   let providerMaintenance: ProviderMaintenanceController;
-  const runtimeSync = new RuntimeSyncHub<WebSocket>(send, undefined, (linkId) => store.watcherLinks.get(linkId));
+  const runtimeSync = new RuntimeSyncHub<WebSocket>(send, undefined, (linkId) => store.watcherLinks.get(linkId),
+    { conversation: (conversationId) => store.conversationShell(conversationId), project: (projectId) => store.project(projectId) });
   const pendingApprovals = new Map<string, AgentApprovalRequest>();
   const pendingInputs = new Map<string, AgentInputRequest>();
   const deletedConversationIds = new Set<string>();
@@ -416,7 +452,21 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     return turns?.isActive(run.conversationId)
       || isolatedRuns?.ownsWorkspaceRun(run.id);
   };
+  let cachedSnapshot: AppSnapshot | null = null;
+  let deferredSnapshotBroadcast = false;
+  const schedulePostVacuumSnapshot = (): void => {
+    if (deferredSnapshotBroadcast || closed) return;
+    deferredSnapshotBroadcast = true;
+    void store.whenDatabaseWritable().then(() => {
+      deferredSnapshotBroadcast = false;
+      if (!closed) snapshotBroadcasts.request();
+    });
+  };
   const currentSnapshot = (sync: RuntimeSyncCursor = runtimeSync.cursor()): AppSnapshot => {
+    if (store.isDatabaseVacuuming() && cachedSnapshot) {
+      schedulePostVacuumSnapshot();
+      return { ...cachedSnapshot, sync };
+    }
     const snapshot = store.shellSnapshot(providerInfo);
     const approvalConversationIds = new Set([...pendingApprovals.values()].map(({ conversationId }) => conversationId));
     const inputConversationIds = new Set([...pendingInputs.values()].map(({ conversationId }) => conversationId));
@@ -436,7 +486,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }));
     const activeConversationIds = turns?.activeConversationIds()
       ?? providerRunOwnership.map(({ conversationId }) => conversationId);
-    return {
+    const assembled: AppSnapshot = {
       ...snapshot,
       backendProfiles: backendProfileController.profiles(providerInfo),
       backendDefaults: backendProfileController.defaults(),
@@ -459,6 +509,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       sync,
     };
+    cachedSnapshot = assembled;
+    return assembled;
   };
   const detachedChatRuntimeSecurity = createDetachedChatRuntimeSecurity({ websocketPath, store, snapshot: currentSnapshot, pendingApprovals, pendingInputs });
   const broadcast = (event: RuntimeMutationEvent): void => {
@@ -488,6 +540,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     });
   };
   const snapshotBroadcasts = new SnapshotBroadcastCoalescer(() => {
+    if (closed) return;
+    if (store.isDatabaseVacuuming()) {
+      schedulePostVacuumSnapshot();
+      return;
+    }
     runtimeSync.broadcastSnapshot(currentSnapshot);
   });
   const broadcastSnapshot = (): void => snapshotBroadcasts.request();
@@ -519,10 +576,25 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   startProjectAutoPull({
-    store, workspaceRuns, signal: runtimeLifetimeAbort.signal, track: trackRuntimeOperation,
+    store, workspaceRuns, signal: runtimeLifetimeAbort.signal, track: trackDatabaseWrite,
     idle: () => !closed && !updatePreparation.isAdmissionClosed() && activeRuntimeCommands === 0
       && !recoveryImportAdmission.isActive() && turns.activeConversationIds().length === 0 && isolatedRuns.activeCount() === 0 && !terminals.hasUpdateBlockingActivity(),
     reportIncident: commandIncidents.report, cleanupFailed: options.onOwnedProcessCleanupUnconfirmed,
+  });
+  const testMessageSearchIndexStartMs = process.env.NODE_ENV === "test" ? Number(process.env.INERTIA_TEST_MESSAGE_SEARCH_INDEX_START_MS ?? Number.NaN) : Number.NaN;
+  startMessageSearchIndexing({
+    signal: runtimeLifetimeAbort.signal, writes: databaseWrites,
+    index: (budgetMs) => store.indexMessageSearchBatch(budgetMs),
+    merge: (budgetMs) => store.mergeMessageSearchIndex(budgetMs),
+    idle: () => messageSearchIndexIdle({
+      closed, safetyLocked: Boolean(runtimeSafetyLock), updatePreparing: updatePreparation.isAdmissionClosed(),
+      recoveryActive: recoveryImportAdmission.isActive() || activeRecoveryExports > 0, activeRuntimeCommands,
+      activeTurns: turns.activeConversationIds().length > 0,
+      activeRuns: isolatedRuns.activeCount() > 0 || store.hasRecordedActiveWorkspaceRun(),
+      providerMaintenanceActive: providerMaintenance.activeOperations().length > 0,
+      backingUp: store.isDatabaseBackingUp(), compacting: store.isDatabaseCompacting(),
+    }),
+    ...(Number.isFinite(testMessageSearchIndexStartMs) ? { delays: { start: testMessageSearchIndexStartMs, busy: 50, settled: 200 } } : {}),
   });
   const rateLimitChanges = createRateLimitChangeSignal();
   const applyProviderMetadata = (providerId: ProviderInfo["id"], metadata: ProviderMetadata): void => {
@@ -626,14 +698,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     activeProviderIds: () => new Set(turns.activeConversationIds().flatMap((conversationId) => {
       try { return [store.conversation(conversationId).providerId]; } catch { return []; }
     })),
-    track: trackRuntimeOperation,
+    track: trackDatabaseWrite,
     clientPresent: () => runtimeSync.connectionCount > 0,
     subscribeClientConnected: (listener) => runtimeSync.onClientConnected(listener),
     subscribeRateLimitsChanged: rateLimitChanges.subscribe,
   };
   const conversationTitles = createConversationTitleRuntime({
     store, providers, backendProfileController, broadcastSnapshot, signal: runtimeLifetimeAbort.signal,
-    track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+    track: admitBackgroundWork,
   });
   let queuedMessages: ReturnType<typeof createQueuedMessageRuntime> | undefined;
   const watcherPolicy = createWatcherTurnPolicy(store, (input) => agentThreads?.manager.contextOnlyBridgeFor(input));
@@ -710,7 +782,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     turns,
     dataDirectory,
     () => providerInfo,
-    { workspaceRuns, runtimeClosed: () => closed },
+    { workspaceRuns, runtimeClosed: () => closed, databaseWrites },
   );
   duoLaunches = duoLaunchCoordinator;
   const turnInteractionDependencies: TurnInteractionCommandDependencies = {
@@ -725,18 +797,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     broadcast, broadcastSnapshot, send,
   };
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
-    signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)),
+    signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork,
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
     compacting: (conversationId) => compactions.isCompacting(conversationId),
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
   queuedMessages.start();
-  const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)) });
+  const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork });
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
-    turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId) });
+    turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId), databaseWrites });
   const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
-    dependencies: turnInteractionDependencies, track: (operation) => recoveryImportAdmission.admit(() => trackRuntimeOperation(operation)), providerMaintenance, updatePreparation,
+    dependencies: turnInteractionDependencies, track: admitBackgroundWork, providerMaintenance, updatePreparation,
   }, (providerId) => { applyProviderMetadata(providerId, providers.cachedMetadata(providerId)); flushSnapshot(); });
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
@@ -866,6 +938,17 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
+    if (recoveryImportAdmission.isActive()) {
+      send(socket, {
+        type: "request.error",
+        requestId: command.requestId,
+        message: "Database recovery is in progress. Try again after it finishes.",
+      });
+      return;
+    }
+    if (store.isDatabaseVacuuming() && command.type !== "database.storage.get") {
+      return send(socket, { type: "request.error", requestId: command.requestId, message: DATABASE_VACUUM_REFUSAL });
+    }
     const detachedAuthorizationError = detachedChatRuntimeSecurity.authorizationError(authority, command);
     if (detachedAuthorizationError) { send(socket, detachedAuthorizationError); return; }
     if (updatePreparation.isAdmissionClosed()) {
@@ -884,15 +967,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
       return;
     }
-    if (recoveryImportAdmission.isActive()) {
-      send(socket, {
-        type: "request.error",
-        requestId: command.requestId,
-        message: "Database recovery is in progress. Try again after it finishes.",
-      });
-      return;
-    }
+    const isStorageCommand = command.type === "database.storage.get" || command.type === "database.storage.compact";
     activeRuntimeCommands += 1;
+    if (!isStorageCommand) activeNonStorageCommands += 1;
     try {
       await trackRuntimeOperation(async () => {
         await testOnlyBeforeRuntimeCommand?.();
@@ -910,6 +987,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       });
     } finally {
       activeRuntimeCommands -= 1;
+      if (!isStorageCommand) activeNonStorageCommands -= 1;
       if (activeRuntimeCommands === 0) {
         for (const resolveDrain of runtimeCommandDrainWaiters) resolveDrain();
         runtimeCommandDrainWaiters.clear();
@@ -944,6 +1022,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }
   const websocketUrl = `ws://127.0.0.1:${address.port}${websocketPath}`; detachedChatRuntimeSecurity.activate(websocketUrl);
 
+  const privateConnectAdmission = { updatePreparing: () => updatePreparation.isAdmissionClosed(), safetyLocked: () => Boolean(runtimeSafetyLock), safetyError: runtimeSafetyError,
+    recoveryActive: () => recoveryImportAdmission.isActive(), databaseVacuuming: () => store.isDatabaseVacuuming() };
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
     ...privateConnectStoreReads(store),
@@ -999,177 +1079,101 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => {
       agentThreads?.secrets.sweep();
+      if (store.isDatabaseVacuuming()) {
+        void databaseWrites.run(async () => {
+          recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume);
+        }).catch(() => undefined);
+        return false;
+      }
       return recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot, turns, refreshProviderInfo.rediscoverAfterSystemResume);
     },
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
-    readHtmlRender: (renderId) => store.htmlRenders.read(renderId),
-    attachmentConversations: (attachmentId) => store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+    readHtmlRender: (renderId) => { assertDatabaseReadable(); return store.htmlRenders.read(renderId); },
+    attachmentConversations: (attachmentId) => {
+      assertDatabaseReadable();
+      return [...new Set([...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
+        ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? []])];
+    },
+    attachmentMetadata: (attachmentId) => {
+      assertDatabaseReadable();
+      return queuedMessages?.editedAttachmentMetadata(attachmentId) ?? null;
+    },
     deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
-    resolveProjectPath: (request) => trackRuntimeOperation(async () => {
-      if (runtimeSafetyLock) {
-        throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
-      }
-      return (await resolveAuthoritativeProjectPath(
-        store,
-        request,
-        projectIdentityAuthority,
-      )).absolute;
+    resolveProjectPath: (request) => trackNonStorageOperation(async () => {
+      if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
+      assertDatabaseReadable();
+      return (await resolveAuthoritativeProjectPath(store, request, projectIdentityAuthority)).absolute;
     }),
-    privateConnectRequest: (subject, request) =>
-      updatePreparation.isAdmissionClosed()
-      ? Promise.resolve({
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: "unavailable",
-          message: "The runtime is preparing for an application update.",
-        })
-      : runtimeSafetyLock
-      ? Promise.resolve({
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: "unavailable",
-          message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
-        })
-      : recoveryImportAdmission.isActive()
-      ? Promise.resolve({
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: "unavailable",
-          message: "Database recovery is in progress.",
-        })
-      : trackRuntimeOperation(() => privateConnectGateway.request(subject, request)),
-    preparePrivateConnectPrompt: (subject, request) =>
-      updatePreparation.isAdmissionClosed()
-      ? Promise.resolve({
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: "unavailable",
-          message: "The runtime is preparing for an application update.",
-        })
-      : runtimeSafetyLock
-      ? Promise.resolve({
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: "unavailable",
-          message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
-        })
-      : recoveryImportAdmission.isActive()
-      ? Promise.resolve({
-          type: "response",
-          requestId: request.requestId,
-          ok: false,
-          code: "unavailable",
-          message: "Database recovery is in progress.",
-        })
-      : trackRuntimeOperation(() => privateConnectGateway.preparePrompt(subject, request)),
+    editorContext: (filePath, conversationId) => trackNonStorageOperation(async () => {
+      assertDatabaseReadable();
+      return await resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock, conversationId);
+    }),
+    privateConnectRequest: (subject, request) => {
+      const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
+      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () =>
+        privateConnectRefusal(privateConnectAdmission, request.requestId) ?? await privateConnectGateway.request(subject, request));
+    },
+    preparePrivateConnectPrompt: (subject, request) => {
+      const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
+      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () =>
+        privateConnectRefusal(privateConnectAdmission, request.requestId) ?? await privateConnectGateway.preparePrompt(subject, request));
+    },
     commitPrivateConnectPrompt: (subject, request, preparationId) =>
-      updatePreparation.isAdmissionClosed()
-        ? {
-            type: "response",
-            requestId: request.requestId,
-            ok: false,
-            code: "unavailable",
-            message: "The runtime is preparing for an application update.",
-          }
-        : runtimeSafetyLock
-        ? {
-            type: "response",
-            requestId: request.requestId,
-            ok: false,
-            code: "unavailable",
-            message: runtimeSafetyError("Private Connect changes are unavailable in recovery safety mode."),
-          }
-        : recoveryImportAdmission.isActive()
-        ? {
-            type: "response",
-            requestId: request.requestId,
-            ok: false,
-            code: "unavailable",
-            message: "Database recovery is in progress.",
-          }
-        : privateConnectGateway.commitPrompt(subject, request, preparationId),
+      privateConnectRefusal(privateConnectAdmission, request.requestId) ?? privateConnectGateway.commitPrompt(subject, request, preparationId),
     forgetPrivateConnectTranscripts: (scope) => {
       if (updatePreparation.isAdmissionClosed()) return;
       if (scope.kind === "all") privateConnectGateway.reset();
       else privateConnectGateway.forgetConversation(scope.conversationId);
     },
-    exportRecoveryData: (path, signal) =>
+    exportRecoveryData: (path, signal, exportOptions) =>
       updatePreparation.runDatabaseRecovery(async () => {
-        if (runtimeSafetyLock) {
-          throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
+        if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Database export is unavailable in recovery safety mode."));
+        activeRecoveryExports += 1;
+        try {
+          await store.whenDatabaseCompactionSettled();
+          await initializedConversationAttachments.whenReconciled();
+          if (exportOptions?.includeAttachments) return await store.exportRecoveryBundle(path, { signal });
+          await writeDatabaseRecoveryExportFile(path, store.exportRecoveryData(), { signal });
+          return { includeAttachments: false, attachments: 0, missingAttachments: 0 };
+        } finally {
+          activeRecoveryExports -= 1;
         }
-        await writeDatabaseRecoveryExportFile(
-          path,
-          store.exportRecoveryData(),
-          { signal },
-        );
       }),
     importRecoveryData: (path, targetDirectory, signal, operationId) =>
       updatePreparation.runDatabaseRecovery(async () => {
-        if (runtimeSafetyLock) {
-          throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
-        }
-        if (!operationId) {
-          throw new Error("The database recovery import identity is required.");
-        }
-        if (isWithinScratchRoot(dataDirectory, targetDirectory)) {
-          throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
-        }
+        if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Database import is unavailable in recovery safety mode."));
+        if (!operationId) throw new Error("The database recovery import identity is required.");
+        if (isWithinScratchRoot(dataDirectory, targetDirectory)) throw new Error(SCRATCH_RECOVERY_TARGET_REFUSAL);
         recoveryImportAdmission.begin();
         try {
-          if (activeRuntimeCommands > 0) {
-            await new Promise<void>((resolveDrain) => {
-              runtimeCommandDrainWaiters.add(resolveDrain);
-            });
-          }
+          if (activeRuntimeCommands > 0) await new Promise<void>((resolveDrain) => { runtimeCommandDrainWaiters.add(resolveDrain); });
           await recoveryImportAdmission.drain();
+          await store.whenDatabaseCompactionSettled();
+          await initializedConversationAttachments.whenReconciled();
           await postReady.identityRefresh;
           await postReady.artifactReconciliation;
-          if (
-            turns.activeConversationIds().length > 0
-            || store.hasRecordedActiveWorkspaceRun()
-            || providerMaintenance.activeOperations().length > 0
-            || activeProviderRefreshes > 0
-          ) {
-            throw new Error(
-              "Database recovery cannot start while runtime work is active.",
-            );
+          if (turns.activeConversationIds().length > 0 || store.hasRecordedActiveWorkspaceRun()
+            || providerMaintenance.activeOperations().length > 0 || activeProviderRefreshes > 0) {
+            throw new Error("Database recovery cannot start while runtime work is active.");
           }
-          // With command admission closed and active turns ruled out, no new
-          // terminal task can appear after this final store-writer drain.
           await turns.drainSettlementTasks(signal);
           const result = await runRecoveryImportWorker({
-            databasePath,
-            defaultWorkspacePath: options.defaultWorkspacePath,
-            recoveryPath: path,
-            targetDirectory,
-            operationId,
-            signal,
-            ...(recoveryImportFault
-              ? {
-                  fault: {
-                    phase: recoveryImportFault.phase,
-                    markerPath: recoveryImportFault.markerPath,
-                    stallMs: recoveryImportFault.stallMs,
-                  },
-                }
-              : {}),
+            databasePath, defaultWorkspacePath: options.defaultWorkspacePath, recoveryPath: path,
+            targetDirectory, operationId, signal,
+            ...(recoveryImportFault ? { fault: { ...recoveryImportFault } } : {}),
           });
           await new ScratchWorkspace(store, dataDirectory).reconcile().catch(() => undefined);
+          if (result.attachments && result.attachments > 0) {
+            await initializedConversationAttachments.syncImportedReferences(store.attachments()).catch(() => undefined);
+          }
           broadcastSnapshot();
           return result;
         } catch (error) {
-          // Worker termination is confirmed before rejection. Reconcile its
-          // durable filesystem journal only after SQLite has rolled back and
-          // released the independent connection.
           store.reconcileRecoveryImport();
+          await reconcileRecoveryAttachmentStaging(dataDirectory, store.attachments()).catch(() => undefined);
+          await initializedConversationAttachments.syncImportedReferences(store.attachments()).catch(() => undefined);
           broadcastSnapshot();
           throw error;
         } finally {

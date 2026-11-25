@@ -7,6 +7,7 @@ import type { ChatAttachmentMimeType } from "./attachments";
  */
 export interface TrustedRuntimeAttachment {
   snapshot?: import("./snapshots").SnapshotSource;
+  previewAnnotation?: import("./preview-annotation").PreviewAnnotation;
   id: string;
   name: string;
   path: string;

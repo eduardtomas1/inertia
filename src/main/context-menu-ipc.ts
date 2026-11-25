@@ -12,9 +12,21 @@ import {
   type ContextMenuRequest,
 } from "../shared/context-menu.js";
 import type { DesktopWindowContext } from "../shared/desktop.js";
+import {
+  editorLabel,
+  isEditorId,
+  type DetectedEditor,
+  type PreferredEditor,
+} from "../shared/editors.js";
+
+export interface ContextMenuEditorState {
+  preferredEditor: PreferredEditor;
+  detectedEditors: readonly DetectedEditor[];
+}
 
 type ContextMenuEntry =
   | { label: string; action: ContextMenuAction; enabled?: boolean; accelerator?: string }
+  | { label: string; submenu: readonly { label: string; action: ContextMenuAction }[] }
   | { role: "copy" | "paste"; label: string; accelerator?: string }
   | { separator: true };
 
@@ -32,6 +44,7 @@ export interface ContextMenuIpcOptions {
   ) => BrowserWindow;
   isPackaged: () => boolean;
   platform?: NodeJS.Platform;
+  editorMenu?: () => Promise<ContextMenuEditorState> | ContextMenuEditorState;
 }
 
 const SEPARATOR = { separator: true } as const;
@@ -48,9 +61,38 @@ function revealLabel(platform: NodeJS.Platform): string {
   return "Reveal in file manager";
 }
 
-function pathEntries(platform: NodeJS.Platform, openable: boolean): ContextMenuEntry[] {
+function editorEntries(editors?: ContextMenuEditorState): ContextMenuEntry[] {
+  if (!editors) return [];
+  if (isEditorId(editors.preferredEditor)) {
+    return [{
+      label: `Open in ${editorLabel(editors.preferredEditor)}`,
+      action: `open-in-editor:${editors.preferredEditor}`,
+    }];
+  }
+  if (editors.detectedEditors.length === 1) {
+    const only = editors.detectedEditors[0]!;
+    return [{ label: `Open in ${only.label}`, action: `open-in-editor:${only.id}` }];
+  }
+  if (editors.detectedEditors.length > 1) {
+    return [{
+      label: "Open in editor",
+      submenu: editors.detectedEditors.map((editor) => ({
+        label: editor.label,
+        action: `open-in-editor:${editor.id}` as const,
+      })),
+    }];
+  }
+  return [];
+}
+
+function pathEntries(
+  platform: NodeJS.Platform,
+  openable: boolean,
+  editors?: ContextMenuEditorState,
+): ContextMenuEntry[] {
   return [
     ...(openable ? [{ label: "Open", action: "open" } as const] : []),
+    ...editorEntries(editors),
     { label: revealLabel(platform), action: "reveal" },
     SEPARATOR,
     { label: "Copy path", action: "copy-path" },
@@ -62,6 +104,7 @@ export function contextMenuEntries(
   request: ContextMenuRequest,
   platform: NodeJS.Platform,
   context: Pick<DesktopWindowContext, "role">,
+  editors?: ContextMenuEditorState,
 ): ContextMenuEntry[] {
   switch (request.kind) {
     case "message":
@@ -71,7 +114,6 @@ export function contextMenuEntries(
         ...(request.role === "assistant"
           ? [{ label: "Copy as Markdown", action: "copy-markdown" } as const]
           : []),
-        // Tasks live in the main window; detached chats cannot write them.
         ...(context.role === "main"
           ? [SEPARATOR, { label: "Create task from message", action: "create-task" } as const]
           : []),
@@ -82,12 +124,10 @@ export function contextMenuEntries(
         { label: "Copy code", action: "copy-code" },
       ];
     case "project-link":
-      return pathEntries(platform, true);
+      return pathEntries(platform, true, editors);
     case "diff-file":
       return [
-        ...pathEntries(platform, true),
-        // A detached chat stages only in its own workspace; the runtime
-        // policy checks that for the git.stage and git.unstage commands.
+        ...pathEntries(platform, true, editors),
         ...(request.stageable || request.unstageable
           ? [
               SEPARATOR,
@@ -97,7 +137,16 @@ export function contextMenuEntries(
           : []),
       ];
     case "file":
-      return pathEntries(platform, !request.directory);
+      return pathEntries(platform, !request.directory, editors);
+    case "editor-pick":
+      return [
+        ...(editors?.detectedEditors ?? []).map((editor) => ({
+          label: `Open in ${editor.label}`,
+          action: `open-in-editor:${editor.id}` as const,
+        })),
+        ...(editors && editors.detectedEditors.length > 0 ? [SEPARATOR] : []),
+        { label: "Open", action: "open" },
+      ];
     case "terminal":
       return [
         { label: "Copy", action: "terminal-copy", enabled: request.hasSelection, ...terminalShortcut(platform, "C") },
@@ -126,6 +175,7 @@ function showMenu(
   request: ContextMenuRequest,
   context: DesktopWindowContext,
   options: ContextMenuIpcOptions,
+  editors?: ContextMenuEditorState,
 ): Promise<ContextMenuAction | null> {
   return new Promise((resolve) => {
     let settled = false;
@@ -141,8 +191,18 @@ function showMenu(
       request,
       options.platform ?? process.platform,
       context,
+      editors,
     ).map((entry) => {
       if ("separator" in entry) return { type: "separator" };
+      if ("submenu" in entry) {
+        return {
+          label: entry.label,
+          submenu: entry.submenu.map((child) => ({
+            label: child.label,
+            click: () => complete(child.action),
+          })),
+        };
+      }
       const shortcut = entry.accelerator
         ? { accelerator: entry.accelerator, registerAccelerator: false }
         : {};
@@ -171,6 +231,13 @@ function showMenu(
   });
 }
 
+function needsEditorMenu(request: ContextMenuRequest): boolean {
+  return request.kind === "file"
+    || request.kind === "diff-file"
+    || request.kind === "project-link"
+    || request.kind === "editor-pick";
+}
+
 export function registerContextMenuIpc(options: ContextMenuIpcOptions): void {
   ipcMain.handle(options.channel, async (event, ...args) => {
     const context = options.assertTrusted(event, args.length, 1);
@@ -180,6 +247,9 @@ export function registerContextMenuIpc(options: ContextMenuIpcOptions): void {
       throw new Error("Detached chats can show menus only for their owned conversation");
     }
     const window = options.windowFor(event, args.length, 1);
-    return await showMenu(window, request, context, options);
+    const editors = needsEditorMenu(request) && options.editorMenu
+      ? await options.editorMenu()
+      : undefined;
+    return await showMenu(window, request, context, options, editors);
   });
 }

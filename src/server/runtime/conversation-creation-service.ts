@@ -62,7 +62,7 @@ export class ConversationCreationService {
     providerId: Conversation["providerId"];
     selection: ModelSelection;
   } {
-    const settings = this.dependencies.store.shellSnapshot().settings;
+    const settings = this.dependencies.store.settings();
     const defaultProviderId = payload.providerId ?? effectiveDefaultProviderId(
       settings.defaultProvider,
       payload.modelSelection ? [] : this.dependencies.providerInfo?.() ?? [],
@@ -136,10 +136,9 @@ export class ConversationCreationService {
 
     if (payload.worktreePath) {
       const requestedPath = resolve(payload.worktreePath);
-      const reusableContext = this.dependencies.store.shellSnapshot()
-        .conversations.find((candidate) => (
-          candidate.projectId === payload.projectId
-          && candidate.worktreePath !== null
+      const reusableContext = this.dependencies.store.projectConversations(payload.projectId)
+        .find((candidate) => (
+          candidate.worktreePath !== null
           && normalizeIdentityPath(resolve(candidate.worktreePath))
             === normalizeIdentityPath(requestedPath)
         ));

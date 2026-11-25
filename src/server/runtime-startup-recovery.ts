@@ -15,6 +15,7 @@ import {
 } from "../node/runtime-modern-recovery-authorities.js";
 import type { RuntimeOptions } from "./runtime-types.js";
 import { RuntimeStore } from "./database.js";
+import { reconcileRecoveryAttachmentStaging } from "./persistence/database-recovery-bundle.js";
 import { reconcileInterruptedDuoLaunches } from
   "./runtime/duo/duo-launch-coordinator.js";
 import { recoverInterruptedTurns } from
@@ -84,7 +85,7 @@ export async function initializeRuntimePersistence(
     const testRecordLimit = process.env.NODE_ENV === "test"
       ? Number(process.env.INERTIA_TEST_CONVERSATION_ATTACHMENT_MAX_RECORDS ?? 0)
       : 0;
-    const attachmentSettings = store.shellSnapshot().settings;
+    const attachmentSettings = store.settings();
     conversationAttachments = await ConversationAttachmentStore.open(
       dataDirectory,
       {
@@ -100,7 +101,10 @@ export async function initializeRuntimePersistence(
       },
     );
     if (!runtimeSafetyLock) {
-      await conversationAttachments.reconcile(store.attachments());
+      await reconcileRecoveryAttachmentStaging(dataDirectory, store.attachments());
+      await conversationAttachments.reconcile(store.attachments(), {
+        isReferenced: (id) => store.referencedAttachmentIds([id]).has(id),
+      });
       if (manuallyRetiredGenerations.length > 0
         && process.env.NODE_ENV === "test") {
         options.testOnlyBeforeLegacyInterruptedRecovery?.();

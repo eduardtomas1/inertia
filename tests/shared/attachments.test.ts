@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isExtractedDocumentAttachmentMimeType,
+  storedAttachmentTypeMatchesName,
+} from "../../src/shared/attachments";
+import {
   MAX_ATTACHMENT_COUNT,
   chatAttachmentKind,
   safeChatAttachmentMimeTypeForName as chatAttachmentMimeTypeForName,
@@ -26,6 +30,40 @@ describe("chat attachment contract", () => {
     expect(chatAttachmentTypeLabel("application/json")).toBe("JSON document");
   });
 
+  it("classifies Word, PowerPoint, RTF, OpenDocument, notebook and EPUB files for extraction", () => {
+    const expected = {
+      "report.DOCX": ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Word document"],
+      "deck.pptx": ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "PowerPoint presentation"],
+      "letter.rtf": ["application/rtf", "RTF document"],
+      "essay.odt": ["application/vnd.oasis.opendocument.text", "OpenDocument text"],
+      "ledger.ods": ["application/vnd.oasis.opendocument.spreadsheet", "OpenDocument spreadsheet"],
+      "talk.odp": ["application/vnd.oasis.opendocument.presentation", "OpenDocument presentation"],
+      "analysis.ipynb": ["application/x-ipynb+json", "Jupyter notebook"],
+      "novel.epub": ["application/epub+zip", "EPUB book"],
+    } as const;
+    for (const [name, [mimeType, label]] of Object.entries(expected)) {
+      expect(chatAttachmentMimeTypeForName(name), name).toBe(mimeType);
+      expect(isExtractedDocumentAttachmentMimeType(mimeType)).toBe(true);
+      expect(chatAttachmentKind(mimeType)).toBe("document");
+      expect(chatAttachmentTypeLabel(mimeType)).toBe(label);
+      expect(isPotentialChatAttachment(name, mimeType)).toBe(true);
+      expect(isPotentialChatAttachment(name, "")).toBe(true);
+      expect(isPotentialChatAttachment(name, "image/png")).toBe(false);
+    }
+    expect(isExtractedDocumentAttachmentMimeType("application/pdf")).toBe(false);
+    expect(isPotentialChatAttachment("report.docx", "application/zip")).toBe(true);
+    expect(isPotentialChatAttachment("letter.rtf", "text/rtf")).toBe(true);
+    expect(isPotentialChatAttachment("analysis.ipynb", "application/json")).toBe(true);
+    expect(isPotentialChatAttachment("report.docx", "application/pdf")).toBe(false);
+  });
+
+  it("keeps attachments stored before these types existed readable", () => {
+    expect(storedAttachmentTypeMatchesName("analysis.ipynb", "text/plain")).toBe(true);
+    expect(storedAttachmentTypeMatchesName("report.docx", "application/octet-stream")).toBe(true);
+    expect(storedAttachmentTypeMatchesName("report.docx", "text/plain")).toBe(false);
+    expect(storedAttachmentTypeMatchesName("notes.txt", "application/x-ipynb+json")).toBe(false);
+  });
+
   it("requires extension and declared MIME agreement", () => {
     expect(isPotentialChatAttachment("notes.md", "text/markdown")).toBe(true);
     expect(isPotentialChatAttachment("notes.md", "text/plain")).toBe(true);
@@ -34,7 +72,7 @@ describe("chat attachment contract", () => {
   });
 
   it("accepts plain-text source, markup and configuration names as text beside the pinned lookup", () => {
-    for (const name of ["config.yaml", "main.ts", "index.html", "query.sql", "Dockerfile.patch", "app.log", "rows.tsv", "Dockerfile", "Makefile", ".gitignore", "settings.jsonc", "notebook.ipynb"]) {
+    for (const name of ["config.yaml", "main.ts", "index.html", "query.sql", "Dockerfile.patch", "app.log", "rows.tsv", "Dockerfile", "Makefile", ".gitignore", "settings.jsonc"]) {
       expect(chatAttachmentMimeTypeForName(name), name).toBe("text/plain");
     }
     // The lookup migration 56 pins is unchanged; the names it knows keep their own type.

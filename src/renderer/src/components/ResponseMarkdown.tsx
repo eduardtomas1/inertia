@@ -39,7 +39,10 @@ import {
   isContextMenuId,
   projectPathContextMenu,
   selectionInside,
+  showEditorPickMenu,
 } from "../utils/contextMenu";
+import { isEditorId } from "@shared/editor-ids";
+import { useEditorPreference } from "../hooks/useAvailableEditors";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { createBoundedCache } from "../utils/boundedCache";
 import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
@@ -782,6 +785,7 @@ function MarkdownLink({
     markdownBasePath,
     onOpenProjectFile,
   } = useMarkdownRenderContext();
+  const { preferredEditor, detectedEditors } = useEditorPreference();
   const target = resolveResponseLink(
     projectRoot,
     href,
@@ -803,7 +807,7 @@ function MarkdownLink({
       .filter(Boolean)
       .join(" ");
     const FileIcon = language.id === "sql" ? Database : FileCode2;
-    const openLink = (): void => {
+    const openDefault = (): void => {
       if (onOpenProjectFile) {
         if (target.headingId) {
           onOpenProjectFile(
@@ -832,12 +836,49 @@ function MarkdownLink({
         action: target.action,
       }).catch(() => undefined);
     };
+    const parsedReference = !target.literalPath && !target.location
+      ? workspaceFileReference(target.relativePath)
+      : null;
+    const editorRelativePath = parsedReference ? parsedReference.path : target.relativePath;
+    const editorLocation = target.location ?? parsedReference?.location;
+    const openLink = (event?: React.MouseEvent<HTMLAnchorElement>): void => {
+      if (isEditorId(preferredEditor)) {
+        void window.inertia.openProjectPath({
+          projectId,
+          ...(conversationId ? { conversationId } : {}),
+          relativePath: editorRelativePath,
+          action: "open-in-editor",
+          editor: preferredEditor,
+          ...(editorLocation ? {
+            line: editorLocation.startLine,
+            ...(editorLocation.startColumn !== undefined ? { column: editorLocation.startColumn } : {}),
+          } : {}),
+        }).catch(() => undefined);
+        return;
+      }
+      if (preferredEditor === "ask" && detectedEditors.length > 0 && event) {
+        showEditorPickMenu(
+          {
+            projectId,
+            conversationId,
+            relativePath: editorRelativePath,
+            location: editorLocation,
+            open: openDefault,
+          },
+          event.currentTarget,
+          event.detail > 0 ? { x: event.clientX, y: event.clientY } : undefined,
+        );
+        return;
+      }
+      openDefault();
+    };
     const linkMenu = projectPathContextMenu<HTMLAnchorElement>("project-link", {
       projectId,
       conversationId,
       projectRoot,
-      relativePath: target.relativePath,
-      open: openLink,
+      relativePath: editorRelativePath,
+      location: editorLocation,
+      open: openDefault,
     });
     return (
       <a
@@ -848,7 +889,7 @@ function MarkdownLink({
         href={href}
         onClick={(event) => {
           event.preventDefault();
-          openLink();
+          openLink(event);
         }}
         onContextMenu={linkMenu?.onContextMenu}
         onKeyDown={linkMenu?.onKeyDown}

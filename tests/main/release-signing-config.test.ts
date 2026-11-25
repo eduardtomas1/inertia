@@ -15,11 +15,78 @@ const windowsSigningEnvironmentKeys = [
   "WIN_CSC_LINK",
   "WIN_CSC_KEY_PASSWORD",
 ] as const;
+const windowsAzureSigningEnvironmentKeys = [
+  "AZURE_TENANT_ID",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_TRUSTED_SIGNING_ENDPOINT",
+  "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+  "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+  "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME",
+] as const;
 const signingEnvironmentKeys = [
   ...macSigningEnvironmentKeys,
   ...windowsSigningEnvironmentKeys,
+  ...windowsAzureSigningEnvironmentKeys,
 ] as const;
+const azureSigning = {
+  AZURE_TENANT_ID: "tenant-value-1f0c",
+  AZURE_CLIENT_ID: "client-value-9a2e",
+  AZURE_CLIENT_SECRET: "client-secret-value-77d1",
+  AZURE_TRUSTED_SIGNING_ENDPOINT: "https://weu.codesigning.azure.net/",
+  AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: "inertia-signing",
+  AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: "inertia-public-trust",
+  AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: "Example Publisher, Inc.",
+} as const satisfies Record<(typeof windowsAzureSigningEnvironmentKeys)[number], string>;
+const certificateSigning = {
+  WIN_CSC_LINK: "certificate",
+  WIN_CSC_KEY_PASSWORD: "password",
+} as const;
 const releaseChannels = ["stable", "canary"] as const;
+
+function loadWindowsUpdateConfiguration(
+  platform: "windows-x64" | "windows-arm64",
+  additions: Record<string, string>,
+): { status: number | null; stdout: string; stderr: string } {
+  const environment = { ...process.env };
+  for (const key of signingEnvironmentKeys) delete environment[key];
+  const command = `
+    const { Platform } = require("app-builder-lib");
+    const { WinPackager } = require("app-builder-lib/out/winPackager");
+    const { WindowsSignAzureManager } = require("app-builder-lib/out/codeSign/windowsSignAzureManager");
+    const { getAppUpdatePublishConfiguration } = require("app-builder-lib/out/publish/PublishManager");
+    const config = require("./scripts/electron-builder.release.cjs");
+    const verification = Object.getOwnPropertyDescriptor(
+      WinPackager.prototype,
+      "isForceCodeSigningVerification",
+    ).get;
+    const packager = {
+      platform: Platform.WINDOWS,
+      config,
+      platformSpecificBuildOptions: config.win,
+      info: { config, appInfo: { channel: null } },
+      appInfo: { updaterCacheDirName: "inertia-updater" },
+      expandMacro: (value) => value,
+      get isForceCodeSigningVerification() {
+        return verification.call(this);
+      },
+    };
+    packager.signingManager = { value: Promise.resolve(new WindowsSignAzureManager(packager)) };
+    getAppUpdatePublishConfiguration(packager, null, 1, false).then((updateConfiguration) => {
+      process.stdout.write(JSON.stringify(updateConfiguration));
+    }, (error) => {
+      process.stderr.write(String(error && error.message));
+      process.exitCode = 1;
+    });
+  `;
+  const result = spawnSync(process.execPath, ["-e", command], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...environment, INERTIA_RELEASE_PLATFORM: platform, ...additions },
+    timeout: 15_000,
+  });
+  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
 
 function loadConfig(
   platform:
@@ -60,7 +127,10 @@ function loadConfig(
   };
 }
 
-function loadIncompleteMacSigningMatrix(): {
+function loadIncompleteSigningMatrix(
+  releasePlatforms: readonly string[],
+  subsetKeys: readonly string[],
+): {
   status: number | null;
   stdout: string;
   stderr: string;
@@ -70,19 +140,19 @@ function loadIncompleteMacSigningMatrix(): {
   for (const key of signingEnvironmentKeys) delete environment[key];
   const command = `
     const signingEnvironmentKeys = ${JSON.stringify(signingEnvironmentKeys)};
-    const macSigningEnvironmentKeys = ${JSON.stringify(macSigningEnvironmentKeys)};
+    const subsetKeys = ${JSON.stringify(subsetKeys)};
     const releaseChannels = ${JSON.stringify(releaseChannels)};
-    const releasePlatforms = ["macos-x64", "macos-arm64"];
+    const releasePlatforms = ${JSON.stringify(releasePlatforms)};
     const configPath = require.resolve("./scripts/electron-builder.release.cjs");
     const results = [];
 
     for (const channel of releaseChannels) {
       for (const platform of releasePlatforms) {
-        for (let mask = 1; mask < (1 << macSigningEnvironmentKeys.length) - 1; mask += 1) {
+        for (let mask = 1; mask < (1 << subsetKeys.length) - 1; mask += 1) {
           for (const key of signingEnvironmentKeys) delete process.env[key];
           process.env.INERTIA_RELEASE_CHANNEL = channel;
           process.env.INERTIA_RELEASE_PLATFORM = platform;
-          for (const [index, key] of macSigningEnvironmentKeys.entries()) {
+          for (const [index, key] of subsetKeys.entries()) {
             if ((mask & (1 << index)) !== 0) process.env[key] = \`configured-\${key}\`;
           }
 
@@ -106,8 +176,8 @@ function loadIncompleteMacSigningMatrix(): {
     cwd: root,
     encoding: "utf8",
     env: environment,
-    maxBuffer: 512 * 1024,
-    timeout: 5_000,
+    maxBuffer: 1024 * 1024,
+    timeout: 10_000,
   });
   return {
     status: result.status,
@@ -155,7 +225,7 @@ describe("release signing configuration", () => {
   });
 
   it("rejects every non-empty proper macOS signing subset on both channels and architectures", () => {
-    const result = loadIncompleteMacSigningMatrix();
+    const result = loadIncompleteSigningMatrix(["macos-x64", "macos-arm64"], macSigningEnvironmentKeys);
     expect(result.status, `${result.error}\n${result.stderr}`).toBe(0);
     expect(result.error).toBe("");
     expect(result.stderr).toBe("");
@@ -357,6 +427,183 @@ describe("release signing configuration", () => {
         expect(config.extraMetadata.inertiaUpdateCapability)
           .toEqual({ delivery: "in-app", platform: "linux" });
       }
+    }
+  });
+
+  it("rejects every non-empty proper Azure Trusted Signing subset on both channels and architectures", () => {
+    const result = loadIncompleteSigningMatrix(
+      ["windows-x64", "windows-arm64"],
+      windowsAzureSigningEnvironmentKeys,
+    );
+    expect(result.status, `${result.error}\n${result.stderr}`).toBe(0);
+    expect(result.error).toBe("");
+    expect(result.stderr).toBe("");
+    const cases = JSON.parse(result.stdout) as Array<{
+      channel: string;
+      platform: string;
+      mask: number;
+      outcome: "success" | "error";
+      diagnostic: string;
+    }>;
+    const subsets = (1 << windowsAzureSigningEnvironmentKeys.length) - 2;
+    expect(cases).toHaveLength(subsets * 4);
+
+    let checked = 0;
+    for (const channel of releaseChannels) {
+      for (const platform of ["windows-x64", "windows-arm64"] as const) {
+        for (let mask = 1; mask <= subsets; mask += 1) {
+          const testCase = cases[checked];
+          expect(testCase).toMatchObject({ channel, platform, mask, outcome: "error" });
+          const missingKeys = windowsAzureSigningEnvironmentKeys.filter(
+            (_key, index) => (mask & (1 << index)) === 0,
+          );
+          expect(testCase.diagnostic, `${channel}/${platform}/subset-${mask}`).toBe(
+            `Windows Azure Trusted Signing configuration is incomplete. Missing: ${missingKeys.join(", ")}.`,
+          );
+          expect(testCase.diagnostic).not.toContain("configured-");
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBe(subsets * 4);
+  });
+
+  it("accepts the complete Azure Trusted Signing set as signed in-app Windows delivery", () => {
+    for (const channel of releaseChannels) {
+      for (const platform of ["windows-x64", "windows-arm64"] as const) {
+        const result = loadConfig(platform, { ...azureSigning, INERTIA_RELEASE_CHANNEL: channel });
+        expect(result.status, `${channel}/${platform}: ${result.stderr}`).toBe(0);
+        const config = JSON.parse(result.stdout) as {
+          forceCodeSigning: boolean;
+          extraMetadata: { inertiaUpdateCapability: unknown };
+          win: { azureSignOptions?: unknown; verifyUpdateCodeSignature?: boolean; signtoolOptions?: unknown };
+        };
+        expect(config.forceCodeSigning).toBe(true);
+        expect(config.extraMetadata.inertiaUpdateCapability)
+          .toEqual({ delivery: "in-app", platform: "win32" });
+        expect(config.win.verifyUpdateCodeSignature).toBe(true);
+        expect(config.win.signtoolOptions).toBeUndefined();
+        expect(config.win.azureSignOptions).toEqual({
+          publisherName: "Example Publisher, Inc.",
+          endpoint: "https://weu.codesigning.azure.net/",
+          codeSigningAccountName: "inertia-signing",
+          certificateProfileName: "inertia-public-trust",
+        });
+        for (const secret of [
+          azureSigning.AZURE_TENANT_ID,
+          azureSigning.AZURE_CLIENT_ID,
+          azureSigning.AZURE_CLIENT_SECRET,
+        ]) {
+          expect(result.stdout).not.toContain(secret);
+        }
+      }
+    }
+  });
+
+  it("rejects a Windows build that configures both the certificate file and Azure Trusted Signing", () => {
+    const result = loadConfig("windows-x64", { ...certificateSigning, ...azureSigning });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Windows signing configuration is ambiguous. Configure either WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD or Azure Trusted Signing, not both.",
+    );
+    for (const value of [...Object.values(certificateSigning), ...Object.values(azureSigning)]) {
+      expect(result.stderr).not.toContain(value);
+    }
+  });
+
+  it("reports a partial Azure set even when the certificate file set is complete", () => {
+    const result = loadConfig("windows-x64", {
+      ...certificateSigning,
+      AZURE_CLIENT_SECRET: azureSigning.AZURE_CLIENT_SECRET,
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Windows Azure Trusted Signing configuration is incomplete. Missing: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_TRUSTED_SIGNING_ENDPOINT",
+    );
+    expect(result.stderr).not.toContain(azureSigning.AZURE_CLIENT_SECRET);
+  });
+
+  it("rejects malformed Azure Trusted Signing values without echoing them", () => {
+    const cases = [
+      ["AZURE_TRUSTED_SIGNING_ENDPOINT", "http://weu.codesigning.azure.net/"],
+      ["AZURE_TRUSTED_SIGNING_ENDPOINT", "https://weu.codesigning.azure.net/path"],
+      ["AZURE_TRUSTED_SIGNING_ENDPOINT", "https://user:pass@weu.codesigning.azure.net/"],
+      ["AZURE_TRUSTED_SIGNING_ENDPOINT", "https://weu.codesigning.azure.net/?q=leak"],
+      ["AZURE_TRUSTED_SIGNING_ENDPOINT", "not a url"],
+      ["AZURE_TRUSTED_SIGNING_ACCOUNT_NAME", "inertia signing"],
+      ["AZURE_TRUSTED_SIGNING_ACCOUNT_NAME", "inertia';Invoke-Leak;'"],
+      ["AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME", "-profile"],
+      ["AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME", "p".repeat(101)],
+      ["AZURE_TRUSTED_SIGNING_PUBLISHER_NAME", " Example Publisher"],
+      ["AZURE_TRUSTED_SIGNING_PUBLISHER_NAME", "CN=Example Publisher"],
+      ["AZURE_TRUSTED_SIGNING_PUBLISHER_NAME", "Example\u0007Publisher"],
+      ["AZURE_TRUSTED_SIGNING_PUBLISHER_NAME", "x".repeat(513)],
+    ] as const;
+    for (const [key, value] of cases) {
+      const result = loadConfig("windows-x64", { ...azureSigning, [key]: value });
+      expect(result.status, `${key}=${value}`).not.toBe(0);
+      expect(result.stderr).toContain(
+        `Windows Azure Trusted Signing configuration has an invalid ${key}.`,
+      );
+      expect(result.stderr).not.toContain(value);
+      expect(result.stderr).not.toContain(azureSigning.AZURE_CLIENT_SECRET);
+    }
+  });
+
+  it("keeps unsigned and certificate-file Windows builds free of Azure options with update verification on", () => {
+    const unsigned = loadConfig("windows-x64");
+    expect(unsigned.status, unsigned.stderr).toBe(0);
+    const unsignedConfig = JSON.parse(unsigned.stdout) as {
+      forceCodeSigning: boolean;
+      extraMetadata: { inertiaUpdateCapability: unknown };
+      win: { azureSignOptions?: unknown; verifyUpdateCodeSignature?: boolean };
+    };
+    expect(unsignedConfig.forceCodeSigning).toBe(false);
+    expect(unsignedConfig.extraMetadata.inertiaUpdateCapability)
+      .toEqual({ delivery: "manual", reason: "windows-signing-unavailable" });
+    expect(unsignedConfig.win.verifyUpdateCodeSignature).toBe(true);
+    expect(unsignedConfig.win.azureSignOptions).toBeUndefined();
+
+    const certificate = loadConfig("windows-x64", certificateSigning);
+    expect(certificate.status, certificate.stderr).toBe(0);
+    const config = JSON.parse(certificate.stdout) as {
+      extraMetadata: { inertiaUpdateCapability: unknown };
+      win: { azureSignOptions?: unknown; verifyUpdateCodeSignature?: boolean; signtoolOptions?: unknown };
+    };
+    expect(config.extraMetadata.inertiaUpdateCapability).toEqual({ delivery: "in-app", platform: "win32" });
+    expect(config.win.verifyUpdateCodeSignature).toBe(true);
+    expect(config.win.azureSignOptions).toBeUndefined();
+    expect(config.win.signtoolOptions).toBeUndefined();
+  });
+
+  it("ignores Windows credential sets on macOS and Linux builds", () => {
+    for (const platform of ["macos-arm64", "linux-x64"] as const) {
+      const result = loadConfig(platform, {
+        ...certificateSigning,
+        ...azureSigning,
+        AZURE_CLIENT_SECRET: "",
+      });
+      expect(result.status, `${platform}: ${result.stderr}`).toBe(0);
+      const config = JSON.parse(result.stdout) as {
+        forceCodeSigning: boolean;
+        win: { azureSignOptions?: unknown };
+      };
+      expect(config.forceCodeSigning).toBe(false);
+      expect(config.win.azureSignOptions).toBeUndefined();
+    }
+  });
+
+  it("writes the Azure publisher name into the packaged Windows update configuration", () => {
+    for (const platform of ["windows-x64", "windows-arm64"] as const) {
+      const result = loadWindowsUpdateConfiguration(platform, azureSigning);
+      expect(result.status, `${platform}: ${result.stderr}`).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        provider: "generic",
+        url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+        updaterCacheDirName: "inertia-updater",
+        publisherName: ["Example Publisher, Inc."],
+      });
+      expect(result.stdout).not.toContain(azureSigning.AZURE_CLIENT_SECRET);
     }
   });
 });

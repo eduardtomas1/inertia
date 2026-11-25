@@ -290,7 +290,7 @@ export function previewPickerStartScript(options: PreviewPickerStartOptions = {}
     } catch {}
     host.style.cssText = "position:fixed;inset:0;width:auto;height:auto;margin:0;border:0;padding:0;overflow:visible;background:transparent;color:inherit;z-index:2147483647;pointer-events:none;";
 
-    const shadow = host.attachShadow({ mode: "closed" });
+    const shadow = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = [
       ":host { all: initial; }",

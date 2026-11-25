@@ -258,7 +258,7 @@ describe("preview picker overlay selection in Happy DOM", () => {
       const run = new Function(previewPickerStartScript({ generation: 2 }));
       run();
       const host = document.querySelector(`[${PREVIEW_PICKER_OVERLAY_ATTR}="host"]`)!;
-      expect(host.shadowRoot).toBeNull();
+      expect(host.shadowRoot).toBe(shadows.get(host));
       expect(shadows.get(host)).not.toBeNull();
       expect(shadows.get(host)!.querySelector("textarea")).toBeNull();
 

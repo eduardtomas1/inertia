@@ -74,7 +74,7 @@ function trusted<T extends object>(event: T): T {
 }
 
 describe("isolated-world preview picker script", () => {
-  it("mounts a closed shadow root overlay, highlights on hover, swallows clicks, and submits comments", async () => {
+  it("mounts an open shadow root overlay, highlights on hover, swallows clicks, and delivers selection", async () => {
     const env = createIsolatedPickerEnvironment('<main><button id="cta" class="primary">Buy now</button></main>');
     const button = env.win.document.getElementById("cta")!;
     button.getBoundingClientRect = () => ({
@@ -88,9 +88,9 @@ describe("isolated-world preview picker script", () => {
     expect(env.runScript(previewPickerStartScript())).toBe(true);
     const host = env.getOverlayHost();
     expect(host).not.toBeNull();
-    expect((host as unknown as { shadowRoot: unknown }).shadowRoot).toBeNull();
     const shadow = env.getClosedShadow()!;
     expect(shadow).not.toBeNull();
+    expect((host as unknown as { shadowRoot: unknown }).shadowRoot).toBe(shadow);
 
     env.win.dispatchEvent(new env.win.Event("pointermove", { bubbles: true, cancelable: true }) as never);
     const badge = shadow.querySelector(".badge") as HTMLElement;
@@ -509,6 +509,86 @@ describe("main-process preview picker coordinator and provider assembly", () => 
     expect(sentToMainWindow[0]?.[1]).toMatchObject({
       conversationId: session.contextId,
       error: expect.stringMatching(/password|secret/iu),
+    });
+  });
+
+  it("refuses element annotation when screenshot privacy checks are unreadable before or after capture", async () => {
+    const pngBytes = Buffer.from(SCREENSHOT_PNG_BASE64, "base64");
+    const sentToMainWindow: Array<[string, unknown]> = [];
+    const capturePage = vi.fn(async () => ({
+      isEmpty: () => false,
+      getSize: () => ({ width: 120, height: 40 }),
+      toPNG: () => pngBytes,
+      resize: vi.fn(),
+    }));
+    const contents = {
+      isDestroyed: () => false,
+      getURL: () => "http://127.0.0.1:4173/embed",
+      executeJavaScriptInIsolatedWorld: vi.fn(async () => true),
+      capturePage,
+    } as unknown as WebContents;
+    const checkScreenshotPrivacy = vi.fn<() => Promise<"clear" | "sensitive" | "unreadable">>()
+      .mockResolvedValueOnce("unreadable")
+      .mockResolvedValueOnce("clear")
+      .mockResolvedValueOnce("unreadable");
+    const coordinator = new PreviewPickerCoordinator({
+      publish: vi.fn(),
+      annotations: {
+        window: () => ({
+          isDestroyed: () => false,
+          webContents: { isDestroyed: () => false, send: (ch: string, payload: unknown) => sentToMainWindow.push([ch, payload]) },
+        }) as never,
+        document: () => ({ owner: contents, processId: 1, frameId: 1, frameToken: "frame" }) as never,
+        registry: () => ({ import: vi.fn(), setPreviewAnnotation: vi.fn() }) as never,
+        imports: { begin: vi.fn(), importSelection: vi.fn(), cancel: vi.fn() } as never,
+        channel: "inertia:preview-annotation-ready",
+      },
+      privacy: {
+        checkEvidencePrivacy: vi.fn(async () => ({ withheld: null })),
+        checkScreenshotPrivacy,
+      },
+    });
+    const session: PreviewPickerSessionView = {
+      contextId: "11111111-1111-4111-8111-111111111111",
+      partition: "inertia-preview-test",
+      activeTabId: "tab-1",
+      busy: 0,
+      viewportScale: 1,
+      pickerActive: false,
+      pickerSelection: null,
+      activeTab: { id: "tab-1", documentSequence: 1, contents },
+    };
+
+    const payload = {
+      selector: "div#frame-wrap",
+      role: "generic",
+      name: "Embedded",
+      tagName: "div",
+      bounds: { x: 10, y: 10, width: 120, height: 40 },
+      html: '<div id="frame-wrap">Embedded</div>',
+      viewportWidth: 800,
+      viewportHeight: 600,
+    };
+
+    await coordinator.start(session);
+    coordinator.handleGuestEvent(contents, { type: "selected", generation: 1, payload }, session);
+    await vi.waitFor(() => expect(sentToMainWindow).toHaveLength(1));
+    expect(capturePage).not.toHaveBeenCalled();
+    expect(session.pickerSelection).toBeNull();
+    expect(sentToMainWindow[0]?.[1]).toMatchObject({
+      conversationId: session.contextId,
+      error: expect.stringMatching(/frames or shadow roots/iu),
+    });
+
+    await coordinator.start(session);
+    coordinator.handleGuestEvent(contents, { type: "selected", generation: 2, payload }, session);
+    await vi.waitFor(() => expect(sentToMainWindow).toHaveLength(2));
+    expect(capturePage).toHaveBeenCalledTimes(1);
+    expect(session.pickerSelection).toBeNull();
+    expect(session.pickerActive).toBe(false);
+    expect(sentToMainWindow[1]?.[1]).toMatchObject({
+      conversationId: session.contextId,
+      error: expect.stringMatching(/frames or shadow roots/iu),
     });
   });
 

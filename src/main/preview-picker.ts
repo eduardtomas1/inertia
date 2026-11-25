@@ -30,6 +30,7 @@ const PREVIEW_PARTITION_PATTERN = /^inertia(?:-canary)?-preview-/u;
 const MAX_SCREENSHOT_RESIZE_ATTEMPTS = 4;
 const PREVIEW_ANNOTATION_MAX_RAW_HTML_CHARS = 32 * 1024;
 const PICKER_SENSITIVE_SCREENSHOT_MESSAGE = "Element annotations are unavailable because the visible page shows a secret, or is too large for Inertia to check for one.";
+const PICKER_UNREADABLE_SCREENSHOT_MESSAGE = "Element annotations are unavailable because the page has frames or shadow roots Inertia cannot inspect.";
 
 export interface PreviewPickerSessionView {
   readonly contextId: string;
@@ -287,6 +288,9 @@ export class PreviewPickerCoordinator {
     const screenshot = await checkScreenshot(contents);
     if (screenshot === "sensitive") {
       throw new Error(PICKER_SENSITIVE_SCREENSHOT_MESSAGE);
+    }
+    if (screenshot !== "clear") {
+      throw new Error(PICKER_UNREADABLE_SCREENSHOT_MESSAGE);
     }
   }
 

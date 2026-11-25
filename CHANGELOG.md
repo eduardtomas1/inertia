@@ -2,7 +2,65 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.85 — 2026-11-25
+
+Full-history message search, an editable queue that keeps unsent files across
+chats, Office, notebook and EPUB attachments, point-and-comment on local
+previews, opening files at the cited line in your editor, portable recovery
+backups with attachments, database compaction, bounded Git checkpoints, and
+lighter live updates.
+
+### Search
+
+- Message search in the command palette (`Ctrl/Cmd+K`) now indexes your whole
+  history in small background slices so older chats stay searchable without
+  pausing the app. Matches arrive newest first; choose **Search older
+  messages** to continue further back through history.
+
+### Composer and queue
+
+- Unsent attachments stay with your draft when you switch to another chat and
+  come back, instead of disappearing before you send.
+- The message queue lists every waiting message, lets you pull one back into
+  the composer to edit (preserving its text, attachments and annotations),
+  accepts documents as well as images, and re-sends with the chat's current
+  settings—asking for confirmation if those settings became broader.
+
+### Attachments and recovery
+
+- Attach Word (`.docx`), PowerPoint (`.pptx`), RTF (`.rtf`), OpenDocument
+  (`.odt`, `.ods`, `.odp`), Jupyter notebooks (`.ipynb`) and EPUB books
+  (`.epub`) so agents can read their text alongside PDFs, spreadsheets and
+  images.
+- **Settings → Data → Portable recovery export** can now include retained
+  attachments (**Include attachments**) in a single portable `.tar` bundle
+  and restore them cleanly on import.
+
+### Preview and editor
+
+- Point at any element on a local preview page (**Comment on this element**)
+  to capture a cropped screenshot with its selector, role, bounds, sanitized
+  HTML and your comment straight into the composer.
+- Choose a **Preferred editor** (VS Code, Cursor, Zed, JetBrains IDEs and
+  others) under **Settings → Chats → Review and terminal** to open project
+  files and cited `path:line` links directly at that line in your editor.
+
+### Storage, checkpoints and performance
+
+- **Settings → Data** shows the database size and reclaimable free space with
+  **Compact now** to shrink it cleanly; new databases start with incremental
+  auto-vacuum enabled.
+- Git checkpoint refs are now bounded per chat and per repository, cleaned up
+  when a project is removed, and expired checkpoints clearly show *No longer
+  available*.
+- Archived chats stay out of the live shell snapshot, internal reads no
+  longer rebuild the whole snapshot, and long command or tool outputs load on
+  expand and stream incrementally.
+
+### Releases
+
+- Windows release builds now support Azure Artifact Signing, enabling
+  verified in-app updates on Windows once the signing secrets are configured.
 
 ### Dependencies
 

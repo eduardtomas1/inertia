@@ -61,7 +61,7 @@ export async function openProjectPathInEditor(
   resolvedPath: string,
   request: OpenProjectPathRequest,
 ): Promise<string> {
-  const context = await runtime.editorContext(resolvedPath);
+  const context = await runtime.editorContext(resolvedPath, request.conversationId);
   if (!context.authorizedPath || !context.projectRoot) {
     throw new Error("The requested path is outside the authorized project.");
   }

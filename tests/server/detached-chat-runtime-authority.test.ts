@@ -1381,4 +1381,29 @@ describe("detached chat workspace tools", () => {
       }
     }
   });
+
+  it("authorizes commands for an archived detached chat omitted from the main shell snapshot via conversationShell fallback", () => {
+    const base = resources();
+    const archivedShell = base.snapshot().conversations.find(({ id }) => id === CONVERSATION)!;
+    const withoutArchived: DetachedChatRuntimePolicyResources = {
+      ...base,
+      snapshot: () => ({
+        ...base.snapshot(),
+        conversations: base.snapshot().conversations.filter(({ id }) => id !== CONVERSATION),
+      }),
+      conversationShell: (id) => (id === CONVERSATION ? archivedShell : null),
+    };
+    const readDetail: ClientCommand = {
+      type: "activity.detail.read",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, activityId: REQUEST },
+    };
+    expect(detachedChatCommandRejection(authority, readDetail, withoutArchived)).toBeNull();
+    const otherRead: ClientCommand = {
+      type: "activity.detail.read",
+      requestId: REQUEST,
+      payload: { conversationId: OTHER_CONVERSATION, activityId: REQUEST },
+    };
+    expect(detachedChatCommandRejection(authority, otherRead, withoutArchived)).toBe(REJECTED);
+  });
 });

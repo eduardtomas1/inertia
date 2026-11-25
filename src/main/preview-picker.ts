@@ -177,8 +177,14 @@ export function buildValidatedPreviewAnnotation(
   const viewportWidth = finiteNumber(rawPayload.viewportWidth) ?? 0;
   const viewportHeight = finiteNumber(rawPayload.viewportHeight) ?? 0;
 
+  const sanitizedUrl = new URL(target.url.toString());
+  sanitizedUrl.username = "";
+  sanitizedUrl.password = "";
+  sanitizedUrl.search = "";
+  sanitizedUrl.hash = "";
+
   const annotation = previewAnnotationSchema.parse({
-    pageUrl: target.url.toString(),
+    pageUrl: sanitizedUrl.toString(),
     selector,
     role,
     name,
@@ -419,7 +425,8 @@ export class PreviewPickerCoordinator {
       await this.#assertPageAllowsAnnotation(tab.contents);
       const { annotation, viewport } = buildValidatedPreviewAnnotation({ ...rawPayload, comment: "" }, url);
       if (
-        browserEvidenceTextContainsSensitiveCredential(annotation.html)
+        browserEvidenceTextContainsSensitiveCredential(annotation.pageUrl)
+        || browserEvidenceTextContainsSensitiveCredential(annotation.html)
         || browserEvidenceTextContainsSensitiveCredential(annotation.name)
         || browserEvidenceTextContainsSensitiveCredential(annotation.selector)
       ) {

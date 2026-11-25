@@ -759,4 +759,66 @@ describe("portable recovery bundles with attachments", () => {
     expect(existsSync(join(destDir, "conversation-attachments"))).toBe(false);
     destStore.close();
   });
+
+  it("preserves previewAnnotation metadata on PNG attachments across recovery bundle export and import", async () => {
+    const sourceDir = temporaryDirectory();
+    const destDir = temporaryDirectory();
+    const authorizedRoot = temporaryDirectory();
+    const bundlePath = join(temporaryDirectory(), "annotated.tar");
+
+    const sourceStore = new RuntimeStore(
+      join(sourceDir, "inertia.sqlite"),
+      sourceDir,
+      { recoverInterruptedRuns: false },
+    );
+    const sourceAttachments = await ConversationAttachmentStore.open(sourceDir);
+    const project = sourceStore.createProject("Annotated project", sourceDir);
+    const conversation = sourceStore.createConversation(project.id, "Annotated chat");
+    const pngBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const attachmentId = randomUUID();
+    const retentionId = randomUUID();
+    const previewAnnotation = {
+      pageUrl: "http://127.0.0.1:4173/dashboard",
+      selector: "button#save",
+      role: "button",
+      name: "Save",
+      bounds: { x: 4, y: 8, width: 80, height: 28 },
+      html: "<button id=\"save\">Save</button>",
+      comment: "Increase contrast",
+      capturedAt: "2026-11-25T06:00:00.000Z",
+    };
+    const [retained] = await sourceAttachments.retain(
+      [{
+        attachment: {
+          id: attachmentId,
+          name: "annotation.png",
+          path: attachmentId,
+          mimeType: "image/png",
+          size: pngBytes.byteLength,
+        },
+        bytes: pngBytes,
+      }],
+      undefined,
+      retentionId,
+    );
+    sourceAttachments.acceptRetention(retentionId);
+    sourceStore.createMessage(conversation.id, "Check element", "user", [{ ...retained!, previewAnnotation }]);
+    await sourceStore.exportRecoveryBundle(bundlePath);
+    await sourceAttachments.close();
+    sourceStore.close();
+
+    const destStore = new RuntimeStore(
+      join(destDir, "inertia.sqlite"),
+      destDir,
+      { recoverInterruptedRuns: false },
+    );
+    await destStore.importRecoveryFile(bundlePath, authorizedRoot);
+    const importedConversation = destStore.shellSnapshot().conversations[0]!;
+    const importedDetail = destStore.conversationDetail(importedConversation.id)!;
+    expect(importedDetail.messages[0]?.attachments[0]?.previewAnnotation).toEqual(previewAnnotation);
+    destStore.close();
+  });
 });

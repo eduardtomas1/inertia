@@ -248,4 +248,33 @@ describe("activity detail on demand", () => {
     expect(sent).toEqual([]);
     expect(store.activityDetail(other.id, command.id)).toBeNull();
   });
+
+  it("includes latestTurn.failureKind in targeted conversationShell reads", () => {
+    const { store, directory } = fixture();
+    const project = store.createProject("FailureKind", directory);
+    const conversation = store.createConversation(project.id, "Billing failure");
+    const { turn } = store.beginAgentTurn({
+      id: "turn-billing",
+      runId: "run-billing",
+      conversationId: conversation.id,
+      content: "Run it",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "native:codex:app-server",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 1,
+      association: "authoritative",
+      requestedAt: at(1).toISOString(),
+    });
+    store.settleAgentTurn(turn.id, {
+      status: "failed",
+      errorMessage: "Quota exceeded",
+      updatedAt: at(2).toISOString(),
+    });
+    store.limitResets.markFailureKind(turn.id, "billing");
+    expect(store.conversationShell(conversation.id)?.latestTurn?.failureKind).toBe("billing");
+  });
 });

@@ -394,7 +394,12 @@ export function createQueuedMessageRuntime(
     }
   }
 
-  const editGrants = new Map<string, { conversationId: string; attachmentIds: string[]; timer: ReturnType<typeof setTimeout> }>();
+  const editGrants = new Map<string, {
+    conversationId: string;
+    attachmentIds: string[];
+    attachments: QueuedMessage["attachments"];
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   const releaseEditGrant = async (id: string): Promise<void> => {
     const grant = editGrants.get(id);
     if (!grant) return;
@@ -422,7 +427,12 @@ export function createQueuedMessageRuntime(
       }
       const timer = setTimeout(() => { void releaseEditGrant(id).catch(() => undefined); }, QUEUED_EDIT_GRANT_MS);
       timer.unref?.();
-      editGrants.set(id, { conversationId, attachmentIds: removed.attachments.map(({ id: attachmentId }) => attachmentId), timer });
+      editGrants.set(id, {
+        conversationId,
+        attachmentIds: removed.attachments.map(({ id: attachmentId }) => attachmentId),
+        attachments: removed.attachments,
+        timer,
+      });
     }
     changed(conversationId);
     void schedule(conversationId).catch(() => undefined);
@@ -442,6 +452,27 @@ export function createQueuedMessageRuntime(
       owners.push(grant.conversationId);
     }
     return [...new Set(owners)];
+  }
+
+  function editedAttachmentMetadata(
+    attachmentId: string,
+  ): { previewAnnotation?: QueuedMessage["attachments"][number]["previewAnnotation"]; snapshot?: QueuedMessage["attachments"][number]["snapshot"] } | null {
+    for (const [grantId, grant] of editGrants.entries()) {
+      const attachment = grant.attachments.find(({ id }) => id === attachmentId);
+      if (!attachment) continue;
+      try {
+        store.conversation(grant.conversationId);
+      } catch {
+        void releaseEditGrant(grantId).catch(() => undefined);
+        continue;
+      }
+      if (!attachment.previewAnnotation && !attachment.snapshot) continue;
+      return {
+        ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}),
+        ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}),
+      };
+    }
+    return null;
   }
 
   async function reconfirm(conversationId: string, id: string, confirmed: QueuedAccess | undefined): Promise<MessageQueueResult["confirmation"]> {
@@ -532,6 +563,7 @@ export function createQueuedMessageRuntime(
     enqueueManagedMessage,
     withdrawWatcherNote,
     editedAttachmentConversations,
+    editedAttachmentMetadata,
     onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
     onCompactionSettled(conversationId: string): void {
       if (store.queuedMessages.list(conversationId).length > 0) void schedule(conversationId).catch(() => undefined);

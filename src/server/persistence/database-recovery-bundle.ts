@@ -321,6 +321,8 @@ export async function exportDatabaseRecoveryBundle(
         sha256: outcome.status === "included" ? outcome.sha256 : null,
         status: outcome.status,
         entryPath: outcome.status === "included" ? outcome.entryPath : null,
+        ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}),
+        ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}),
       });
     }
 
@@ -616,6 +618,8 @@ export async function stageRecoveryBundleImport(
         path: newId,
         mimeType: entry.mimeType as ChatAttachmentMimeType,
         size: entry.size,
+        ...(entry.previewAnnotation ? { previewAnnotation: entry.previewAnnotation } : {}),
+        ...(entry.snapshot ? { snapshot: entry.snapshot } : {}),
       });
       if (attachmentLimitError(list) !== null) {
         throw new Error("A recovered message exceeds the attachment limit.");

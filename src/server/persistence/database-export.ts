@@ -11,6 +11,8 @@ import {
   type ChatAttachmentMimeType,
 } from "../../shared/attachments";
 import { providerNativeModelSelection } from "../../shared/model-routing";
+import { previewAnnotationSchema } from "../../shared/preview-annotation";
+import { snapshotSourceSchema } from "../../shared/snapshots";
 import type { ProviderId } from "../../shared/contracts";
 import type { NewConversationOptions } from "./types";
 
@@ -231,7 +233,16 @@ export const recoveryBundleAttachmentSchema = z.object({
   sha256: z.string().regex(SHA256_PATTERN).nullable(),
   status: z.enum(["included", "missing"]),
   entryPath: z.string().min(1).max(100).nullable(),
+  previewAnnotation: previewAnnotationSchema.optional(),
+  snapshot: snapshotSourceSchema.optional(),
 }).strict().superRefine((value, context) => {
+  if ((value.previewAnnotation || value.snapshot) && value.mimeType !== "image/png") {
+    context.addIssue({
+      code: "custom",
+      path: ["mimeType"],
+      message: "Attachment annotation or snapshot metadata requires a PNG image.",
+    });
+  }
   if (!storedAttachmentTypeMatchesName(value.name, value.mimeType)) {
     context.addIssue({
       code: "custom",

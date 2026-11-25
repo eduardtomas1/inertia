@@ -42,10 +42,10 @@ export function registerChatAttachmentIpc(options: {
   registerAttachmentReattachIpc({
     ipcMain, channel: IPC.reattachAttachment, assertTrusted, registry, imports,
     retained: () => options.conversationAttachments(),
-    attachmentConversations: async (attachmentId) => {
+    attachmentReattachContext: async (attachmentId) => {
       const supervisor = options.supervisor();
       if (!supervisor) throw new Error("The local runtime is not available");
-      return await supervisor.attachmentConversations(attachmentId);
+      return await supervisor.attachmentReattachContext(attachmentId);
     },
   });
   registerAttachmentLifecycleIpc({

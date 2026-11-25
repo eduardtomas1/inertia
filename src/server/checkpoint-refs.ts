@@ -390,7 +390,7 @@ async function runBatchedRefDeletes(
       await runRefGit(
         gitRoot,
         refGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "--stdin"]),
-        Buffer.from(batch.map((ref) => `delete ${ref}\n`).join(""), "utf8"),
+        Buffer.from(`option no-deref\n${batch.map((ref) => `delete ${ref}\n`).join("")}`, "utf8"),
         1024 * 1024,
         options.deadlineAt,
         options.signal,
@@ -467,7 +467,7 @@ export async function deleteCheckpointsForConversations(
         await runRefGit(
           gitRoot,
           refGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "--stdin"]),
-          Buffer.from(listed.refs.map((ref) => `delete ${ref}\n`).join(""), "utf8"),
+          Buffer.from(`option no-deref\n${listed.refs.map((ref) => `delete ${ref}\n`).join("")}`, "utf8"),
           1024 * 1024,
           options.deadlineAt,
           options.signal,

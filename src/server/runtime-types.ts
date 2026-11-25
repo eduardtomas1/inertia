@@ -123,6 +123,7 @@ export interface RunningRuntime extends RuntimeHtmlRenderReader, RuntimeAgentSec
   editorContext: (filePath?: string, conversationId?: string) => Promise<import("../node/runtime-editor-protocol").RuntimeEditorContextResult>;
   /** The chats whose sent messages carry the stored attachment. */
   attachmentConversations: (attachmentId: string) => readonly string[];
+  attachmentMetadata?: (attachmentId: string) => import("../node/runtime-attachment-protocol").RuntimeAttachmentReattachMetadata | null;
   privateConnectRequest: (
     subject: PrivateConnectRuntimeAuthorization,
     request: Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>,

@@ -317,6 +317,7 @@ export class RuntimeSupervisor {
   editorContext(filePath?: string, conversationId?: string) { return this.queries.editorContext(filePath, conversationId); }
   /** The chats whose sent messages carry a stored attachment, read from the runtime. */
   attachmentConversations(attachmentId: string): Promise<readonly string[]> { return this.queries.attachmentConversations(attachmentId); }
+  attachmentReattachContext(attachmentId: string) { return this.queries.attachmentReattachContext(attachmentId); }
   /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */
   readHtmlRender(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
     return this.htmlRenders.read(renderId);

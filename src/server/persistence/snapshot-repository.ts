@@ -336,7 +336,7 @@ export class SnapshotRepository {
     const row = this.conversationRow(conversationId);
     if (!row) return null;
     const latestTurn = cachedStatement(this.context.database, `
-      SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited FROM agent_turns
+      SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited, ${TURN_FAILURE_KIND_SQL} AS failure_kind FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
       LIMIT 1

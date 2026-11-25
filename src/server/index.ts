@@ -243,6 +243,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
     updatePreparation.track(operation);
+  const trackNonStorageOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
+    activeNonStorageCommands += 1;
+    try {
+      return await trackRuntimeOperation(operation);
+    } finally {
+      activeNonStorageCommands -= 1;
+    }
+  };
   const databaseWrites = new DatabaseWriteGate({ isDatabaseVacuuming: () => store.isDatabaseVacuuming(), whenDatabaseWritable: () => store.whenDatabaseWritable() });
   const trackDatabaseWrite = <T>(operation: () => Promise<T>): Promise<T> => databaseWrites.run(() => trackRuntimeOperation(operation));
   const admitBackgroundWork = <T>(operation: () => Promise<T>): Promise<T> => recoveryImportAdmission.admit(() => trackDatabaseWrite(operation));
@@ -330,10 +338,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
+  const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory, undefined, {
     reportIncident: commandIncidents.report,
     databaseWrites,
-    isConversationProtected: (conversationId) => Boolean(turns?.activeConversationIds().includes(conversationId)),
+    isConversationProtected: (conversationId) =>
+      Boolean(turns?.activeConversationIds().includes(conversationId))
+      || providerTerminalResumes.isActive(conversationId),
   });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
@@ -341,7 +352,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     onOwnedProcessCleanupUnconfirmed:
       options.onOwnedProcessCleanupUnconfirmed,
   });
-  const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const compactions = new ConversationCompactionStates();
   const metadataCache = new ProviderMetadataCache({
     persistence: {
@@ -1091,9 +1101,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       return [...new Set([...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
         ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? []])];
     },
+    attachmentMetadata: (attachmentId) => {
+      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      return queuedMessages?.editedAttachmentMetadata(attachmentId) ?? null;
+    },
     deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
-    resolveProjectPath: (request) => trackRuntimeOperation(async () => {
+    resolveProjectPath: (request) => trackNonStorageOperation(async () => {
       if (runtimeSafetyLock) {
         throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
       }
@@ -1105,18 +1120,24 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         projectIdentityAuthority,
       )).absolute;
     }),
-    editorContext: (filePath, conversationId) => trackRuntimeOperation(async () => {
+    editorContext: (filePath, conversationId) => trackNonStorageOperation(async () => {
       if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
       if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
       return await resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock, conversationId);
     }),
     privateConnectRequest: (subject, request) => {
       const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
-      return refused ? Promise.resolve(refused) : trackRuntimeOperation(() => privateConnectGateway.request(subject, request));
+      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () => {
+        const rechecked = privateConnectRefusal(privateConnectAdmission, request.requestId);
+        return rechecked ?? await privateConnectGateway.request(subject, request);
+      });
     },
     preparePrivateConnectPrompt: (subject, request) => {
       const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
-      return refused ? Promise.resolve(refused) : trackRuntimeOperation(() => privateConnectGateway.preparePrompt(subject, request));
+      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () => {
+        const rechecked = privateConnectRefusal(privateConnectAdmission, request.requestId);
+        return rechecked ?? await privateConnectGateway.preparePrompt(subject, request);
+      });
     },
     commitPrivateConnectPrompt: (subject, request, preparationId) =>
       privateConnectRefusal(privateConnectAdmission, request.requestId) ?? privateConnectGateway.commitPrompt(subject, request, preparationId),

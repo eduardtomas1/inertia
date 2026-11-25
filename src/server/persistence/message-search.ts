@@ -106,7 +106,10 @@ export function searchMessages(
   const continuation = options.continuation ? messageSearchContinuationSchema.parse(options.continuation) : null;
   const pattern = messageSearchPattern(query);
   const now = options.now ?? performance.now.bind(performance);
-  const deadline = now() + (options.maxScanMs ?? MAX_SCAN_MS);
+  const startedAt = now();
+  const maxScanMs = options.maxScanMs ?? MAX_SCAN_MS;
+  const deadline = startedAt + maxScanMs;
+  const membershipDeadline = startedAt + Math.max(1, Math.floor(maxScanMs / 2));
   const maximumBytes = options.maxScanBytes ?? MAX_SCAN_BYTES;
   const sortedCandidateLimit = options.sortedCandidateLimit ?? MESSAGE_SEARCH_SORTED_CANDIDATE_LIMIT;
   const result: MessageSearchResult = {
@@ -203,19 +206,17 @@ export function searchMessages(
           )
         `).pluck().get(expression, sortedCandidateLimit + 1) as number;
         if (candidates > sortedCandidateLimit) {
-          const members = sortedMembership(database, expression, expired);
+          const members = maxScanMs <= 0
+            ? null
+            : sortedMembership(database, expression, () => now() >= membershipDeadline);
           if (!members) {
-            result.incomplete = true;
-            result.continuation = continuation ?? database.prepare(`
-              SELECT m.created_at AS createdAt, m.id AS messageId FROM messages m INDEXED BY messages_created_id_idx
-              ORDER BY m.created_at DESC, m.id DESC LIMIT 1
-            `).get() as Position | undefined ?? null;
-            return;
+            streams.push(candidateStream(ordered(cursor, false), (row) => ({ ...position(row), verify: true })));
+          } else {
+            streams.push(candidateStream(ordered(cursor, true), (row) => ({
+              ...position(row),
+              verify: row.documentId === null || row.state !== 1 || contains(members, row.documentId),
+            })));
           }
-          streams.push(candidateStream(ordered(cursor, true), (row) => ({
-            ...position(row),
-            verify: row.documentId === null || row.state !== 1 || contains(members, row.documentId),
-          })));
         } else {
           streams.push(candidateStream(database.prepare(`
             SELECT m.id AS messageId, m.created_at AS createdAt

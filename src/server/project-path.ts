@@ -149,7 +149,7 @@ export async function resolveAuthorizedEditorFile(
       await assertProjectIdentityAuthority(authority, candidate.projectId, candidate.projectRoot);
       const resolved = await resolveWorkspacePathForOpen(
         canonicalRoot,
-        rel ? rel.replaceAll("\\", "/") : ".",
+        rel ? (process.platform === "win32" ? rel.replaceAll("\\", "/") : rel) : ".",
       );
       return { absolute: resolved.absolute, projectRoot: canonicalRoot };
     } catch {

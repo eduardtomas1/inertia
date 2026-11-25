@@ -734,6 +734,15 @@ describe("bounded retention for Git checkpoint refs", () => {
       await expect(
         deleteCheckpointRefs(fixture.repository, ["refs/heads/main"]),
       ).rejects.toBeInstanceOf(CheckpointError);
+
+      // Symbolic refs under refs/inertia/checkpoints/ must be deleted with no-deref
+      // so the target branch ref is never touched.
+      const symRef = `refs/inertia/checkpoints/${fixture.conversation.id}/${randomUUID()}`;
+      git(fixture.repository, ["symbolic-ref", symRef, "refs/heads/main"]);
+      const headBefore = git(fixture.repository, ["rev-parse", "refs/heads/main"]);
+      await deleteCheckpointRefs(fixture.repository, [symRef]);
+      expect(git(fixture.repository, ["rev-parse", "refs/heads/main"])).toBe(headBefore);
+      expect(listAllRefs(fixture.repository, `refs/inertia/checkpoints/${fixture.conversation.id}/`)).not.toContain(symRef);
     } finally {
       fixture.store.close();
     }

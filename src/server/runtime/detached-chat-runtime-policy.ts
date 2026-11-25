@@ -11,6 +11,7 @@ const REJECTION = "That request is unavailable in a detached chat.";
 
 export interface DetachedChatRuntimePolicyResources {
   snapshot(): AppSnapshot;
+  conversationShell?(conversationId: string): AppSnapshot["conversations"][number] | null;
   subagentConversationId(traceId: string): string | null;
   checkpointConversationId(checkpointId: string): string | null;
   turnConversationId(turnId: string): string | null;
@@ -55,7 +56,7 @@ export function detachedChatCommandRejection(
   const shell = (): AppSnapshot["conversations"][number] | null =>
     snapshot().conversations.find(
       ({ id }) => id === authority.conversationId,
-    ) ?? null;
+    ) ?? resources.conversationShell?.(authority.conversationId) ?? null;
   const ownsExistingConversation = (candidate: string): boolean =>
     Boolean(shell() && owns(candidate));
   const ownsWorkspace = (

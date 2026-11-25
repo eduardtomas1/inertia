@@ -301,7 +301,15 @@ export class AttachmentRegistry {
     const record = this.records.get(id);
     if (!record || record.mimeType !== "image/png") throw new Error("Snapshot attachment is unavailable.");
     record.snapshot = snapshot;
-    return { id: record.id, name: record.name, path: record.id, mimeType: record.mimeType, size: record.size, snapshot };
+    return {
+      id: record.id,
+      name: record.name,
+      path: record.id,
+      mimeType: record.mimeType,
+      size: record.size,
+      snapshot,
+      ...(record.previewAnnotation ? { previewAnnotation: record.previewAnnotation } : {}),
+    };
   }
 
   setPreviewAnnotation(id: string, annotation: PreviewAnnotation): ChatAttachment {
@@ -309,7 +317,15 @@ export class AttachmentRegistry {
     const record = this.records.get(id);
     if (!record || record.mimeType !== "image/png") throw new Error("Page annotation attachment is unavailable.");
     record.previewAnnotation = parsed;
-    return { id: record.id, name: record.name, path: record.id, mimeType: record.mimeType, size: record.size, previewAnnotation: parsed };
+    return {
+      id: record.id,
+      name: record.name,
+      path: record.id,
+      mimeType: record.mimeType,
+      size: record.size,
+      previewAnnotation: parsed,
+      ...(record.snapshot ? { snapshot: record.snapshot } : {}),
+    };
   }
 
   async import(

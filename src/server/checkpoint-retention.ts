@@ -296,6 +296,23 @@ export async function pruneCheckpointRefs(
     }
   };
 
+  const resolveVerifiedBucket = async (
+    checkoutPath: string,
+    projectId: string,
+    workspaceKind: string | null,
+    expectedRepositoryIdentity: string | null,
+  ): Promise<RepositoryBucket | null> => {
+    const candidate = await resolveBucket(checkoutPath, projectId, workspaceKind);
+    if (!candidate) return null;
+    if (
+      expectedRepositoryIdentity
+      && `git:${normalizeIdentityPath(candidate.commonGitDir)}` !== expectedRepositoryIdentity
+    ) {
+      return null;
+    }
+    return candidate;
+  };
+
   const resolveFallbackBucket = async (
     projectPath: string,
     projectId: string,
@@ -303,28 +320,23 @@ export async function pruneCheckpointRefs(
     expectedRepositoryIdentity: string | null,
   ): Promise<RepositoryBucket | null> => {
     if (!expectedRepositoryIdentity) return null;
-    const candidate = await resolveBucket(projectPath, projectId, workspaceKind);
-    if (!candidate) return null;
-    if (`git:${normalizeIdentityPath(candidate.commonGitDir)}` !== expectedRepositoryIdentity) {
-      return null;
-    }
-    return candidate;
+    return await resolveVerifiedBucket(projectPath, projectId, workspaceKind, expectedRepositoryIdentity);
   };
 
   for (const record of checkpoints) {
     if (options.signal?.aborted) return result;
     const bucket = record.worktreePath
-      ? (await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind))
+      ? (await resolveVerifiedBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity))
         ?? (await resolveFallbackBucket(record.projectPath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity))
-      : await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
+      : await resolveVerifiedBucket(record.projectPath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity);
     if (bucket) bucket.checkpoints.push(record);
   }
   for (const record of artifacts) {
     if (options.signal?.aborted) return result;
     const bucket = record.worktreePath
-      ? (await resolveBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind))
+      ? (await resolveVerifiedBucket(record.worktreePath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity))
         ?? (await resolveFallbackBucket(record.projectPath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity))
-      : await resolveBucket(record.projectPath, record.projectId, record.projectWorkspaceKind);
+      : await resolveVerifiedBucket(record.projectPath, record.projectId, record.projectWorkspaceKind, record.projectRepositoryIdentity);
     if (bucket) bucket.artifacts.push(record);
   }
 
@@ -440,9 +452,11 @@ async function pruneRepositoryBucket(
       if (artifact.beforeRef !== null) {
         if (turnProtected) {
           protectedBeforeTurns.add(artifact.turnId);
-        } else if (artifact.beforeCheckpointId === null) {
-          clearBeforeTurns.add(artifact.turnId);
-        } else if (expiredCheckpointIds.has(artifact.beforeCheckpointId)) {
+        } else if (
+          artifact.beforeCheckpointId === null
+          || !checkpointById.has(artifact.beforeCheckpointId)
+          || expiredCheckpointIds.has(artifact.beforeCheckpointId)
+        ) {
           clearBeforeTurns.add(artifact.turnId);
         }
       }

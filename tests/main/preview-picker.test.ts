@@ -706,4 +706,19 @@ describe("main-process preview picker coordinator and provider assembly", () => 
     expect(executeJavaScriptInIsolatedWorld).toHaveBeenCalledTimes(3);
     expect(executeJavaScriptInIsolatedWorld.mock.calls[2]?.[1]?.[0]?.code).toContain("expectedGeneration = 1");
   });
+
+  it("strips query and fragment from pageUrl before storing annotations", () => {
+    const built = buildValidatedPreviewAnnotation(
+      {
+        selector: "#save",
+        role: "button",
+        name: "Save",
+        bounds: { x: 0, y: 0, width: 20, height: 10 },
+        html: "<button id='save'>Save</button>",
+        comment: "Fix spacing",
+      },
+      "http://127.0.0.1:4173/settings/profile?token=ghp_123456789012345678901234567890123456#access_token=abc",
+    );
+    expect(built.annotation.pageUrl).toBe("http://127.0.0.1:4173/settings/profile");
+  });
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { RuntimeAttachmentReattachMetadata } from "../node/runtime-attachment-protocol.js";
 import type { RuntimeEditorContextResult } from "../node/runtime-editor-protocol.js";
 import type { RuntimeWorkerCommand, RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
@@ -16,7 +17,12 @@ type RuntimeSupervisorQueryEvent = Extract<RuntimeWorkerEvent, {
     | "runtime.editor-context-rejected";
 }>;
 
-type QueryValue = string | readonly string[] | RuntimeEditorContextResult;
+export interface RuntimeAttachmentReattachContext {
+  conversationIds: readonly string[];
+  metadata?: RuntimeAttachmentReattachMetadata;
+}
+
+type QueryValue = string | RuntimeAttachmentReattachContext | RuntimeEditorContextResult;
 
 interface PendingQuery {
   record: RuntimeProcessRecord;
@@ -50,10 +56,14 @@ export class RuntimeSupervisorQueries {
     }));
   }
 
-  attachmentConversations(attachmentId: string): Promise<readonly string[]> {
-    return this.ask<readonly string[]>("attachment-conversations", "The attachment owner request timed out.", (requestId) => ({
+  attachmentReattachContext(attachmentId: string): Promise<RuntimeAttachmentReattachContext> {
+    return this.ask<RuntimeAttachmentReattachContext>("attachment-conversations", "The attachment owner request timed out.", (requestId) => ({
       type: "runtime.attachment-conversations", requestId, attachmentId,
     }));
+  }
+
+  attachmentConversations(attachmentId: string): Promise<readonly string[]> {
+    return this.attachmentReattachContext(attachmentId).then(({ conversationIds }) => conversationIds);
   }
 
   editorContext(filePath?: string, conversationId?: string): Promise<RuntimeEditorContextResult> {
@@ -70,7 +80,12 @@ export class RuntimeSupervisorQueries {
     let value: QueryValue | Error;
     if (event.type === "runtime.project-path-resolved") [kind, value] = ["project-path", event.path];
     else if (event.type === "runtime.project-path-rejected") [kind, value] = ["project-path", new Error(event.message)];
-    else if (event.type === "runtime.attachment-conversations-resolved") [kind, value] = ["attachment-conversations", event.conversationIds];
+    else if (event.type === "runtime.attachment-conversations-resolved") {
+      [kind, value] = ["attachment-conversations", {
+        conversationIds: event.conversationIds,
+        ...(event.metadata ? { metadata: event.metadata } : {}),
+      }];
+    }
     else if (event.type === "runtime.attachment-conversations-rejected") [kind, value] = ["attachment-conversations", new Error(event.message)];
     else if (event.type === "runtime.editor-context-resolved") {
       [kind, value] = ["editor-context", {

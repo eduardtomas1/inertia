@@ -384,4 +384,26 @@ describe("message search continuation", () => {
     clock = 0;
     expect(pageAll(context.reader, "page needle", { now: () => clock++, maxScanMs: 10 }).ids).toEqual(expected);
   });
+
+  it("falls back to cursor-bounded chronological scan when sortedMembership exceeds its time budget", async () => {
+    const context = await fixture();
+    const expected = await history(context, 12);
+    // Use sortedCandidateLimit: 0 so the sortedMembership path runs, and a clock that
+    // jumps past half maxScanMs inside sortedMembership but still leaves budget to advance.
+    let calls = 0;
+    const now = () => {
+      calls += 1;
+      return calls <= 2 ? 0 : 12 + calls;
+    };
+    const first = searchMessages(context.reader, "page needle", {
+      sortedCandidateLimit: 0,
+      now,
+      maxScanMs: 20,
+      continuation: { createdAt: at(10), messageId: expected[0]! },
+    });
+    expect(first.hits.length).toBeGreaterThan(0);
+    if (first.continuation) {
+      expect(first.continuation.messageId).not.toBe(expected[0]);
+    }
+  });
 });

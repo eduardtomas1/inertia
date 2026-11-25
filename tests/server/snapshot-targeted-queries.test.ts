@@ -271,7 +271,6 @@ describe("activity detail on demand", () => {
     });
     store.settleAgentTurn(turn.id, {
       status: "failed",
-      errorMessage: "Quota exceeded",
       updatedAt: at(2).toISOString(),
     });
     store.limitResets.markFailureKind(turn.id, "billing");

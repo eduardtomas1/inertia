@@ -241,15 +241,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       await postReady.artifactReconciliation;
     },
   });
-  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> =>
-    updatePreparation.track(operation);
+  const trackRuntimeOperation = <T>(operation: () => Promise<T>): Promise<T> => updatePreparation.track(operation);
   const trackNonStorageOperation = async <T>(operation: () => Promise<T>): Promise<T> => {
     activeNonStorageCommands += 1;
-    try {
-      return await trackRuntimeOperation(operation);
-    } finally {
-      activeNonStorageCommands -= 1;
-    }
+    try { return await trackRuntimeOperation(operation); } finally { activeNonStorageCommands -= 1; }
+  };
+  const assertDatabaseReadable = (): void => {
+    if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
+    if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
   };
   const databaseWrites = new DatabaseWriteGate({ isDatabaseVacuuming: () => store.isDatabaseVacuuming(), whenDatabaseWritable: () => store.whenDatabaseWritable() });
   const trackDatabaseWrite = <T>(operation: () => Promise<T>): Promise<T> => databaseWrites.run(() => trackRuntimeOperation(operation));
@@ -1090,54 +1089,36 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
     prepareForUpdate: (operationId) => postReady.beforeUpdatePreparation(() => updatePreparation.prepare(operationId)),
     releaseUpdatePreparation: (operationId) => updatePreparation.release(operationId),
-    readHtmlRender: (renderId) => {
-      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
-      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
-      return store.htmlRenders.read(renderId);
-    },
+    readHtmlRender: (renderId) => { assertDatabaseReadable(); return store.htmlRenders.read(renderId); },
     attachmentConversations: (attachmentId) => {
-      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
-      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      assertDatabaseReadable();
       return [...new Set([...store.attachmentConversationIds([attachmentId], { includeUnreadable: false }),
         ...queuedMessages?.editedAttachmentConversations(attachmentId) ?? []])];
     },
     attachmentMetadata: (attachmentId) => {
-      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
-      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      assertDatabaseReadable();
       return queuedMessages?.editedAttachmentMetadata(attachmentId) ?? null;
     },
     deliverAgentSecret: (delivery) => agentThreads!.secrets.deliver(delivery),
     orphanedAgentSecrets: (requestIds) => agentThreads?.secrets.orphanedVaultRequests(requestIds) ?? [],
     resolveProjectPath: (request) => trackNonStorageOperation(async () => {
-      if (runtimeSafetyLock) {
-        throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
-      }
-      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
-      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
-      return (await resolveAuthoritativeProjectPath(
-        store,
-        request,
-        projectIdentityAuthority,
-      )).absolute;
+      if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Project changes are unavailable in recovery safety mode."));
+      assertDatabaseReadable();
+      return (await resolveAuthoritativeProjectPath(store, request, projectIdentityAuthority)).absolute;
     }),
     editorContext: (filePath, conversationId) => trackNonStorageOperation(async () => {
-      if (recoveryImportAdmission.isActive()) throw new Error("Database recovery is in progress. Try again after it finishes.");
-      if (store.isDatabaseVacuuming()) throw new Error(DATABASE_VACUUM_REFUSAL);
+      assertDatabaseReadable();
       return await resolveEditorContext(store, filePath, projectIdentityAuthority, runtimeSafetyLock, conversationId);
     }),
     privateConnectRequest: (subject, request) => {
       const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
-      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () => {
-        const rechecked = privateConnectRefusal(privateConnectAdmission, request.requestId);
-        return rechecked ?? await privateConnectGateway.request(subject, request);
-      });
+      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () =>
+        privateConnectRefusal(privateConnectAdmission, request.requestId) ?? await privateConnectGateway.request(subject, request));
     },
     preparePrivateConnectPrompt: (subject, request) => {
       const refused = privateConnectRefusal(privateConnectAdmission, request.requestId);
-      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () => {
-        const rechecked = privateConnectRefusal(privateConnectAdmission, request.requestId);
-        return rechecked ?? await privateConnectGateway.preparePrompt(subject, request);
-      });
+      return refused ? Promise.resolve(refused) : trackNonStorageOperation(async () =>
+        privateConnectRefusal(privateConnectAdmission, request.requestId) ?? await privateConnectGateway.preparePrompt(subject, request));
     },
     commitPrivateConnectPrompt: (subject, request, preparationId) =>
       privateConnectRefusal(privateConnectAdmission, request.requestId) ?? privateConnectGateway.commitPrompt(subject, request, preparationId),

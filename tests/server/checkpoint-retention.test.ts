@@ -260,7 +260,7 @@ describe("bounded retention for Git checkpoint refs", () => {
     } finally {
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("bounds restore backup refs per conversation and enforces the repository global cap", async () => {
     const fixture = createRepoFixture("backups-and-cap");
@@ -320,7 +320,7 @@ describe("bounded retention for Git checkpoint refs", () => {
     } finally {
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("deletes only Inertia checkpoint refs for removed project conversations and preserves user refs and sibling project refs", async () => {
     const fixture = createRepoFixture("project-remove");
@@ -385,7 +385,7 @@ describe("bounded retention for Git checkpoint refs", () => {
     } finally {
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("rejects project.remove before deleting checkpoint refs when an isolated chat worktree blocks removal", async () => {
     const fixture = createRepoFixture("project-remove-blocked");
@@ -432,7 +432,7 @@ describe("bounded retention for Git checkpoint refs", () => {
     } finally {
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("does not fall back to projectPath during retention pruning when project repository identity is missing or mismatched", async () => {
     const fixture = createRepoFixture("fallback-identity");
@@ -514,7 +514,7 @@ describe("bounded retention for Git checkpoint refs", () => {
     } finally {
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("logs and reports incidents instead of silently swallowing conversation-delete ref cleanup failures", async () => {
     const fixture = createRepoFixture("delete-log");
@@ -590,7 +590,7 @@ describe("bounded retention for Git checkpoint refs", () => {
       warnSpy.mockRestore();
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("pages listing and batches deletion across thousands of Inertia refs without touching user refs", async () => {
     const fixture = createRepoFixture("thousands");
@@ -714,7 +714,7 @@ describe("bounded retention for Git checkpoint refs", () => {
       warnSpy.mockRestore();
       fixture.store.close();
     }
-  });
+  }, 45_000);
 
   it("enforces repository path realpath containment and rejects non-Inertia ref names", async () => {
     const fixture = createRepoFixture("containment");

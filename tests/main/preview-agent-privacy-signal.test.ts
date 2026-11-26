@@ -52,19 +52,35 @@ function mainWorld() {
     setAttributeNS(_namespace: string | null, name: string, value: string): void { this.applyAttribute(name, String(value)); }
     setAttributeNode(): null { return null; }
     setAttributeNodeNS(): null { return null; }
-    setHTML(_value: string, _options?: unknown): void {}
+    setHTML(value: string, _options?: unknown): void {
+      if (this instanceof FakeHTMLTemplateElement) this.content.source = value;
+    }
   }
   class FakeDocumentFragment extends FakeNode {
-    querySelector(_selector: string): null { return null; }
+    source = "";
+    querySelector(selector: string): FakeElement | null {
+      if (selector === "input[type='password' i][value]:not([value=''])") {
+        if (!/<input\b[^>]*\btype\s*=\s*["']?password["']?/iu.test(this.source)) return null;
+        const match = /\bvalue\s*=\s*(?:"([^"]+)"|'([^']+)')/iu.exec(this.source);
+        if (!match) return null;
+        const input = new FakeHTMLInputElement();
+        input.applyAttribute("type", "password");
+        input.applyAttribute("value", match[1] ?? match[2] ?? "");
+        return input;
+      }
+      return null;
+    }
   }
   class FakeHTMLTemplateElement extends FakeElement {
-    readonly content = new FakeDocumentFragment();
+    readonly #content = new FakeDocumentFragment();
+    get content(): FakeDocumentFragment { return this.#content; }
   }
   class FakeDOMImplementation {
     createHTMLDocument(_title: string): FakeDocument { return new FakeDocument(); }
   }
   class FakeDocument extends FakeEventTarget {
-    readonly implementation = new FakeDOMImplementation();
+    readonly #implementation = new FakeDOMImplementation();
+    get implementation(): FakeDOMImplementation { return this.#implementation; }
     createElement(_tag: string): FakeHTMLTemplateElement { return new FakeHTMLTemplateElement(); }
     write(..._args: unknown[]): void {}
     writeln(..._args: unknown[]): void {}
@@ -327,7 +343,7 @@ describe("Browser main-world credential signal", () => {
     `);
     expect(dispatched).toEqual([]);
 
-    // 2. >4 KB padded password input via DOMParser, innerHTML, and document.write must signal.
+    // 2. >4 KB padded password input via DOMParser, innerHTML, and document.write must signal its value for redaction without falsely withholding the whole page.
     run(`
       const paddedPassword = "<div>" + "a".repeat(5_000) + '</div><input type="password" value="s3cr3t">';
       new DOMParser().parseFromString(paddedPassword, "text/html");
@@ -336,9 +352,9 @@ describe("Browser main-world credential signal", () => {
       document.write("<div>" + "a".repeat(5_000), '</div><input type="password" value="s3cr3t">');
     `);
     expect(dispatched).toEqual([
-      { type: "credential-signal" },
-      { type: "credential-signal" },
-      { type: "credential-signal" },
+      { type: "credential-signal", detail: '["s3cr3t"]' },
+      { type: "credential-signal", detail: '["s3cr3t"]' },
+      { type: "credential-signal", detail: '["s3cr3t"]' },
     ]);
 
     // 3. Non-string coercible objects passed to innerHTML or document.write fail closed without calling untrusted toString during guard inspection.

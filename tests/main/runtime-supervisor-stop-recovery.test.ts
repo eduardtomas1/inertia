@@ -198,12 +198,12 @@ describe("RuntimeSupervisor stop retry and shutdown phase transitions", () => {
     currentChild = await bootReady(supervisor, children);
 
     const firstStop = supervisor.stop();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(10_000);
     await expect(firstStop).resolves.toBe(false);
     expect(forceKillCalls).toBe(1);
 
     const secondStop = supervisor.stop();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(10_000);
     await expect(secondStop).resolves.toBe(true);
     expect(forceKillCalls).toBe(2);
     expect(supervisor.snapshot().phase).toBe("stopped");

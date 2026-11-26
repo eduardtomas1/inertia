@@ -5,10 +5,6 @@ import {
   type ConversationHistoryCursor,
   type ConversationHistoryRequest,
 } from "../../shared/conversation-history";
-import {
-  ACTIVITY_DETAIL_ERROR_EXCERPT_CHARS,
-  ACTIVITY_DETAIL_PREVIEW_CHARS,
-} from "./activity-detail-preview";
 import { RecordNotFoundError } from "./errors";
 import { cachedStatement } from "./statement-cache";
 
@@ -68,7 +64,6 @@ const HISTORY_TABLES = ["agent_turns", "turn_git_artifacts", "messages", "activi
 type HistoryTable = typeof HISTORY_TABLES[number];
 const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries",
   "diff_review_states", "diff_review_notes"] as const;
-const PREVIEWED_ACTIVITY_DETAIL_BYTE_CAP = ACTIVITY_DETAIL_PREVIEW_CHARS + ACTIVITY_DETAIL_ERROR_EXCERPT_CHARS;
 
 function historyConversationColumn(table: HistoryTable): string {
   return table === "conversation_context_packets" ? "target_conversation_id" : "conversation_id";
@@ -137,20 +132,14 @@ function tableColumns(database: Database.Database, table: string): string[] {
 function columnLengthsSql(
   database: Database.Database,
   table: string,
-  capActivityPreviewDetail = false,
 ): string {
   const names = tableColumns(database, table);
-  return names.map((name) => {
-    if (capActivityPreviewDetail && table === "activities" && name === "detail") {
-      return `CASE WHEN kind = 'error' THEN COALESCE(octet_length("detail"), 0) ELSE MIN(COALESCE(octet_length("detail"), 0), ${PREVIEWED_ACTIVITY_DETAIL_BYTE_CAP}) END`;
-    }
-    return `COALESCE(octet_length("${name}"), 0)`;
-  }).join(" + ");
+  return names.map((name) => `COALESCE(octet_length("${name}"), 0)`).join(" + ");
 }
 
 function storedBytes(database: Database.Database, table: string,
-  where: { sql: string; parameters: string[] }, capActivityPreviewDetail = false): number {
-  const lengths = columnLengthsSql(database, table, capActivityPreviewDetail);
+  where: { sql: string; parameters: string[] }): number {
+  const lengths = columnLengthsSql(database, table);
   return (cachedStatement(database, `SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes
     FROM ${table} WHERE ${where.sql}`)
     .get(...where.parameters) as { bytes: number }).bytes;
@@ -161,7 +150,7 @@ export function historyStoredBytes(database: Database.Database, conversationId: 
   let bytes = 0;
   for (const table of HISTORY_TABLES) {
     const where = historyPredicate(table, scope, conversationId);
-    bytes += storedBytes(database, table, where, table === "activities");
+    bytes += storedBytes(database, table, where);
     if (table === "messages" || table === "agent_reasonings") {
       const chunkTable = table === "messages" ? "message_content_chunks" : "reasoning_content_chunks";
       const key = table === "messages" ? "message_id" : "reasoning_id";

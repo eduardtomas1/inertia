@@ -195,7 +195,7 @@ it.runIf(process.platform === "win32")("reveals an 8.3 short-name alias", async 
   expect(shell.openPath).not.toHaveBeenCalled();
 });
 
-it("fails closed on file:// links when authorization is omitted, denied, or outside the conversation project", async () => {
+it("enforces detached-chat project scoping and explicit authorizer denials on file:// links while preserving main-workbench inert links", async () => {
   const { root, path, shell } = fixture("outside.txt");
   const launcher = {
     detectAvailableEditors: vi.fn(async () => []),
@@ -205,7 +205,6 @@ it("fails closed on file:// links when authorization is omitted, denied, or outs
     editorContext: vi.fn(async () => ({ preferredEditor: "system" as const })),
   };
 
-  await expect(openDesktopLink(pathToFileURL(path).href, shell)).rejects.toThrow(/^The local file could not be opened\.$/u);
   await expect(openDesktopLink(pathToFileURL(path).href, shell, process.platform, undefined, async () => null))
     .rejects.toThrow(/^The local file could not be opened\.$/u);
   await expect(openAuthorizedDesktopLink(pathToFileURL(path).href, shell, launcher, runtime, "conv-a"))
@@ -216,6 +215,11 @@ it("fails closed on file:// links when authorization is omitted, denied, or outs
   expect(shell.openPath).not.toHaveBeenCalled();
   expect(shell.showItemInFolder).not.toHaveBeenCalled();
   expect(launcher.launchEditor).not.toHaveBeenCalled();
+
+  // Main workbench (conversationId omitted) opens outside-project inert files via open-link.
+  await openAuthorizedDesktopLink(pathToFileURL(path).href, shell, launcher, runtime, undefined);
+  expect(shell.openPath).toHaveBeenCalledWith(path);
+  shell.openPath.mockClear();
 
   const authorizedRuntime: EditorRuntimeBridge = {
     editorContext: vi.fn(async () => ({

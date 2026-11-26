@@ -612,7 +612,7 @@ export function ChatWorkspace({
     if (followCorrectionFrameRef.current !== null) {
       window.cancelAnimationFrame(followCorrectionFrameRef.current);
     }
-    const correctMeasuredBottom = (remainingFrames: number, settledFrames = 0): void => {
+    const correctMeasuredBottom = (remainingFrames: number): void => {
       followCorrectionFrameRef.current = window.requestAnimationFrame(() => {
         followCorrectionFrameRef.current = null;
         const current = scrollRef.current;
@@ -624,16 +624,16 @@ export function ChatWorkspace({
         ) return;
         if (!transcriptNavigationFollowsContent(navigationRef.current)) {
           if (remainingFrames > 1) {
-            correctMeasuredBottom(remainingFrames - 1, 0);
+            correctMeasuredBottom(remainingFrames - 1);
           }
           return;
         }
-        const deficit = current.scrollHeight - current.clientHeight - current.scrollTop;
-        if (deficit >= 1) {
-          current.scrollTo({ top: current.scrollHeight, behavior: "auto" });
-          if (remainingFrames > 1) correctMeasuredBottom(remainingFrames - 1, 0);
-        } else if (settledFrames + 1 < 2 && remainingFrames > 1) {
-          correctMeasuredBottom(remainingFrames - 1, settledFrames + 1);
+        current.scrollTo({ top: current.scrollHeight, behavior: "auto" });
+        // A clamped scroll reports a zero gap before the virtualizer publishes
+        // its next measurement. Keep the bounded correction window alive even
+        // when this frame appears settled; reader intent still stops it above.
+        if (remainingFrames > 1) {
+          correctMeasuredBottom(remainingFrames - 1);
         }
       });
     };

@@ -53,10 +53,7 @@ export async function openDesktopLink(
       if (path.includes("::$") || (platform === "win32" && path.replace(/^[a-z]:/iu, "").includes(":"))) {
         throw new Error("Alternate stream links cannot be opened.");
       }
-      if (!authorizeLocalFile) {
-        throw new Error("Local file links require authorization.");
-      }
-      const authorizedPath = await authorizeLocalFile(path);
+      const authorizedPath = authorizeLocalFile ? await authorizeLocalFile(path) : path;
       if (!authorizedPath) {
         throw new Error("The local file is not authorized.");
       }

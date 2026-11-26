@@ -144,11 +144,25 @@ export async function openAuthorizedDesktopLink(
       return await launchResolvedPreferredEditor(launcher, resolvedContext, position);
     },
     async (filePath) => {
-      if (!runtime) return null;
-      const context = await runtime.editorContext(filePath, conversationId).catch(() => null);
-      if (!context?.authorizedPath || !context.projectRoot) return null;
-      resolvedContext = context;
-      return context.authorizedPath;
+      if (conversationId !== undefined) {
+        // Detached chat windows are strictly scoped to their own conversation's project.
+        if (!runtime) return null;
+        const context = await runtime.editorContext(filePath, conversationId).catch(() => null);
+        if (!context?.authorizedPath || !context.projectRoot) return null;
+        resolvedContext = context;
+        return context.authorizedPath;
+      }
+      const context = runtime
+        ? await runtime.editorContext(filePath).catch(() => null)
+        : null;
+      if (context?.authorizedPath && context.projectRoot) {
+        resolvedContext = context;
+        return context.authorizedPath;
+      }
+      // Outside-project links from the main workbench still pass through
+      // openAuthorizedProjectPath("open-link"), which restricts opening to
+      // inert document/media extensions and reveals anything launchable.
+      return filePath;
     },
   );
 }

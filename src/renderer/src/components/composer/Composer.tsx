@@ -1012,6 +1012,12 @@ export const Composer = memo(function Composer({
       ? "Remove attachments before restoring another prompt"
       : promptStashRestoreBlockedReason(conversation.modelSelection, entry.route)
   ), [attachments.length, conversation.modelSelection]);
+  const restoreQueuedByConversationRef = useRef(new Map<string, typeof restoreQueuedMessage>());
+  restoreQueuedByConversationRef.current.set(conversation.id, restoreQueuedMessage);
+  if (restoreQueuedByConversationRef.current.size > 16) {
+    const oldest = restoreQueuedByConversationRef.current.keys().next().value;
+    if (oldest && oldest !== conversation.id) restoreQueuedByConversationRef.current.delete(oldest);
+  }
   const toolbarActions = useStableActions({
     chooseAttachments, insertSkill, applyPromptPreset, stashCurrentPrompt, restoreStashedPrompt,
     removeStashedPrompt: (entryId: string) => updatePromptStash((current) => removePromptStashEntry(current, entryId)),
@@ -1019,12 +1025,18 @@ export const Composer = memo(function Composer({
       updatePromptStash((current) => setPromptStashRecurrence(current, entryId, recurrence)),
     chooseModelRoute, updateReasoningEffort, updateFastMode, updateConversation,
     sendQueued: (content: string, queuedAttachments: ChatAttachment[]) => onSend(content, queuedAttachments, undefined),
-    restoreQueuedMessage, submit, stopAndKeepFocus,
+    submit, stopAndKeepFocus,
   });
-  const queueEdit = useMemo(
-    () => ({ blockedReason: queueEditBlockedReason, onEdit: toolbarActions.restoreQueuedMessage }),
-    [queueEditBlockedReason, toolbarActions.restoreQueuedMessage],
-  );
+  const queueEdit = useMemo(() => {
+    const ownerConversationId = conversation.id;
+    return {
+      blockedReason: queueEditBlockedReason,
+      onEdit: async (entry: Parameters<typeof restoreQueuedMessage>[0]) => {
+        const handler = restoreQueuedByConversationRef.current.get(ownerConversationId);
+        if (handler) await handler(entry);
+      },
+    };
+  }, [conversation.id, queueEditBlockedReason]);
   const canStashPrompt = Boolean(message.trim()) && attachments.length === 0;
   const promptStashBlockedReason = attachments.length > 0
     ? "Remove attachments before stashing text"

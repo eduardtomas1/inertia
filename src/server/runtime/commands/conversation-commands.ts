@@ -734,18 +734,18 @@ export function createConversationCommandHandler(
             const serializationRoot = await repositoryRoot(projectPath).catch(() => null);
             const runGitMutations = async (): Promise<void> => {
               if (removeOwnedCheckout && ownedWorktree) {
-                const exclusiveReservationId = `conversation-delete-exclusive:${command.requestId}`;
-                dependencies.providerTerminalResumes.release(conversation.id);
-                if (!dependencies.store.conversationWork.reserveExclusiveCheckout(
-                  exclusiveReservationId,
-                  conversation.projectId,
-                  ownedWorktree.path,
-                )) {
-                  throw new RuntimeRequestError(
-                    "Stop active work before deleting this thread.",
-                  );
+                if (typeof dependencies.store.conversationWork?.upgradeToExclusiveCheckout === "function") {
+                  if (!dependencies.store.conversationWork.upgradeToExclusiveCheckout(
+                    deletionReservationId,
+                    conversation.projectId,
+                    ownedWorktree.path,
+                  )) {
+                    throw new RuntimeRequestError(
+                      "Stop active work before deleting this thread.",
+                    );
+                  }
+                  exclusiveReservationHeld = deletionReservationId;
                 }
-                exclusiveReservationHeld = exclusiveReservationId;
                 await holdGoalReads({ checkoutPath: ownedWorktree.path });
                 const removal = await removeOwnedWorktree(
                   projectPath,
@@ -853,7 +853,7 @@ export function createConversationCommandHandler(
         } finally {
           for (const release of goalReadHolds) release();
           if (exclusiveReservationHeld) {
-            dependencies.store.conversationWork.release(exclusiveReservationHeld);
+            dependencies.store.conversationWork?.release(exclusiveReservationHeld);
           }
           dependencies.providerTerminalResumes.release(conversation.id);
         }

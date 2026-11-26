@@ -40,6 +40,23 @@ export async function resumeCursorSdkAgent(sdk: Pick<typeof import("@cursor/sdk"
   return await platform.resumeAgent(id, options);
 }
 
+export class CursorSteerRefusedError extends Error {
+  constructor(message = "Cursor SDK steering is unavailable.") {
+    super(message);
+    this.name = "CursorSteerRefusedError";
+  }
+}
+
+export function isCursorSdkCleanSteerRefusal(error: unknown): boolean {
+  if (error instanceof CursorSteerRefusedError) return true;
+  if (!(error instanceof Error)) return false;
+  return /^(?:No active session\.|Cursor SDK steering (?:is unavailable|was refused)\.|Cursor SDK authority is no longer active\.)$/u.test(
+    error.message,
+  ) || /\b(?:not steerable|cannot steer|steer(?:ing)? (?:is )?(?:unavailable|refused|not supported|not active)|no active (?:run|session))\b/iu.test(
+    error.message,
+  );
+}
+
 const MAX_MESSAGE_BYTES = 1024 * 1024;
 const MAX_STREAM_BYTES = 32 * 1024 * 1024;
 
@@ -161,11 +178,19 @@ export class CursorSdkSession {
 
   async steer(text: string): Promise<"complete_delivered" | "revert_to_followup"> {
     boundedText(text);
-    this.check();
-    if (!this.active || !this.run?.steer || this.steering) throw new Error("Cursor SDK steering is unavailable.");
+    this.dependencies.assertAuthority(this.authority);
+    if (this.closed || this.cancelling || !this.active || !this.run?.steer || this.steering) {
+      return "revert_to_followup";
+    }
     this.steering = true;
     try {
-      const result = await this.run.steer(text);
+      let result: unknown;
+      try {
+        result = await this.run.steer(text);
+      } catch (error) {
+        if (isCursorSdkCleanSteerRefusal(error)) return "revert_to_followup";
+        throw error;
+      }
       this.check();
       if (result !== "complete_delivered" && result !== "revert_to_followup") throw new Error("Cursor SDK steering acknowledgement is invalid.");
       return result;

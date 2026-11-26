@@ -15,12 +15,24 @@ export const MISSED_RUN_WALK_LIMIT = 64;
 const TERMINAL = "('completed','failed','cancelled','interrupted')";
 
 /**
+ * SQL: the turn aliased `turn`, of the run aliased `run`, was stopped by the user before its provider accepted it
+ * (C1: Codex marks the run `not-delivered` with a recorded `run-interrupt` of `cause: 'user'`).
+ */
+const userStoppedBeforeAcceptance = (turn: string, run: string) => `(${turn}.status = 'cancelled'
+  AND json_extract(${run}.payload_json, '$.delivery') = 'not-delivered'
+  AND EXISTS (SELECT 1 FROM orchestration_v2_entities AS interrupt
+    WHERE interrupt.kind = 'run-interrupt' AND interrupt.thread_id = ${turn}.conversation_id
+      AND json_extract(interrupt.payload_json, '$.runId') = ${run}.id
+      AND json_extract(interrupt.payload_json, '$.cause') = 'user'))`;
+
+/**
  * SQL: the turn aliased `turn`, of the run aliased `run`, ended in a way a missed run can (T3 `missedRuns`,
- * `c5fa33b27`): failed or interrupted, or cancelled after its provider dropped the prompt (`promptDropped`). A run the
- * user stopped before its provider accepted it is withdrawn, not missed.
+ * `c5fa33b27`, and C1): failed or interrupted, cancelled after its provider dropped the prompt (`promptDropped`),
+ * or a Codex run the user stopped before provider acceptance (`not-delivered` with a user `run-interrupt`).
  */
 const missedStatus = (turn: string, run: string) => `(${turn}.status IN ('failed','interrupted')
-  OR (${turn}.status = 'cancelled' AND COALESCE(json_extract(${run}.payload_json, '$.promptDropped'), 0) = 1))`;
+  OR (${turn}.status = 'cancelled' AND COALESCE(json_extract(${run}.payload_json, '$.promptDropped'), 0) = 1)
+  OR ${userStoppedBeforeAcceptance(turn, run)})`;
 
 /** SQL: the turn aliased `turn` is rolled back. */
 const rolledBack = (turn: string) => `EXISTS (SELECT 1 FROM orchestration_v2_entities AS rollback
@@ -69,6 +81,7 @@ interface WalkRow {
   instance: string | null;
   delivery: string | null;
   prompt_dropped: number | null;
+  user_stopped_unaccepted: number;
   rolled_back: number;
   withheld: number;
   attachments_json: string | null;
@@ -94,6 +107,7 @@ export function missedRunImageAttachments(database: Database.Database, input: {
       json_extract(run.payload_json, '$.providerInstanceId') AS instance,
       json_extract(run.payload_json, '$.delivery') AS delivery,
       json_extract(run.payload_json, '$.promptDropped') AS prompt_dropped,
+      ${userStoppedBeforeAcceptance("turn", "run")} AS user_stopped_unaccepted,
       ${rolledBack("turn")} AS rolled_back, ${promptWithheld("turn")} AS withheld,
       message.attachments_json
     FROM agent_turns AS turn
@@ -109,7 +123,7 @@ export function missedRunImageAttachments(database: Database.Database, input: {
     if (row.has_run !== 1 || row.instance !== input.providerInstanceId || !isAgentTurnTerminalStatus(row.status)
       || row.rolled_back === 1) continue;
     if (row.delivery === "not-delivered" || row.delivery === "prompt-not-delivered") {
-      if (row.status === "cancelled" && row.prompt_dropped !== 1) continue;
+      if (row.status === "cancelled" && row.prompt_dropped !== 1 && row.user_stopped_unaccepted !== 1) continue;
       newestFirst.push(parseStoredAttachments(row.attachments_json ?? "[]")
         .filter(({ mimeType }) => chatAttachmentKind(mimeType) === "image"));
       continue;

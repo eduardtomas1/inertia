@@ -1,5 +1,6 @@
 import {
-  contextHandoffSchema, providerBackingSchema, type OrchestrationBackingEvent, type ProviderBacking,
+  contextHandoffSchema, providerBackingSchema,
+  type InheritedCoverage, type OrchestrationBackingEvent, type ProviderBacking,
 } from "../../shared/orchestration-backings";
 import {
   orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationAttempt, type OrchestrationRun,
@@ -47,6 +48,29 @@ export function projectBackingEvent(event: OrchestrationBackingEvent, envelope: 
   return [...writes, ...lookups];
 }
 
+function validCoverageLists(coveredItemIds: readonly string[], uncoveredItemIds: readonly string[] | undefined): boolean {
+  const covered = new Set(coveredItemIds);
+  if (covered.size !== coveredItemIds.length) return false;
+  if (!uncoveredItemIds || uncoveredItemIds.length === 0) return true;
+  const uncovered = new Set(uncoveredItemIds);
+  if (uncovered.size !== uncoveredItemIds.length) return false;
+  for (const item of uncovered) {
+    if (covered.has(item)) return false;
+  }
+  return true;
+}
+
+function validRewoundInheritedCoverage(
+  prior: InheritedCoverage | undefined,
+  next: InheritedCoverage | undefined,
+): boolean {
+  if (next === undefined) return true;
+  if (prior === undefined) return false;
+  if (next === "complete") return prior === "complete";
+  if (prior === "complete") return true;
+  return next.forkId === prior.forkId && next.throughOrdinal <= prior.throughOrdinal;
+}
+
 function projectBackingWrites(event: OrchestrationBackingEvent, envelope: OrchestrationEvent,
   read: ProjectionReader): ProjectionWrite[] {
   if (event.type === "provider.backing-invalidated") {
@@ -61,6 +85,9 @@ function projectBackingWrites(event: OrchestrationBackingEvent, envelope: Orches
     const { backing: restored, runId } = event.payload;
     const row = read("provider-backing", restored.id);
     if (!row || row.threadId !== envelope.threadId) throw new OrchestrationConflict("scope-conflict");
+    if (!validCoverageLists(restored.coveredItemIds, restored.uncoveredItemIds)) {
+      throw new OrchestrationConflict("scope-conflict");
+    }
     const current = providerBackingSchema.parse(row.value);
     if (current.status === "retired" || restored.status === "retired" || current.lastRunId !== runId
       || restored.lastRunId === runId || restored.threadId !== current.threadId || restored.projectId !== current.projectId
@@ -87,7 +114,7 @@ function projectBackingWrites(event: OrchestrationBackingEvent, envelope: Orches
     if (backing.threadId !== run.threadId || backing.projectId !== run.projectId
       || backing.providerInstanceId !== run.providerInstanceId || backing.workspaceKey !== run.workspaceKey
       || backing.providerId !== run.providerId || backing.lastRunId !== run.id || backing.lastTurnId !== run.turnId
-      || new Set(backing.coveredItemIds).size !== backing.coveredItemIds.length) throw new OrchestrationConflict("scope-conflict");
+      || !validCoverageLists(backing.coveredItemIds, backing.uncoveredItemIds)) throw new OrchestrationConflict("scope-conflict");
     if (prior) {
       const before = providerBackingSchema.parse(prior.value);
       if (before.nativeSessionId !== backing.nativeSessionId || before.createdAt !== backing.createdAt
@@ -211,23 +238,47 @@ function rewound(payload: Extract<OrchestrationBackingEvent, { type: "provider.b
   const control = nativeControlSchema.parse(controlRow.value);
   const prior = providerBackingSchema.parse(row.value);
   const covered = new Set(prior.coveredItemIds);
+  const watermarkLowered = prior.coveredThroughOrdinal !== undefined
+    && payload.coveredThroughOrdinal !== undefined
+    && payload.coveredThroughOrdinal < prior.coveredThroughOrdinal;
+  const watermarkInvalid = payload.coveredThroughOrdinal !== undefined
+    && (prior.coveredThroughOrdinal === undefined
+      ? payload.coveredThroughOrdinal > 0
+      : payload.coveredThroughOrdinal > prior.coveredThroughOrdinal);
   if (control.request.kind !== "rollback" || control.state !== "completed" || prior.status !== "ready"
     || prior.providerInstanceId !== control.request.source.identity.providerInstanceId
     || prior.workspaceKey !== control.sourceWorkspaceKey
     || prior.nativeSessionId !== control.request.source.nativeConversationId
     || payload.nativeSessionId !== control.backing?.nativeConversationId
-    || new Set(payload.coveredItemIds).size !== payload.coveredItemIds.length
-    || payload.coveredItemIds.some((item) => !covered.has(item))
+    || !validCoverageLists(payload.coveredItemIds, payload.uncoveredItemIds)
+    || watermarkInvalid
+    || (!watermarkLowered && payload.coveredItemIds.some((item) => !covered.has(item)))
+    || (payload.legacyCovered === true && prior.legacyCovered !== true)
+    || !validRewoundInheritedCoverage(prior.inheritedCoverage, payload.inheritedCoverage)
     || (payload.coverageComplete && !prior.coverageComplete)) throw new OrchestrationConflict("scope-conflict");
-  const coverage = { coveredItemIds: payload.coveredItemIds, coverageComplete: payload.coverageComplete,
-    updatedAt: envelope.createdAt };
+  const {
+    coveredThroughOrdinal: _priorOrdinal,
+    uncoveredItemIds: _priorUncovered,
+    inheritedCoverage: _priorInherited,
+    legacyCovered: _priorLegacy,
+    ...priorBase
+  } = prior;
+  const coverage = {
+    coveredItemIds: payload.coveredItemIds,
+    coverageComplete: payload.coverageComplete,
+    ...(payload.coveredThroughOrdinal !== undefined ? { coveredThroughOrdinal: payload.coveredThroughOrdinal } : {}),
+    ...(payload.uncoveredItemIds !== undefined ? { uncoveredItemIds: payload.uncoveredItemIds } : {}),
+    ...(payload.inheritedCoverage !== undefined ? { inheritedCoverage: payload.inheritedCoverage } : {}),
+    ...(payload.legacyCovered !== undefined ? { legacyCovered: payload.legacyCovered } : {}),
+    updatedAt: envelope.createdAt,
+  };
   if (payload.nativeSessionId === prior.nativeSessionId) {
-    return [{ kind: "provider-backing", id: prior.id, value: { ...prior, ...coverage, status: "ready" } }];
+    return [{ kind: "provider-backing", id: prior.id, value: providerBackingSchema.parse({ ...priorBase, ...coverage, status: "ready" }) }];
   }
   const id = commandFingerprint({ threadId: prior.threadId, instanceId: prior.providerInstanceId,
     workspaceKey: prior.workspaceKey, nativeSessionId: payload.nativeSessionId });
   if (read("provider-backing", id)) throw new OrchestrationConflict("revision-conflict");
   return [{ kind: "provider-backing", id: prior.id, value: { ...prior, status: "retired", updatedAt: envelope.createdAt } },
-    { kind: "provider-backing", id, value: providerBackingSchema.parse({ ...prior, ...coverage, id,
+    { kind: "provider-backing", id, value: providerBackingSchema.parse({ ...priorBase, ...coverage, id,
       nativeSessionId: payload.nativeSessionId, status: "ready", createdAt: envelope.createdAt }) }];
 }

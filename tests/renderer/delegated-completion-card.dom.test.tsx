@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { FollowUpRow } from "../../src/renderer/src/components/response-timeline/activity";
 import { responseTimelineArticleLabel } from "../../src/renderer/src/components/response-timeline/row-label";
+import { clearDelegatedCompletionCardState } from "../../src/renderer/src/components/orchestration/delegated-completion-card";
 import { DelegationSurfaceProvider } from "../../src/renderer/src/components/orchestration/delegation-surface";
 import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import type { ConversationDelegation, DelegatedCompletionAttribution } from "../../src/shared/orchestration-delegation";
 import { providerNativeBackendProfile } from "../../src/shared/model-routing";
 import { PARENT_ID, finished, parentDelegation, summary, taskId } from "./delegation-fixtures";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); clearDelegatedCompletionCardState(); });
 
 function turn(id: string, requestedAt: string): AgentTurn {
   const backendProfileId = providerNativeBackendProfile("codex").id;
@@ -89,14 +90,14 @@ describe("delegated completion card", () => {
   it("expands by keyboard to each finished task's status and preview", async () => {
     timeline([wake], messages(wake, wakeText, { delegatedCompletion: attribution }));
     const card = screen.getByRole("article", { name: /^Delegated results:/u });
-    const toggle = within(card).getByRole("button", { name: "Show results" });
+    const toggle = within(card).getByRole("button", { name: /^Show results/u });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     const region = document.getElementById(toggle.getAttribute("aria-controls")!)!;
     expect(region).toHaveAttribute("hidden");
     const user = userEvent.setup();
     toggle.focus();
     await user.keyboard("{Enter}");
-    expect(within(card).getByRole("button", { name: "Hide results" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(card).getByRole("button", { name: /^Hide results/u })).toHaveAttribute("aria-expanded", "true");
     expect(region).not.toHaveAttribute("hidden");
     const tasks = within(region).getAllByRole("listitem");
     expect(tasks).toHaveLength(2);
@@ -163,7 +164,7 @@ describe("delegated completion card", () => {
       { name: "Delegated results: 2 of 3 delegated tasks failed: Audit the parser, Write the tests" });
     expect(within(card).getByText("2 of 3 delegated tasks failed", { selector: "strong" })).toBeTruthy();
     expect(within(card).getByText("Audit the parser, Write the tests")).toHaveClass("delegated-completion-labels");
-    await userEvent.setup().click(within(card).getByRole("button", { name: "Show results" }));
+    await userEvent.setup().click(within(card).getByRole("button", { name: /^Show results/u }));
     const tasks = within(card).getAllByRole("listitem");
     expect(tasks.map((item) => item.dataset.taskStatus)).toEqual(["completed", "failed"]);
     expect(tasks[0]).toHaveTextContent("Audit the parserCompleted");
@@ -190,7 +191,7 @@ describe("delegated completion card", () => {
     timeline([wake], messages(wake, content, { delegatedCompletion: attribution }), parentDelegation([
       finished(1, { title: "Audit the parser", status: "cancelled" }), finished(2, { title: "Write the tests", status: "cancelled" })]));
     const card = screen.getByRole("article", { name: "Delegated results: 2 delegated tasks stopped: Audit the parser, Write the tests" });
-    await userEvent.setup().click(within(card).getByRole("button", { name: "Show results" }));
+    await userEvent.setup().click(within(card).getByRole("button", { name: /^Show results/u }));
     expect(within(card).getAllByRole("listitem").map((item) => item.dataset.taskStatus)).toEqual(["cancelled", "cancelled"]);
   });
 

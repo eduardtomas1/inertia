@@ -404,7 +404,15 @@ export function AgentExecutionLayer({
   // work log, inside a settled fold's region when the agents fold with the work
   // (kept mounted there, so it keeps its state), or below a quiet settled turn.
   const observedDetails = subagents.length > 0
-    ? <ObservedAgentsDetails conversationId={props.conversationId} turnId={turn.id} turnIndex={turn.index} />
+    ? (
+      <ObservedAgentsDetails
+        conversationId={props.conversationId}
+        turnId={turn.id}
+        turnIndex={turn.index}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
+    )
     : null;
   const observedDetailsInFold = groupInFold && fold?.visible === true;
   const delegatedWork = (

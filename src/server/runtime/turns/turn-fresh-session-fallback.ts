@@ -13,13 +13,13 @@ import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
 import { turnHistoryInjection } from "./turn-history-injection";
 
 /**
- * The imported session when a refusal means it is gone, so the chat fails closed and keeps its link. Not when
- * Claude Code only could not reach a transcript that is still stored under another project folder of its home
- * (an older Claude Code resuming from a moved checkout): that turn starts fresh like any other.
+ * An imported non-Claude session fails closed when its native session is gone,
+ * keeping its link. Imported Claude sessions fall back cleanly to a fresh
+ * session with the full portable summary (T3 `2c4622efb`, N20).
  */
-function importedSessionFailingClosed(store: RuntimeStore, active: ActiveTurn, storedElsewhere: boolean | undefined) {
+function importedSessionFailingClosed(store: RuntimeStore, active: ActiveTurn) {
   const imported = importedSession(store, active.conversation.id, active.providerInput.sessionId);
-  return imported && !(imported.providerId === "claude" && storedElsewhere === true) ? imported : null;
+  return imported && imported.providerId !== "claude" ? imported : null;
 }
 
 /** T3 d32df2d34 (`ProviderTurnStartService`): the provider's session reuse, said honestly. */
@@ -63,17 +63,17 @@ export function importedSessionUnavailableMessage(
   result: ProviderRunResult,
 ): string | null {
   const provider = providerSessionUnavailable(result)
-    ? importedSessionFailingClosed(store, active, result.failure?.sessionStoredElsewhere)?.providerId : null;
+    ? importedSessionFailingClosed(store, active)?.providerId : null;
   return provider ? `The original ${cliProviderLabel(provider)} session for this imported chat is no longer available.` : null;
 }
 
 export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,
-  result: ProviderRunResult,
+  _result: ProviderRunResult,
 ): void {
   const sessionId = active.providerInput.sessionId;
-  if (importedSessionFailingClosed(store, active, result.failure?.sessionStoredElsewhere)) return;
+  if (importedSessionFailingClosed(store, active)) return;
   // Without a session id the lookup would match any backing of the route.
   const backing = sessionId ? store.orchestration.backings.find({ threadId: active.conversation.id,
     providerId: active.turn.providerId, workspaceKey: store.conversationPath(active.conversation.id),
@@ -109,7 +109,7 @@ export function applyFreshSessionFallback(
     || active.reasoningId !== null
     || active.approvalIds.size > 0
     || active.inputIds.size > 0
-    || importedSessionFailingClosed(store, active, prior.sessionStoredElsewhere) !== null
+    || importedSessionFailingClosed(store, active) !== null
     || store.turnLedgerRepository.turnHasProviderActivity(
       active.conversation.id,
       active.turn.id,

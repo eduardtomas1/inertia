@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  EFFECT_WORKER_SLOT_WAIT,
   OrchestrationEffectDispatcher,
   OrchestrationEffectRejected,
   SETTLED_EFFECT_PRUNE_BATCH,
@@ -67,6 +68,11 @@ export const REPLAY_SAFE_EFFECT_KINDS: readonly ReplaySafeEffectKind[] = Object.
   .filter(([, policy]) => policy.replayPolicy === "replay-safe")
   .map(([kind]) => kind as ReplaySafeEffectKind);
 
+export const DISPATCHABLE_PROCESS_BOUND_EFFECT_KINDS = ["provider.interrupt", "provider.steer"] as const;
+export type DispatchableProcessBoundEffectKind = (typeof DISPATCHABLE_PROCESS_BOUND_EFFECT_KINDS)[number];
+export type DispatchableEffectKind = ReplaySafeEffectKind | DispatchableProcessBoundEffectKind;
+const DISPATCHABLE_PROCESS_BOUND_KIND_SET = new Set<string>(DISPATCHABLE_PROCESS_BOUND_EFFECT_KINDS);
+
 export function effectKindPolicy(kind: string): EffectKindPolicy | null {
   return Object.hasOwn(ORCHESTRATION_EFFECT_KINDS, kind)
     ? ORCHESTRATION_EFFECT_KINDS[kind as OrchestrationEffectKind]
@@ -84,14 +90,30 @@ export const checkpointCaptureRequestSchema = z.object({
 }).strict();
 export type CheckpointCaptureRequest = z.infer<typeof checkpointCaptureRequestSchema>;
 
+export const runControlEffectPayloadSchema = z.object({
+  runId: effectEntityId,
+  attemptId: effectEntityId,
+  turnId: effectEntityId,
+  queuedMessageId: effectEntityId.optional(),
+}).strict();
+export type RunControlEffectPayload = z.infer<typeof runControlEffectPayloadSchema>;
+
 interface ReplaySafeEffectPayloads {
   readonly "checkpoint.capture-requested": CheckpointCaptureRequest;
 }
 
-export type ReplaySafeEffectPayload<K extends ReplaySafeEffectKind> = ReplaySafeEffectPayloads[K];
+interface DispatchableEffectPayloads extends ReplaySafeEffectPayloads {
+  readonly "provider.interrupt": RunControlEffectPayload;
+  readonly "provider.steer": RunControlEffectPayload;
+}
 
-const replaySafePayloads: { readonly [K in ReplaySafeEffectKind]: z.ZodType<ReplaySafeEffectPayload<K>> } = {
+export type ReplaySafeEffectPayload<K extends ReplaySafeEffectKind> = ReplaySafeEffectPayloads[K];
+export type DispatchableEffectPayload<K extends DispatchableEffectKind> = DispatchableEffectPayloads[K];
+
+const dispatchablePayloads: { readonly [K in DispatchableEffectKind]: z.ZodType<DispatchableEffectPayload<K>> } = {
   "checkpoint.capture-requested": checkpointCaptureRequestSchema,
+  "provider.interrupt": runControlEffectPayloadSchema,
+  "provider.steer": runControlEffectPayloadSchema,
 };
 
 export function checkpointCaptureEffect(request: CheckpointCaptureRequest, eventIndex: number): EffectDraft {
@@ -114,13 +136,22 @@ export interface ReplaySafeEffectContext {
   readonly attempt: number;
 }
 
+export type DispatchableEffectContext = ReplaySafeEffectContext;
+
 export type ReplaySafeEffectExecutor<K extends ReplaySafeEffectKind> = (
   payload: ReplaySafeEffectPayload<K>,
   context: ReplaySafeEffectContext,
 ) => Promise<void>;
 
+export type DispatchableEffectExecutor<K extends DispatchableEffectKind> = (
+  payload: DispatchableEffectPayload<K>,
+  context: DispatchableEffectContext,
+) => Promise<void>;
+
 export interface OrchestrationEffectRuntimeOptions {
   readonly concurrency?: number;
+  readonly slotWaitMs?: number;
+  readonly perKindCaps?: Readonly<Record<string, number>>;
   readonly livenessPollMs?: number;
   readonly pruneIntervalMs?: number;
   readonly retentionMs?: number;
@@ -147,6 +178,7 @@ export class OrchestrationEffectRuntime {
   private readonly pruneIntervalMs: number;
   private readonly retentionMs: number;
   private readonly pruneBatchSize: number;
+  private readonly perKindCaps: Readonly<Record<string, number>> | undefined;
   private readonly now: () => number;
   private state: "created" | "running" | "stopped" = "created";
   private wakeQueued = false;
@@ -164,9 +196,12 @@ export class OrchestrationEffectRuntime {
     this.pruneIntervalMs = positiveInteger(options.pruneIntervalMs ?? SETTLED_EFFECT_PRUNE_INTERVAL_MS, "prune interval");
     this.retentionMs = positiveInteger(options.retentionMs ?? SETTLED_EFFECT_RETENTION_MS, "retention");
     this.pruneBatchSize = positiveInteger(options.pruneBatchSize ?? SETTLED_EFFECT_PRUNE_BATCH, "prune batch");
+    this.perKindCaps = options.perKindCaps ? { ...options.perKindCaps } : undefined;
     this.now = options.now ?? Date.now;
     this.dispatcher = new OrchestrationEffectDispatcher(outbox, this.handlers, {
       concurrency: options.concurrency ?? EFFECT_DISPATCH_CONCURRENCY,
+      slotWaitMs: options.slotWaitMs ?? EFFECT_WORKER_SLOT_WAIT,
+      ...(this.perKindCaps ? { perKindCaps: this.perKindCaps } : {}),
       ...(options.onFailure ? { onFailure: options.onFailure } : {}),
       afterTask: () => { this.wake(); },
     });
@@ -184,14 +219,20 @@ export class OrchestrationEffectRuntime {
     return this.state === "running" && this.handlers.has(kind);
   }
 
-  register<K extends ReplaySafeEffectKind>(kind: K, executor: ReplaySafeEffectExecutor<K>): () => void {
-    if (ORCHESTRATION_EFFECT_KINDS[kind].replayPolicy !== "replay-safe") {
+  register<K extends DispatchableEffectKind>(kind: K, executor: DispatchableEffectExecutor<K>): () => void {
+    const policy = effectKindPolicy(kind);
+    if (!policy) {
+      throw new Error("Unknown orchestration effect kind.");
+    }
+    const allowedProcessBound = policy.replayPolicy === "process-bound" && DISPATCHABLE_PROCESS_BOUND_KIND_SET.has(kind);
+    if (policy.replayPolicy !== "replay-safe" && !allowedProcessBound) {
       throw new Error("Only replay-safe orchestration effects can be dispatched.");
     }
     if (this.handlers.has(kind)) throw new Error("An orchestration effect executor is already registered.");
-    const schema: z.ZodType<ReplaySafeEffectPayload<K>> = replaySafePayloads[kind];
+    const schema: z.ZodType<DispatchableEffectPayload<K>> = dispatchablePayloads[kind];
+    const expectedPolicy = policy.replayPolicy;
     const handler: EffectHandler = async (effect, { signal, willRetry }) => {
-      if (effect.replayPolicy !== "replay-safe") throw new OrchestrationEffectRejected("replay-policy-mismatch");
+      if (effect.replayPolicy !== expectedPolicy) throw new OrchestrationEffectRejected("replay-policy-mismatch");
       const parsed = schema.safeParse(effect.payload);
       if (!parsed.success) throw new OrchestrationEffectRejected("invalid-effect-payload");
       await executor(parsed.data, {
@@ -254,13 +295,15 @@ export class OrchestrationEffectRuntime {
   awaitSettled(effectId: string): Promise<void> {
     if (this.state === "stopped") return Promise.reject(new Error("The orchestration effect runtime is stopped."));
     return new Promise<void>((resolve, reject) => {
+      const waiter: SettledWaiter = { resolve, reject };
       const waiters = this.settledWaiters.get(effectId) ?? new Set<SettledWaiter>();
-      waiters.add({ resolve, reject });
+      waiters.add(waiter);
       this.settledWaiters.set(effectId, waiters);
       try {
         this.resolveSettled(effectId);
       } catch (error) {
-        this.settledWaiters.delete(effectId);
+        waiters.delete(waiter);
+        if (waiters.size === 0) this.settledWaiters.delete(effectId);
         reject(error instanceof Error ? error : new Error("The orchestration effect could not be read."));
       }
     });
@@ -311,7 +354,10 @@ export class OrchestrationEffectRuntime {
     if (this.state !== "running") return;
     let delay = delayOverride ?? this.livenessPollMs;
     if (delayOverride === undefined && !this.dispatcher.saturated) {
-      const next = this.outbox.nextClaimableAt(this.handlers.keys());
+      const next = this.outbox.nextClaimableAt(
+        this.handlers.keys(),
+        this.perKindCaps ? { perKindCaps: this.perKindCaps } : undefined,
+      );
       if (next !== null) {
         const untilAvailable = Date.parse(next) - this.now();
         delay = Math.min(delay, untilAvailable > 0 ? untilAvailable : 25);

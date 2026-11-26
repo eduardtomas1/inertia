@@ -4,8 +4,16 @@ import { versionedContinuationIdentitySchema, modelSelectionSchema } from "./mod
 import { orchestrationIdSchema as id } from "./orchestration-identities";
 
 export const MAX_BACKING_COVERAGE_ITEMS = 2_048;
+export const MAX_BACKING_UNCOVERED_ITEMS = 256;
 const time = z.iso.datetime();
 const nativeId = z.string().min(1).max(1_000);
+const coverageOrdinal = z.number().int().nonnegative();
+
+export const inheritedCoverageSchema = z.union([
+  z.literal("complete"),
+  z.object({ forkId: id, throughOrdinal: coverageOrdinal }).strict(),
+]);
+export type InheritedCoverage = z.infer<typeof inheritedCoverageSchema>;
 
 export const providerBackingSchema = z.object({
   id, threadId: id, projectId: id, providerId: id, providerInstanceId: id,
@@ -17,6 +25,10 @@ export const providerBackingSchema = z.object({
   status: z.enum(["ready", "uncertain", "retired"]),
   coveredItemIds: z.array(id).max(MAX_BACKING_COVERAGE_ITEMS),
   coverageComplete: z.boolean(),
+  coveredThroughOrdinal: coverageOrdinal.optional(),
+  uncoveredItemIds: z.array(id).max(MAX_BACKING_UNCOVERED_ITEMS).optional(),
+  inheritedCoverage: inheritedCoverageSchema.optional(),
+  legacyCovered: z.boolean().optional(),
   createdAt: time, updatedAt: time,
 }).strict();
 
@@ -71,6 +83,10 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("provider.backing-rewound"), payload: z.object({
     rollbackId: id, backingId: id, nativeSessionId: nativeId,
     coveredItemIds: z.array(id).max(MAX_BACKING_COVERAGE_ITEMS), coverageComplete: z.boolean(),
+    coveredThroughOrdinal: coverageOrdinal.optional(),
+    uncoveredItemIds: z.array(id).max(MAX_BACKING_UNCOVERED_ITEMS).optional(),
+    inheritedCoverage: inheritedCoverageSchema.optional(),
+    legacyCovered: z.boolean().optional(),
   }).strict() }).strict(),
   z.object({ type: z.literal("context.handoff-prepared"), payload: contextHandoffSchema }).strict(),
   /**
@@ -87,6 +103,10 @@ export const orchestrationBackingEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ProviderBacking = z.infer<typeof providerBackingSchema>;
+export type BackingCoverage = Pick<
+  ProviderBacking,
+  "coveredItemIds" | "coveredThroughOrdinal" | "uncoveredItemIds" | "inheritedCoverage" | "legacyCovered"
+>;
 export type ContextHandoff = z.infer<typeof contextHandoffSchema>;
 export type OrchestrationBackingEvent = z.infer<typeof orchestrationBackingEventSchema>;
 

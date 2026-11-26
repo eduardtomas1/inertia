@@ -14,11 +14,12 @@ import { projectNativeControl } from "./native-control-projector";
 import { projectHistoryEvent } from "./history-projector";
 import { projectMergeBackEvent } from "./merge-back-projector";
 import { isDelegationEvent, projectDelegationEvent } from "./delegation-projector";
+import { isQueueEvent, projectQueueEvent } from "./queue-projector";
 import { isRunControlEvent, projectRunControlEvent } from "./run-control-projector";
 import { OrchestrationConflict, type ProjectEvent, type ProjectionWrite } from "./types";
 
-/** 3: backing lookup rows (`backing-session`, `attempt-handoff`) for `provider.backing-forked`. */
-export const ORCHESTRATION_V2_PROJECTION_VERSION = 3;
+/** 4: durable queue projections (`queue-item`, `queue-state`, `superseded-turn`). */
+export const ORCHESTRATION_V2_PROJECTION_VERSION = 4;
 
 export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   const event = orchestrationDomainEventSchema.parse({ type: envelope.type, payload: envelope.payload });
@@ -41,6 +42,7 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
   }
   if (event.type === "merge-back.prepared" || event.type === "merge-back.changed") return projectMergeBackEvent(event, envelope, read);
   if (isDelegationEvent(event)) return projectDelegationEvent(event, envelope, read);
+  if (isQueueEvent(event)) return projectQueueEvent(event, envelope, read);
   if (isRunControlEvent(event)) return projectRunControlEvent(event, envelope, read);
   if (event.type === "provider.native-boundary") return projectNativeBoundary(event, envelope, read);
   if (event.type === "thread.forked" || event.type === "fork.history-part" || event.type === "fork.history-sealed") {
@@ -53,7 +55,6 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
     return projectBackingEvent(event, envelope, read);
   }
   if (event.type === "thread.configured") {
-    if (thread.activeRunId !== null) throw new OrchestrationConflict("revision-conflict");
     return [{ kind: "thread", id: thread.id, value: { ...thread, ...event.payload, updatedAt: envelope.createdAt } }];
   }
   if (event.type === "run.accepted") {
@@ -70,10 +71,11 @@ export const projectOrchestrationEvent: ProjectEvent = (envelope, read) => {
         }
       }
     }
+    const selectionAllowed = run.queueItemId !== undefined
+      || (run.providerId === thread.providerId && durableJson(run.selection) === durableJson(thread.selection));
     if (thread.activeRunId !== null || read("run", run.id) || read("attempt", attempt.id)
       || run.threadId !== thread.id || run.projectId !== thread.projectId
-      || run.workspaceKey !== thread.workspaceKey || run.providerId !== thread.providerId
-      || durableJson(run.selection) !== durableJson(thread.selection)
+      || run.workspaceKey !== thread.workspaceKey || !selectionAllowed
       || run.status !== "queued" || run.executionState !== "queued" || run.providerState !== null
       || run.stateRevision !== 0 || run.startedAt !== null || run.completedAt !== null
       || run.terminalMessageId !== null || run.attemptId !== attempt.id

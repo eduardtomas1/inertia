@@ -1,13 +1,61 @@
 import { z } from "zod";
 
 import {
+  attachmentSchema,
   attachmentsSchema,
   providerIdSchema,
   requestBase,
   turnRequestContextSchema,
 } from "./common";
+import { attachmentLimitError, MAX_ATTACHMENT_COUNT } from "../../attachments";
+import { modelSelectionSchema } from "../../model-routing";
 import { AGENT_GOAL_STATUSES } from "../agent-workflows";
 import { queuedAccessSchema } from "../../queued-messages";
+
+const optionalEditAttachmentsSchema = z.array(attachmentSchema)
+  .max(MAX_ATTACHMENT_COUNT)
+  .superRefine((attachments, context) => {
+    const message = attachmentLimitError(attachments);
+    if (message) context.addIssue({ code: "custom", message });
+  })
+  .optional();
+
+/** Phase 5 in-place edit payload (also accepts legacy `{ conversationId, id }` until Wave 2 migrates the runtime). */
+export const messageQueueEditInPlacePayloadSchema = z.strictObject({
+  conversationId: z.uuid(),
+  id: z.uuid(),
+  expectedRevision: z.number().int().min(0),
+  content: z.string().trim().min(1).max(20_000),
+  attachments: optionalEditAttachmentsSchema,
+  modelSelection: modelSelectionSchema.nullable().optional(),
+});
+
+export const messageQueueEditPayloadSchema = z.union([
+  z.strictObject({ conversationId: z.uuid(), id: z.uuid() }),
+  messageQueueEditInPlacePayloadSchema,
+]);
+
+/** Phase 5 queue commands ready for Wave 2 to wire into `agentCommandSchemas`, command-router, and runtimeCommandPolicy. */
+export const messageQueueResumeCommandSchema = z.strictObject({
+  ...requestBase,
+  type: z.literal("message.queue.resume"),
+  payload: z.strictObject({ conversationId: z.uuid() }),
+});
+
+export const messageQueueReorderCommandSchema = z.strictObject({
+  ...requestBase,
+  type: z.literal("message.queue.reorder"),
+  payload: z.strictObject({
+    conversationId: z.uuid(),
+    id: z.uuid(),
+    beforeId: z.uuid().nullable(),
+  }),
+});
+
+export const phase5QueueCommandSchemas = [
+  messageQueueResumeCommandSchema,
+  messageQueueReorderCommandSchema,
+] as const;
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
@@ -38,7 +86,7 @@ export const agentCommandSchemas = [
   }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.remove"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.send"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
-  z.strictObject({ ...requestBase, type: z.literal("message.queue.edit"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("message.queue.edit"), payload: messageQueueEditPayloadSchema }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.reconfirm"), payload: z.strictObject({
     conversationId: z.uuid(), id: z.uuid(), confirmed: queuedAccessSchema.optional(),
   }) }),

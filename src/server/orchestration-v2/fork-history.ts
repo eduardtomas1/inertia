@@ -35,13 +35,18 @@ export function captureForkHistory(database: Database.Database, targetThreadId: 
   const boundaryRow = database.prepare("SELECT requested_at, rowid AS position FROM agent_turns WHERE id = ? AND conversation_id = ?")
     .get(boundary.id, boundary.conversationId) as { requested_at: string; position: number } | undefined;
   if (!boundaryRow) throw new Error("The fork source turn is unavailable.");
+  const notQueued = `messages.id NOT IN (SELECT user_message_id FROM queued_messages
+    WHERE conversation_id = messages.conversation_id AND state IN ('waiting','dispatching','blocked')
+      AND user_message_id IS NOT NULL)`;
   const eligible = `SELECT id FROM agent_turns WHERE conversation_id = @thread
     AND (requested_at, rowid) <= (@requested, @position)
-    AND id NOT IN (SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = @thread)`;
+    AND id NOT IN (SELECT id FROM orchestration_v2_entities
+      WHERE kind IN ('rolled-back-turn','superseded-turn') AND thread_id = @thread)`;
   const parameters = { thread: boundary.conversationId, requested: boundaryRow.requested_at,
     position: boundaryRow.position, completed: boundary.completedAt ?? boundaryRow.requested_at };
   const index = `SELECT 'message' AS source, messages.id, messages.created_at AS at, messages.rowid AS position
       FROM messages WHERE conversation_id = @thread AND (turn_id IN (${eligible}) OR (turn_id IS NULL AND created_at <= @completed))
+        AND ${notQueued}
     UNION ALL SELECT 'activity', activities.id, activities.created_at, activities.rowid FROM activities
       WHERE conversation_id = @thread AND kind <> 'reasoning' AND turn_id IN (${eligible})
     UNION ALL SELECT 'plan', agent_plans.run_id, agent_plans.updated_at, agent_plans.rowid FROM agent_plans

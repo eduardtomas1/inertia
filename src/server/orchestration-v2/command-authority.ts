@@ -1,6 +1,6 @@
 import type { OrchestrationCommandLanes } from "./command-lanes";
 import type { OrchestrationEventStore } from "./event-store";
-import { commandFingerprint, durableId } from "./json";
+import { commandFingerprints, durableId } from "./json";
 import {
   OrchestrationCommandRejected,
   OrchestrationConflict,
@@ -21,6 +21,8 @@ export interface CommandAuthorityRequest {
   projectId: string;
   commandType: string;
   rejection: CommandRejectionPolicy | null;
+  /** N17: optional row-level content verification invoked on both replay and joined duplicate paths. */
+  verifyReplayContent?: (receipt: CommandReceipt | null) => void;
 }
 
 interface InFlight {
@@ -67,23 +69,36 @@ export class OrchestrationCommandAuthority {
       projectId: request.projectId, threadId: request.threadId };
     for (const value of [identity.actorId, identity.commandId, identity.projectId, identity.threadId]) durableId(value);
     durableId(request.commandType);
-    const fingerprint = commandFingerprint(request.source.command);
+    const { fingerprint, legacyFingerprint } = commandFingerprints(request.commandType, request.source.command);
     return this.lanes.run(request.threadId, (): CommandAuthorityStart<T> => {
       const key = inFlightKey(identity);
       const running = this.inFlight.get(key);
       if (running) {
         if (running.threadId !== identity.threadId || running.projectId !== identity.projectId
-          || running.fingerprint !== fingerprint) throw new OrchestrationConflict("command-conflict");
-        return { kind: "joined", result: running.result };
+          || (running.fingerprint !== fingerprint
+            && (legacyFingerprint === undefined || running.fingerprint !== legacyFingerprint))) {
+          throw new OrchestrationConflict("command-conflict");
+        }
+        const joinedResult = request.verifyReplayContent
+          ? running.result.then((value) => {
+            const stored = this.events.receipt(identity, request.source.command, request.commandType);
+            request.verifyReplayContent!(stored);
+            return value;
+          })
+          : running.result;
+        return { kind: "joined", result: joinedResult };
       }
       let receipt: CommandReceipt | null;
       try {
-        receipt = this.events.receipt(identity, request.source.command);
+        receipt = this.events.receipt(identity, request.source.command, request.commandType);
       } catch (error) {
         if (error instanceof OrchestrationCommandRejected) return { kind: "rejected", detail: error.detail };
         throw error;
       }
-      if (receipt) return { kind: "replay", receipt };
+      if (receipt) {
+        request.verifyReplayContent?.(receipt);
+        return { kind: "replay", receipt };
+      }
       const entry = this.track(key, identity, fingerprint);
       const ticket = this.ticket(key, entry, identity, request);
       try {

@@ -32,13 +32,19 @@ export function ForkSurfaceProvider({ projectId, conversationId, run, rolledBack
   </RolledBackContext.Provider>;
 }
 
-export function ForkTurnAction({ turnId }: { turnId: string }) {
+function forkTurnContextLabel(turnId: string, turnIndex?: number): string {
+  if (turnIndex !== undefined) return `Turn ${turnIndex}`;
+  return `turn ${turnId.length <= 12 ? turnId : turnId.slice(0, 8)}`;
+}
+
+export function ForkTurnAction({ turnId, turnIndex }: { turnId: string; turnIndex?: number }) {
   const surface = useContext(Context);
   const rolledBack = useTurnRolledBack(turnId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (rolledBack) return <span className="fork-turn-action fork-turn-rolled-back">Rolled back · not in context</span>;
   if (!surface) return null;
+  const label = forkTurnContextLabel(turnId, turnIndex);
   const fork = async () => {
     setBusy(true); setError(null);
     try {
@@ -52,11 +58,12 @@ export function ForkTurnAction({ turnId }: { turnId: string }) {
     finally { setBusy(false); }
   };
   return <span className="fork-turn-action">
-    <button type="button" className="history-turn-action" disabled={busy} onClick={() => { void fork(); }}>
+    <button type="button" className="history-turn-action" disabled={busy}
+      aria-label={`${busy ? "Forking…" : "Fork from here"} (${label})`} onClick={() => { void fork(); }}>
       <GitFork size={14} aria-hidden="true" /><span>{busy ? "Forking…" : "Fork from here"}</span>
     </button>
     {error && <span role="alert">{error}</span>}
-    <Suspense fallback={null}><HistoryTurnActions surface={surface} turnId={turnId} /></Suspense>
+    <Suspense fallback={null}><HistoryTurnActions surface={surface} turnId={turnId} turnIndex={turnIndex} /></Suspense>
   </span>;
 }
 

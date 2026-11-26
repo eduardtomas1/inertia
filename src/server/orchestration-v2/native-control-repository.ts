@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 
+import type { AgentActivity } from "../../shared/contracts";
 import { nativeControlSchema, type NativeControl, type NativeControlEvent } from "../../shared/orchestration-native-control";
 import type { NativeConversationResult } from "../provider/native-conversation-operations";
 import type { OrchestrationEventStore } from "./event-store";
@@ -9,6 +11,41 @@ import { commandFingerprint, durableJson } from "./json";
 import { OrchestrationConflict, type CommandSource, type JsonValue, type OrchestrationEffect } from "./types";
 import { forksLiveSource, nativeControlLockResources } from "./native-control-projector";
 import type { HistoryRollbackRepository } from "./history-rollback-repository";
+
+export const NATIVE_FORK_FALLBACK_NOTICE_TITLE = "Native session fork failed — continuing portably";
+
+export function nativeForkFailureNotice(result: NativeConversationResult): { title: string; detail: string } | null {
+  if (result.status === "failed") {
+    if (result.reason === "cleanup-unconfirmed") return null;
+    if (result.reason === "deadline") {
+      return {
+        title: NATIVE_FORK_FALLBACK_NOTICE_TITLE,
+        detail: "The provider timed out while forking the native session. This fork will continue portably with copied history.",
+      };
+    }
+    if (result.reason === "cancelled") {
+      return {
+        title: NATIVE_FORK_FALLBACK_NOTICE_TITLE,
+        detail: "The native session fork was cancelled before it finished. This fork will continue portably with copied history.",
+      };
+    }
+    return {
+      title: NATIVE_FORK_FALLBACK_NOTICE_TITLE,
+      detail: "The provider could not fork the native session. This fork will continue portably with copied history.",
+    };
+  }
+  if (result.status === "rejected") {
+    return {
+      title: NATIVE_FORK_FALLBACK_NOTICE_TITLE,
+      detail: "The provider rejected the native session fork. This fork will continue portably with copied history.",
+    };
+  }
+  return null;
+}
+
+export function nativeForkNoticeRunId(operationId: string): string {
+  return `native-fork:${operationId}`;
+}
 
 /** Durable fences cover both application conversations and the exact native source. */
 export class NativeControlRepository {
@@ -74,7 +111,7 @@ export class NativeControlRepository {
   }
 
   settle(effect: OrchestrationEffect, result: NativeConversationResult): NativeControl {
-    return this.database.transaction(() => {
+    const settled = this.database.transaction(() => {
       const control = this.claimed(effect);
       const rollback = control.request.kind === "rollback";
       if (result.operationId !== control.id || result.targetConversationId !== (rollback ? undefined : control.threadId)
@@ -105,6 +142,53 @@ export class NativeControlRepository {
       }
       return this.get(control.id)!;
     }).immediate();
+    if (settled.request.kind === "fork" && settled.state === "portable") {
+      const notice = nativeForkFailureNotice(result);
+      if (notice) this.recordForkFallbackNotice(settled.threadId, settled.id, notice);
+    }
+    return settled;
+  }
+
+  /** Non-blocking visible timeline notice when a provider-side native fork falls back to portable history. */
+  recordForkFallbackNotice(
+    conversationId: string,
+    operationId: string,
+    notice: { title: string; detail: string },
+  ): AgentActivity | null {
+    const runId = nativeForkNoticeRunId(operationId);
+    try {
+      const existing = this.database.prepare(`SELECT id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at
+        FROM activities WHERE conversation_id = ? AND run_id = ? LIMIT 1`)
+        .get(conversationId, runId) as {
+          id: string; conversation_id: string; run_id: string; turn_id: string | null;
+          kind: AgentActivity["kind"]; title: string; detail: string | null;
+          status: AgentActivity["status"]; created_at: string;
+        } | undefined;
+      if (existing) {
+        return {
+          id: existing.id, conversationId: existing.conversation_id, runId: existing.run_id,
+          turnId: existing.turn_id, kind: existing.kind, title: existing.title,
+          detail: existing.detail, status: existing.status, createdAt: existing.created_at,
+        };
+      }
+      const record: AgentActivity = {
+        id: randomUUID(),
+        conversationId,
+        runId,
+        turnId: null,
+        kind: "status",
+        title: notice.title,
+        detail: notice.detail,
+        status: "completed",
+        createdAt: new Date().toISOString(),
+      };
+      this.database.prepare(`INSERT INTO activities
+        (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at)
+        VALUES (@id, @conversationId, @runId, @turnId, @kind, @title, @detail, @status, @createdAt)`).run(record);
+      return record;
+    } catch {
+      return null;
+    }
   }
 
   uncertain(effect: OrchestrationEffect, reason = "operation-unconfirmed"): void {

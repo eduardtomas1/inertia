@@ -60,27 +60,56 @@ function ChildBreadcrumb({ surface }: { surface: DelegationSurface }) {
 }
 
 function FullResult({ surface, task }: { surface: DelegationSurface; task: DelegatedTaskSummary }) {
+  const resultKey = `${task.taskId}:${task.resultTurnId ?? ""}`;
   const [open, setOpen] = useState(false);
-  const [text, setText] = useState<string | null>(null);
+  const [cached, setCached] = useState<{ key: string; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const panelId = useId();
-  const toggle = async () => {
-    const next = !open;
-    setOpen(next);
-    if (!next || text !== null) return;
+  const mounted = useRef(true);
+  const seq = useRef(0);
+  const surfaceRef = useRef(surface);
+  surfaceRef.current = surface;
+  const cachedKeyRef = useRef<string | null>(null);
+  cachedKeyRef.current = cached?.key ?? null;
+
+  const text = cached?.key === resultKey ? cached.text : null;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      seq.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      seq.current += 1;
+      return;
+    }
+    if (cachedKeyRef.current === resultKey) return;
+    const requestSeq = ++seq.current;
     setError(null);
     const refusal = "The full result could not be loaded.";
-    try {
-      const result = await send(surface, `delegation.task.read:${task.taskId}`, { type: "delegation.task.read",
-        payload: { taskId: task.taskId } }, refusal);
+    void send(surfaceRef.current, `delegation.task.read:${task.taskId}`, { type: "delegation.task.read",
+      payload: { taskId: task.taskId } }, refusal).then((result) => {
+      if (!mounted.current || seq.current !== requestSeq) return;
       if (result.kind !== "delegation.task" || result.task.taskId !== task.taskId) throw new Error(refusal);
       const view = result.task.result;
-      setText(view?.text ? `${view.text}${view.truncated ? "\n…" : ""}` : "This task left no result text.");
-    } catch (failure) { setError(failureText(failure, refusal)); }
-  };
+      setCached({
+        key: resultKey,
+        text: view?.text ? `${view.text}${view.truncated ? "\n…" : ""}` : "This task left no result text.",
+      });
+    }).catch((failure: unknown) => {
+      if (!mounted.current || seq.current !== requestSeq) return;
+      setError(failureText(failure, refusal));
+    });
+    return () => { seq.current += 1; };
+  }, [open, resultKey, task.taskId]);
+
   return <>
     <button type="button" className="turn-run-details-toggle" aria-expanded={open} aria-controls={panelId}
-      aria-label={`Full result of ${task.title}`} onClick={() => { void toggle(); }}>Full result</button>
+      aria-label={`Full result of ${task.title}`} onClick={() => setOpen((current) => !current)}>Full result</button>
     <div id={panelId} className="delegation-full-result" hidden={!open}>
       {open && (error ? <p role="alert" className="delegation-notice">{error}</p>
         : text === null ? <p role="status">Loading result…</p> : <pre>{text}</pre>)}
@@ -93,34 +122,61 @@ function useConfirm() {
   const trigger = useRef<HTMLButtonElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
   const row = useRef<HTMLLIElement>(null);
-  const restore = useRef(false);
+  const focusInConfirm = useRef(false);
+  const restore = useRef<"none" | "trigger-or-row" | "row">("none");
   useEffect(() => {
-    if (confirming) confirm.current?.focus();
-    else if (restore.current) { restore.current = false; (trigger.current ?? row.current)?.focus(); }
+    if (confirming) {
+      focusInConfirm.current = true;
+      confirm.current?.focus();
+    } else if (restore.current !== "none") {
+      const mode = restore.current;
+      restore.current = "none";
+      focusInConfirm.current = false;
+      (mode === "row" ? row.current : (trigger.current ?? row.current))?.focus();
+    }
   }, [confirming]);
-  const close = () => { restore.current = true; setConfirming(false); };
-  return { confirming, open: () => setConfirming(true), close, trigger, confirm, row };
+  const close = (restoreFocus = true) => {
+    restore.current = restoreFocus ? "trigger-or-row" : "none";
+    setConfirming(false);
+  };
+  const resetToRow = (restoreRowFocus: boolean) => {
+    restore.current = restoreRowFocus ? "row" : "none";
+    setConfirming(false);
+  };
+  return { confirming, open: () => setConfirming(true), close, resetToRow, trigger, confirm, row, focusInConfirm };
 }
 
 function TaskRow({ surface, task }: { surface: DelegationSurface; task: DelegatedTaskSummary }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const cancel = useConfirm();
+  const mounted = useRef(true);
   const describedBy = useId();
   const titleId = useId();
   const chip = taskChip(task);
   const undelivered = isUndelivered(task);
-  const act = async (name: string, key: string, command: DelegationCommand, refusal: string) => {
-    if (busy) return;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
+    if (task.status !== "running" && cancel.confirming) {
+      const active = document.activeElement;
+      const focusDropped = active === null || active === document.body || Boolean(cancel.row.current?.contains(active));
+      cancel.resetToRow(cancel.focusInConfirm.current && focusDropped);
+    }
+  }, [task.status, cancel]);
+  const act = async (name: string, key: string, command: DelegationCommand, refusal: string): Promise<boolean> => {
+    if (busy) return false;
     setBusy(name); setError(null);
-    try { await send(surface, key, command, refusal); }
-    catch (failure) { setError(failureText(failure, refusal)); }
-    finally { setBusy(null); }
+    try { await send(surface, key, command, refusal); return true; }
+    catch (failure) { if (mounted.current) setError(failureText(failure, refusal)); return false; }
+    finally { if (mounted.current) setBusy(null); }
   };
   const confirmCancel = async () => {
-    await act("cancel", `delegation.task.cancel:${task.taskId}`, { type: "delegation.task.cancel", payload: { taskId: task.taskId } },
+    const ok = await act("cancel", `delegation.task.cancel:${task.taskId}`, { type: "delegation.task.cancel", payload: { taskId: task.taskId } },
       "The task could not be cancelled.");
-    cancel.close();
+    if (ok && mounted.current) cancel.close();
   };
   const escape = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || busy) return;
@@ -145,11 +201,18 @@ function TaskRow({ surface, task }: { surface: DelegationSurface; task: Delegate
       <OpenChat surface={surface} conversationId={task.childConversationId} label={`Open chat for ${task.title}`}
         onMissing={setError} />
       {surface.run && task.status === "running" && (cancel.confirming
-        ? <span className="delegation-confirm" role="group" aria-label={`Confirm cancelling ${task.title}`} onKeyDown={escape}>
+        ? <span className="delegation-confirm" role="group" aria-label={`Confirm cancelling ${task.title}`}
+          onFocus={() => { cancel.focusInConfirm.current = true; }}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null) && event.relatedTarget !== null) {
+              cancel.focusInConfirm.current = false;
+            }
+          }}
+          onKeyDown={escape}>
           <span>The child chat's active turn stops. Results so far stay readable.</span>
           <button ref={cancel.confirm} type="button" className="turn-run-details-toggle" disabled={busy !== null}
             onClick={() => { void confirmCancel(); }}>{busy === "cancel" ? "Cancelling…" : "Cancel task"}</button>
-          <button type="button" className="turn-run-details-toggle" disabled={busy !== null} onClick={cancel.close}>Keep running</button>
+          <button type="button" className="turn-run-details-toggle" disabled={busy !== null} onClick={() => cancel.close()}>Keep running</button>
         </span>
         : <button ref={cancel.trigger} type="button" className="turn-run-details-toggle" aria-label={`Cancel task: ${task.title}`}
           aria-describedby={describedBy}

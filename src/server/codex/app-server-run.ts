@@ -7,8 +7,6 @@ import {
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
 
-import { staleProviderSessionDecision } from "../../shared/continuation-policy";
-import { INERTIA_VERSION } from "../../shared/version";
 import type { TurnFailureKind } from "../../shared/turn-lifecycle";
 import type { OrchestrationRunFailureCode } from "../../shared/orchestration-v2";
 import {
@@ -17,25 +15,27 @@ import {
   CODEX_CHILD_INTERRUPT_TIMEOUT_MS,
   CODEX_APP_SERVER_MAX_QUEUED_STDIN_BYTES,
   CODEX_ROOT_INTERRUPT_TIMEOUT_MS,
-  CODEX_THREAD_IN_USE_MESSAGE,
   CODEX_TRANSPORT_CLOSE_GRACE_MS,
   MAX_CODEX_PENDING_CANCELLATION_REQUESTS,
   MAX_CODEX_PENDING_CLIENT_REQUESTS,
   MAX_CODEX_DIAGNOSTIC_CHARS,
   MAX_CODEX_TEXT_CHARS,
-  codexAccessPolicy,
   codexProtocolLimits,
-  codexServiceTierMatches,
-  isStaleResumeError,
   isUnsupportedFastModeError,
   isUnsupportedFullAccessError,
   validateCodexModelProvider,
   type CodexRunPhase,
 } from "./app-server-config";
-import { CodexAppServerEvents } from "./app-server-events";
+import { CodexAppServerEvents, type CodexAppServerEventHost } from "./app-server-events";
+import { resetCodexRetryBudget } from "./app-server-error-events";
 import { codexAppServerExitMessage } from "./app-server-exit-message";
-import type { OpenCodexTurnOptions } from "./app-server-open-turn-options";
 import { CodexOrphanGoalTurns, codexGoalMayContinue } from "./app-server-orphan-goal-turns";
+import {
+  CodexProtocolViolationError,
+  isCodexArchivedThreadError,
+  isCodexClosingThreadError,
+  openCodexTurn,
+} from "./app-server-turn-start";
 import { redactCodexErrorHeaders } from "./managed-errors";
 import { CodexJsonLineWriter } from "./jsonl-writer";
 import {
@@ -48,33 +48,16 @@ import {
   type JsonLineDecoderFailure,
   type JsonObject,
 } from "./protocol";
-import { codexWatcherThreadConfig } from "./read-only-thread-config";
-import { injectCodexHistory } from "./app-server-history-injection";
 import {
-  CodexErrorResponse, CodexRequestRefusedError, isCodexActiveWriterError, type CodexRequestFailureRecording,
+  CodexErrorResponse, CodexRequestRefusedError, type CodexRequestFailureRecording,
 } from "./app-server-request-errors";
-import {
-  codexResumedThreadWithheldInstructions,
-  codexThreadStartTools,
-  recordCodexThreadRegistration,
-} from "./app-server-thread-tools";
-import {
-  codexPromptWithSessionInstruction,
-  codexSessionDeveloperInstructions,
-  configuredDeveloperInstructions,
-  readConfiguredDeveloperInstructions,
-} from "./developer-instructions";
-import {
-  codexModelProviderLaunchArguments,
-  codexModelProviderThreadConfig,
-} from "./model-provider-config";
-import { withoutInternalProviderInstructions } from "../runtime/turns/request-context";
-import { withoutSessionInstructions } from "../runtime/turns/turn-instruction-delivery";
+import { codexModelProviderLaunchArguments } from "./model-provider-config";
 import type {
   CodexAppServerOptions,
   CodexAppServerResult,
   CodexAppServerRun,
 } from "./types";
+export { isCodexArchivedThreadError, isCodexClosingThreadError, openCodexTurn };
 import {
   launchCredentialValues,
   sanitizeProviderFailureDetail,
@@ -94,6 +77,25 @@ import {
   waitForProviderNaturalClose,
 } from "../provider/provider-natural-close";
 import { createOwnedProcessTreeTermination } from "../process-lifecycle";
+
+const MAX_PRIOR_COMPLETED_TURN_IDS = 4_096;
+
+const SUBSTANTIVE_PROGRESS_METHODS = new Set([
+  "turn/started",
+  "turn/completed",
+  "turn/plan/updated",
+  "turn/diff/updated",
+  "item/started",
+  "item/completed",
+  "item/agentMessage/delta",
+  "item/plan/delta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/summaryPartAdded",
+  "item/commandExecution/outputDelta",
+  "item/fileChange/outputDelta",
+  "item/mcpToolCall/progress",
+  "thread/tokenUsage/updated",
+]);
 
 interface PendingClientRequest {
   method: string;
@@ -159,6 +161,8 @@ export function startCodexAppServerRun(
   });
   let goalMutationTail = Promise.resolve();
   let events: CodexAppServerEvents;
+  let eventHost: CodexAppServerEventHost | undefined;
+  const priorCompletedTurnIds = new Set<string>();
   let cancellationStarted = false;
   const terminateOwnedProcessTree = createOwnedProcessTreeTermination(
     child,
@@ -331,6 +335,7 @@ export function startCodexAppServerRun(
     );
     events?.dispose();
     events?.settleInteractions();
+    if (eventHost) resetCodexRetryBudget(eventHost);
     ownedTerminationArmed = true;
     void (async () => {
       // Capture an earlier user cancellation at terminal acceptance. A later
@@ -540,7 +545,7 @@ export function startCodexAppServerRun(
 
   const orphanGoalTurns = new CodexOrphanGoalTurns(options, () => providerThreadId, request, () => events,
     options.rpcTimeoutMs ?? CODEX_RPC_TIMEOUT_MS);
-  events = new CodexAppServerEvents({
+  eventHost = {
     options,
     orphanGoalTurns,
     resultText,
@@ -587,7 +592,8 @@ export function startCodexAppServerRun(
     },
     finish,
     rememberFailure,
-  });
+  };
+  events = new CodexAppServerEvents(eventHost);
 
   const handleLine = (line: string): void => {
     if (settled) return;
@@ -619,7 +625,20 @@ export function startCodexAppServerRun(
     lastProtocolMethod = method ?? lastProtocolMethod;
 
     if (id !== undefined && method) {
-      events.handleServerRequest(id, method, params);
+      try {
+        events.handleServerRequest(id, method, params);
+      } catch (error) {
+        const detail = error instanceof Error
+          ? error.message
+          : "Codex server request handler threw an unexpected error.";
+        lastError = redactCodexErrorHeaders(detail);
+        rememberFailure(
+          "malformed-protocol",
+          "Codex App Server sent a server request that could not be processed.",
+          detail,
+        );
+        finish("failed", null, null);
+      }
       return;
     }
     if (id !== undefined && typeof id === "number") {
@@ -627,7 +646,22 @@ export function startCodexAppServerRun(
       if (!pending) return;
       clearTimeout(pending.timeout);
       pendingRequests.delete(id);
-      pending.onResponseFrame?.(objectValue(message.result));
+      try {
+        pending.onResponseFrame?.(objectValue(message.result));
+      } catch (error) {
+        const detail = error instanceof Error
+          ? error.message
+          : "Codex response frame handler threw an unexpected error.";
+        lastError = redactCodexErrorHeaders(detail);
+        rememberFailure(
+          "malformed-protocol",
+          "Codex App Server returned a response frame that could not be processed.",
+          detail,
+        );
+        pending.reject(error instanceof Error ? error : new Error(detail));
+        finish("failed", null, null);
+        return;
+      }
       const error = objectValue(message.error);
       if (error) {
         const errorMessage =
@@ -647,7 +681,38 @@ export function startCodexAppServerRun(
       return;
     }
     if (method) {
-      events.handleNotification(method, params);
+      if (
+        method === "turn/completed"
+        && phase === "opening"
+        && priorCompletedTurnIds.size < MAX_PRIOR_COMPLETED_TURN_IDS
+      ) {
+        const notificationThreadId = boundedText(params.threadId, 512);
+        const completedId = boundedText(params.turnId, 512)
+          ?? boundedText(objectValue(params.turn)?.id, 512);
+        if (
+          completedId
+          && (!providerThreadId || !notificationThreadId || notificationThreadId === providerThreadId)
+        ) {
+          priorCompletedTurnIds.add(completedId);
+        }
+      }
+      if (eventHost && SUBSTANTIVE_PROGRESS_METHODS.has(method)) {
+        resetCodexRetryBudget(eventHost);
+      }
+      try {
+        events.handleNotification(method, params);
+      } catch (error) {
+        const detail = error instanceof Error
+          ? error.message
+          : "Codex notification handler threw an unexpected error.";
+        lastError = redactCodexErrorHeaders(detail);
+        rememberFailure(
+          "malformed-protocol",
+          "Codex App Server sent a notification that could not be processed.",
+          detail,
+        );
+        finish("failed", null, null);
+      }
       return;
     }
     rememberFailure(
@@ -759,6 +824,9 @@ export function startCodexAppServerRun(
         settle: () => orphanGoalTurns.awaitStopped(codexGoalMayContinue(options)) },
       phase: () => phase,
       hasObservedTurn: (turnId) => events.hasObservedTurn(turnId),
+      hasCompletedTurn: (turnId: string) =>
+        priorCompletedTurnIds.has(turnId)
+        || (events.hasObservedTurn(turnId) && activeTurnId !== turnId),
       goalProjectionSequence: () => events.goalProjectionSequence(),
       beginGoalMutation: (activatesGoal) =>
         events.beginGoalMutation(activatesGoal),
@@ -802,8 +870,10 @@ export function startCodexAppServerRun(
         ? error.message
         : "Codex App Server could not start.";
       rememberFailure(
-        "codex-error",
-        "Codex App Server could not start the turn.",
+        error instanceof CodexProtocolViolationError ? "malformed-protocol" : "codex-error",
+        error instanceof CodexProtocolViolationError
+          ? "Codex App Server returned a malformed protocol message."
+          : "Codex App Server could not start the turn.",
         lastError,
       );
       finish(cancelRequested ? "cancelled" : "failed", null, null);
@@ -912,304 +982,4 @@ export function startCodexAppServerRun(
     setGoal,
     clearGoal,
   };
-}
-
-export async function openCodexTurn({
-  options,
-  modelProvider,
-  request,
-  notify,
-  setProviderThreadId,
-  activeTurnId,
-  setActiveTurnId,
-  setRequestedTurnId,
-  replayPreResponseTurnNotifications,
-  goalTurns,
-  phase,
-  hasObservedTurn,
-  goalProjectionSequence,
-  beginGoalMutation,
-  endGoalMutation,
-  awaitInitialGoalTurn,
-  projectGoalResponse,
-  setContinuationError,
-  setCompatibilityError,
-  deferSessionInstruction,
-  setPhase,
-  isSettled,
-  isCancelRequested,
-  finish,
-}: OpenCodexTurnOptions): Promise<void> {
-  await request("initialize", {
-    clientInfo: {
-      name: "inertia",
-      title: "Inertia",
-      version: INERTIA_VERSION,
-    },
-    capabilities: {
-      experimentalApi: true,
-      requestAttestation: false,
-    },
-  });
-  notify("initialized");
-
-  const accessPolicy = codexAccessPolicy(options);
-  const effectiveConfig = options.readOnlyProfile === "watcher" || modelProvider?.credentialEnvironmentKey
-    ? await request("config/read", { includeLayers: false, cwd: options.cwd })
-    : null;
-  const watcherConfig = options.readOnlyProfile === "watcher" && effectiveConfig
-    ? codexWatcherThreadConfig(effectiveConfig)
-    : null;
-  const providerConfig = modelProvider
-    ? codexModelProviderThreadConfig(modelProvider, effectiveConfig)
-    : null;
-  // A resumed thread keeps the dynamic tools it registered at thread/start,
-  // so instructions for packs it did not register leave both channels.
-  const withheldInstructions = options.sessionId
-    ? codexResumedThreadWithheldInstructions(options.sessionId, options.hostTools)
-    : [];
-  const sessionDeveloperInstructions = withoutSessionInstructions(
-    options.sessionDeveloperInstructions,
-    withheldInstructions,
-  );
-  const { developerInstructions, sessionInstructionApplied } = codexSessionDeveloperInstructions(
-    sessionDeveloperInstructions === undefined
-      ? undefined
-      : effectiveConfig
-        ? configuredDeveloperInstructions(effectiveConfig)
-        : await readConfiguredDeveloperInstructions(
-          () => request("config/read", { includeLayers: false, cwd: options.cwd }, undefined, false),
-        ),
-    sessionDeveloperInstructions,
-    options.developerInstructions,
-  );
-  if (!sessionInstructionApplied) deferSessionInstruction?.();
-  const threadConfig = {
-    cwd: options.cwd,
-    approvalPolicy: accessPolicy.approvalPolicy,
-    approvalsReviewer: "user",
-    sandbox: accessPolicy.threadSandbox,
-    ...(options.model ? { model: options.model } : {}),
-    ...(options.serviceTier !== undefined
-      ? { serviceTier: options.serviceTier }
-      : {}),
-    ...(modelProvider ? { modelProvider: modelProvider.providerId } : {}),
-    ...(providerConfig || watcherConfig || options.autoCompactTokenLimit
-      ? { config: { ...(options.autoCompactTokenLimit ? { model_auto_compact_token_limit: options.autoCompactTokenLimit } : {}), ...watcherConfig, ...providerConfig } }
-      : {}),
-    ...(developerInstructions ? { developerInstructions } : {}),
-  };
-  let opened: JsonObject;
-  if (options.sessionId) {
-    try {
-      // The audited App Server protocol persists thread/start dynamic tools in
-      // its rollout/state DB and exposes no registration field on resume, so
-      // the developer instructions and the prompt keep only instructions for
-      // packs this thread registered. Schema 65 clears Codex identities from before the current
-      // Browser tool capability epoch, so persisted sessions reaching this
-      // path own the Browser tools.
-      opened = await request("thread/resume", {
-        threadId: options.sessionId,
-        excludeTurns: true,
-        ...threadConfig,
-      });
-    } catch (error) {
-      if (isCodexActiveWriterError(error)) {
-        setContinuationError("thread-in-use");
-        throw new Error(CODEX_THREAD_IN_USE_MESSAGE);
-      }
-      if (isStaleResumeError(error)) {
-        setContinuationError("stale-provider-session");
-        throw new Error(staleProviderSessionDecision().reason);
-      }
-      if (error instanceof CodexErrorResponse) setContinuationError("resume-rejected");
-      throw error;
-    }
-  } else {
-    opened = await request("thread/start", {
-      ...threadConfig,
-      ...(options.hostTools
-        ? {
-            dynamicTools: codexThreadStartTools(options.hostTools).map((definition) => ({
-              name: definition.name,
-              description: definition.description,
-              inputSchema: definition.inputSchema,
-            })),
-          }
-        : {}),
-    });
-  }
-
-  const thread = objectValue(opened.thread);
-  const openedThreadId = boundedText(thread?.id, 512);
-  if (!openedThreadId) {
-    throw new Error("Codex did not return a thread identifier.");
-  }
-  if (options.sessionId && openedThreadId !== options.sessionId) {
-    setContinuationError("stale-provider-session");
-    throw new Error(staleProviderSessionDecision().reason);
-  }
-  if (
-    options.serviceTier !== undefined
-    && !codexServiceTierMatches(options.serviceTier, opened.serviceTier)
-  ) {
-    setCompatibilityError?.("fast-mode-unsupported");
-    throw new Error(
-      "Codex did not confirm the requested response service tier.",
-    );
-  }
-  if (!options.sessionId) recordCodexThreadRegistration(openedThreadId, options.hostTools);
-  setProviderThreadId(openedThreadId);
-  options.onSession?.(openedThreadId);
-  await goalTurns?.settle(); // A goal turn no run owns stops before the run's turn starts.
-  if (isSettled()) return;
-  // Never into an active turn (T3 8b21cbdf1), nor a resumed one Codex may still continue a goal in.
-  const prompt = await injectCodexHistory({ history: options.historyInjection, prompt: options.prompt, threadId: openedThreadId,
-    thread, turnActive: activeTurnId() !== undefined || goalTurns?.held() === true || codexGoalMayContinue(options),
-    cancelRequested: isCancelRequested, request });
-  if (isCancelRequested()) {
-    finish("cancelled", null, null);
-    return;
-  }
-
-  if (options.goalStart) {
-    setPhase("starting-turn");
-    goalTurns?.adopt();
-    if (options.reasoningEffort) {
-      await request("thread/settings/update", {
-        threadId: openedThreadId,
-        effort: options.reasoningEffort,
-      });
-    }
-    const params: JsonObject = {
-      threadId: openedThreadId,
-      status: "active",
-    };
-    if (options.goalStart.objective !== undefined) {
-      params.objective = options.goalStart.objective;
-    }
-    if (options.goalStart.tokenBudget !== undefined) {
-      params.tokenBudget = options.goalStart.tokenBudget;
-    }
-    beginGoalMutation(true);
-    let terminalGoalStart = false;
-    try {
-      let sequenceAtResponse = goalProjectionSequence();
-      const response = await request("thread/goal/set", params, () => {
-        sequenceAtResponse = goalProjectionSequence();
-      });
-      const projectedGoal = projectGoalResponse(
-        openedThreadId,
-        response.goal,
-        sequenceAtResponse,
-      );
-      if (!projectedGoal) {
-        throw new Error("Codex returned a malformed goal response.");
-      }
-      terminalGoalStart = projectedGoal.status !== "active";
-    } finally {
-      endGoalMutation(true);
-    }
-    if (terminalGoalStart && phase() === "starting-turn") {
-      finish("completed", 0, null);
-    } else if (!terminalGoalStart) {
-      awaitInitialGoalTurn();
-    }
-    return;
-  }
-
-  const effectiveModel = boundedText(opened.model, 160) ?? options.model;
-  if (options.planMode && !effectiveModel) {
-    throw new Error(
-      "Codex did not return an effective model for Plan mode.",
-    );
-  }
-  // The visible user message already contains Codex's explicit `$name`
-  // invocation. Keep the structured item only as the authoritative path
-  // capability; prepending another token would make provider input diverge
-  // from the persisted transcript.
-  for (const skill of options.skills ?? []) {
-    if (
-      skill.source !== "codex-native"
-      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(skill.name)
-    ) {
-      throw new Error("Codex received an invalid selected skill.");
-    }
-  }
-  const turnPrompt = withoutInternalProviderInstructions(prompt, withheldInstructions);
-  const input: JsonObject[] = [{
-    type: "text",
-    text: sessionInstructionApplied || sessionDeveloperInstructions === undefined
-      ? turnPrompt
-      : codexPromptWithSessionInstruction(turnPrompt, sessionDeveloperInstructions),
-    text_elements: [],
-  }];
-  for (const skill of options.skills ?? []) {
-    input.push({
-      type: "skill",
-      name: skill.name,
-      path: skill.path,
-    });
-  }
-  for (const path of options.imagePaths ?? []) {
-    input.push({ type: "localImage", path });
-  }
-  setPhase("starting-turn");
-  setRequestedTurnId?.(null);
-  const started = await request("turn/start", {
-    threadId: openedThreadId,
-    input,
-    approvalPolicy: accessPolicy.approvalPolicy,
-    approvalsReviewer: "user",
-    sandboxPolicy: accessPolicy.turnSandboxPolicy,
-    ...(options.model ? { model: options.model } : {}),
-    ...(options.reasoningEffort
-      ? { effort: options.reasoningEffort }
-      : {}),
-    ...(options.serviceTier !== undefined
-      ? { serviceTier: options.serviceTier }
-      : {}),
-    summary: "auto",
-    ...(options.planMode ? {
-      collaborationMode: {
-        mode: "plan",
-        settings: {
-          model: effectiveModel,
-          reasoning_effort: options.reasoningEffort ?? null,
-          developer_instructions: null,
-        },
-      },
-    } : {}),
-  }, (result) => {
-    const respondedTurnId = boundedText(objectValue(result?.turn)?.id, 512);
-    setRequestedTurnId?.(respondedTurnId);
-    // Codex accepted the turn: record it before anything else, so a Stop racing `turn/started` keeps the prompt
-    // delivered. `turn/started` repeats the same boundary, which records nothing new.
-    if (respondedTurnId && !isSettled()) options.onNativeBoundary?.(openedThreadId, respondedTurnId, "started");
-    // Same stdout chunk or earlier: notifications for this turn that arrived
-    // before the response are applied now, so a turn that already started (or
-    // finished) is neither lost nor resurrected as running below.
-    if (respondedTurnId) replayPreResponseTurnNotifications?.(respondedTurnId);
-  });
-  if (isSettled()) return;
-  const turn = objectValue(started.turn);
-  const startedTurnId = boundedText(turn?.id, 512);
-  if (!startedTurnId) {
-    throw new Error("Codex did not return a turn identifier.");
-  }
-  // Notifications can share the response's stdout chunk and complete the
-  // turn before this await resumes. Preserve the event-driven phase instead
-  // of resurrecting a completed turn as running.
-  if (phase() !== "starting-turn") {
-    if (!hasObservedTurn(startedTurnId)) {
-      throw new Error("Codex returned inconsistent turn identifiers.");
-    }
-    return;
-  }
-  if (activeTurnId() && activeTurnId() !== startedTurnId) {
-    throw new Error("Codex returned inconsistent turn identifiers.");
-  }
-  setActiveTurnId(startedTurnId);
-  setPhase("running");
-  options.onStatus?.("running");
 }

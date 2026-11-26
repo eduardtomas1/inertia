@@ -103,12 +103,17 @@ function useTwoStep() {
   return { phase, setPhase, trigger, confirm, settle };
 }
 
-function escapeCancels(cancel: () => void) {
+function escapeCancels(cancel: () => void, busy = false) {
   return (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
+    if (event.key !== "Escape" || busy) return;
     event.stopPropagation();
     cancel();
   };
+}
+
+function turnContextLabel(turnId: string, turnIndex?: number): string {
+  if (turnIndex !== undefined) return `Turn ${turnIndex}`;
+  return `turn ${turnId.length <= 12 ? turnId : turnId.slice(0, 8)}`;
 }
 
 function RollbackOutcomeText({ outcome }: { outcome: RollbackOutcome }) {
@@ -130,7 +135,7 @@ function RollbackConfirmation({ start, confirm, busy, onConfirm, onCancel }: {
     : start ? "Files changed in this chat are restored when it is safe."
       : "Files changed by later turns are restored when it is safe.";
   return <span className="history-rollback-confirm" role="group"
-    aria-label={start ? "Confirm rollback to chat start" : "Confirm rollback"} onKeyDown={escapeCancels(onCancel)}>
+    aria-label={start ? "Confirm rollback to chat start" : "Confirm rollback"} onKeyDown={escapeCancels(onCancel, busy)}>
     <span id={describedBy}>{scope} {files}</span>
     <label className="history-files-toggle">
       <input type="checkbox" checked={restore} disabled={busy} onChange={(event) => setRestore(event.currentTarget.checked)} />
@@ -144,7 +149,7 @@ function RollbackConfirmation({ start, confirm, busy, onConfirm, onCancel }: {
   </span>;
 }
 
-function HistoryRollbackAction({ surface, turnId }: { surface: ForkSurface; turnId: string }) {
+function HistoryRollbackAction({ surface, turnId, turnIndex }: { surface: ForkSurface; turnId: string; turnIndex?: number }) {
   const { phase, setPhase, trigger, confirm, settle } = useTwoStep();
   const [outcome, setOutcome] = useState<RollbackOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -154,21 +159,23 @@ function HistoryRollbackAction({ surface, turnId }: { surface: ForkSurface; turn
     catch (failure) { setError(failureMessage(failure, "This chat could not be rolled back.")); }
     finally { settle(); }
   };
-  if (phase === "confirming") {
-    return <RollbackConfirmation start={false} confirm={confirm} busy={false}
-      onConfirm={(restoreFiles) => { void rollback(restoreFiles); }} onCancel={settle} />;
+  if (phase === "confirming" || phase === "busy") {
+    const busy = phase === "busy";
+    return <RollbackConfirmation start={false} confirm={confirm} busy={busy}
+      onConfirm={(restoreFiles) => { void rollback(restoreFiles); }} onCancel={() => { if (!busy) settle(); }} />;
   }
   return <>
-    <button ref={trigger} type="button" className="history-turn-action" disabled={phase === "busy"}
+    <button ref={trigger} type="button" className="history-turn-action"
+      aria-label={`Roll back to here (${turnContextLabel(turnId, turnIndex)})`}
       onClick={() => { setError(null); setOutcome(null); setPhase("confirming"); }}>
-      <Undo2 size={14} aria-hidden="true" /><span>{phase === "busy" ? "Rolling back…" : "Roll back to here"}</span>
+      <Undo2 size={14} aria-hidden="true" /><span>Roll back to here</span>
     </button>
     {outcome && <RollbackOutcomeText outcome={outcome} />}
     {error && <span role="alert" className="history-notice">{error}</span>}
   </>;
 }
 
-function MergeThroughAction({ surface, turnId }: { surface: ForkSurface; turnId: string }) {
+function MergeThroughAction({ surface, turnId, turnIndex }: { surface: ForkSurface; turnId: string; turnIndex?: number }) {
   const { phase, setPhase, trigger, confirm, settle } = useTwoStep();
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -178,30 +185,35 @@ function MergeThroughAction({ surface, turnId }: { surface: ForkSurface; turnId:
     catch (failure) { setError(failureMessage(failure, "The fork's findings could not be merged back.")); }
     finally { settle(); }
   };
-  if (phase === "confirming") {
-    return <span className="history-rollback-confirm" role="group" aria-label="Confirm merge" onKeyDown={escapeCancels(settle)}>
+  if (phase === "confirming" || phase === "busy") {
+    const busy = phase === "busy";
+    return <span className="history-rollback-confirm" role="group" aria-label="Confirm merge"
+      onKeyDown={escapeCancels(() => { if (!busy) settle(); }, busy)}>
       <span>Findings from this fork up to this turn are attached to the source chat's next message.</span>
-      <button ref={confirm} type="button" className="history-turn-action" onClick={() => { void merge(); }}>Merge findings</button>
-      <button type="button" className="history-turn-action" onClick={settle}>Cancel</button>
+      <button ref={confirm} type="button" className="history-turn-action" disabled={busy} onClick={() => { void merge(); }}>
+        {busy ? "Merging…" : "Merge findings"}
+      </button>
+      <button type="button" className="history-turn-action" disabled={busy} onClick={() => { if (!busy) settle(); }}>Cancel</button>
     </span>;
   }
   return <>
-    <button ref={trigger} type="button" className="history-turn-action" disabled={phase === "busy"}
+    <button ref={trigger} type="button" className="history-turn-action"
+      aria-label={`Merge findings up to here (${turnContextLabel(turnId, turnIndex)})`}
       onClick={() => { setError(null); setStatus(null); setPhase("confirming"); }}>
-      <GitMerge size={14} aria-hidden="true" /><span>{phase === "busy" ? "Merging…" : "Merge findings up to here"}</span>
+      <GitMerge size={14} aria-hidden="true" /><span>Merge findings up to here</span>
     </button>
     {status && <span role="status">{status}</span>}
     {error && <span role="alert" className="history-notice">{error}</span>}
   </>;
 }
 
-export function HistoryTurnActions({ surface, turnId }: { surface: ForkSurface; turnId: string }) {
+export function HistoryTurnActions({ surface, turnId, turnIndex }: { surface: ForkSurface; turnId: string; turnIndex?: number }) {
   const fork = useForkLineage(surface.conversationId);
   const restored = useFilesRestored(surface.conversationId, turnId);
   return <>
     {restored && <span className="history-files-restored">Files restored</span>}
-    <HistoryRollbackAction surface={surface} turnId={turnId} />
-    {fork && <MergeThroughAction surface={surface} turnId={turnId} />}
+    <HistoryRollbackAction surface={surface} turnId={turnId} turnIndex={turnIndex} />
+    {fork && <MergeThroughAction surface={surface} turnId={turnId} turnIndex={turnIndex} />}
   </>;
 }
 
@@ -210,7 +222,14 @@ function StartRollbackConfirmation({ surface, request, onSettled }: {
 }) {
   const [busy, setBusy] = useState(false);
   const confirm = useRef<HTMLButtonElement>(null);
-  useEffect(() => { confirm.current?.focus(); }, []);
+  const mounted = useRef(true);
+  const activeConversationId = useRef(surface.conversationId);
+  activeConversationId.current = surface.conversationId;
+  useEffect(() => {
+    mounted.current = true;
+    confirm.current?.focus();
+    return () => { mounted.current = false; };
+  }, []);
   const close = () => {
     const target = request.returnFocus?.isConnected ? request.returnFocus
       : confirm.current?.closest<HTMLElement>(".message-scroll") ?? null;
@@ -218,12 +237,17 @@ function StartRollbackConfirmation({ surface, request, onSettled }: {
     closeStartRollback(request);
   };
   const rollback = async (restoreFiles: boolean) => {
+    const startedConversationId = surface.conversationId;
     setBusy(true);
     onSettled(null);
     let settled: ReactNode;
     try { settled = <RollbackOutcomeText outcome={await rollBack(surface, null, restoreFiles)} />; }
     catch (failure) {
       settled = <span role="alert" className="history-notice">{failureMessage(failure, "This chat could not be rolled back.")}</span>;
+    }
+    if (!mounted.current || activeConversationId.current !== startedConversationId) {
+      closeStartRollback(request);
+      return;
     }
     onSettled(settled);
     close();

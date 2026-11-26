@@ -2,8 +2,9 @@ import type Database from "better-sqlite3";
 
 import type { AgentTurn, ContinuationIdentity } from "../../shared/contracts";
 import {
-  MAX_BACKING_COVERAGE_ITEMS, contextHandoffSchema, providerBackingSchema,
-  type ContextHandoff, type OrchestrationBackingEvent, type PreparedContextHandoff, type ProviderBacking,
+  MAX_BACKING_COVERAGE_ITEMS, MAX_BACKING_UNCOVERED_ITEMS, contextHandoffSchema, providerBackingSchema,
+  type BackingCoverage, type ContextHandoff, type InheritedCoverage, type OrchestrationBackingEvent,
+  type PreparedContextHandoff, type ProviderBacking,
 } from "../../shared/orchestration-backings";
 import { orchestrationAttemptSchema, orchestrationRunSchema, type OrchestrationRun } from "../../shared/orchestration-v2";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
@@ -18,6 +19,32 @@ import { harnessDeclaresCapability } from "../provider/capability-manifest";
 import { OrchestrationConflict } from "./types";
 
 const UNCLEAN_RECOVERY_REASONS = new Set(["runtime-restart", "runtime-crash"]);
+
+/** Pure N18 coverage predicate: exceptions win, then explicit IDs, then turn watermark or legacy flag. */
+export function isItemCovered(
+  backing: Pick<ProviderBacking, "coveredItemIds" | "coveredThroughOrdinal" | "uncoveredItemIds" | "legacyCovered">,
+  itemId: string,
+  turnOrdinal: number | null,
+): boolean {
+  if (backing.uncoveredItemIds?.includes(itemId)) return false;
+  if (backing.coveredItemIds.includes(itemId)) return true;
+  if (turnOrdinal !== null) {
+    return backing.coveredThroughOrdinal !== undefined && turnOrdinal <= backing.coveredThroughOrdinal;
+  }
+  return backing.legacyCovered === true;
+}
+
+function optionalCoverageFields(coverage: Pick<
+  BackingCoverage,
+  "coveredThroughOrdinal" | "uncoveredItemIds" | "inheritedCoverage" | "legacyCovered"
+>): Partial<Pick<ProviderBacking, "coveredThroughOrdinal" | "uncoveredItemIds" | "inheritedCoverage" | "legacyCovered">> {
+  return {
+    ...(coverage.coveredThroughOrdinal !== undefined ? { coveredThroughOrdinal: coverage.coveredThroughOrdinal } : {}),
+    ...(coverage.uncoveredItemIds && coverage.uncoveredItemIds.length > 0 ? { uncoveredItemIds: coverage.uncoveredItemIds } : {}),
+    ...(coverage.inheritedCoverage !== undefined ? { inheritedCoverage: coverage.inheritedCoverage } : {}),
+    ...(coverage.legacyCovered === true ? { legacyCovered: true } : {}),
+  };
+}
 
 export class ProviderBackingRepository {
   constructor(private readonly database: Database.Database, private readonly events: OrchestrationEventStore) {}
@@ -186,22 +213,23 @@ export class ProviderBackingRepository {
    * Nothing is written unless the run's current attempt works on the resumed session's backing in its checkout.
    */
   forkSession(turn: AgentTurn, fromNativeSessionId: string, nativeSessionId: string, observer?: AttemptObserver): StaleAttemptObservation | null {
-    const run = this.run(turn.runId);
-    if (!run || fromNativeSessionId === nativeSessionId) return null;
-    const stale = staleAttemptObservation(this.events, run, observer);
-    if (stale) return stale;
-    this.database.transaction(() => {
+    if (fromNativeSessionId === nativeSessionId) return null;
+    return this.database.transaction(() => {
+      const run = this.run(turn.runId);
+      if (!run) return null;
+      const stale = staleAttemptObservation(this.events, run, observer);
+      if (stale) return stale;
       const attempt = orchestrationAttemptSchema.parse(this.events.projection("attempt", run.attemptId)?.value);
       const source = this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, fromNativeSessionId);
       if (attempt.nativeSessionId !== fromNativeSessionId || !source || source.status === "retired" || source.lastRunId !== run.id
-        || this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId)) return;
+        || this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId)) return null;
       const handoff = this.handoff(run.id);
       const followed = handoff?.targetBackingId === source.id && (handoff.state === "prepared" || handoff.state === "dispatching");
       this.commit(run.threadId, run.projectId, { type: "provider.backing-forked", payload: { runId: run.id,
         attemptId: run.attemptId, backingId: source.id, fromNativeSessionId, nativeSessionId,
         handoffId: followed ? handoff.id : null } });
+      return null;
     }).immediate();
-    return null;
   }
 
   /**
@@ -209,36 +237,44 @@ export class ProviderBackingRepository {
    * no backing to move (a native fork before its first send), the copy inherits the native fork's coverage.
    */
   observeSession(turn: AgentTurn, nativeSessionId: string, observer?: AttemptObserver, forkedFrom?: string): StaleAttemptObservation | null {
-    const run = this.run(turn.runId);
-    if (!run) return null;
-    const stale = staleAttemptObservation(this.events, run, observer);
-    if (stale) return stale;
-    // A relocated backing has its own id, so look the session's row up rather than derive its id.
-    const previous = this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
-    if (previous?.status === "retired") return null;
-    const id = previous?.id ?? commandFingerprint({ threadId: run.threadId, instanceId: run.providerInstanceId,
-      workspaceKey: run.workspaceKey, nativeSessionId });
-    const timestamp = new Date().toISOString();
-    const handoff = this.handoff(run.id);
-    const copied = forkedFrom !== undefined && forkedFrom !== nativeSessionId && turn.providerSessionBefore === forkedFrom
-      ? forkedFrom : null;
-    const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, nativeSessionId)
-      ?? (copied ? this.nativeForkCoverage(run.threadId, run.providerInstanceId, copied) : null);
-    const moved = previous || inherited ? [] : this.movedBackings(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
-    const [carried] = moved;
-    const status = previous?.lastRunId === run.id ? previous.status
-      : handoff?.state === "dispatching" || carried?.status === "uncertain" ? "uncertain" : "ready";
-    this.database.transaction(() => {
+    return this.database.transaction(() => {
+      const run = this.run(turn.runId);
+      if (!run) return null;
+      const stale = staleAttemptObservation(this.events, run, observer);
+      if (stale) return stale;
+      // A relocated backing has its own id, so look the session's row up rather than derive its id.
+      const previous = this.latest(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
+      if (previous?.status === "retired") return null;
+      const id = previous?.id ?? commandFingerprint({ threadId: run.threadId, instanceId: run.providerInstanceId,
+        workspaceKey: run.workspaceKey, nativeSessionId });
+      const timestamp = new Date().toISOString();
+      const handoff = this.handoff(run.id);
+      const copied = forkedFrom !== undefined && forkedFrom !== nativeSessionId && turn.providerSessionBefore === forkedFrom
+        ? forkedFrom : null;
+      const inherited = previous ? null : this.nativeForkCoverage(run.threadId, run.providerInstanceId, nativeSessionId)
+        ?? (copied ? this.nativeForkCoverage(run.threadId, run.providerInstanceId, copied) : null);
+      const moved = previous || inherited ? [] : this.movedBackings(run.threadId, run.providerInstanceId, run.workspaceKey, nativeSessionId);
+      const [carried] = moved;
+      const status = previous?.lastRunId === run.id ? previous.status
+        : handoff?.state === "dispatching" || carried?.status === "uncertain" ? "uncertain" : "ready";
+      const watermark = previous
+        ? optionalCoverageFields(previous)
+        : inherited
+          ? optionalCoverageFields(inherited)
+          : carried
+            ? optionalCoverageFields(carried)
+            : {};
       for (const backing of moved) this.invalidate(backing, "workspace-changed");
       this.record({ id, threadId: run.threadId, projectId: run.projectId, providerId: run.providerId,
         providerInstanceId: run.providerInstanceId, workspaceKey: run.workspaceKey, nativeSessionId,
         continuationIdentity: versionedContinuationIdentitySchema.parse(turn.continuationIdentity), selection: run.selection,
         lastRunId: run.id, lastTurnId: run.turnId, status,
-        coveredItemIds: previous?.coveredItemIds ?? inherited?.ids ?? carried?.coveredItemIds ?? [],
-        coverageComplete: previous?.coverageComplete ?? inherited?.complete ?? carried?.coverageComplete ?? true,
+        coveredItemIds: previous?.coveredItemIds ?? (inherited ? [] : carried?.coveredItemIds ?? []),
+        coverageComplete: previous?.coverageComplete ?? (inherited ? true : carried?.coverageComplete ?? true),
+        ...watermark,
         createdAt: previous?.createdAt ?? timestamp, updatedAt: timestamp }, run.id, run.attemptId);
+      return null;
     }).immediate();
-    return null;
   }
 
   private latest(threadId: string, instanceId: string, workspaceKey: string, nativeSessionId: string): ProviderBacking | null {
@@ -263,7 +299,9 @@ export class ProviderBackingRepository {
     return rows.map((row) => providerBackingSchema.parse(JSON.parse(row.payload_json)));
   }
 
-  private nativeForkCoverage(threadId: string, instanceId: string, nativeSessionId: string) {
+  private nativeForkCoverage(threadId: string, instanceId: string, nativeSessionId: string): {
+    inheritedCoverage: "complete";
+  } | null {
     const row = this.events.projection("fork-native-backing", threadId);
     if (!row) return null;
     const fork = nativeControlSchema.parse(row.value);
@@ -271,19 +309,16 @@ export class ProviderBackingRepository {
     // a fork moved before its first send keeps it when its harness resumes there.
     if (fork.state !== "completed" || fork.request.source.identity.providerInstanceId !== instanceId
       || fork.backing?.nativeConversationId !== nativeSessionId) return null;
-    const items = this.database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = 'fork-history'
-      AND thread_id = ? AND json_extract(payload_json, '$.part') = 0 ORDER BY revision LIMIT ?`)
-      .all(threadId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];
-    return { ids: items.slice(0, MAX_BACKING_COVERAGE_ITEMS).map(({ id }) => id), complete: items.length <= MAX_BACKING_COVERAGE_ITEMS };
+    return { inheritedCoverage: "complete" };
   }
 
   /** Provider output is evidence that a request reached the native session. */
   acknowledge(runId: string): void {
-    const run = this.run(runId);
-    if (!run) return;
-    const backing = this.attemptBacking(run);
-    if (!backing || backing.status === "retired" || backing.lastRunId !== run.id) return;
     this.database.transaction(() => {
+      const run = this.run(runId);
+      if (!run) return;
+      const backing = this.attemptBacking(run);
+      if (!backing || backing.status === "retired" || backing.lastRunId !== run.id) return;
       const handoff = this.handoff(run.id);
       // A native handoff is delivered only by the injection's own response, never by later output.
       if (handoff?.state === "dispatching" && handoff.method === "inline") this.changeHandoff(handoff, "delivered", backing);
@@ -389,20 +424,286 @@ export class ProviderBackingRepository {
       return;
     }
     if (notDelivered) {
-      if (backing?.lastRunId === run.id && backing.status !== "retired") this.restoreBeforeRun(backing, run.id);
+      if (backing?.lastRunId === run.id && backing.status !== "retired") {
+        this.restoreBeforeRun(backing, run.id, undelivered || promptDropped || backing.status === "uncertain");
+      }
       return;
     }
     if (!backing || backing.lastRunId !== run.id || backing.status !== "ready") return;
-    const rows = this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND turn_id = ?
-      AND role IN ('user','assistant') ORDER BY created_at, rowid LIMIT ?`)
-      .all(run.threadId, run.turnId, MAX_BACKING_COVERAGE_ITEMS + 1) as { id: string }[];
-    const unread = new Set(unreadFollowUpMessageIds);
+    const nextCoverage = this.computeNextCoverage(backing, run, handoff, unaccepted, unreadFollowUpMessageIds);
+    const {
+      coveredThroughOrdinal: _c,
+      uncoveredItemIds: _u,
+      inheritedCoverage: _i,
+      legacyCovered: _l,
+      ...baseBacking
+    } = backing;
+    this.record({ ...baseBacking, ...nextCoverage }, run.id, run.attemptId);
+  }
+
+  private computeNextCoverage(
+    backing: ProviderBacking,
+    run: OrchestrationRun,
+    handoff: ContextHandoff | null,
+    unaccepted: boolean,
+    unreadFollowUpMessageIds: readonly string[],
+  ): Pick<ProviderBacking, "coveredItemIds" | "coverageComplete" | "coveredThroughOrdinal" | "uncoveredItemIds" | "inheritedCoverage" | "legacyCovered"> {
+    const threadId = run.threadId;
+    const covered = new Set<string>(backing.coveredItemIds);
+    const uncovered = new Set<string>(backing.uncoveredItemIds ?? []);
+    const unread = new Set<string>(unreadFollowUpMessageIds);
+    const pendingUnread = new Set<string>();
+
     // An injection delivered before a turn Codex never accepted: its items are in the thread, the prompt is not.
-    const coverage = [...new Set([...backing.coveredItemIds,
-      ...(handoff?.state === "delivered" ? [...handoff.itemIds, ...handoff.omittedItemIds ?? []] : []),
-      ...(unaccepted ? [] : rows.flatMap(({ id }) => unread.has(id) ? [] : [id]))])];
-    this.record({ ...backing, coveredItemIds: coverage.slice(-MAX_BACKING_COVERAGE_ITEMS),
-      coverageComplete: backing.coverageComplete && coverage.length <= MAX_BACKING_COVERAGE_ITEMS }, run.id, run.attemptId);
+    if (handoff?.state === "delivered") {
+      for (const id of [...handoff.itemIds, ...handoff.omittedItemIds ?? []]) {
+        uncovered.delete(id);
+        covered.add(id);
+      }
+    }
+    if (!unaccepted) {
+      const rows = this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ? AND turn_id = ?
+        AND role IN ('user','assistant') ORDER BY created_at, rowid`)
+        .all(threadId, run.turnId) as { id: string }[];
+      for (const { id } of rows) {
+        if (unread.has(id)) {
+          covered.delete(id);
+          pendingUnread.add(id);
+        } else {
+          uncovered.delete(id);
+          covered.add(id);
+        }
+      }
+    }
+
+    // Step 1: Convert legacy list-only backings and advance coveredThroughOrdinal over consecutive V2 turns.
+    let watermark = backing.coveredThroughOrdinal ?? 0;
+    const v2Runs = this.database.prepare(`SELECT json_extract(r.payload_json, '$.ordinal') AS ordinal,
+        json_extract(r.payload_json, '$.id') AS run_id,
+        json_extract(r.payload_json, '$.turnId') AS turn_id,
+        EXISTS (SELECT 1 FROM orchestration_v2_entities AS rb
+          WHERE rb.kind = 'rolled-back-turn' AND rb.thread_id = r.thread_id
+            AND rb.id = json_extract(r.payload_json, '$.turnId')) AS rolled_back
+      FROM orchestration_v2_entities AS r
+      WHERE r.kind = 'run' AND r.thread_id = ?
+        AND json_extract(r.payload_json, '$.ordinal') > ?
+      ORDER BY json_extract(r.payload_json, '$.ordinal') ASC`)
+      .all(threadId, watermark) as { ordinal: number; run_id: string; turn_id: string; rolled_back: number }[];
+    const turnMessagesStmt = this.database.prepare(`SELECT id FROM messages
+      WHERE conversation_id = ? AND turn_id = ? AND role IN ('user','assistant')`);
+    for (const v2 of v2Runs) {
+      if (v2.ordinal !== watermark + 1) break;
+      if (v2.rolled_back === 1) {
+        for (const { id } of turnMessagesStmt.all(threadId, v2.turn_id) as { id: string }[]) {
+          covered.delete(id);
+          uncovered.delete(id);
+          pendingUnread.delete(id);
+        }
+        this.dropTurnAttachedIds(threadId, v2.turn_id, v2.run_id, covered, uncovered);
+        watermark = v2.ordinal;
+        continue;
+      }
+      const messages = turnMessagesStmt.all(threadId, v2.turn_id) as { id: string }[];
+      const allCoveredOrExcepted = messages.every(({ id }) => covered.has(id) || uncovered.has(id) || pendingUnread.has(id));
+      if (!allCoveredOrExcepted) break;
+      watermark = v2.ordinal;
+      for (const { id } of messages) {
+        covered.delete(id);
+        if (pendingUnread.has(id)) {
+          uncovered.add(id);
+          pendingUnread.delete(id);
+        }
+      }
+      this.dropTurnAttachedIds(threadId, v2.turn_id, v2.run_id, covered, uncovered);
+    }
+
+    // Step 2: Flip legacyCovered when non-V2 turns / turnless messages exist and are all covered or excepted.
+    let legacyCovered = backing.legacyCovered === true;
+    if (!legacyCovered) {
+      const legacyMessages = this.database.prepare(`SELECT m.id, m.turn_id FROM messages AS m
+        WHERE m.conversation_id = ? AND m.role IN ('user','assistant')
+          AND (m.turn_id IS NULL OR (
+            m.turn_id NOT IN (SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = m.conversation_id)
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS r
+              WHERE r.kind = 'run' AND r.thread_id = m.conversation_id
+                AND json_extract(r.payload_json, '$.turnId') = m.turn_id
+                AND json_extract(r.payload_json, '$.ordinal') IS NOT NULL)))`)
+        .all(threadId) as { id: string; turn_id: string | null }[];
+      if (legacyMessages.length > 0 && legacyMessages.every(({ id }) => covered.has(id) || uncovered.has(id))) {
+        legacyCovered = true;
+        const legacyTurnIds = new Set<string>();
+        for (const { id, turn_id: turnId } of legacyMessages) {
+          covered.delete(id);
+          if (turnId) legacyTurnIds.add(turnId);
+        }
+        for (const turnId of legacyTurnIds) {
+          this.dropTurnAttachedIds(threadId, turnId, null, covered, uncovered);
+        }
+      }
+    }
+
+    // Step 3: Advance inheritedCoverage over fork-history items and flip to "complete" when all are covered.
+    let inheritedCoverage: InheritedCoverage | undefined = backing.inheritedCoverage;
+    if (inheritedCoverage !== "complete") {
+      const forkItems = this.database.prepare(`SELECT id, json_extract(payload_json, '$.ordinal') AS ordinal
+        FROM orchestration_v2_entities
+        WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.part') = 0
+          AND json_extract(payload_json, '$.kind') IN ('user-message','assistant-message','command','file','plan','error')
+        ORDER BY json_extract(payload_json, '$.ordinal') ASC`)
+        .all(threadId) as { id: string; ordinal: number }[];
+      if (forkItems.length > 0) {
+        const coveredThrough = inheritedCoverage && inheritedCoverage.forkId === threadId
+          ? inheritedCoverage.throughOrdinal : -1;
+        const isForkItemCovered = (item: { id: string; ordinal: number }) =>
+          item.ordinal <= coveredThrough || covered.has(item.id);
+        if (forkItems.every(isForkItemCovered)) {
+          inheritedCoverage = "complete";
+          for (const { id } of forkItems) {
+            covered.delete(id);
+            uncovered.delete(id);
+          }
+        } else {
+          let nextThrough = coveredThrough;
+          for (const item of forkItems) {
+            if (item.ordinal <= nextThrough) continue;
+            if (item.ordinal !== nextThrough + 1 || !covered.has(item.id)) break;
+            nextThrough = item.ordinal;
+            covered.delete(item.id);
+          }
+          if (nextThrough > coveredThrough) {
+            inheritedCoverage = { forkId: threadId, throughOrdinal: nextThrough };
+          }
+        }
+      }
+    }
+
+    // Drop any IDs still in `covered` that are already covered by watermark, legacyCovered, or inheritedCoverage.
+    if (covered.size > 0) {
+      this.pruneRedundantCoveredIds(threadId, covered, watermark, legacyCovered, inheritedCoverage);
+    }
+
+    // Keep covered and uncovered disjoint.
+    for (const id of covered) uncovered.delete(id);
+
+    const coveredList = [...covered];
+    const uncoveredList = [...uncovered];
+    const coverageComplete = backing.coverageComplete
+      && coveredList.length <= MAX_BACKING_COVERAGE_ITEMS
+      && uncoveredList.length <= MAX_BACKING_UNCOVERED_ITEMS;
+    const includeWatermark = watermark > 0 || backing.coveredThroughOrdinal !== undefined;
+    return {
+      coveredItemIds: coveredList.slice(-MAX_BACKING_COVERAGE_ITEMS),
+      coverageComplete,
+      ...optionalCoverageFields({
+        ...(includeWatermark ? { coveredThroughOrdinal: watermark } : {}),
+        ...(uncoveredList.length > 0 ? { uncoveredItemIds: uncoveredList.slice(-MAX_BACKING_UNCOVERED_ITEMS) } : {}),
+        ...(inheritedCoverage !== undefined ? { inheritedCoverage } : {}),
+        ...(legacyCovered ? { legacyCovered: true } : {}),
+      }),
+    };
+  }
+
+  private pruneRedundantCoveredIds(
+    threadId: string,
+    covered: Set<string>,
+    watermark: number,
+    legacyCovered: boolean,
+    inheritedCoverage: InheritedCoverage | undefined,
+  ): void {
+    const candidatesJson = JSON.stringify([...covered]);
+    if (watermark > 0) {
+      const msgRows = this.database.prepare(`SELECT m.id FROM messages AS m
+        JOIN agent_turns AS t ON t.id = m.turn_id AND t.conversation_id = m.conversation_id
+        JOIN orchestration_v2_entities AS r ON r.kind = 'run' AND r.thread_id = m.conversation_id AND r.id = t.run_id
+        WHERE m.conversation_id = ? AND m.id IN (SELECT value FROM json_each(?))
+          AND json_extract(r.payload_json, '$.ordinal') <= ?`)
+        .all(threadId, candidatesJson, watermark) as { id: string }[];
+      for (const { id } of msgRows) covered.delete(id);
+    }
+    if (legacyCovered && covered.size > 0) {
+      const legacyRows = this.database.prepare(`SELECT m.id FROM messages AS m
+        WHERE m.conversation_id = ? AND m.id IN (SELECT value FROM json_each(?))
+          AND (m.turn_id IS NULL OR NOT EXISTS (SELECT 1 FROM agent_turns AS t
+            JOIN orchestration_v2_entities AS r ON r.kind = 'run' AND r.thread_id = m.conversation_id AND r.id = t.run_id
+            WHERE t.id = m.turn_id AND t.conversation_id = m.conversation_id
+              AND json_extract(r.payload_json, '$.ordinal') IS NOT NULL))`)
+        .all(threadId, JSON.stringify([...covered])) as { id: string }[];
+      for (const { id } of legacyRows) covered.delete(id);
+    }
+    if (inheritedCoverage !== undefined && covered.size > 0) {
+      const forkRows = inheritedCoverage === "complete"
+        ? this.database.prepare(`SELECT id FROM orchestration_v2_entities
+            WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.part') = 0
+              AND id IN (SELECT value FROM json_each(?))`)
+            .all(threadId, JSON.stringify([...covered])) as { id: string }[]
+        : inheritedCoverage.forkId === threadId
+          ? this.database.prepare(`SELECT id FROM orchestration_v2_entities
+              WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.part') = 0
+                AND json_extract(payload_json, '$.ordinal') <= ?
+                AND id IN (SELECT value FROM json_each(?))`)
+              .all(threadId, inheritedCoverage.throughOrdinal, JSON.stringify([...covered])) as { id: string }[]
+          : [];
+      for (const { id } of forkRows) covered.delete(id);
+    }
+    if ((watermark > 0 || legacyCovered) && covered.size > 0) {
+      for (const id of covered) {
+        if (!id.startsWith("activity:") && !id.startsWith("plan:") && !id.startsWith("files:") && !id.startsWith("interrupt:")) continue;
+        let turnId: string | null | undefined;
+        if (id.startsWith("activity:")) {
+          turnId = (this.database.prepare("SELECT turn_id FROM activities WHERE id = ? AND conversation_id = ?")
+            .get(id.slice("activity:".length), threadId) as { turn_id: string | null } | undefined)?.turn_id;
+        } else if (id.startsWith("plan:")) {
+          turnId = (this.database.prepare("SELECT turn_id FROM agent_plans WHERE run_id = ? AND conversation_id = ?")
+            .get(id.slice("plan:".length), threadId) as { turn_id: string | null } | undefined)?.turn_id;
+        } else if (id.startsWith("files:")) {
+          turnId = (this.database.prepare("SELECT turn_id FROM turn_git_artifacts WHERE id = ? AND conversation_id = ?")
+            .get(id.slice("files:".length), threadId) as { turn_id: string | null } | undefined)?.turn_id;
+        } else {
+          turnId = id.slice("interrupt:".length);
+        }
+        if (!turnId) continue;
+        const row = this.database.prepare(`SELECT json_extract(r.payload_json, '$.ordinal') AS ordinal
+          FROM agent_turns AS t
+          LEFT JOIN orchestration_v2_entities AS r ON r.kind = 'run' AND r.thread_id = t.conversation_id AND r.id = t.run_id
+          WHERE t.id = ? AND t.conversation_id = ? LIMIT 1`)
+          .get(turnId, threadId) as { ordinal: number | null } | undefined;
+        if (!row) continue;
+        if ((typeof row.ordinal === "number" && row.ordinal <= watermark) || (row.ordinal === null && legacyCovered)) {
+          covered.delete(id);
+        }
+      }
+    }
+  }
+
+  private dropTurnAttachedIds(
+    threadId: string,
+    turnId: string,
+    runId: string | null,
+    covered: Set<string>,
+    uncovered: Set<string>,
+  ): void {
+    if (covered.size === 0) return;
+    covered.delete(`interrupt:${turnId}`);
+    if (runId && !uncovered.has(`plan:${runId}`)) covered.delete(`plan:${runId}`);
+    for (const id of covered) {
+      if (!id.startsWith("activity:") && !id.startsWith("plan:") && !id.startsWith("files:")) continue;
+      if (id.startsWith("activity:")) {
+        const key = id.slice("activity:".length);
+        const match = this.database.prepare("SELECT 1 FROM activities WHERE id = ? AND conversation_id = ? AND turn_id = ? LIMIT 1")
+          .get(key, threadId, turnId);
+        if (match) covered.delete(id);
+      } else if (id.startsWith("plan:")) {
+        const key = id.slice("plan:".length);
+        const match = this.database.prepare("SELECT 1 FROM agent_plans WHERE run_id = ? AND conversation_id = ? AND turn_id = ? LIMIT 1")
+          .get(key, threadId, turnId);
+        if (match) covered.delete(id);
+      } else if (id.startsWith("files:")) {
+        const key = id.slice("files:".length);
+        const match = this.database.prepare("SELECT 1 FROM turn_git_artifacts WHERE id = ? AND conversation_id = ? AND turn_id = ? LIMIT 1")
+          .get(key, threadId, turnId);
+        if (match) covered.delete(id);
+      }
+    }
   }
 
   /**
@@ -428,19 +729,34 @@ export class ProviderBackingRepository {
    * the next turn sees the backing it would have seen without this run. Unlike
    * a record, a restore touches no attempt.
    */
-  private restoreBeforeRun(backing: ProviderBacking, runId: string): void {
+  private restoreBeforeRun(backing: ProviderBacking, runId: string, retireIfFresh = false): void {
     const row = this.database.prepare(`SELECT payload_json FROM orchestration_v2_events
       WHERE thread_id = ? AND type = 'provider.backing-recorded' AND json_extract(payload_json, '$.runId') = ?
         AND json_extract(payload_json, '$.backing.id') = ? AND json_extract(payload_json, '$.beforeDispatch') IS NOT NULL
       ORDER BY revision DESC LIMIT 1`).get(backing.threadId, runId, backing.id) as { payload_json: string } | undefined;
-    if (!row) return;
+    if (!row) {
+      // A brand-new backing created during an explicitly undelivered/dropped/uncertain run has no prior state to restore: retire it so it is never resumed.
+      if (retireIfFresh) this.invalidate(backing, "uncertain-delivery");
+      return;
+    }
     const before = providerBackingSchema.parse((JSON.parse(row.payload_json) as { beforeDispatch: unknown }).beforeDispatch);
-    if (before.status === "retired" || before.lastRunId === runId) return;
+    if (before.status === "retired" || before.lastRunId === runId) {
+      this.invalidate(backing, "uncertain-delivery");
+      return;
+    }
     // A backing that moved to a copy of its session during the run (`forkSession`) keeps the copy: it holds the
     // same history the backing held before dispatch.
+    const {
+      coveredThroughOrdinal: _c,
+      uncoveredItemIds: _u,
+      inheritedCoverage: _i,
+      legacyCovered: _l,
+      ...beforeBase
+    } = before;
     this.commit(backing.threadId, backing.projectId, { type: "provider.backing-restored", payload: { runId,
-      backing: providerBackingSchema.parse({ ...before, nativeSessionId: backing.nativeSessionId, coveredItemIds: backing.coveredItemIds,
-        coverageComplete: backing.coverageComplete, updatedAt: new Date().toISOString() }) } });
+      backing: providerBackingSchema.parse({ ...beforeBase, nativeSessionId: backing.nativeSessionId,
+        coveredItemIds: backing.coveredItemIds, coverageComplete: backing.coverageComplete,
+        ...optionalCoverageFields(backing), updatedAt: new Date().toISOString() }) } });
   }
 
   invalidate(backing: ProviderBacking, reason: Extract<OrchestrationBackingEvent,

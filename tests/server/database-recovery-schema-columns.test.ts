@@ -14,6 +14,7 @@ import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/mi
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/turn-scoped-indexes";
 import { DUO_COMPARISON_BRIEFS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/duo-comparison-briefs";
 import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
+import { QUEUE_ITEMS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/queue-items";
 import { removeDelegatedTasksFromFixture } from "../support/legacy-project-settings-schema";
 import { CUSTOM_AGENTS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/custom-agents";
 import { LIBRARY_SCHEMA_VERSION } from "../../src/server/persistence/migrations/library";
@@ -78,7 +79,32 @@ function narrowAgentContextReadAccess(database: Database.Database, version: numb
   database.pragma("foreign_keys = ON");
 }
 
+const queueItemColumns = [
+  "queue_position",
+  "queue_held",
+  "kind",
+  "created_by",
+  "creation_source",
+  "device_id",
+  "steer_follow_up_of_run_id",
+  "edit_revision",
+  "edited_at",
+  "creation_digest",
+  "dispatch_ordinal",
+  "run_id",
+  "delivery_mode",
+  "steer_when_ready_run_id",
+  "selection_json",
+  "follows_thread_selection",
+];
+
 function labelSchema(database: Database.Database, version: number): void {
+  if (version < QUEUE_ITEMS_SCHEMA_VERSION) {
+    database.exec("DROP INDEX queued_messages_conversation_state_position_idx");
+    for (const column of [...queueItemColumns].reverse()) {
+      database.exec(`ALTER TABLE queued_messages DROP COLUMN ${column}`);
+    }
+  }
   if (version < ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION) {
     database.exec(`
       DROP TABLE orchestration_v2_projection_metadata;
@@ -250,6 +276,9 @@ describe("database health check for settings and subagent columns", () => {
     { version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, sql: "DROP TABLE orchestration_v2_projection_metadata" },
     ...["status", "error", "command_type"].map((column) => ({ version: ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION,
       sql: `ALTER TABLE orchestration_v2_receipts DROP COLUMN ${column}` })),
+    { version: QUEUE_ITEMS_SCHEMA_VERSION, sql: "DROP INDEX queued_messages_conversation_state_position_idx" },
+    { version: QUEUE_ITEMS_SCHEMA_VERSION, sql: "ALTER TABLE queued_messages DROP COLUMN selection_json" },
+    { version: QUEUE_ITEMS_SCHEMA_VERSION, sql: "ALTER TABLE queued_messages DROP COLUMN creation_digest" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "ALTER TABLE custom_agents DROP COLUMN skills_json" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP INDEX custom_agents_position_idx" },
     { version: CUSTOM_AGENTS_SCHEMA_VERSION, sql: "DROP TRIGGER custom_agents_count_limit" },
@@ -267,7 +296,7 @@ describe("database health check for settings and subagent columns", () => {
   });
 
   it.each([...Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 128,
-    ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
+    ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, QUEUE_ITEMS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });
     expect(messages).toEqual(["coherent schema", "malformed schema"]);

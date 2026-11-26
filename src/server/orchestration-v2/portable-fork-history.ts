@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 
+import type { InheritedCoverage } from "../../shared/orchestration-backings";
 import { forkHistoryPartSchema, type ForkHistoryPart } from "../../shared/orchestration-forks";
 import { scrubCommandSecrets } from "../provider/command-secrets";
 import { boundedSubagentText } from "../provider/subagent-trace";
@@ -8,6 +9,12 @@ import { MAX_PORTABLE_HISTORY_BUDGET, MAX_PORTABLE_HISTORY_CANDIDATES, type Port
 
 /** Parts of one inherited item; more means the snapshot is not one an intact fork writes. */
 export const MAX_FORK_ITEM_PARTS = 4_096;
+
+export interface ForkHistoryCoverageFilter {
+  readonly coveredItemIds?: readonly string[];
+  readonly uncoveredItemIds?: readonly string[];
+  readonly inheritedCoverage?: InheritedCoverage;
+}
 
 /**
  * Inherited text as an agent may read it: a command or error line is redacted
@@ -20,11 +27,40 @@ export function forkItemText(kind: ForkHistoryPart["kind"], text: string): strin
 }
 
 /** The fork itself authorizes access to its immutable inherited context. */
-export function portableForkHistory(database: Database.Database, threadId: string, excluded: readonly string[]) {
-  const where = `kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.part') = 0
-    AND json_extract(payload_json, '$.kind') IN ('user-message','assistant-message','command','file','plan','error')
-    AND id NOT IN (SELECT value FROM json_each(?))`;
-  const args = [threadId, JSON.stringify(excluded)];
+export function portableForkHistory(
+  database: Database.Database,
+  threadId: string,
+  excludedOrCoverage: readonly string[] | ForkHistoryCoverageFilter,
+) {
+  const coverage: ForkHistoryCoverageFilter = Array.isArray(excludedOrCoverage)
+    ? { coveredItemIds: excludedOrCoverage }
+    : (excludedOrCoverage as ForkHistoryCoverageFilter);
+  const coveredItemIds = coverage.coveredItemIds ?? [];
+  const uncoveredItemIds = coverage.uncoveredItemIds ?? [];
+  const inheritedCoverage = coverage.inheritedCoverage;
+  if (inheritedCoverage === "complete" && uncoveredItemIds.length === 0) {
+    return { items: [] as PortableHistoryItem[], omittedCount: 0 };
+  }
+  const baseWhere = `kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.part') = 0
+    AND json_extract(payload_json, '$.kind') IN ('user-message','assistant-message','command','file','plan','error')`;
+  let where: string;
+  let args: (string | number)[];
+  if (inheritedCoverage === "complete") {
+    where = `${baseWhere} AND id IN (SELECT value FROM json_each(?))`;
+    args = [threadId, JSON.stringify(uncoveredItemIds)];
+  } else if (inheritedCoverage !== undefined && inheritedCoverage.forkId === threadId) {
+    where = `${baseWhere} AND (
+      id IN (SELECT value FROM json_each(?))
+      OR (json_extract(payload_json, '$.ordinal') > ? AND id NOT IN (SELECT value FROM json_each(?)))
+    )`;
+    args = [threadId, JSON.stringify(uncoveredItemIds), inheritedCoverage.throughOrdinal, JSON.stringify(coveredItemIds)];
+  } else {
+    where = `${baseWhere} AND (
+      id IN (SELECT value FROM json_each(?))
+      OR id NOT IN (SELECT value FROM json_each(?))
+    )`;
+    args = [threadId, JSON.stringify(uncoveredItemIds), JSON.stringify(coveredItemIds)];
+  }
   const count = (database.prepare(`SELECT COUNT(*) AS count FROM orchestration_v2_entities WHERE ${where}`)
     .get(...args) as { count: number }).count;
   const select = `SELECT id, payload_json FROM orchestration_v2_entities WHERE ${where}`;

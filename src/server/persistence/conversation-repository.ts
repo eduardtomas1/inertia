@@ -360,6 +360,7 @@ export class ConversationRepository {
     const conversation = this.context.requireConversation(conversationId);
     this.context.database.transaction(() => {
       releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
+      this.context.database.prepare("DELETE FROM orchestration_v2_receipts WHERE thread_id = ?").run(conversationId);
       this.context.database.prepare("DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);
       this.context.database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
     })();

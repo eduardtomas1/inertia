@@ -45,10 +45,10 @@ describe("fork controls", () => {
     await user.keyboard("{Enter}");
     expect(run).toHaveBeenCalledExactlyOnceWith("conversation.fork", { type: "conversation.fork",
       payload: { projectId, sourceConversationId: conversationId, sourceTurnId: turnId, activate: true } });
-    expect(screen.getByRole("button", { name: "Forking…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Forking…/u })).toBeDisabled();
     await act(async () => complete({ type: "request.result", requestId: "request",
       result: { kind: "conversation.created", conversationId: sourceId } }));
-    expect(screen.getByRole("button", { name: "Fork from here" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^Fork from here/u })).toBeEnabled();
   });
 
   it("pages immutable history without replacing already loaded items", async () => {
@@ -73,22 +73,22 @@ describe("fork controls", () => {
       <ForkHistoryPanel /><ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
     const user = userEvent.setup();
-    await screen.findByRole("button", { name: "Merge findings up to here" });
-    screen.getByRole("button", { name: "Fork from here" }).focus();
+    await screen.findByRole("button", { name: /^Merge findings up to here/u });
+    screen.getByRole("button", { name: /^Fork from here/u }).focus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Roll back to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Roll back to here/u })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole("button", { name: "Merge findings up to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Merge findings up to here/u })).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("group", { name: "Confirm merge" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Merge findings" })).toHaveFocus();
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("button", { name: "Merge findings up to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Merge findings up to here/u })).toHaveFocus();
     view.rerender(<ForkSurfaceProvider projectId={projectId} conversationId={sourceId} run={run}>
       <ForkHistoryPanel /><ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Merge findings up to here" })).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "Roll back to here" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Merge findings up to here/u })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /^Roll back to here/u })).toBeInTheDocument();
     expect(run).toHaveBeenCalledTimes(2);
   });
 
@@ -134,7 +134,7 @@ describe("fork controls", () => {
     view.rerender(surface([{ id: sourceId }, { id: conversationId }]));
     await waitFor(() => expect(run).toHaveBeenCalledExactlyOnceWith("conversation.fork.history", {
       type: "conversation.fork.history", payload: { conversationId, limit: 1 } }));
-    expect(await screen.findByRole("button", { name: "Fork from here" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /^Fork from here/u })).toBeEnabled();
     expect(screen.queryByText(/Inherited history/u)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

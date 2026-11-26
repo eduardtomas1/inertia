@@ -957,6 +957,11 @@
       "version": 129,
       "name": "OrchestrationV2ReceiptStatusAndProjectionMetadata",
       "digest": "64e188bb6ee9d3b299faa732d7f3c8b5ed854d6894b896d8c07889d38f23a705"
+    },
+    {
+      "version": 130,
+      "name": "PersistQueueItemOrderDeliveryAndSelection",
+      "digest": "73d3a571aa6d59e77424fa4e9aafd6229640605a6c5646fec0fef119b91cccf8"
     }
   ]
 }

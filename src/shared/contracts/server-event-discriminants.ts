@@ -418,6 +418,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "watcher.live":
       return null;
     case "conversation.detail.invalidated":
+    case "conversation.queue.changed":
     case "agent.started":
     case "agent.text":
     case "agent.text.replaced":

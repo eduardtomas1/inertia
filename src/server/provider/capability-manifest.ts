@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { HARNESS_STEERING_CAPABILITIES } from "../../shared/follow-up-steer";
 import type { KnownHarnessId } from "../../shared/model-routing";
 import type { ProviderId } from "./contracts";
 
@@ -14,7 +15,10 @@ export const PROVIDER_CAPABILITY_IDS = [
   "approvals",
   "structured-input",
   "follow-up-steer",
+  "steer-accepts-attachments",
+  "steer-during-compaction",
   "session-resume",
+  "native-resume",
   "compaction",
   "usage-tokens",
   "rate-limits",
@@ -478,6 +482,21 @@ function digestManifest(
     .digest("hex");
 }
 
+function steeringSupportFor(
+  harnessId: ProductionHarnessId,
+): Pick<
+  Record<ProviderCapabilityId, ProviderCapabilitySupport>,
+  "follow-up-steer" | "steer-accepts-attachments" | "steer-during-compaction" | "native-resume"
+> {
+  const entry = HARNESS_STEERING_CAPABILITIES[harnessId];
+  return {
+    "follow-up-steer": entry?.followUpSteer ?? "unavailable",
+    "steer-accepts-attachments": entry?.steerAcceptsAttachments ?? "unavailable",
+    "steer-during-compaction": entry?.steerDuringCompaction ?? "unavailable",
+    "native-resume": entry?.nativeResume ?? "unavailable",
+  };
+}
+
 function manifestFrom(
   definition: ManifestDefinition,
 ): ProviderCapabilityManifest {
@@ -485,8 +504,11 @@ function manifestFrom(
     ...BASE_REQUIRES_CONFIGURATION,
     ...(definition.requiresConfiguration ?? []),
   ]);
+  const steeringSupport = steeringSupportFor(definition.harnessId);
   const capabilities = Object.freeze(PROVIDER_CAPABILITY_IDS.map((id) => {
-    const support = definition.support[id] ?? "unavailable";
+    const support = (id in steeringSupport
+      ? steeringSupport[id as keyof typeof steeringSupport]
+      : definition.support[id]) ?? "unavailable";
     const requiresConfiguration = configured.has(id);
     return Object.freeze({
       id,

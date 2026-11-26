@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Square } from "lucide-react";
 import { observedChildReadResultSchema, type ObservedChildReadResult, type ObservedChildThread } from "@shared/observed-child-thread";
 import {
@@ -30,6 +30,11 @@ function ObservedChild({ child, result, parentTitle, turnLabel, run, onChanged }
   const nameId = useId();
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const name = observedName(child);
   const stop = (result.controls[child.id] ?? child.controls).stop;
   const usage = usageLabel(child.usage, child.toolUseCount);
@@ -49,8 +54,14 @@ function ObservedChild({ child, result, parentTitle, turnLabel, run, onChanged }
       const response = await run(`agent.subagent.stop:${child.id}`, { type: "agent.subagent.stop",
         payload: { conversationId: result.conversationId, traceId: child.id } }, QUIET);
       if (response.type !== "request.result") throw new Error("The agent could not be stopped.");
-    } catch (failure) { setError(failureText(failure, "The agent could not be stopped.")); }
-    finally { setStopping(false); onChanged(); }
+    } catch (failure) {
+      if (mounted.current) setError(failureText(failure, "The agent could not be stopped."));
+    } finally {
+      if (mounted.current) {
+        setStopping(false);
+        onChanged();
+      }
+    }
   };
   return <article className="observed-child" aria-labelledby={nameId} data-observed-child-id={child.id}>
     <ol className="observed-child-lineage" aria-label="Agent lineage">
@@ -73,7 +84,9 @@ function ObservedChild({ child, result, parentTitle, turnLabel, run, onChanged }
           onClick={() => { void requestStop(); }}>
           <Square size={14} fill="currentColor" aria-hidden="true" /><span>{stopping ? "Stopping…" : "Stop"}</span>
         </button>
-        : <p className="observed-child-reason">Stop unavailable: {stop.reason}</p>}
+        : <p className="observed-child-reason">
+          Stop unavailable: {stop.reason?.trim() || "This provider does not support stopping individual agents."}
+        </p>}
     </div>
     {error && <p role="alert" className="delegation-notice">{error}</p>}
   </article>;
@@ -83,20 +96,37 @@ export function ObservedChildView({ conversationId, turnId, focusTraceId, parent
   conversationId: string; turnId?: string; focusTraceId?: string; parentTitle?: string; turnLabel?: string;
   run: ObservedChildCommandRunner;
 }) {
+  const targetKey = `${conversationId}:${turnId ?? ""}`;
+  const [loadedKey, setLoadedKey] = useState(targetKey);
   const [result, setResult] = useState<ObservedChildReadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  if (loadedKey !== targetKey) {
+    setLoadedKey(targetKey);
+    setResult(null);
+    setError(null);
+    setLoading(true);
+  }
   const refresh = useCallback(() => setRevision((current) => current + 1), []);
   useEffect(() => {
     let current = true;
+    setLoading(true);
     readObserved(run, conversationId, turnId).then((loaded) => {
-      if (current) { setResult(loaded); setError(null); }
-    }, (failure: unknown) => { if (current) setError(failureText(failure, "The agents could not be read.")); });
+      if (current) { setResult(loaded); setError(null); setLoading(false); }
+    }, (failure: unknown) => {
+      if (current) { setError(failureText(failure, "The agents could not be read.")); setLoading(false); }
+    });
     return () => { current = false; };
   }, [run, conversationId, turnId, revision]);
   const children = result ? result.children.filter(({ id }) => !focusTraceId || id === focusTraceId) : [];
-  return <section className="observed-child-view" aria-label="Provider-managed agents" aria-busy={!result && !error}>
-    {error && <p role="alert" className="delegation-notice">{error}</p>}
+  return <section className="observed-child-view" aria-label="Provider-managed agents" aria-busy={loading && !result}>
+    {error && <div className="observed-child-actions">
+      <p role="alert" className="delegation-notice">{error}</p>
+      <button type="button" className="turn-run-details-toggle" disabled={loading} onClick={refresh}>
+        {loading ? "Retrying…" : "Retry"}
+      </button>
+    </div>}
     {!result && !error && <p role="status">Loading agents…</p>}
     {result && children.length === 0 && <p>No provider-managed agents are recorded for this {focusTraceId ? "agent" : "turn"}.</p>}
     {result && children.map((child) => <ObservedChild key={child.id} child={child} result={result} parentTitle={parentTitle}

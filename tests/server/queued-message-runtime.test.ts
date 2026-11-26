@@ -5,6 +5,7 @@ import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/shared/contracts";
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { createQueuedMessageRuntime, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END, QUEUED_EDIT_GRANT_MS, UNREAD_FOLLOW_UP_ROUTE_CHANGED } from "../../src/server/runtime/queued-message-runtime";
 import { QUEUED_ROUTE_CHANGED_ERROR } from "../../src/shared/queued-messages";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
@@ -1109,9 +1110,15 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
     .filter((message) => message.content === content);
   const rows = (f: QueueFixture) => f.store.queuedMessages.list(f.conversationId);
   const unreadRows = (f: QueueFixture) => rows(f).filter(({ userMessageId }) => userMessageId !== null);
-  const coverage = (f: QueueFixture, turn: { continuationIdentity: unknown }) => f.store.orchestration.backings.find({
+  const backingFor = (f: QueueFixture, turn: { continuationIdentity: unknown }) => f.store.orchestration.backings.find({
     threadId: f.conversationId, providerId: "codex", workspaceKey: f.workspace, identity: turn.continuationIdentity as never,
-  })?.coveredItemIds ?? [];
+  });
+  const coversTurnItem = (f: QueueFixture, turn: { runId: string; continuationIdentity: unknown }, messageId: string): boolean => {
+    const backing = backingFor(f, turn);
+    if (!backing) return false;
+    const ordinal = (f.store.orchestration.events.projection("run", turn.runId)?.value as { ordinal?: number } | undefined)?.ordinal ?? null;
+    return isItemCovered(backing, messageId, ordinal);
+  };
   // A stale second row naming the same message, as a defect or a lost cancellation could leave.
   const insertStaleRow = (f: QueueFixture, messageId: string) => {
     const id = randomUUID();
@@ -1154,8 +1161,8 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       expect(f.provider.runCount).toBe(1);
       expect(unreadRows(f)).toEqual([expect.objectContaining({ state: "waiting", userMessageId: message.id,
         content: "Also look at this.", attachments: [expect.objectContaining({ id: media.id })], createdAt: message.createdAt })]);
-      expect(coverage(f, initial.turn)).toContain(initial.message.id);
-      expect(coverage(f, initial.turn)).not.toContain(message.id);
+      expect(coversTurnItem(f, initial.turn, initial.message.id)).toBe(true);
+      expect(coversTurnItem(f, initial.turn, message.id)).toBe(false);
 
       f.compaction.active = false;
       f.queue.onCompactionSettled(f.conversationId);
@@ -1603,7 +1610,7 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       complete(f, { unreadFollowUps: [steerId] });
       await f.drain();
       expect(unreadRows(f).some(({ userMessageId }) => userMessageId === message.id)).toBe(false);
-      expect(coverage(f, initial.turn)).toContain(message.id);
+      expect(coversTurnItem(f, initial.turn, message.id)).toBe(true);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("Too many unread follow-ups"));
     } finally { warn.mockRestore(); await f.close(); }
   });

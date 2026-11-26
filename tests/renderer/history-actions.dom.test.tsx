@@ -73,7 +73,7 @@ describe("history rollback and merge-back controls", () => {
       <ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
     const user = userEvent.setup();
-    const trigger = await screen.findByRole("button", { name: "Roll back to here" });
+    const trigger = await screen.findByRole("button", { name: /^Roll back to here/u });
     trigger.focus();
     await user.keyboard("{Enter}");
     const confirmation = screen.getByRole("group", { name: "Confirm rollback" });
@@ -89,7 +89,7 @@ describe("history rollback and merge-back controls", () => {
     expect(within(confirmation).getByRole("button", { name: "Roll back context and files" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("group", { name: "Confirm rollback" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Roll back to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Roll back to here/u })).toHaveFocus();
     expect(run).not.toHaveBeenCalled();
 
     await user.keyboard("{Enter}");
@@ -104,7 +104,7 @@ describe("history rollback and merge-back controls", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Rolled back 2 later turns. The next message starts a fresh provider session with the retained history. Files restored.");
     expect(screen.getByText("Files restored", { exact: true })).toHaveClass("history-files-restored");
-    expect(screen.getByRole("button", { name: "Roll back to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Roll back to here/u })).toHaveFocus();
   });
 
   it.each([
@@ -125,7 +125,7 @@ describe("history rollback and merge-back controls", () => {
       <ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Roll back to here" }));
+    await user.click(await screen.findByRole("button", { name: /^Roll back to here/u }));
     const restore = files.outcome !== "unchanged" || files.message !== null;
     if (restore) await user.click(screen.getByRole("checkbox", { name: "Also restore files to this point" }));
     await user.click(screen.getByRole("button", { name: restore ? "Roll back context and files" : "Roll back context" }));
@@ -145,7 +145,7 @@ describe("history rollback and merge-back controls", () => {
       <ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Roll back to here" }));
+    await user.click(await screen.findByRole("button", { name: /^Roll back to here/u }));
     await user.click(screen.getByRole("button", { name: "Roll back context" }));
     const notice = await screen.findByRole("alert");
     expect(notice).toHaveTextContent(refusal, { normalizeWhitespace: false });
@@ -153,7 +153,7 @@ describe("history rollback and merge-back controls", () => {
     expect(notice).toHaveClass("history-notice");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Roll back to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Roll back to here/u })).toHaveFocus();
   });
 
   it("marks rolled-back turns without offering fork, rollback or merge actions", async () => {
@@ -163,10 +163,10 @@ describe("history rollback and merge-back controls", () => {
       <ForkTurnAction turnId={laterTurnId} />
       <ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
-    expect(await screen.findAllByRole("button", { name: "Merge findings up to here" })).toHaveLength(1);
+    expect(await screen.findAllByRole("button", { name: /^Merge findings up to here/u })).toHaveLength(1);
     expect(screen.getByText("Rolled back · not in context")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Fork from here" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Roll back to here" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Fork from here/u })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Roll back to here/u })).toHaveLength(1);
   });
 
   it("merges a fork's findings up to a footer turn with a two-step keyboard confirmation", async () => {
@@ -179,7 +179,7 @@ describe("history rollback and merge-back controls", () => {
       <ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
     const user = userEvent.setup();
-    const trigger = await screen.findByRole("button", { name: "Merge findings up to here" });
+    const trigger = await screen.findByRole("button", { name: /^Merge findings up to here/u });
     expect(screen.getByRole("button", { name: "Merge findings into source chat" })).toBeInTheDocument();
     trigger.focus();
     await user.keyboard("{Enter}");
@@ -188,7 +188,7 @@ describe("history rollback and merge-back controls", () => {
     expect(within(confirmation).getByRole("button", { name: "Merge findings" })).toHaveFocus();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("group", { name: "Confirm merge" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Merge findings up to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Merge findings up to here/u })).toHaveFocus();
     expect(run).toHaveBeenCalledTimes(1);
 
     await user.keyboard("{Enter}{Enter}");
@@ -197,7 +197,7 @@ describe("history rollback and merge-back controls", () => {
     expect(screen.getByRole("button", { name: "Merging…" })).toBeDisabled();
     await act(async () => complete(mergeResult(forkId, 1, turnId)));
     expect(screen.getByRole("status")).toHaveTextContent("Attached 4 messages from 1 turn to the source chat's next message.");
-    expect(screen.getByRole("button", { name: "Merge findings up to here" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Merge findings up to here/u })).toHaveFocus();
 
     await user.keyboard("{Enter}{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("The source chat is running. Merge findings when it finishes.");
@@ -210,9 +210,9 @@ describe("history rollback and merge-back controls", () => {
       <ForkHistoryPanel />
       <ForkTurnAction turnId={turnId} />
     </ForkSurfaceProvider>);
-    await screen.findByRole("button", { name: "Roll back to here" });
+    await screen.findByRole("button", { name: /^Roll back to here/u });
     expect(run).toHaveBeenCalledWith("conversation.fork.history", expect.anything());
-    expect(screen.queryByRole("button", { name: "Merge findings up to here" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Merge findings up to here/u })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Merge findings into source chat" })).not.toBeInTheDocument();
   });
 

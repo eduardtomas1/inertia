@@ -2,6 +2,7 @@ import type { spawn } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import { objectValue, type JsonObject } from "../codex/protocol";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
 import { AcpSecretRedactor } from "./acp-redaction";
@@ -29,6 +30,47 @@ export const PI_RPC_CAPABILITIES = {
   extension: { kind: "pi-rpc", protocol: "pi-jsonl-rpc-v1", approvals: "managed-extension", questions: "extension-ui",
     plans: "unavailable", reasoning: "native", usage: "native", images: "structured-base64-input", authentication: "pi-native", modelMetadata: "rpc" },
 } as const satisfies PiRpcHarnessCapabilities;
+
+const MAX_CLEARED_QUEUE_ENTRIES = 20;
+const MAX_CLEARED_QUEUE_ENTRY_CHARS = 500;
+const MAX_CLEARED_QUEUE_DETAIL_CHARS = 4_000;
+
+function extractPiClearedQueueEntries(data: unknown): string[] {
+  const rawEntries: unknown[] = [];
+  if (Array.isArray(data)) {
+    rawEntries.push(...data);
+  } else {
+    const record = objectValue(data);
+    if (record) {
+      for (const key of ["steering", "steeringMessages", "followUp", "followUpMessages", "follow_up", "cleared", "messages", "queued"]) {
+        const list = record[key];
+        if (Array.isArray(list)) rawEntries.push(...list);
+      }
+    }
+  }
+  const texts: string[] = [];
+  for (const entry of rawEntries) {
+    if (texts.length >= MAX_CLEARED_QUEUE_ENTRIES) break;
+    const rawText = typeof entry === "string"
+      ? entry
+      : (() => {
+          const item = objectValue(entry);
+          if (!item) return undefined;
+          for (const field of ["message", "text", "content"]) {
+            if (typeof item[field] === "string") return item[field];
+          }
+          return undefined;
+        })();
+    if (typeof rawText !== "string") continue;
+    const normalized = rawText.replaceAll("\0", "").trim();
+    if (normalized) texts.push(normalized);
+  }
+  return texts;
+}
+
+function isPiCleanSteerRefusal(error: unknown): boolean {
+  return error instanceof Error && error.message === "Pi rejected steer.";
+}
 
 export interface PiRpcHarnessOptions {
   spawnProcess?: typeof spawn;
@@ -77,13 +119,28 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
   let settled!: () => void;
   let settlement = new Promise<void>((resolve) => { settled = resolve; });
   const resetSettlement = (): void => { settlement = new Promise<void>((resolve) => { settled = resolve; }); };
+  const emitClearedQueueNotice = (cleared: unknown): void => {
+    const entries = extractPiClearedQueueEntries(cleared);
+    if (entries.length === 0) return;
+    const lines = entries.map((entry) =>
+      `- ${clipCodeUnits(redact.payload(entry), MAX_CLEARED_QUEUE_ENTRY_CHARS)}`);
+    const detail = clipCodeUnits(
+      `Cleared queued messages:\n${lines.join("\n")}`,
+      MAX_CLEARED_QUEUE_DETAIL_CHARS,
+    );
+    emit.activity("system", "info", "Cleared queued Pi messages before stopping", { detail });
+  };
   const cancel = (force: boolean): void => {
     if (finished) return;
     cancelled = true; live = false; controller.abort(); dialogs?.close(); host?.settle();
     if (!connection) return;
     if (force) { stopped = connection.close(true); void stopped.catch(() => undefined); return; }
     stopped ??= (async () => {
-      try { await connection!.request("clear_queue", {}, 2_000); await connection!.request("abort", {}, 2_000); }
+      try {
+        const cleared = await connection!.request("clear_queue", {}, 2_000);
+        emitClearedQueueNotice(cleared);
+        await connection!.request("abort", {}, 2_000);
+      }
       finally { await connection!.close(true); }
     })();
     void stopped.catch(() => undefined); settled();
@@ -261,9 +318,12 @@ function startPiRun(options: AgentHarnessStartOptions, dependencies: PiRpcHarnes
           if (!live || cancelled) return false;
           try {
             const response = objectValue(await connection.request("steer", { message: steer.content, ...(images.length ? { images } : {}) }));
-            if (!["queued", "handled"].includes(String(response?.disposition))) throw new ProviderSteerDeliveryUnknownError();
-            return true;
-          } catch {
+            const disposition = String(response?.disposition);
+            if (disposition === "queued" || disposition === "handled") return true;
+            if (disposition === "refused" || disposition === "rejected") return false;
+            throw new ProviderSteerDeliveryUnknownError();
+          } catch (caught) {
+            if (isPiCleanSteerRefusal(caught)) return false;
             const settledBeforeResponse = !live;
             uncertainSteer = true; cancel(false);
             throw new ProviderSteerDeliveryUnknownError(settledBeforeResponse);

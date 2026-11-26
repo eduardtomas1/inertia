@@ -39,8 +39,70 @@ export function durableJson(value: JsonValue, maxBytes = MAX_DURABLE_JSON_BYTES)
   return serialized;
 }
 
+const TEXT_BEARING_COMMAND_TYPES = new Set([
+  "message.queue.enqueue",
+  "message.queue.edit",
+  "message.queue.stop-and-send",
+  "message.send",
+  "conversation.compact-and-send",
+]);
+
+function isPlainJsonObject(value: JsonValue): value is { readonly [key: string]: JsonValue } {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function isTextBearingCommandType(commandType: string | undefined): boolean {
+  return commandType !== undefined
+    && (TEXT_BEARING_COMMAND_TYPES.has(commandType) || commandType.startsWith("agent-queue:"));
+}
+
+function redactTextBearingObject(record: { readonly [key: string]: JsonValue }): { [key: string]: JsonValue } {
+  const result: { [key: string]: JsonValue } = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (key === "content" && typeof value === "string") {
+      result[key] = { chars: Array.from(value.trim()).length };
+    } else if (key === "attachments" && Array.isArray(value)) {
+      result[key] = value.map((entry) => (isPlainJsonObject(entry) && typeof entry.id === "string" ? entry.id : ""));
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * N17: replaces `content` with `{ chars }` (Unicode code-point count of trimmed text) and
+ * `attachments` with their ids only so receipt fingerprints never hash raw text, filenames,
+ * paths, or snapshots.
+ */
+export function redactCommandForFingerprint(commandType: string | undefined, command: JsonValue): JsonValue {
+  const declaredType = isPlainJsonObject(command) && typeof command.type === "string" ? command.type : undefined;
+  const effectiveType = commandType ?? declaredType;
+  if (!isTextBearingCommandType(effectiveType) || !isPlainJsonObject(command)) return command;
+  const redacted = redactTextBearingObject(command);
+  if (redacted.payload !== undefined && isPlainJsonObject(redacted.payload)) {
+    redacted.payload = redactTextBearingObject(redacted.payload);
+  }
+  return redacted;
+}
+
 export function commandFingerprint(command: JsonValue): string {
   return createHash("sha256").update(durableJson(command)).digest("hex");
+}
+
+export function commandFingerprints(
+  commandType: string | undefined,
+  command: JsonValue,
+): { fingerprint: string; legacyFingerprint?: string } {
+  const declaredType = isPlainJsonObject(command) && typeof command.type === "string" ? command.type : undefined;
+  const effectiveType = commandType ?? declaredType;
+  if (!isTextBearingCommandType(effectiveType)) {
+    return { fingerprint: commandFingerprint(command) };
+  }
+  const redacted = redactCommandForFingerprint(effectiveType, command);
+  const fingerprint = commandFingerprint(redacted);
+  const legacyFingerprint = commandFingerprint(command);
+  return legacyFingerprint !== fingerprint ? { fingerprint, legacyFingerprint } : { fingerprint };
 }
 
 export function durableId(value: string): string {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { OrchestrationEventStore } from "../../src/server/orchestration-v2/event-store";
+import { commandFingerprint, redactCommandForFingerprint } from "../../src/server/orchestration-v2/json";
 import { ORCHESTRATION_V2_PROJECTION_VERSION, projectOrchestrationEvent } from "../../src/server/orchestration-v2/projector";
 import { OrchestratedTurnRepository } from "../../src/server/orchestration-v2/turn-repository";
 import {
@@ -180,7 +181,7 @@ describe("Orchestrator V2 projection metadata", () => {
     store.commit(command({ commandId: "request-2", expectedRevision: 2 }));
     expect(metadata(db).last_sequence).toBe(3);
     expect(store.verify()).toEqual({ valid: true, schemaVersion: 1, expectedSchemaVersion: 1, expectedSequence: 3,
-      projectionSequence: 3, missingThreadIds: [], unexpectedThreadIds: [], unreadable: [] });
+      projectionSequence: 3, missingThreadIds: [], unexpectedThreadIds: [], unreadable: [], queueContentMismatches: [] });
     db.prepare("UPDATE orchestration_v2_projection_metadata SET last_sequence = 2").run();
     expect(store.verify()).toMatchObject({ valid: false, expectedSequence: 3, projectionSequence: 2 });
     store.rebuildProjections();
@@ -405,6 +406,23 @@ describe("Orchestrator V2 receipt status migration", () => {
     databases.push(db);
     db.pragma("foreign_keys = ON");
     db.exec(`
+      DROP INDEX IF EXISTS queued_messages_conversation_state_position_idx;
+      ALTER TABLE queued_messages DROP COLUMN follows_thread_selection;
+      ALTER TABLE queued_messages DROP COLUMN selection_json;
+      ALTER TABLE queued_messages DROP COLUMN steer_when_ready_run_id;
+      ALTER TABLE queued_messages DROP COLUMN delivery_mode;
+      ALTER TABLE queued_messages DROP COLUMN run_id;
+      ALTER TABLE queued_messages DROP COLUMN dispatch_ordinal;
+      ALTER TABLE queued_messages DROP COLUMN creation_digest;
+      ALTER TABLE queued_messages DROP COLUMN edited_at;
+      ALTER TABLE queued_messages DROP COLUMN edit_revision;
+      ALTER TABLE queued_messages DROP COLUMN steer_follow_up_of_run_id;
+      ALTER TABLE queued_messages DROP COLUMN device_id;
+      ALTER TABLE queued_messages DROP COLUMN creation_source;
+      ALTER TABLE queued_messages DROP COLUMN created_by;
+      ALTER TABLE queued_messages DROP COLUMN kind;
+      ALTER TABLE queued_messages DROP COLUMN queue_held;
+      ALTER TABLE queued_messages DROP COLUMN queue_position;
       DROP TABLE orchestration_v2_projection_metadata;
       ALTER TABLE orchestration_v2_receipts DROP COLUMN command_type;
       ALTER TABLE orchestration_v2_receipts DROP COLUMN error;
@@ -487,5 +505,223 @@ describe("Orchestrator V2 receipt status migration", () => {
     expect(() => insert("rejected", "x".repeat(1_000), "y".repeat(240))).not.toThrow();
     expect(() => db.prepare(`INSERT INTO orchestration_v2_projection_metadata VALUES ('other', 1, 0, 'now')`).run())
       .toThrow(/CHECK/u);
+  });
+});
+
+describe("Phase 5 N17 text-free receipts, dual-fingerprint, purges, and verify checks", () => {
+  it("stores text-free fingerprints for text-bearing commands and verifies conflicts on reject() (Audit 2 Bug #3)", () => {
+    const { store } = fixture();
+    const attA = { id: "11111111-1111-4111-8111-111111111111", name: "secret-a.png", path: "/a/secret.png", mimeType: "image/png", size: 10 };
+    const attB = { id: "11111111-1111-4111-8111-111111111111", name: "other-b.png", path: "/b/other.png", mimeType: "image/png", size: 99 };
+    const cmd1 = {
+      type: "message.queue.enqueue",
+      requestId: "req-n17",
+      payload: { conversationId: "thread-1", id: "item-1", content: "  alpha 🌍 ", attachments: [attA] },
+    };
+    const cmd2SameLen = {
+      type: "message.queue.enqueue",
+      requestId: "req-n17",
+      payload: { conversationId: "thread-1", id: "item-1", content: "omega 🚀", attachments: [attB] },
+    };
+    expect(redactCommandForFingerprint("message.queue.enqueue", cmd1)).toEqual({
+      type: "message.queue.enqueue",
+      requestId: "req-n17",
+      payload: { conversationId: "thread-1", id: "item-1", content: { chars: 7 }, attachments: [attA.id] },
+    });
+    expect(redactCommandForFingerprint("message.queue.enqueue", cmd2SameLen))
+      .toEqual(redactCommandForFingerprint("message.queue.enqueue", cmd1));
+
+    const committed = store.commit(command({
+      commandId: "req-n17",
+      commandType: "message.queue.enqueue",
+      command: cmd1,
+    }));
+    expect(committed.receipt.fingerprint).toBe(commandFingerprint(redactCommandForFingerprint("message.queue.enqueue", cmd1)));
+    expect(committed.receipt.fingerprint).not.toBe(commandFingerprint(cmd1));
+
+    // Audit 2 Bug #3: reject() must verify thread_id, project_id, and fingerprint against any existing receipt.
+    expect(() => store.reject(rejection({
+      commandId: "req-n17",
+      threadId: "thread-2",
+      commandType: "message.queue.enqueue",
+      command: cmd1,
+    }))).toThrow("command-conflict");
+    expect(() => store.reject(rejection({
+      commandId: "req-n17",
+      projectId: "project-2",
+      commandType: "message.queue.enqueue",
+      command: cmd1,
+    }))).toThrow("command-conflict");
+    expect(() => store.reject(rejection({
+      commandId: "req-n17",
+      commandType: "message.queue.enqueue",
+      command: { ...cmd1, payload: { ...cmd1.payload, content: "different length text" } },
+    }))).toThrow("command-conflict");
+  });
+
+  it("accepts legacy full-command fingerprints on replay and enforces row text verification on replay and joined paths", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const store = runtime.store;
+      const db = storeDatabase(store);
+      const conversation = store.conversation(runtime.conversationId);
+      const legacyCmd = {
+        type: "message.send",
+        requestId: "legacy-req",
+        payload: { conversationId: conversation.id, content: "Legacy text", attachments: [] },
+      };
+      const legacyFp = commandFingerprint(legacyCmd);
+      db.prepare(`INSERT INTO orchestration_v2_receipts
+        (actor_id, command_id, thread_id, project_id, fingerprint, result_json, created_at, status, command_type)
+        VALUES ('human', 'legacy-req', ?, ?, ?, '{"ok":true}', '2026-11-01T10:00:00.000Z', 'accepted', 'message.send')`)
+        .run(conversation.id, conversation.projectId, legacyFp);
+
+      // Replaying with the exact original text matches legacyFp!
+      const replayed = store.orchestration.events.receipt(
+        { actorId: "human", commandId: "legacy-req", projectId: conversation.projectId, threadId: conversation.id },
+        legacyCmd,
+        "message.send",
+      );
+      expect(replayed?.result).toEqual({ ok: true });
+      // Different text of same length fails legacyFp AND newFp -> command-conflict.
+      expect(() => store.orchestration.events.receipt(
+        { actorId: "human", commandId: "legacy-req", projectId: conversation.projectId, threadId: conversation.id },
+        { ...legacyCmd, payload: { ...legacyCmd.payload, content: "Other  text" } },
+        "message.send",
+      )).toThrow("command-conflict");
+
+      // Row text check on replay AND joined concurrent duplicate for same-length different text.
+      const itemId = "22222222-2222-4222-8222-222222222222";
+      const cmdId = "33333333-3333-4333-8333-333333333333";
+      const originalText = "alpha";
+      const differentSameLen = "omega";
+      const enqueueCmd = (content: string) => ({
+        type: "message.queue.enqueue",
+        requestId: cmdId,
+        payload: { conversationId: conversation.id, id: itemId, content, attachments: [] },
+      });
+
+      const lead = await store.orchestration.authority.begin({
+        source: { actorId: "human", commandId: cmdId, command: enqueueCmd(originalText) },
+        threadId: conversation.id,
+        projectId: conversation.projectId,
+        commandType: "message.queue.enqueue",
+        rejection: null,
+        verifyReplayContent: () => store.orchestration.queue.verifyEnqueueReplay(conversation.id, itemId, originalText, []),
+      });
+      expect(lead.kind).toBe("lead");
+      if (lead.kind !== "lead") return;
+
+      // Concurrent duplicate with different same-length text joins on text-free fingerprint, then fails verifyReplayContent!
+      const joined = await store.orchestration.authority.begin({
+        source: { actorId: "human", commandId: cmdId, command: enqueueCmd(differentSameLen) },
+        threadId: conversation.id,
+        projectId: conversation.projectId,
+        commandType: "message.queue.enqueue",
+        rejection: null,
+        verifyReplayContent: () => store.orchestration.queue.verifyEnqueueReplay(conversation.id, itemId, differentSameLen, []),
+      });
+      expect(joined.kind).toBe("joined");
+
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId,
+        content: originalText,
+        source: { actorId: "human", commandId: cmdId, command: enqueueCmd(originalText) },
+      });
+      lead.ticket.finish({ queued: itemId });
+
+      if (joined.kind === "joined") {
+        await expect(joined.result).rejects.toThrow("command-conflict");
+      }
+
+      // Edit the item; replaying the ORIGINAL enqueue still succeeds because creation_digest is immutable!
+      store.orchestration.queue.edit({
+        conversationId: conversation.id,
+        itemId,
+        expectedRevision: 0,
+        content: "Edited text after enqueue",
+      });
+      const replayAfterEdit = await store.orchestration.authority.begin({
+        source: { actorId: "human", commandId: cmdId, command: enqueueCmd(originalText) },
+        threadId: conversation.id,
+        projectId: conversation.projectId,
+        commandType: "message.queue.enqueue",
+        rejection: null,
+        verifyReplayContent: () => store.orchestration.queue.verifyEnqueueReplay(conversation.id, itemId, originalText, []),
+      });
+      expect(replayAfterEdit.kind).toBe("replay");
+
+      // Replaying with different same-length text still throws command-conflict.
+      await expect(store.orchestration.authority.begin({
+        source: { actorId: "human", commandId: cmdId, command: enqueueCmd(differentSameLen) },
+        threadId: conversation.id,
+        projectId: conversation.projectId,
+        commandType: "message.queue.enqueue",
+        rejection: null,
+        verifyReplayContent: () => store.orchestration.queue.verifyEnqueueReplay(conversation.id, itemId, differentSameLen, []),
+      })).rejects.toThrow("command-conflict");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("purges receipts on conversation delete and project remove, and reports G6 queue content mismatches without failing valid", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const store = runtime.store;
+      const db = storeDatabase(store);
+      const conv1 = store.conversation(runtime.conversationId);
+      const conv2 = store.createConversation(conv1.projectId, "Second chat");
+
+      const item1 = "44444444-4444-4444-8444-444444444444";
+      const item2 = "55555555-5555-4555-8555-555555555555";
+      store.orchestration.queue.enqueue({ conversationId: conv1.id, itemId: item1, content: "Hello" });
+      store.orchestration.queue.enqueue({ conversationId: conv2.id, itemId: item2, content: "World" });
+
+      // Detect chars-mismatch, revision-mismatch, state-mismatch, missing-row without failing valid.
+      db.prepare("UPDATE queued_messages SET content = 'Hi' WHERE id = ?").run(item1);
+      expect(store.orchestration.events.verify()).toMatchObject({
+        valid: true,
+        queueContentMismatches: [{ itemId: item1, threadId: conv1.id, reason: "chars-mismatch" }],
+      });
+
+      db.prepare("UPDATE queued_messages SET content = 'Hello', edit_revision = 9 WHERE id = ?").run(item1);
+      expect(store.orchestration.events.verify()).toMatchObject({
+        valid: true,
+        queueContentMismatches: [{ itemId: item1, threadId: conv1.id, reason: "revision-mismatch" }],
+      });
+
+      db.prepare("UPDATE queued_messages SET edit_revision = 0, state = 'blocked' WHERE id = ?").run(item1);
+      expect(store.orchestration.events.verify()).toMatchObject({
+        valid: true,
+        queueContentMismatches: [{ itemId: item1, threadId: conv1.id, reason: "state-mismatch" }],
+      });
+
+      db.prepare("DELETE FROM queued_messages WHERE id = ?").run(item1);
+      expect(store.orchestration.events.verify()).toMatchObject({
+        valid: true,
+        queueContentMismatches: [{ itemId: item1, threadId: conv1.id, reason: "missing-row" }],
+      });
+
+      // Deleting conv1 purges conv1's receipts and stops flagging item1 in verify!
+      expect((db.prepare("SELECT COUNT(*) AS c FROM orchestration_v2_receipts WHERE thread_id = ?").get(conv1.id) as { c: number }).c)
+        .toBeGreaterThan(0);
+      store.deleteConversation(conv1.id);
+      expect((db.prepare("SELECT COUNT(*) AS c FROM orchestration_v2_receipts WHERE thread_id = ?").get(conv1.id) as { c: number }).c)
+        .toBe(0);
+      expect(store.orchestration.events.verify().queueContentMismatches).toEqual([]);
+
+      // Removing the project purges conv2's receipts too!
+      expect((db.prepare("SELECT COUNT(*) AS c FROM orchestration_v2_receipts WHERE project_id = ?").get(conv1.projectId) as { c: number }).c)
+        .toBeGreaterThan(0);
+      store.removeProject(conv1.projectId);
+      expect((db.prepare("SELECT COUNT(*) AS c FROM orchestration_v2_receipts WHERE project_id = ?").get(conv1.projectId) as { c: number }).c)
+        .toBe(0);
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
   });
 });

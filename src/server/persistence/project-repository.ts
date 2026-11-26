@@ -154,6 +154,7 @@ export class ProjectRepository {
     const state = this.context.database.prepare("SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
     this.context.database.transaction(() => {
       releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
+      this.context.database.prepare("DELETE FROM orchestration_v2_receipts WHERE project_id = ?").run(projectId);
       this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
     })();
     const activeProjectId = state?.active_project_id ?? null;

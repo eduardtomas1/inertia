@@ -3,6 +3,7 @@ import { conversationContextSupplementBoundMigration } from "./conversation-cont
 import { delegatedTasksMigration } from "./delegated-tasks";
 import { delegationAutomaticWakesMigration } from "./delegation-automatic-wakes";
 import { orchestrationV2ReceiptStatusMigration } from "./orchestration-v2-receipt-status";
+import { queueItemsMigration } from "./queue-items";
 import { limitResetMigration } from "./limit-reset";
 import { orchestrationV2Migration } from "./orchestration-v2";
 import { nativePiProviderMigration } from "./native-pi-provider";
@@ -109,4 +110,5 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   delegatedTasksMigration,
   delegationAutomaticWakesMigration,
   orchestrationV2ReceiptStatusMigration,
+  queueItemsMigration,
 ];

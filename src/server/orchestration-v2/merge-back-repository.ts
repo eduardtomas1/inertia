@@ -188,12 +188,14 @@ export class MergeBackRepository {
     }
   }
 
-  dispatched(runId: string): void {
-    for (const merge of this.forRun(runId, ["attached"])) this.change(merge, "dispatched");
+  dispatched(runId: string, threadId?: string): void {
+    const scoped = threadId ?? this.events.projection("run", runId)?.threadId;
+    for (const merge of this.forRun(runId, ["attached"], scoped)) this.change(merge, "dispatched");
   }
 
-  acknowledge(runId: string): void {
-    for (const merge of this.forRun(runId, ["attached", "dispatched"])) this.change(merge, "delivered");
+  acknowledge(runId: string, threadId?: string): void {
+    const scoped = threadId ?? this.events.projection("run", runId)?.threadId;
+    for (const merge of this.forRun(runId, ["attached", "dispatched"], scoped)) this.change(merge, "delivered");
   }
 
   /**
@@ -203,9 +205,9 @@ export class MergeBackRepository {
    */
   settleRun(turn: AgentTurn, undelivered = false, promptDropped = false): void {
     if (!isAgentTurnTerminalStatus(turn.status)) return;
-    if (turn.status === "completed") this.acknowledge(turn.runId);
+    if (turn.status === "completed") this.acknowledge(turn.runId, turn.conversationId);
     for (const merge of this.forRun(turn.runId, promptDropped && undelivered ? ["attached", "dispatched", "delivered"]
-      : ["attached", "dispatched"])) {
+      : ["attached", "dispatched"], turn.conversationId)) {
       this.change(merge, merge.state === "attached" || undelivered ? "undelivered" : "uncertain");
       if (merge.state === "delivered") this.releaseStaleBase(merge);
     }
@@ -382,7 +384,14 @@ export class MergeBackRepository {
       AND json_extract(payload_json, '$.packetId') IN (SELECT value FROM json_each(?))`, threadId, JSON.stringify(packetIds));
   }
 
-  private forRun(runId: string, states: readonly Lifecycle[]): MergeBack[] {
+  private forRun(runId: string, states: readonly Lifecycle[], threadId?: string): MergeBack[] {
+    const resolvedThreadId = threadId ?? this.events.projection("run", runId)?.threadId;
+    if (resolvedThreadId !== undefined) {
+      return this.rows(
+        `thread_id = ? AND json_extract(payload_json, '$.runId') = ? AND json_extract(payload_json, '$.state') IN (SELECT value FROM json_each(?))`,
+        resolvedThreadId, runId, JSON.stringify(states),
+      );
+    }
     return this.rows(`json_extract(payload_json, '$.runId') = ? AND json_extract(payload_json, '$.state') IN (SELECT value FROM json_each(?))`,
       runId, JSON.stringify(states));
   }

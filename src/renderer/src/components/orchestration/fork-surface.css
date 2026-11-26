@@ -5,7 +5,8 @@
   margin: 0; padding: 0 6px; border-radius: var(--radius-xs); color: var(--text-faint); background: transparent;
   font-size: inherit; font-weight: 400;
 }
-.history-turn-action:hover { color: var(--text-muted); background: var(--fill); }
+.history-turn-action:hover:not(:disabled) { color: var(--text-muted); background: var(--fill); }
+.history-turn-action:disabled { opacity: 0.55; cursor: default; }
 .fork-turn-action > [role="status"], .fork-turn-action > [role="alert"] { flex-basis: 100%; }
 .fork-turn-action [role="alert"] { max-width: 28rem; }
 .fork-history-panel { margin: 1rem 0; padding: 0.75rem; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
@@ -20,4 +21,4 @@
 .fork-merge-back { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
 .fork-merge-back > button { display: inline-flex; align-items: center; gap: 0.375rem; }
 .fork-merge-back > p { margin: 0; }
-.response-turn.is-rolled-back > :not(.turn-supporting-ledger) { opacity: 0.55; }
+.response-turn.is-rolled-back > :not(.turn-supporting-ledger) { opacity: 0.8; }

@@ -28,6 +28,7 @@ import {
   type ProviderActivityEvent,
 } from "../../provider/contracts";
 import { PortableHistoryBudgetError, portableHistoryResponseItems } from "../../orchestration-v2/portable-history";
+import { isItemCovered } from "../../orchestration-v2/backing-repository";
 import { relocatedBackingId as relocatedProviderBackingId } from "../../orchestration-v2/backing-projector";
 import { sessionCwdMobility } from "../../provider/session-cwd-mobility";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
@@ -701,7 +702,7 @@ export function resolveTurnRequest(
         target: target ? { usage, sameSelection: sameContextSelection(target.selection, routeSelection) } : null,
       }),
       ...(excludedMessageId === undefined ? {} : { excludedMessageId }),
-      ...(target ? { excludedItemIds: target.coveredItemIds } : {}), route: restoredHistoryRoute(),
+      ...(target ? { coverage: target } : {}), route: restoredHistoryRoute(),
       hostToolBridgeAttested,
     });
     if (!history || (options.skipEmpty && history.messageCount === 0 && history.omittedMessageCount === 0)) {
@@ -737,9 +738,13 @@ export function resolveTurnRequest(
   const deferredDeltaOnly = deltaTarget !== null && latestTurn?.id === deltaTarget.lastTurnId;
   // The session's last turn may not have reached it: a withheld prompt (goal start), or a prompt whose
   // turn never started after its history was injected (its message is then not covered).
+  const lastTurnForDelta = deltaTarget && deferredDeltaOnly ? dependencies.store.agentTurn(deltaTarget.lastTurnId) : null;
+  const lastTurnRunOrdinal = lastTurnForDelta
+    ? ((dependencies.store.orchestration.events.projection("run", lastTurnForDelta.runId)?.value as { ordinal?: number } | undefined)?.ordinal ?? null)
+    : null;
   const pendingDelta = deltaTarget !== null
     && (!deferredDeltaOnly || dependencies.store.turnLedgerRepository.promptWithheld(deltaTarget.lastTurnId)
-      || !deltaTarget.coveredItemIds.includes(dependencies.store.agentTurn(deltaTarget.lastTurnId).userMessageId));
+      || (lastTurnForDelta !== null && !isItemCovered(deltaTarget, lastTurnForDelta.userMessageId, lastTurnRunOrdinal)));
   // A provider command is sent on its own. Turns its session missed on another route must reach it first; a delta
   // deferred from the session's own last turn (a withheld prompt or instruction pack) waits for the next message.
   if (providerCommand && pendingDelta && !deferredDeltaOnly) {

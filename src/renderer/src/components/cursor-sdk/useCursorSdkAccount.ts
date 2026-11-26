@@ -58,6 +58,11 @@ export function useCursorSdkAccount({ status, sendCommand, subscribe }: CursorSd
     });
   }, [sendCommand]);
 
+  const checkRef = useRef(check);
+  checkRef.current = check;
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
+
   useEffect(() => {
     const unsubscribe = subscribe((event) => {
       if (event.type !== "provider.cursor-sdk.login.updated"
@@ -65,13 +70,13 @@ export function useCursorSdkAccount({ status, sendCommand, subscribe }: CursorSd
       if (cancelling.current && ["starting", "waiting"].includes(event.status)) return;
       if (event.status === "waiting" && !isCursorSdkLoginUrl(event.loginUrl)) {
         setError("Cursor returned an invalid sign-in link.");
-        cancel();
+        cancelRef.current();
         return;
       }
       setLogin(event);
       if (["authenticated", "cancelled", "expired", "failed"].includes(event.status)) {
         attempt.current = null;
-        if (event.status === "authenticated") void check(true);
+        if (event.status === "authenticated") void checkRef.current(true);
       }
     });
     return () => {
@@ -87,7 +92,7 @@ export function useCursorSdkAccount({ status, sendCommand, subscribe }: CursorSd
         }).catch(() => undefined);
       }
     };
-  }, [cancel, check, sendCommand, subscribe]);
+  }, [sendCommand, subscribe]);
 
   useEffect(() => {
     if (online) return;

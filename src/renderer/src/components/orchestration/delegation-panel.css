@@ -37,16 +37,20 @@
 .delegation-panel-note { margin: 0.5rem 0 0; }
 .delegation-tasks { display: grid; gap: 2px; margin: 0.5rem 0 0; padding: 0; list-style: none; }
 .delegation-task { display: grid; gap: 2px; padding: 0.5rem 0; border-top: 1px solid var(--line-soft); }
-.delegation-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+.delegation-task:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-xs); }
 .delegation-task-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .delegation-task-heading > strong { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
 .delegation-chip {
   padding: 1px 8px;
+  border: 1px solid transparent;
   border-radius: 999px;
   color: var(--text-muted);
   background: var(--fill);
   font-size: var(--text-xs);
   white-space: nowrap;
+}
+@media (forced-colors: active) {
+  .delegation-chip { border-color: CanvasText; }
 }
 .delegation-chip[data-tone="ready"] { color: var(--accent-strong); background: var(--accent-soft); }
 .delegation-chip[data-tone="attention"] { color: var(--warning); background: var(--fill-strong); }
@@ -98,6 +102,9 @@
 }
 .delegated-completion-toggle:hover { color: var(--text); background: var(--fill); }
 .delegated-completion-toggle svg { transition: transform var(--dur-fast) var(--ease); }
+@media (prefers-reduced-motion: reduce) {
+  .delegated-completion-toggle svg { transition: none; }
+}
 .delegated-completion-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .delegated-completion-tasks { display: grid; gap: 6px; margin: 4px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--fill); list-style: none; }
 .delegated-completion-tasks p { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }

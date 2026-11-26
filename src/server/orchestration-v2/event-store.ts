@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import { commandFingerprint, durableId, durableJson, durableTimestamp } from "./json";
+import { commandFingerprints, durableId, durableJson, durableTimestamp } from "./json";
 import { ORCHESTRATION_V2_PROJECTION_VERSION } from "./projector";
+import {
+  QUEUE_ITEM_PROJECTION,
+  QUEUE_STATE_PROJECTION,
+  queueItemProjectionSchema,
+} from "../../shared/orchestration-queue";
 import {
   OrchestrationCommandRejected,
   OrchestrationConflict,
@@ -22,12 +27,28 @@ import {
   type UnreadableProjection,
 } from "./types";
 
+export type QueueContentMismatchReason =
+  | "missing-row"
+  | "chars-mismatch"
+  | "revision-mismatch"
+  | "state-mismatch";
+
+export interface QueueContentMismatch {
+  itemId: string;
+  threadId: string;
+  reason: QueueContentMismatchReason;
+}
+
+export type EventStoreVerification = ProjectionVerification & {
+  queueContentMismatches: readonly QueueContentMismatch[];
+};
+
 const PROJECTION_NAME = "orchestration-v2";
 const REBUILD_PAGE_SIZE = 500;
 const VERIFY_PAGE_SIZE = 500;
 const VERIFY_REPORT_LIMIT = 100;
 const MAX_REJECTION_ERROR_LENGTH = 1_000;
-const VERIFIED_PROJECTION_KINDS = ["thread", "run", "attempt"] as const;
+const VERIFIED_PROJECTION_KINDS = ["thread", "run", "attempt", QUEUE_ITEM_PROJECTION, QUEUE_STATE_PROJECTION] as const;
 
 interface ReceiptRow {
   actor_id: string; command_id: string; thread_id: string; project_id: string;
@@ -123,11 +144,12 @@ export class OrchestrationEventStore {
     } : null;
   }
 
-  receipt(identity: CommandIdentity, command: JsonValue): CommandReceipt | null {
+  receipt(identity: CommandIdentity, command: JsonValue, commandType?: string): CommandReceipt | null {
     const row = this.receiptRow(identity);
     if (!row) return null;
+    const { fingerprint, legacyFingerprint } = commandFingerprints(commandType ?? row.command_type ?? undefined, command);
     if (row.project_id !== identity.projectId || row.thread_id !== identity.threadId
-      || row.fingerprint !== commandFingerprint(command)) {
+      || (row.fingerprint !== fingerprint && (legacyFingerprint === undefined || row.fingerprint !== legacyFingerprint))) {
       throw new OrchestrationConflict("command-conflict");
     }
     const receipt = receiptFromRow(row);
@@ -141,10 +163,17 @@ export class OrchestrationEventStore {
     for (const value of [input.actorId, input.commandId, input.projectId, input.threadId]) durableId(value);
     const commandType = durableId(input.commandType);
     const error = boundedRejectionError(input.error);
-    const fingerprint = commandFingerprint(input.command);
+    const { fingerprint, legacyFingerprint } = commandFingerprints(commandType, input.command);
     return this.database.transaction((): CommandReceipt => {
       const existing = this.receiptRow(input);
-      if (existing) return receiptFromRow(existing);
+      if (existing) {
+        if (existing.project_id !== input.projectId || existing.thread_id !== input.threadId
+          || (existing.fingerprint !== fingerprint
+            && (legacyFingerprint === undefined || existing.fingerprint !== legacyFingerprint))) {
+          throw new OrchestrationConflict("command-conflict");
+        }
+        return receiptFromRow(existing);
+      }
       const now = durableTimestamp(this.clock());
       this.database.prepare(`INSERT INTO orchestration_v2_receipts
         (actor_id, command_id, thread_id, project_id, fingerprint, first_sequence, last_sequence,
@@ -166,8 +195,8 @@ export class OrchestrationEventStore {
     if (input.events.length > 256 || (input.effects?.length ?? 0) > 256) {
       throw new Error("An orchestration commit exceeds its batch limit.");
     }
-    const fingerprint = commandFingerprint(input.command);
     const commandType = resolvedCommandType(input);
+    const { fingerprint } = commandFingerprints(commandType, input.command);
     const resultJson = durableJson(input.result, 262_144);
     const payloads = input.events.map((event) => {
       durableId(event.type);
@@ -185,7 +214,7 @@ export class OrchestrationEventStore {
       return { ...effect, json: durableJson(effect.payload) };
     });
     const committed = this.database.transaction((): CommitResult => {
-      const existing = this.receipt(input, input.command);
+      const existing = this.receipt(input, input.command, commandType);
       if (existing) return { replayed: true, receipt: existing, events: [] };
       const head = this.database.prepare(`SELECT project_id, revision FROM orchestration_v2_events
         WHERE thread_id = ? ORDER BY revision DESC LIMIT 1`).get(input.threadId) as
@@ -274,8 +303,8 @@ export class OrchestrationEventStore {
     }).immediate();
   }
 
-  verify(options: ProjectionVerificationOptions = {}): ProjectionVerification {
-    return this.database.transaction((): ProjectionVerification => {
+  verify(options: ProjectionVerificationOptions = {}): EventStoreVerification {
+    return this.database.transaction((): EventStoreVerification => {
       const metadata = this.database.prepare(`SELECT schema_version, last_sequence
         FROM orchestration_v2_projection_metadata WHERE projection_name = ?`).get(PROJECTION_NAME) as
         { schema_version: number; last_sequence: number } | undefined;
@@ -290,6 +319,7 @@ export class OrchestrationEventStore {
       const readable = options.readable === true ? this.projectionReadable : options.readable || null;
       if (options.readable === true && !readable) throw new Error("No orchestration projection reader is configured.");
       const unreadable = readable ? this.unreadableProjections(readable) : [];
+      const queueContentMismatches = this.checkQueueContentMismatches();
       const schemaVersion = metadata?.schema_version ?? 0;
       const projectionSequence = metadata?.last_sequence ?? 0;
       return {
@@ -297,9 +327,64 @@ export class OrchestrationEventStore {
           && projectionSequence === expectedSequence && missingThreadIds.length === 0
           && unexpectedThreadIds.length === 0 && unreadable.length === 0,
         schemaVersion, expectedSchemaVersion: this.projectionVersion, expectedSequence, projectionSequence,
-        missingThreadIds, unexpectedThreadIds, unreadable,
+        missingThreadIds, unexpectedThreadIds, unreadable, queueContentMismatches,
       };
     })();
+  }
+
+  private checkQueueContentMismatches(): QueueContentMismatch[] {
+    const hasQueueItem = this.database.prepare(`SELECT 1 FROM orchestration_v2_entities
+      WHERE kind = ? LIMIT 1`).get(QUEUE_ITEM_PROJECTION);
+    if (!hasQueueItem) return [];
+    const tables = new Set(
+      (this.database.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'
+        AND name IN ('conversations', 'queued_messages')`).all() as { name: string }[]).map(({ name }) => name),
+    );
+    if (!tables.has("conversations") || !tables.has("queued_messages")) return [];
+    const columns = new Set(
+      (this.database.prepare("PRAGMA table_info(queued_messages)").all() as { name: string }[]).map(({ name }) => name),
+    );
+    if (!columns.has("edit_revision")) return [];
+    const mismatches: QueueContentMismatch[] = [];
+    const page = this.database.prepare(`SELECT e.id AS item_id, e.thread_id AS thread_id, e.payload_json AS payload_json,
+        q.id AS row_id, length(q.content) AS row_chars, q.edit_revision AS row_revision, q.state AS row_state
+      FROM orchestration_v2_entities AS e
+      JOIN conversations AS c ON c.id = e.thread_id
+      LEFT JOIN queued_messages AS q ON q.id = e.id AND q.conversation_id = e.thread_id
+      WHERE e.kind = ? AND e.id > ?
+        AND json_extract(e.payload_json, '$.state') IN ('waiting', 'dispatching', 'blocked')
+      ORDER BY e.id LIMIT ?`);
+    let after = "";
+    while (mismatches.length < VERIFY_REPORT_LIMIT) {
+      const rows = page.all(QUEUE_ITEM_PROJECTION, after, VERIFY_PAGE_SIZE) as Array<{
+        item_id: string; thread_id: string; payload_json: string;
+        row_id: string | null; row_chars: number | null; row_revision: number | null; row_state: string | null;
+      }>;
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        if (mismatches.length >= VERIFY_REPORT_LIMIT) break;
+        let parsed: ReturnType<typeof queueItemProjectionSchema.safeParse>;
+        try {
+          parsed = queueItemProjectionSchema.safeParse(JSON.parse(row.payload_json));
+        } catch {
+          continue;
+        }
+        if (!parsed.success) continue;
+        const item = parsed.data;
+        if (row.row_id === null) {
+          mismatches.push({ itemId: row.item_id, threadId: row.thread_id, reason: "missing-row" });
+        } else if (row.row_chars !== item.contentRef.chars) {
+          mismatches.push({ itemId: row.item_id, threadId: row.thread_id, reason: "chars-mismatch" });
+        } else if (row.row_revision !== item.contentRef.editRevision) {
+          mismatches.push({ itemId: row.item_id, threadId: row.thread_id, reason: "revision-mismatch" });
+        } else if (row.row_state !== item.state) {
+          mismatches.push({ itemId: row.item_id, threadId: row.thread_id, reason: "state-mismatch" });
+        }
+      }
+      after = rows.at(-1)!.item_id;
+      if (rows.length < VERIFY_PAGE_SIZE) break;
+    }
+    return mismatches;
   }
 
   private latestSequence(): number {

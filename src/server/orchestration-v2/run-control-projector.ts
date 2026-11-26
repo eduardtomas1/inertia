@@ -72,7 +72,8 @@ export function projectRunControlEvent(event: RunControlEvent, envelope: Orchest
       requireCurrent(read, envelope, runId, attemptId);
       if (read(RUN_STEER_PROJECTION, effectId)) throw new OrchestrationConflict("revision-conflict");
       return [{ kind: RUN_STEER_PROJECTION, id: effectId, value: runSteerSchema.parse({ runId, attemptId, effectId,
-        requestedAt, state: "dispatching", outcome: null, messageId: null, queuedMessageId: null, settledAt: null }) }];
+        requestedAt, state: "dispatching", outcome: null, messageId: null, queuedMessageId: null, settledAt: null,
+        readAt: null }) }];
     }
     case "run-control.steer-settled": {
       const { runId, attemptId, effectId, outcome, messageId, queuedMessageId } = event.payload;
@@ -84,6 +85,17 @@ export function projectRunControlEvent(event: RunControlEvent, envelope: Orchest
       }
       return [{ kind: RUN_STEER_PROJECTION, id: effectId, value: runSteerSchema.parse({ ...current,
         state: "settled", outcome, messageId, queuedMessageId, settledAt: envelope.createdAt }) }];
+    }
+    case "run-control.steer-read": {
+      const { runId, attemptId, effectId, readAt } = event.payload;
+      target(read, envelope, runId, attemptId);
+      const row = read(RUN_STEER_PROJECTION, effectId);
+      const current = row && row.threadId === envelope.threadId ? runSteerSchema.parse(row.value) : null;
+      if (!current || current.runId !== runId || current.attemptId !== attemptId
+        || current.state !== "settled" || current.outcome !== "accepted" || current.readAt !== null) {
+        throw new OrchestrationConflict("revision-conflict");
+      }
+      return [{ kind: RUN_STEER_PROJECTION, id: effectId, value: runSteerSchema.parse({ ...current, readAt }) }];
     }
   }
 }

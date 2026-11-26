@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { startCursorSdkRun } from "../../src/server/provider/cursor-sdk-harness";
+import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
+import { CursorSdkSession, CursorSteerRefusedError } from "../../src/server/provider/cursor-sdk-session";
 import { CursorSdkStoreMissingError } from "../../src/server/provider/cursor-sdk-store";
 import type { openCursorSdkWorker } from "../../src/server/provider/cursor-sdk-process";
 import type { CursorSdkStart } from "../../src/node/cursor-sdk-protocol";
@@ -177,6 +179,47 @@ describe("Cursor SDK production harness", () => {
     if (run.extension.kind !== "cursor-sdk") throw new Error("wrong route");
     await expect(run.extension.steer!({ content: "next", imagePaths: [] })).resolves.toBe(false);
     finish(); await expect(run.result).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("returns false cleanly on Cursor SDK steer refusals and keeps ProviderSteerDeliveryUnknownError for ambiguous errors", async () => {
+    // 1. Session-level clean refusal when inactive or missing run.steer returns revert_to_followup instead of throwing.
+    const session = new CursorSdkSession(
+      { conversationId: "c", turnId: "t", runId: "r", providerInstanceId: "p", workspace: "/tmp" },
+      {
+        create: vi.fn(),
+        resume: vi.fn(),
+        store: {} as never,
+        assertAuthority: vi.fn(),
+        emit: vi.fn(),
+      },
+    );
+    await expect(session.steer("not yet active")).resolves.toBe("revert_to_followup");
+
+    // 2. Harness maps clean worker/SDK refusal errors to false without ProviderSteerDeliveryUnknownError.
+    let finish!: () => void;
+    const waiting = new Promise<void>((resolve) => { finish = resolve; });
+    const f = await fixture(async () => { await waiting; return { agentId: "native-session", id: "native-run", status: "finished" }; });
+    const run = f.start();
+    await vi.waitFor(() => expect(f.request).toHaveBeenCalledWith("start", expect.anything(), 1800000));
+    if (run.extension.kind !== "cursor-sdk") throw new Error("wrong route");
+
+    for (const cleanError of [
+      new CursorSteerRefusedError(),
+      new Error("No active session."),
+      new Error("Cursor SDK steering is unavailable."),
+    ]) {
+      f.request.mockImplementationOnce(async () => { throw cleanError; });
+      await expect(run.extension.steer!({ content: "clean refusal", imagePaths: [] })).resolves.toBe(false);
+    }
+
+    // 3. Ambiguous mid-flight transport/unknown failure still throws ProviderSteerDeliveryUnknownError.
+    f.request.mockImplementationOnce(async () => { throw new Error("Worker pipe closed mid-request"); });
+    await expect(run.extension.steer!({ content: "ambiguous", imagePaths: [] })).rejects.toBeInstanceOf(
+      ProviderSteerDeliveryUnknownError,
+    );
+
+    finish();
+    await expect(run.result).resolves.toMatchObject({ status: "completed" });
   });
 
   it("fails closed without opening a worker when durable storage is unavailable on this platform", async () => {

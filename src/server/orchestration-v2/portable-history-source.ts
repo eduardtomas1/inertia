@@ -17,6 +17,9 @@ import {
   portableCommandText, portableErrorText, portableFileChangeText, portableInterruptText, portablePlanText,
   providerHandoffReason,
 } from "../persistence/turn-context-facts";
+import {
+  MAX_BACKING_COVERAGE_ITEMS, MAX_BACKING_UNCOVERED_ITEMS, type InheritedCoverage,
+} from "../../shared/orchestration-backings";
 import { forkHistoryPartSchema } from "../../shared/orchestration-forks";
 import { MAX_FORK_ITEM_PARTS, boundedHistoryCandidates, forkItemText, portableForkHistory } from "./portable-fork-history";
 import { coveredHistoryOccupancy } from "./portable-history-occupancy";
@@ -50,68 +53,167 @@ const NOT_QUEUED = `messages.id NOT IN (SELECT user_message_id FROM queued_messa
   WHERE conversation_id = messages.conversation_id AND state IN ('waiting','dispatching','blocked')
     AND user_message_id IS NOT NULL)`;
 
+export interface PortableHistoryCoverage {
+  readonly coveredItemIds?: readonly string[];
+  readonly coveredThroughOrdinal?: number;
+  readonly uncoveredItemIds?: readonly string[];
+  readonly inheritedCoverage?: InheritedCoverage;
+  readonly legacyCovered?: boolean;
+}
+
+interface ResolvedCoverage {
+  readonly coveredItemIds: readonly string[];
+  readonly coveredThroughOrdinal: number | undefined;
+  readonly uncoveredItemIds: readonly string[];
+  readonly inheritedCoverage: InheritedCoverage | undefined;
+  readonly legacyCovered: boolean;
+}
+
+export function hasCoverage(coverage: PortableHistoryCoverage | null | undefined): boolean {
+  if (!coverage) return false;
+  return (coverage.coveredItemIds?.length ?? 0) > 0
+    || (coverage.coveredThroughOrdinal !== undefined && coverage.coveredThroughOrdinal > 0)
+    || coverage.legacyCovered === true
+    || coverage.inheritedCoverage !== undefined;
+}
+
+function resolveCoverage(input: {
+  excludedItemIds?: readonly string[];
+  coverage?: PortableHistoryCoverage;
+}): ResolvedCoverage {
+  const coveredItemIds = input.coverage?.coveredItemIds !== undefined && input.excludedItemIds !== undefined
+    ? [...new Set([...input.excludedItemIds, ...input.coverage.coveredItemIds])]
+    : input.coverage?.coveredItemIds ?? input.excludedItemIds ?? [];
+  const uncoveredItemIds = input.coverage?.uncoveredItemIds ?? [];
+  if (coveredItemIds.length > MAX_BACKING_COVERAGE_ITEMS) throw new Error("Too many covered history items.");
+  if (uncoveredItemIds.length > MAX_BACKING_UNCOVERED_ITEMS) throw new Error("Too many uncovered history items.");
+  return {
+    coveredItemIds,
+    coveredThroughOrdinal: input.coverage?.coveredThroughOrdinal,
+    uncoveredItemIds,
+    inheritedCoverage: input.coverage?.inheritedCoverage,
+    legacyCovered: input.coverage?.legacyCovered === true,
+  };
+}
+
+const EMPTY_COVERAGE: ResolvedCoverage = {
+  coveredItemIds: [],
+  coveredThroughOrdinal: undefined,
+  uncoveredItemIds: [],
+  inheritedCoverage: undefined,
+  legacyCovered: false,
+};
+
 function turnItemStatus(status: string | null): PortableHistoryItem["status"] {
   return status === "failed" || status === "cancelled" || status === "interrupted"
     ? status : status === null || status === "completed" ? "completed" : "partial";
+}
+
+function messageNotCoveredFilter(coverage: ResolvedCoverage, excludedJson: string, uncoveredJson: string): {
+  sql: string;
+  parameters: (string | number)[];
+} {
+  const coveredArms: string[] = [`messages.id IN ${COVERED}`];
+  const parameters: (string | number)[] = [uncoveredJson, excludedJson];
+  if (coverage.coveredThroughOrdinal !== undefined && coverage.coveredThroughOrdinal > 0) {
+    coveredArms.push(`(messages.turn_id IS NOT NULL AND EXISTS (SELECT 1 FROM agent_turns AS cov_turn
+      JOIN orchestration_v2_entities AS cov_run ON cov_run.kind = 'run' AND cov_run.id = cov_turn.run_id
+        AND cov_run.thread_id = messages.conversation_id
+      WHERE cov_turn.id = messages.turn_id AND cov_turn.conversation_id = messages.conversation_id
+        AND json_extract(cov_run.payload_json, '$.ordinal') <= ?))`);
+    parameters.push(coverage.coveredThroughOrdinal);
+  }
+  if (coverage.legacyCovered) {
+    coveredArms.push(`(messages.turn_id IS NULL OR NOT EXISTS (SELECT 1 FROM agent_turns AS leg_turn
+      JOIN orchestration_v2_entities AS leg_run ON leg_run.kind = 'run' AND leg_run.id = leg_turn.run_id
+        AND leg_run.thread_id = messages.conversation_id
+      WHERE leg_turn.id = messages.turn_id AND leg_turn.conversation_id = messages.conversation_id
+        AND json_extract(leg_run.payload_json, '$.ordinal') IS NOT NULL))`);
+  }
+  return {
+    sql: `(messages.id IN ${COVERED} OR NOT (${coveredArms.join(" OR ")}))`,
+    parameters,
+  };
 }
 
 function candidateIndex(input: {
   threadId: string;
   excludedMessageId?: string;
   route?: ContinuationRouteFilter;
-}, excluded: string) {
+}, coverage: ResolvedCoverage) {
+  const excluded = JSON.stringify(coverage.coveredItemIds);
+  const uncovered = JSON.stringify(coverage.uncoveredItemIds);
   const route = continuationRouteSql(input.route);
   const retained = `(messages.turn_id IS NULL OR messages.turn_id NOT IN (SELECT id FROM orchestration_v2_entities
     WHERE kind = 'rolled-back-turn' AND thread_id = messages.conversation_id))`;
   const messageWhere = `messages.conversation_id = ? AND messages.role IN ('user','assistant')
     AND messages.id <> ? ${route.sql} AND ${retained} AND ${NOT_QUEUED}`;
-  const messageParameters = [input.threadId, input.excludedMessageId ?? "", ...route.parameters];
+  const messageParameters: (string | number | null)[] = [input.threadId, input.excludedMessageId ?? "", ...route.parameters];
+  const messageFilter = messageNotCoveredFilter(coverage, excluded, uncovered);
   const routeTurn = input.route ? continuationRouteTurnSql("item_turn", input.route) : { sql: "1", parameters: [] };
-  const attached = (column: string) => ({
-    sql: `${column} IS NOT NULL AND EXISTS (SELECT 1 FROM agent_turns AS item_turn WHERE item_turn.id = ${column}
-        AND item_turn.conversation_id = ? AND item_turn.status IN ${TERMINAL_TURN_STATUSES} AND ${routeTurn.sql}
-        AND item_turn.id NOT IN (SELECT id FROM orchestration_v2_entities
-          WHERE kind = 'rolled-back-turn' AND thread_id = item_turn.conversation_id))
-      AND NOT EXISTS (SELECT 1 FROM messages AS covered WHERE covered.turn_id = ${column} AND covered.id IN ${COVERED})`,
-    parameters: [input.threadId, ...routeTurn.parameters, excluded],
-  });
-  const activity = attached("activities.turn_id");
-  const plan = attached("agent_plans.turn_id");
-  const files = attached("artifact.turn_id");
-  const interrupt = attached("agent_turns.id");
-  const sources: { source: SourceKind; keyColumn: string; sql: string; parameters: (string | null)[] }[] = [
+  const attached = (column: string, itemIdExpr: string) => {
+    const turnCoveredArms: string[] = [
+      `${itemIdExpr} IN ${COVERED}`,
+      `EXISTS (SELECT 1 FROM messages AS covered WHERE covered.turn_id = ${column} AND covered.id IN ${COVERED})`,
+    ];
+    const coveredParams: (string | number)[] = [uncovered, excluded, excluded];
+    if (coverage.coveredThroughOrdinal !== undefined && coverage.coveredThroughOrdinal > 0) {
+      turnCoveredArms.push(`EXISTS (SELECT 1 FROM orchestration_v2_entities AS cov_run
+        WHERE cov_run.kind = 'run' AND cov_run.thread_id = item_turn.conversation_id AND cov_run.id = item_turn.run_id
+          AND json_extract(cov_run.payload_json, '$.ordinal') <= ?)`);
+      coveredParams.push(coverage.coveredThroughOrdinal);
+    }
+    if (coverage.legacyCovered) {
+      turnCoveredArms.push(`NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS leg_run
+        WHERE leg_run.kind = 'run' AND leg_run.thread_id = item_turn.conversation_id AND leg_run.id = item_turn.run_id
+          AND json_extract(leg_run.payload_json, '$.ordinal') IS NOT NULL)`);
+    }
+    return {
+      sql: `${column} IS NOT NULL AND EXISTS (SELECT 1 FROM agent_turns AS item_turn WHERE item_turn.id = ${column}
+          AND item_turn.conversation_id = ? AND item_turn.status IN ${TERMINAL_TURN_STATUSES} AND ${routeTurn.sql}
+          AND item_turn.id NOT IN (SELECT id FROM orchestration_v2_entities
+            WHERE kind = 'rolled-back-turn' AND thread_id = item_turn.conversation_id)
+          AND (${itemIdExpr} IN ${COVERED} OR NOT (${turnCoveredArms.join(" OR ")})))`,
+      parameters: [input.threadId, ...routeTurn.parameters, ...coveredParams] as (string | number | null)[],
+    };
+  };
+  const activity = attached("activities.turn_id", "('activity:' || activities.id)");
+  const plan = attached("agent_plans.turn_id", "('plan:' || agent_plans.run_id)");
+  const files = attached("artifact.turn_id", "('files:' || artifact.id)");
+  const interrupt = attached("agent_turns.id", "('interrupt:' || agent_turns.id)");
+  const sources: { source: SourceKind; keyColumn: string; sql: string; parameters: (string | number | null)[] }[] = [
     { source: "message", keyColumn: "messages.id", sql: `SELECT 'message' AS source, messages.id AS key, messages.id AS id, messages.turn_id AS turn_id,
         messages.created_at AS at, 0 AS source_order, messages.rowid AS position, messages.role AS kind
-        FROM messages WHERE ${messageWhere} AND messages.id NOT IN ${COVERED}`,
-    parameters: [...messageParameters, excluded] },
+        FROM messages WHERE ${messageWhere} AND ${messageFilter.sql}`,
+    parameters: [...messageParameters, ...messageFilter.parameters] },
     { source: "activity", keyColumn: "activities.id", sql: `SELECT 'activity' AS source, activities.id AS key, 'activity:' || activities.id AS id,
         activities.turn_id AS turn_id, activities.created_at AS at, 1 AS source_order, activities.rowid AS position,
         activities.kind AS kind FROM activities
         WHERE activities.conversation_id = ? AND activities.kind IN ('command','error') AND activities.status <> 'running'
-          AND ${activity.sql} AND ('activity:' || activities.id) NOT IN ${COVERED}`,
-    parameters: [input.threadId, ...activity.parameters, excluded] },
+          AND ${activity.sql}`,
+    parameters: [input.threadId, ...activity.parameters] },
     { source: "plan", keyColumn: "agent_plans.run_id", sql: `SELECT 'plan' AS source, agent_plans.run_id AS key, 'plan:' || agent_plans.run_id AS id,
         agent_plans.turn_id AS turn_id, agent_plans.updated_at AS at, 2 AS source_order, agent_plans.rowid AS position,
         'plan' AS kind FROM agent_plans
-        WHERE agent_plans.conversation_id = ? AND ${plan.sql} AND ('plan:' || agent_plans.run_id) NOT IN ${COVERED}`,
-    parameters: [input.threadId, ...plan.parameters, excluded] },
+        WHERE agent_plans.conversation_id = ? AND ${plan.sql}`,
+    parameters: [input.threadId, ...plan.parameters] },
     { source: "files", keyColumn: "artifact.id", sql: `SELECT 'files' AS source, artifact.id AS key, 'files:' || artifact.id AS id,
         artifact.turn_id AS turn_id, artifact.updated_at AS at, 3 AS source_order, artifact.rowid AS position,
         'file-change' AS kind FROM turn_git_artifacts AS artifact
         WHERE artifact.conversation_id = ? AND artifact.status IN ('ready','partial')
           AND (CASE WHEN json_valid(artifact.files_json) THEN json_array_length(artifact.files_json) ELSE 0 END) > 0
           AND EXISTS (SELECT 1 FROM agent_turns AS owner WHERE owner.id = artifact.turn_id AND owner.association = 'authoritative')
-          AND ${files.sql} AND ('files:' || artifact.id) NOT IN ${COVERED}`,
-    parameters: [input.threadId, ...files.parameters, excluded] },
+          AND ${files.sql}`,
+    parameters: [input.threadId, ...files.parameters] },
     { source: "interrupt", keyColumn: "agent_turns.id", sql: `SELECT 'interrupt' AS source, agent_turns.id AS key, 'interrupt:' || agent_turns.id AS id,
         agent_turns.id AS turn_id, COALESCE(agent_turns.completed_at, agent_turns.updated_at) AS at, 4 AS source_order,
         agent_turns.rowid AS position, agent_turns.status AS kind FROM agent_turns
         WHERE agent_turns.conversation_id = ? AND agent_turns.status IN ('cancelled','interrupted')
-          AND agent_turns.started_at IS NOT NULL AND ${interrupt.sql} AND ('interrupt:' || agent_turns.id) NOT IN ${COVERED}`,
-    parameters: [input.threadId, ...interrupt.parameters, excluded] },
+          AND agent_turns.started_at IS NOT NULL AND ${interrupt.sql}`,
+    parameters: [input.threadId, ...interrupt.parameters] },
   ];
   return { sql: sources.map(({ sql }) => sql).join(" UNION ALL "), parameters: sources.flatMap(({ parameters }) => parameters),
-    sources, messageWhere, messageParameters, retained };
+    sources, messageWhere, messageParameters, messageFilter, retained };
 }
 
 type SourceContent = Pick<PortableHistoryItem, "kind" | "status" | "text">;
@@ -168,12 +270,12 @@ export function portableHistorySource(database: Database.Database, input: {
   threadId: string;
   excludedMessageId?: string;
   excludedItemIds?: readonly string[];
+  coverage?: PortableHistoryCoverage;
   route?: ContinuationRouteFilter;
 }) {
-  if ((input.excludedItemIds?.length ?? 0) > 2_048) throw new Error("Too many covered history items.");
-  const excluded = JSON.stringify(input.excludedItemIds ?? []);
-  const index = candidateIndex(input, excluded);
-  const count = (sql: string, values: Array<string | null>) =>
+  const coverage = resolveCoverage(input);
+  const index = candidateIndex(input, coverage);
+  const count = (sql: string, values: Array<string | number | null>) =>
     (database.prepare(`SELECT count(*) AS count FROM ${sql}`).get(...values) as { count: number }).count;
   const eligible = count(`(${index.sql})`, index.parameters);
   const routedCount = count(`messages WHERE ${index.messageWhere}`, index.messageParameters);
@@ -223,11 +325,11 @@ export function portableHistorySource(database: Database.Database, input: {
   }
   const backings = runBackings(database, input.threadId, [...new Set(items.flatMap(({ runId }) => runId ? [runId] : []))]);
   for (const item of items) item.providerBackingId = item.runId ? backings.get(item.runId) ?? null : null;
-  const inherited = portableForkHistory(database, input.threadId, input.excludedItemIds ?? []);
+  const inherited = portableForkHistory(database, input.threadId, coverage);
   const combined = [...inherited.items, ...items];
   const bounded = boundedHistoryCandidates(combined);
-  const eligibleMessages = count(`messages WHERE ${index.messageWhere} AND messages.id NOT IN ${COVERED}`,
-    [...index.messageParameters, excluded]);
+  const eligibleMessages = count(`messages WHERE ${index.messageWhere} AND ${index.messageFilter.sql}`,
+    [...index.messageParameters, ...index.messageFilter.parameters]);
   return { items: bounded, omittedCount: eligible - items.length + inherited.omittedCount + combined.length - bounded.length,
     activityOmittedCount: eligible - eligibleMessages - bounded.filter(isActivityItem).length,
     withheldCount: total - routedCount,
@@ -280,7 +382,7 @@ export function portableHistoryItem(database: Database.Database, input: {
     ? prefix : "message";
   const key = source === "message" ? input.itemId : input.itemId.slice(separator + 1);
   const find = (route?: ContinuationRouteFilter) => {
-    const arm = candidateIndex({ threadId: input.threadId, ...(route ? { route } : {}) }, "[]").sources
+    const arm = candidateIndex({ threadId: input.threadId, ...(route ? { route } : {}) }, EMPTY_COVERAGE).sources
       .find((candidate) => candidate.source === source)!;
     return database.prepare(`${arm.sql} AND ${arm.keyColumn} = ? LIMIT 1`).get(...arm.parameters, key) as SourceRow | undefined;
   };
@@ -330,10 +432,12 @@ export function readPortableContinuationHistory(database: Database.Database, inp
     estimateNativeOccupancy?: true;
     hostToolBridgeAttested?: boolean;
   }) {
+  const coverage = resolveCoverage(input);
+  const isDelta = hasCoverage(coverage);
   const source = portableHistorySource(database, input);
   if (source.items.length === 0 && source.omittedCount === 0 && source.withheldCount === 0) return null;
   const nativeContextEstimate = input.estimateNativeOccupancy && input.nativeUsedTokens === undefined
-    ? coveredHistoryOccupancy(database, input.threadId, input.excludedItemIds ?? []) : undefined;
+    ? coveredHistoryOccupancy(database, input.threadId, coverage) : undefined;
   const budget = Math.min(Math.max(0, input.capacityBytes),
     portableHistoryBudget({ ...input, ...(nativeContextEstimate === undefined ? {} : { nativeContextEstimate }) }));
   const references = sentConversationContextReferences(database, input.threadId,
@@ -347,11 +451,11 @@ export function readPortableContinuationHistory(database: Database.Database, inp
       ...(note ? { origin: WATCHER_NOTE_HISTORY_LABELS[note.automatic === 1 ? "automatic" : "forwarded"] } : {}) };
   });
   const selected = selectPortableHistory({ threadId: input.threadId, items,
-    previouslyOmitted: source.omittedCount, budget, purpose: input.excludedItemIds?.length ? "delta" : "restore",
+    previouslyOmitted: source.omittedCount, budget, purpose: isDelta ? "delta" : "restore",
     turnOrdinals: source.turnOrdinals,
     ...(input.hostToolBridgeAttested === undefined ? {} : { hostToolBridgeAttested: input.hostToolBridgeAttested }) });
   const activityIds = new Set(items.filter(isActivityItem).map(({ id }) => id));
-  const label = input.excludedItemIds?.length ? "Context added since this session last ran" : RESTORED_CHAT_HISTORY_LABEL;
+  const label = isDelta ? "Context added since this session last ran" : RESTORED_CHAT_HISTORY_LABEL;
   const blocks: ContinuationHistoryBlock[] = [{ label: `${label} · ${selected.items.length} messages`, content: selected.rendered }];
   let remaining = budget - selected.cost;
   const append = (block: ContinuationHistoryBlock | null) => {

@@ -369,6 +369,85 @@ describe("Pi RPC production harness", () => {
     } finally { run.cancel(true); await run.result; }
   });
 
+  it("returns false on clean Pi steer RPC rejection without cancelling the active turn", async () => {
+    const test = fixture(`if(request.type === "prompt") {streaming=true;reply(request,{disposition:"started"});}
+      else if(request.type === "steer") {
+        emit({type:"response",id:request.id,command:"steer",success:false,error:"not steerable right now"});
+        setTimeout(() => {
+          emit({type:"message_start",message:{role:"assistant"}});
+          emit({type:"message_update",assistantMessageEvent:{type:"text_delta",delta:"Still completed"}});
+          emit({type:"message_end",message:{role:"assistant",stopReason:"stop",content:[]}});
+          streaming=false; emit({type:"agent_settled"});
+        }, 20);
+      }`);
+    const run = test.start();
+    await waitFor("Pi running", () => test.events.some((event) => event.type === "status" && event.status === "running"));
+    if (run.extension.kind !== "pi-rpc") throw new Error("wrong extension");
+    await expect(run.extension.steer!({ content: "refused follow-up", imagePaths: [] })).resolves.toBe(false);
+    const result = await run.result;
+    expect(result).toMatchObject({ status: "completed", text: "Still completed", cleanupConfirmed: true });
+    expect(result.error).toBeUndefined();
+    const commands = test.requests().map((request) => request.type);
+    expect(commands).not.toContain("clear_queue");
+    expect(commands).not.toContain("abort");
+  });
+
+  it("redacts, clips, and surfaces cleared Pi queued messages on abort (afb8619e1d)", async () => {
+    const test = fixture(`
+      if (request.type === "prompt") { streaming=true; reply(request,{disposition:"started"}); }
+    `);
+    // Override clear_queue via a custom fixture where clear_queue returns queued entries including a secret and long text.
+    const root = realpathSync(portableFixtureRoot("pi-rpc-clear-queue")); roots.push(root);
+    const home = join(root, "pi-home"); mkdirSync(home);
+    const executable = writeNodeFlagExecutable(root, "pi", `
+const path = require("node:path");
+const args = process.argv.slice(2); const at = (flag) => args[args.indexOf(flag) + 1];
+const sessionId = "f4d51282-5f59-4a8c-9bfc-fd7573ae46aa";
+const sessionFile = path.join(at("--session-dir") || ${JSON.stringify(root)}, "2026-10-29_" + sessionId + ".jsonl");
+const model = { provider: "test", id: "model", name: "Test model", reasoning: true, input: ["text"] };
+const emit = (event) => process.stdout.write(JSON.stringify(event) + "\\n");
+const reply = (request, data) => emit({type: "response", id: request.id, command: request.type, success: true, data});
+let streaming = false;
+emit({type:"extension_ui_request", id:"ready", method:"notify", message:"inertia-ready:"+process.env.INERTIA_PI_READY});
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.type === "get_state") return reply(request, {sessionId, sessionFile, model, isStreaming: streaming, isCompacting:false, pendingMessageCount:0});
+  if (request.type === "get_available_models") return reply(request, {models:[model]});
+  if (request.type === "prompt") { streaming = true; return reply(request, {disposition:"started"}); }
+  if (request.type === "clear_queue") {
+    return reply(request, {
+      steering: ["Check token secret-for-pi-tests now", "Long entry " + "😀".repeat(400)],
+      followUp: [{ text: "Follow up task" }],
+    });
+  }
+  if (request.type === "abort") { streaming = false; return reply(request); }
+});
+`);
+    const events: AgentHarnessEvent[] = [];
+    const run = createPiRpcHarness({ startupTimeoutMs: 2000, runTimeoutMs: 10_000 }).start({
+      executable,
+      environment: { ...process.env, PI_CODING_AGENT_DIR: home, TEST_API_KEY: "secret-for-pi-tests" },
+      input: nativeProviderRunInput({ providerId: "pi", cwd: root, conversationId: "pi-clear", prompt: "Hello", access: "supervised", interactionMode: "build" }),
+      providerNativeToolsAvailable: true,
+      callbacks: { onEvent: (event) => events.push(event) },
+    });
+    await waitFor("Pi running", () => events.some((event) => event.type === "status" && event.status === "running"));
+    run.cancel(false);
+    expect(await run.result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    const notice = events.find(
+      (event): event is Extract<AgentHarnessEvent, { type: "activity" }> =>
+        event.type === "activity" && event.kind === "system" && event.phase === "info" && event.label.includes("Cleared queued Pi"),
+    );
+    expect(notice).toBeDefined();
+    expect(notice!.detail).toContain("Follow up task");
+    expect(notice!.detail).not.toContain("secret-for-pi-tests");
+    expect(notice!.detail).toContain("[redacted]");
+    expect(notice!.detail!.length).toBeLessThanOrEqual(4_000);
+    // Surrogate-safe clipping: no lone high/low surrogates in notice detail.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(notice!.detail!)).toBe(false);
+    void test;
+  });
+
   it("fails malformed UTF-8 instead of admitting replacement-character JSON", async () => {
     const test=fixture(`if(request.type === "prompt") process.stdout.write(Buffer.from([0xff,10]));`);
     expect(await test.start().result).toMatchObject({status:"failed",cleanupConfirmed:true});

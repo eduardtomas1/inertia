@@ -1,5 +1,6 @@
 import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
 import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "./migrations/orchestration-v2-receipt-status";
+import { QUEUE_ITEMS_SCHEMA_VERSION } from "./migrations/queue-items";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
 import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
 import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
@@ -237,6 +238,24 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "last_sequence",
     "updated_at",
   ]],
+  [QUEUE_ITEMS_SCHEMA_VERSION, "queued_messages", [
+    "queue_position",
+    "queue_held",
+    "kind",
+    "created_by",
+    "creation_source",
+    "device_id",
+    "steer_follow_up_of_run_id",
+    "edit_revision",
+    "edited_at",
+    "creation_digest",
+    "dispatch_ordinal",
+    "run_id",
+    "delivery_mode",
+    "steer_when_ready_run_id",
+    "selection_json",
+    "follows_thread_selection",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -331,6 +350,7 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [127, "delegated_tasks_child_status_idx"],
     [127, "delegated_tasks_source_turn_idx"],
     [127, "delegated_task_turns_task_idx"],
+    [QUEUE_ITEMS_SCHEMA_VERSION, "queued_messages_conversation_state_position_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [

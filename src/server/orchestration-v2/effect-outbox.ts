@@ -15,15 +15,28 @@ interface EffectRow {
 
 export const MAX_EFFECT_ATTEMPTS = 5;
 export const SETTLED_EFFECT_PRUNE_BATCH = 500;
+export const EFFECT_WORKER_SLOT_WAIT = 30_000;
+export const MALFORMED_EFFECT_PAYLOAD_CODE = "malformed-effect-payload";
+export const PRIORITY_NON_BLOCKING_EFFECT_KINDS = ["provider.interrupt"] as const;
 
-function fromRow(row: EffectRow): OrchestrationEffect {
+function tryParsePayload(payloadJson: string): { ok: true; value: JsonValue } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(payloadJson) as JsonValue };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function fromRow(row: EffectRow, parsedPayload?: JsonValue): OrchestrationEffect {
+  const payload = parsedPayload !== undefined ? parsedPayload : (tryParsePayload(row.payload_json).ok
+    ? (JSON.parse(row.payload_json) as JsonValue) : null);
   return {
     sequence: row.sequence, id: row.id, projectId: row.project_id, threadId: row.thread_id,
     eventSequence: row.event_sequence, kind: row.kind, replayPolicy: row.replay_policy,
     runtimeId: row.runtime_id, state: row.state, attempts: row.attempts,
     availableAt: row.available_at, claimId: row.claim_id, claimedAt: row.claimed_at,
     settledAt: row.settled_at, failureCode: row.failure_code,
-    payload: JSON.parse(row.payload_json) as JsonValue,
+    payload,
   };
 }
 
@@ -31,9 +44,23 @@ function kindList(kinds: Iterable<string>): string {
   return JSON.stringify([...kinds].map((kind) => durableId(kind)));
 }
 
+const PRIORITY_KIND_JSON = kindList(PRIORITY_NON_BLOCKING_EFFECT_KINDS);
+
+function validatePerKindCaps(perKindCaps: Readonly<Record<string, number>> | undefined): void {
+  if (!perKindCaps) return;
+  for (const [kind, cap] of Object.entries(perKindCaps)) {
+    durableId(kind);
+    if (!Number.isSafeInteger(cap) || cap < 0) {
+      throw new Error(`Invalid orchestration effect per-kind cap for ${kind}.`);
+    }
+  }
+}
+
 const unblockedCandidate = `NOT EXISTS (SELECT 1 FROM orchestration_v2_effects predecessor
   WHERE predecessor.thread_id = candidate.thread_id AND predecessor.sequence < candidate.sequence
-    AND predecessor.state IN ('pending','running'))`;
+    AND predecessor.state IN ('pending','running')
+    AND (candidate.kind NOT IN (SELECT value FROM json_each('${PRIORITY_KIND_JSON}'))
+      OR predecessor.kind IN (SELECT value FROM json_each('${PRIORITY_KIND_JSON}'))))`;
 
 export class OrchestrationEffectOutbox {
   private readonly listeners = new Set<() => void>();
@@ -48,6 +75,11 @@ export class OrchestrationEffectOutbox {
 
   get open(): boolean {
     return this.database.open;
+  }
+
+  /** @internal */
+  get connection(): Database.Database {
+    return this.database;
   }
 
   subscribe(listener: () => void): () => void {
@@ -110,24 +142,35 @@ export class OrchestrationEffectOutbox {
 
   claimControl(id: string): OrchestrationEffect | null {
     durableId(id);
-    return this.database.transaction(() => {
+    let skippedMalformed = false;
+    const claimed = this.database.transaction(() => {
       const now = durableTimestamp(this.clock());
       const row = this.database.prepare(`SELECT * FROM orchestration_v2_effects
         WHERE id = ? AND state = 'pending' AND runtime_id = ?`).get(id, this.runtimeId) as EffectRow | undefined;
       if (!row) return null;
+      const parsed = tryParsePayload(row.payload_json);
+      if (!parsed.ok) {
+        this.markMalformedFailed(row.id, now);
+        skippedMalformed = true;
+        return null;
+      }
       const claimId = randomUUID();
       const changed = this.database.prepare(`UPDATE orchestration_v2_effects
         SET state = 'running', claim_id = ?, claimed_at = ?, attempts = attempts + 1
         WHERE id = ? AND state = 'pending' AND runtime_id = ?`)
         .run(claimId, now, row.id, this.runtimeId).changes;
       if (changed !== 1) return null;
-      return fromRow({ ...row, state: "running", claim_id: claimId, claimed_at: now, attempts: row.attempts + 1 });
+      return fromRow({ ...row, state: "running", claim_id: claimId, claimed_at: now, attempts: row.attempts + 1 }, parsed.value);
     }).immediate();
+    if (skippedMalformed) this.notifyAvailable();
+    return claimed;
   }
 
-  claimNext(kinds: Iterable<string>): OrchestrationEffect | null {
-    const list = kindList(kinds);
-    return list === "[]" ? null : this.claimWhere(null, list, null);
+  claimNext(kinds: Iterable<string>, options: { perKindCaps?: Readonly<Record<string, number>> } = {}): OrchestrationEffect | null {
+    validatePerKindCaps(options.perKindCaps);
+    const kindArray = [...kinds].map((kind) => durableId(kind));
+    if (kindArray.length === 0) return null;
+    return this.claimWhere(null, kindArray, null, options.perKindCaps);
   }
 
   unsettledBefore(threadId: string, sequence: number, kinds: Iterable<string>): string[] {
@@ -141,9 +184,11 @@ export class OrchestrationEffectOutbox {
       .all(threadId, sequence, list) as { id: string }[]).map(({ id }) => id);
   }
 
-  nextClaimableAt(kinds: Iterable<string>): string | null {
-    const list = kindList(kinds);
-    if (list === "[]") return null;
+  nextClaimableAt(kinds: Iterable<string>, options: { perKindCaps?: Readonly<Record<string, number>> } = {}): string | null {
+    validatePerKindCaps(options.perKindCaps);
+    const eligible = this.filterKindsByCaps([...kinds].map((kind) => durableId(kind)), options.perKindCaps);
+    if (eligible.length === 0) return null;
+    const list = JSON.stringify(eligible);
     const row = this.database.prepare(`SELECT MIN(candidate.available_at) AS available_at
       FROM orchestration_v2_effects candidate
       WHERE candidate.state = 'pending' AND candidate.runtime_id = ?
@@ -202,28 +247,77 @@ export class OrchestrationEffectOutbox {
       .run(before, kinds, kinds, limit).changes;
   }
 
-  private claimWhere(id: string | null, kinds: string | null, passing: string | null): OrchestrationEffect | null {
-    return this.database.transaction(() => {
+  private filterKindsByCaps(kinds: readonly string[], perKindCaps: Readonly<Record<string, number>> | undefined): string[] {
+    if (!perKindCaps || Object.keys(perKindCaps).length === 0) return [...kinds];
+    const runningRows = this.database.prepare(`SELECT kind, COUNT(*) AS count FROM orchestration_v2_effects
+      WHERE state = 'running' AND runtime_id = ? GROUP BY kind`)
+      .all(this.runtimeId) as { kind: string; count: number }[];
+    const runningByKind = new Map(runningRows.map(({ kind, count }) => [kind, count]));
+    return kinds.filter((kind) => {
+      if (!Object.hasOwn(perKindCaps, kind)) return true;
+      const cap = perKindCaps[kind]!;
+      return cap > 0 && (runningByKind.get(kind) ?? 0) < cap;
+    });
+  }
+
+  private markMalformedFailed(id: string, now: string): void {
+    this.database.prepare(`UPDATE orchestration_v2_effects
+      SET state = 'failed', settled_at = ?, claim_id = NULL, claimed_at = NULL, failure_code = ?
+      WHERE id = ? AND state = 'pending' AND runtime_id = ?`)
+      .run(now, MALFORMED_EFFECT_PAYLOAD_CODE, id, this.runtimeId);
+  }
+
+  private claimWhere(
+    id: string | null,
+    kinds: readonly string[] | null,
+    passing: string | null,
+    perKindCaps?: Readonly<Record<string, number>>,
+  ): OrchestrationEffect | null {
+    let skippedMalformed = false;
+    const claimed = this.database.transaction(() => {
       const now = durableTimestamp(this.clock());
-      const row = this.database.prepare(`SELECT candidate.* FROM orchestration_v2_effects candidate
+      let kindJson: string | null = null;
+      if (kinds !== null) {
+        const eligible = this.filterKindsByCaps(kinds, perKindCaps);
+        if (eligible.length === 0) return null;
+        kindJson = JSON.stringify(eligible);
+      }
+      const select = this.database.prepare(`SELECT candidate.* FROM orchestration_v2_effects candidate
         WHERE candidate.state = 'pending' AND candidate.runtime_id = ? AND candidate.available_at <= ?
           AND (? IS NULL OR candidate.id = ?)
           AND (? IS NULL OR candidate.kind IN (SELECT value FROM json_each(?)))
           AND NOT EXISTS (SELECT 1 FROM orchestration_v2_effects predecessor
             WHERE predecessor.thread_id = candidate.thread_id AND predecessor.sequence < candidate.sequence
               AND predecessor.state IN ('pending','running')
-              AND (? IS NULL OR predecessor.kind NOT IN (SELECT value FROM json_each(?))))
-        ORDER BY candidate.sequence LIMIT 1`)
-        .get(this.runtimeId, now, id, id, kinds, kinds, passing, passing) as EffectRow | undefined;
-      if (!row) return null;
-      const claimId = randomUUID();
-      const changed = this.database.prepare(`UPDATE orchestration_v2_effects
-        SET state = 'running', claim_id = ?, claimed_at = ?, attempts = attempts + 1
-        WHERE id = ? AND state = 'pending' AND runtime_id = ?`)
-        .run(claimId, now, row.id, this.runtimeId).changes;
-      if (changed !== 1) return null;
-      return fromRow({ ...row, state: "running", claim_id: claimId, claimed_at: now, attempts: row.attempts + 1 });
+              AND (? IS NULL OR predecessor.kind NOT IN (SELECT value FROM json_each(?)))
+              AND (candidate.kind NOT IN (SELECT value FROM json_each(?))
+                OR predecessor.kind IN (SELECT value FROM json_each(?))))
+        ORDER BY CASE WHEN candidate.kind IN (SELECT value FROM json_each(?)) THEN 0 ELSE 1 END,
+          candidate.sequence LIMIT 1`);
+      for (;;) {
+        const row = select.get(
+          this.runtimeId, now, id, id, kindJson, kindJson, passing, passing,
+          PRIORITY_KIND_JSON, PRIORITY_KIND_JSON, PRIORITY_KIND_JSON,
+        ) as EffectRow | undefined;
+        if (!row) return null;
+        const parsed = tryParsePayload(row.payload_json);
+        if (!parsed.ok) {
+          this.markMalformedFailed(row.id, now);
+          skippedMalformed = true;
+          if (id !== null) return null;
+          continue;
+        }
+        const claimId = randomUUID();
+        const changed = this.database.prepare(`UPDATE orchestration_v2_effects
+          SET state = 'running', claim_id = ?, claimed_at = ?, attempts = attempts + 1
+          WHERE id = ? AND state = 'pending' AND runtime_id = ?`)
+          .run(claimId, now, row.id, this.runtimeId).changes;
+        if (changed !== 1) return null;
+        return fromRow({ ...row, state: "running", claim_id: claimId, claimed_at: now, attempts: row.attempts + 1 }, parsed.value);
+      }
     }).immediate();
+    if (skippedMalformed) this.notifyAvailable();
+    return claimed;
   }
 
   /**
@@ -291,6 +385,8 @@ export const EFFECT_SETTLE_RETRY_POLICY: EffectSettleRetryPolicy = Object.freeze
 
 export interface OrchestrationEffectDispatcherOptions {
   readonly concurrency?: number;
+  readonly slotWaitMs?: number;
+  readonly perKindCaps?: Readonly<Record<string, number>>;
   readonly onFailure?: (failure: EffectFailure) => void;
   readonly afterTask?: () => void;
   readonly settleRetry?: EffectSettleRetryPolicy;
@@ -312,9 +408,19 @@ export function isDatabaseLockTimeout(error: unknown): boolean {
   return typeof code === "string" && /^SQLITE_(?:BUSY|LOCKED)(?:_|$)/u.test(code);
 }
 
+interface ActiveEffectTask {
+  readonly kind: string;
+  readonly controller: AbortController;
+  task: Promise<void>;
+  slotted: boolean;
+  slotTimer: ReturnType<typeof setTimeout> | null;
+}
+
 export class OrchestrationEffectDispatcher {
-  private readonly active = new Map<string, { controller: AbortController; task: Promise<void> }>();
+  private readonly active = new Map<string, ActiveEffectTask>();
   private readonly concurrency: number;
+  private readonly slotWaitMs: number;
+  private readonly perKindCaps: Readonly<Record<string, number>> | undefined;
   private readonly shutdown = new AbortController();
   private readonly settleRetry: EffectSettleRetryPolicy;
   private closed = false;
@@ -328,6 +434,12 @@ export class OrchestrationEffectDispatcher {
     if (!Number.isSafeInteger(this.concurrency) || this.concurrency < 1 || this.concurrency > 32) {
       throw new Error("Invalid orchestration effect concurrency.");
     }
+    this.slotWaitMs = options.slotWaitMs ?? EFFECT_WORKER_SLOT_WAIT;
+    if (!Number.isSafeInteger(this.slotWaitMs) || this.slotWaitMs < 1) {
+      throw new Error("Invalid orchestration effect slot wait.");
+    }
+    validatePerKindCaps(options.perKindCaps);
+    this.perKindCaps = options.perKindCaps ? { ...options.perKindCaps } : undefined;
     this.settleRetry = options.settleRetry ?? EFFECT_SETTLE_RETRY_POLICY;
   }
 
@@ -336,24 +448,47 @@ export class OrchestrationEffectDispatcher {
   }
 
   get saturated(): boolean {
-    return this.active.size >= this.concurrency;
+    return this.slottedCount() >= this.concurrency;
   }
 
   pump(): number {
     let claimed = 0;
-    while (!this.closed && this.active.size < this.concurrency && this.handlers.size > 0) {
-      const effect = this.outbox.claimNext(this.handlers.keys());
+    while (!this.closed && this.slottedCount() < this.concurrency && this.handlers.size > 0) {
+      const eligibleKinds = this.eligibleKinds();
+      if (eligibleKinds.length === 0) break;
+      const effect = this.outbox.claimNext(eligibleKinds, this.perKindCaps ? { perKindCaps: this.perKindCaps } : undefined);
       if (!effect) break;
       claimed += 1;
       const controller = new AbortController();
+      const entry: ActiveEffectTask = {
+        kind: effect.kind,
+        controller,
+        task: Promise.resolve(),
+        slotted: true,
+        slotTimer: null,
+      };
+      const slotTimer = setTimeout(() => {
+        if (entry.slotTimer === slotTimer) entry.slotTimer = null;
+        if (entry.slotted) {
+          entry.slotted = false;
+          if (!this.closed) this.options.afterTask?.();
+        }
+      }, this.slotWaitMs);
+      slotTimer.unref?.();
+      entry.slotTimer = slotTimer;
       const task = Promise.resolve()
         .then(() => this.execute(effect, controller.signal))
         .catch(() => undefined)
         .finally(() => {
+          if (entry.slotTimer) {
+            clearTimeout(entry.slotTimer);
+            entry.slotTimer = null;
+          }
           if (this.active.get(effect.id)?.task === task) this.active.delete(effect.id);
           if (!this.closed) this.options.afterTask?.();
         });
-      this.active.set(effect.id, { controller, task });
+      entry.task = task;
+      this.active.set(effect.id, entry);
     }
     return claimed;
   }
@@ -365,8 +500,37 @@ export class OrchestrationEffectDispatcher {
   async close(): Promise<void> {
     this.closed = true;
     this.shutdown.abort(SHUTDOWN);
-    for (const { controller } of this.active.values()) controller.abort(SHUTDOWN);
+    for (const entry of this.active.values()) {
+      if (entry.slotTimer) {
+        clearTimeout(entry.slotTimer);
+        entry.slotTimer = null;
+      }
+      entry.controller.abort(SHUTDOWN);
+    }
     await Promise.allSettled([...this.active.values()].map(({ task }) => task));
+  }
+
+  private slottedCount(): number {
+    let count = 0;
+    for (const entry of this.active.values()) if (entry.slotted) count += 1;
+    return count;
+  }
+
+  private eligibleKinds(): string[] {
+    if (!this.perKindCaps) return [...this.handlers.keys()];
+    const runningByKind = new Map<string, number>();
+    for (const entry of this.active.values()) {
+      runningByKind.set(entry.kind, (runningByKind.get(entry.kind) ?? 0) + 1);
+    }
+    const eligible: string[] = [];
+    for (const kind of this.handlers.keys()) {
+      if (Object.hasOwn(this.perKindCaps, kind)) {
+        const cap = this.perKindCaps[kind]!;
+        if (cap <= 0 || (runningByKind.get(kind) ?? 0) >= cap) continue;
+      }
+      eligible.push(kind);
+    }
+    return eligible;
   }
 
   private async execute(effect: OrchestrationEffect, signal: AbortSignal): Promise<void> {

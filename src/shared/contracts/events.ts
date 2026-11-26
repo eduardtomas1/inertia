@@ -111,6 +111,7 @@ export type RuntimeMutationEvent =
       conversationId: string | null;
     }
   | { type: "conversation.detail.invalidated"; conversationId: string }
+  | { type: "conversation.queue.changed"; conversationId: string; revision: number }
   | { type: "todos.updated"; todos: Todo[] }
   | { type: "library.updated"; library: LibrarySnapshot }
   | { type: "conversation.message.persisted"; message: ChatMessage }

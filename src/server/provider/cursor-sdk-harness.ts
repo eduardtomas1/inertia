@@ -6,6 +6,7 @@ import { createAgentHarnessEmitter, type AgentHarness, type AgentHarnessCapabili
 import { providerRunTerminal, ProviderSteerDeliveryUnknownError, type ProviderRunResult } from "./contracts";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { CursorSdkCleanupError, openCursorSdkWorker } from "./cursor-sdk-process";
+import { isCursorSdkCleanSteerRefusal } from "./cursor-sdk-session";
 import { cursorSdkStateRoot, type CursorSdkConfiguration } from "./cursor-sdk-service";
 import { cursorSdkAgentStoreDirectory, cursorSdkStoreDirectory, cursorSdkStoreHasJournal, CursorSdkStoreMissingError } from "./cursor-sdk-store";
 import { cursorSdkStorePlan } from "./cursor-sdk-store-plan";
@@ -225,10 +226,13 @@ export function startCursorSdkRun(options: AgentHarnessStartOptions, dependencie
   return { harnessId: "cursor-sdk", providerId: "cursor", result, cancel, extension: { kind: "cursor-sdk",
     respondToApproval: (id, decision) => host?.respondToApproval(id, decision) ?? false, respondToInput: () => false,
     steer: async (steer) => {
-      if (!live || !worker || steer.imagePaths.length) return false;
+      if (!live || !worker || cancelled || steer.imagePaths.length) return false;
       let outcome: unknown;
       try { outcome = await worker.channel.request("steer", steer.content); }
-      catch { throw new ProviderSteerDeliveryUnknownError(!live); }
+      catch (error) {
+        if (isCursorSdkCleanSteerRefusal(error)) return false;
+        throw new ProviderSteerDeliveryUnknownError(!live);
+      }
       if (outcome === "complete_delivered") return true;
       if (outcome === "revert_to_followup") return false;
       throw new ProviderSteerDeliveryUnknownError(!live);

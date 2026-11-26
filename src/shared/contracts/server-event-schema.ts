@@ -961,6 +961,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return recordWithStrings(value, "requestId", "projectId")
         && nullableStringField(value, "conversationId");
     case "conversation.detail.invalidated": return stringField(value, "conversationId");
+    case "conversation.queue.changed": return stringField(value, "conversationId") && integerFieldAtLeast(value, "revision");
     case "todos.updated": return Array.isArray(value.todos) && todoCollectionCoherent(value.todos);
     case "library.updated": return record(value.library) && libraryCoherent(value.library);
     case "conversation.message.persisted":

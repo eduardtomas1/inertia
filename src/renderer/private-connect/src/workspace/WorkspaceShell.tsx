@@ -49,7 +49,7 @@ export function WorkspaceShell({
           Offline — showing only data already held in this tab. Conversations and API responses are not stored for offline use.
         </div>
       )}
-      {error && <div className="banner error">{error}</div>}
+      {error && <div className="banner error" role="alert">{error}</div>}
       <div className="layout">
         <ProjectList
           shell={shell}

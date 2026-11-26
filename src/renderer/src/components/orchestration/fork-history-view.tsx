@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GitFork } from "lucide-react";
 import type { ForkHistoryResult } from "@shared/orchestration-forks";
 import { forkHistoryResultSchema } from "@shared/orchestration-forks";
@@ -14,9 +14,17 @@ function ForkLineage({ surface }: { surface: ForkSurface }) {
   const [page, setPage] = useState<ForkHistoryResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const { conversationId, run } = surface;
+  const lastConversationId = useRef(conversationId);
   useEffect(() => {
     let current = true;
+    if (lastConversationId.current !== conversationId) {
+      lastConversationId.current = conversationId;
+      setPage(null);
+      setError(null);
+    }
+    setBusy(true);
     void run("conversation.fork.history", { type: "conversation.fork.history", payload: { conversationId, limit: 1 } })
       .then((response) => {
         if (!current) return;
@@ -24,10 +32,22 @@ function ForkLineage({ surface }: { surface: ForkSurface }) {
         const loaded = forkHistoryResultSchema.parse(response.result);
         noteForkLineage(conversationId, loaded.lineage !== null);
         setPage(loaded);
-      }).catch(() => { if (current) setError("Inherited history could not be loaded."); });
+        setError(null);
+      }).catch(() => { if (current) setError("Inherited history could not be loaded."); })
+      .finally(() => { if (current) setBusy(false); });
     return () => { current = false; };
-  }, [conversationId, run]);
-  if (!page?.lineage) return null;
+  }, [conversationId, run, attempt]);
+  if (!page?.lineage) {
+    if (!error) return null;
+    return <section className="fork-history" aria-label="Fork lineage">
+      <div className="fork-history-panel">
+        <p role="alert">{error}</p>
+        <button type="button" className="subtle-button" disabled={busy} onClick={() => setAttempt((count) => count + 1)}>
+          {busy ? "Loading…" : "Retry"}
+        </button>
+      </div>
+    </section>;
+  }
   const more = async () => {
     if (busy || page.next === null) return;
     setBusy(true); setError(null);

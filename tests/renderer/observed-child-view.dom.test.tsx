@@ -6,7 +6,7 @@ import { ObservedChildView } from "../../src/renderer/src/components/orchestrati
 import { DelegationSurfaceProvider } from "../../src/renderer/src/components/orchestration/delegation-surface";
 import type { DelegationCommandRunner } from "../../src/renderer/src/components/orchestration/delegation-model";
 import { SubagentGroup } from "../../src/renderer/src/components/response-timeline/SubagentGroup";
-import { ObservedAgentsDetails } from "../../src/renderer/src/components/orchestration/observed-agents-details";
+import { clearObservedAgentsDetailsState, ObservedAgentsDetails } from "../../src/renderer/src/components/orchestration/observed-agents-details";
 import { SubagentTraceDetails } from "../../src/renderer/src/components/SubagentTraceDetails";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import {
@@ -71,7 +71,7 @@ function readResult(children = [root, nested]) {
     controls: Object.fromEntries(children.map((entry) => [entry.id, entry.controls])), omitted: 0, truncated: false }));
 }
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); clearObservedAgentsDetailsState(); vi.restoreAllMocks(); });
 
 describe("observed child view", () => {
   it("shows a read-only lineage view with Stop only where the provider supports it", async () => {

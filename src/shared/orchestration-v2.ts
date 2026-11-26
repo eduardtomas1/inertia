@@ -11,6 +11,7 @@ import { nativeControlEventSchema } from "./orchestration-native-control";
 import { historyEventSchema } from "./orchestration-history";
 import { mergeBackEventSchema } from "./orchestration-merge-back";
 import { delegationEventSchema } from "./orchestration-delegation";
+import { queueEventSchema } from "./orchestration-queue";
 import { runControlEventSchema } from "./orchestration-run-control";
 
 const agentTurnStatusSchema = z.enum(AGENT_TURN_STATUSES);
@@ -94,6 +95,10 @@ export const orchestrationRunSchema = z.object({
    * and on runs settled before stop reasons were recorded.
    */
   providerStopReason: orchestrationProviderStopReasonSchema.optional(),
+  /** Phase 5: the durable queue item that produced this run, when started from the queue. */
+  queueItemId: orchestrationIdSchema.optional(),
+  /** Phase 5: the active run that stop-and-send stopped immediately before starting this run. */
+  afterStopOf: orchestrationIdSchema.optional(),
 }).strict();
 
 export const orchestrationCleanupReleaseSchema = z.object({
@@ -128,6 +133,7 @@ export const orchestrationDomainEventSchema = z.discriminatedUnion("type", [
   ...historyEventSchema.options,
   ...mergeBackEventSchema.options,
   ...delegationEventSchema.options,
+  ...queueEventSchema.options,
   ...runControlEventSchema.options,
   nativeBoundaryEventSchema,
   ...orchestrationForkEventSchema.options,

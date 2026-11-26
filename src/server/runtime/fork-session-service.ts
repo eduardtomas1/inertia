@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { AgentActivity } from "../../shared/contracts";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../../shared/model-routing";
 import type { RuntimeStore } from "../database";
 import type { ProviderManager } from "../providers";
@@ -11,6 +12,7 @@ import { RuntimeRequestError } from "../runtime-errors";
 import { RecordNotFoundError } from "../persistence/errors";
 import { harnessDeclaresCapability } from "../provider/capability-manifest";
 import { nativeControlLockResources } from "../orchestration-v2/native-control-projector";
+import { nativeForkFailureNotice } from "../orchestration-v2/native-control-repository";
 import { OrchestrationConflict } from "../orchestration-v2/types";
 
 interface ForkSessionDependencies {
@@ -18,6 +20,7 @@ interface ForkSessionDependencies {
   providers: Pick<ProviderManager, "resolveModelRoute" | "nativeConversation" | "isRunning">;
   turns: Pick<TurnController, "acquireTurnAdmission">;
   providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "acquire" | "release">;
+  broadcast?: (event: { type: "agent.activity"; activity: AgentActivity }) => void;
 }
 
 /** First-send resolution. The target admission lease is already held by the caller. */
@@ -127,6 +130,15 @@ async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, 
         || !live && store.conversationPath(source.id) !== fork.sourceWorkspaceKey) throw new Error("Native fork scope changed.");
       const settled = store.orchestration.nativeControls.settle(effect, result);
       if (settled.state === "uncertain") throw new RuntimeRequestError("Native fork cleanup is still pending.");
+      if (settled.state === "portable") {
+        const notice = nativeForkFailureNotice(result);
+        if (notice) {
+          const activity = store.orchestration.nativeControls.recordForkFallbackNotice(conversationId, settled.id, notice);
+          if (activity) {
+            try { dependencies.broadcast?.({ type: "agent.activity", activity }); } catch { /* non-blocking notice */ }
+          }
+        }
+      }
     } catch (error) {
       if (store.orchestration.nativeControls.get(operationId)?.state === "running") {
         store.orchestration.nativeControls.uncertain(effect);

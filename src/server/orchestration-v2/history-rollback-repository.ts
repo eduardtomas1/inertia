@@ -7,7 +7,8 @@ import {
   type RollbackFiles,
 } from "../../shared/orchestration-history";
 import {
-  contextHandoffSchema, providerBackingSchema, type OrchestrationBackingEvent, type ProviderBacking,
+  MAX_BACKING_UNCOVERED_ITEMS, contextHandoffSchema, providerBackingSchema,
+  type InheritedCoverage, type OrchestrationBackingEvent, type ProviderBacking,
 } from "../../shared/orchestration-backings";
 import { nativeControlSchema, type NativeControl } from "../../shared/orchestration-native-control";
 import { orchestrationIdSchema } from "../../shared/orchestration-identities";
@@ -217,14 +218,33 @@ export class HistoryRollbackRepository {
 
   private settleBackings(threadId: string, projectId: string, plan: HistoryRollbackPlan,
     native: { control: NativeControl; backing: NonNullable<NativeControl["backing"]> } | null): void {
-    const removed = new Set((this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ?
-      AND turn_id IN (SELECT value FROM json_each(?))`).all(threadId, JSON.stringify(plan.rolledBackTurnIds)) as { id: string }[])
-      .map(({ id }) => id));
+    const rolledBackJson = JSON.stringify(plan.rolledBackTurnIds);
+    const removedMessages = (this.database.prepare(`SELECT id FROM messages WHERE conversation_id = ?
+      AND turn_id IN (SELECT value FROM json_each(?))`).all(threadId, rolledBackJson) as { id: string }[])
+      .map(({ id }) => id);
+    const removed = new Set<string>(removedMessages);
+    for (const turnId of plan.rolledBackTurnIds) removed.add(`interrupt:${turnId}`);
+    for (const { id } of this.database.prepare(`SELECT 'activity:' || id AS id FROM activities
+      WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?))`)
+      .all(threadId, rolledBackJson) as { id: string }[]) removed.add(id);
+    for (const { id } of this.database.prepare(`SELECT 'plan:' || run_id AS id FROM agent_plans
+      WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?))`)
+      .all(threadId, rolledBackJson) as { id: string }[]) removed.add(id);
+    for (const { id } of this.database.prepare(`SELECT 'files:' || id AS id FROM turn_git_artifacts
+      WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?))`)
+      .all(threadId, rolledBackJson) as { id: string }[]) removed.add(id);
     // An unread follow-up of a rolled-back turn is rolled back with it: its queue row never sends.
     this.database.prepare(`UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL
       WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked')
-        AND user_message_id IN (SELECT value FROM json_each(?))`).run(threadId, JSON.stringify([...removed]));
+        AND user_message_id IN (SELECT value FROM json_each(?))`).run(threadId, JSON.stringify(removedMessages));
     pruneTerminalQueuedMessages(this.database, threadId);
+    const retainedOrdinal = this.retainedOrdinal(threadId, plan.retainedTurnId);
+    const rolledBackLegacy = this.database.prepare(`SELECT 1 FROM agent_turns AS turn
+      WHERE turn.conversation_id = ? AND turn.id IN (SELECT value FROM json_each(?))
+        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS run
+          WHERE run.kind = 'run' AND run.thread_id = turn.conversation_id AND run.id = turn.run_id
+            AND json_extract(run.payload_json, '$.ordinal') IS NOT NULL)
+      LIMIT 1`).get(threadId, rolledBackJson) !== undefined;
     const turns = new Set(plan.rolledBackTurnIds);
     const source = native?.control.request.source;
     let active: ProviderBacking | undefined;
@@ -235,6 +255,8 @@ export class HistoryRollbackRepository {
         continue;
       }
       if (!backing.coverageComplete || turns.has(backing.lastTurnId)
+        || (backing.coveredThroughOrdinal ?? 0) > retainedOrdinal
+        || (backing.legacyCovered === true && rolledBackLegacy)
         || backing.coveredItemIds.some((item) => removed.has(item))) {
         this.commit(threadId, projectId, { type: "provider.backing-invalidated", payload: { backingId: backing.id, reason: "rolled-back" } });
       }
@@ -243,13 +265,161 @@ export class HistoryRollbackRepository {
       if (!active) throw new OrchestrationConflict("revision-conflict");
       const replaced = native.backing.continuation?.kind === "new-session";
       const uncredited = this.rolledBackHandoffItems(threadId, active.nativeSessionId, plan.rolledBackTurnIds);
-      this.commit(threadId, projectId, { type: "provider.backing-rewound", payload: { rollbackId: native.control.id,
-        backingId: active.id, nativeSessionId: native.backing.nativeConversationId,
-        coveredItemIds: replaced ? [] : active.coveredItemIds.filter((item) => !removed.has(item) && !uncredited.has(item)),
-        coverageComplete: active.coverageComplete } });
+      const rewoundPayload = this.rewoundCoveragePayload(
+        threadId,
+        active,
+        retainedOrdinal,
+        rolledBackLegacy,
+        replaced,
+        removed,
+        uncredited,
+      );
+      this.commit(threadId, projectId, { type: "provider.backing-rewound", payload: {
+        rollbackId: native.control.id,
+        backingId: active.id,
+        nativeSessionId: native.backing.nativeConversationId,
+        ...rewoundPayload,
+      } });
     }
     this.database.prepare("UPDATE conversations SET provider_session_id = ? WHERE id = ? AND project_id = ?")
       .run(native?.backing.nativeConversationId ?? null, threadId, projectId);
+  }
+
+  private retainedOrdinal(threadId: string, retainedTurnId: string | null): number {
+    if (retainedTurnId === null) return 0;
+    const boundary = this.database.prepare("SELECT requested_at, rowid AS position FROM agent_turns WHERE id = ? AND conversation_id = ?")
+      .get(retainedTurnId, threadId) as { requested_at: string; position: number } | undefined;
+    if (!boundary) return 0;
+    const row = this.database.prepare(`SELECT COALESCE(MAX(json_extract(run.payload_json, '$.ordinal')), 0) AS ordinal
+      FROM agent_turns AS turn
+      JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.id = turn.run_id
+        AND run.thread_id = turn.conversation_id
+      WHERE turn.conversation_id = ? AND (turn.requested_at, turn.rowid) <= (?, ?)
+        AND json_extract(run.payload_json, '$.ordinal') IS NOT NULL`)
+      .get(threadId, boundary.requested_at, boundary.position) as { ordinal: number };
+    return row.ordinal;
+  }
+
+  private itemCoverageClassification(threadId: string, itemId: string):
+    | { kind: "v2"; ordinal: number }
+    | { kind: "legacy" }
+    | { kind: "inherited"; ordinal: number }
+    | { kind: "unknown" } {
+    const fork = this.database.prepare(`SELECT json_extract(payload_json, '$.ordinal') AS ordinal
+      FROM orchestration_v2_entities
+      WHERE kind = 'fork-history' AND thread_id = ? AND id = ? AND json_extract(payload_json, '$.part') = 0 LIMIT 1`)
+      .get(threadId, itemId) as { ordinal: number } | undefined;
+    if (fork !== undefined) return { kind: "inherited", ordinal: fork.ordinal };
+    let turnId: string | null | undefined;
+    if (itemId.startsWith("activity:")) {
+      turnId = (this.database.prepare("SELECT turn_id FROM activities WHERE id = ? AND conversation_id = ?")
+        .get(itemId.slice("activity:".length), threadId) as { turn_id: string | null } | undefined)?.turn_id;
+    } else if (itemId.startsWith("plan:")) {
+      turnId = (this.database.prepare("SELECT turn_id FROM agent_plans WHERE run_id = ? AND conversation_id = ?")
+        .get(itemId.slice("plan:".length), threadId) as { turn_id: string | null } | undefined)?.turn_id;
+    } else if (itemId.startsWith("files:")) {
+      turnId = (this.database.prepare("SELECT turn_id FROM turn_git_artifacts WHERE id = ? AND conversation_id = ?")
+        .get(itemId.slice("files:".length), threadId) as { turn_id: string | null } | undefined)?.turn_id;
+    } else if (itemId.startsWith("interrupt:")) {
+      const candidate = itemId.slice("interrupt:".length);
+      turnId = this.database.prepare("SELECT id FROM agent_turns WHERE id = ? AND conversation_id = ?")
+        .get(candidate, threadId) ? candidate : undefined;
+    } else {
+      const row = this.database.prepare("SELECT turn_id FROM messages WHERE id = ? AND conversation_id = ?")
+        .get(itemId, threadId) as { turn_id: string | null } | undefined;
+      turnId = row ? row.turn_id : undefined;
+    }
+    if (turnId === undefined) return { kind: "unknown" };
+    if (turnId === null) return { kind: "legacy" };
+    const run = this.database.prepare(`SELECT json_extract(r.payload_json, '$.ordinal') AS ordinal
+      FROM agent_turns AS t
+      JOIN orchestration_v2_entities AS r ON r.kind = 'run' AND r.id = t.run_id AND r.thread_id = t.conversation_id
+      WHERE t.id = ? AND t.conversation_id = ? LIMIT 1`)
+      .get(turnId, threadId) as { ordinal: number | null } | undefined;
+    return typeof run?.ordinal === "number" ? { kind: "v2", ordinal: run.ordinal } : { kind: "legacy" };
+  }
+
+  private rewoundCoveragePayload(
+    threadId: string,
+    active: ProviderBacking,
+    retainedOrdinal: number,
+    rolledBackLegacy: boolean,
+    replaced: boolean,
+    removed: ReadonlySet<string>,
+    uncredited: ReadonlySet<string>,
+  ): {
+    coveredItemIds: string[];
+    coverageComplete: boolean;
+    coveredThroughOrdinal?: number;
+    uncoveredItemIds?: string[];
+    inheritedCoverage?: InheritedCoverage;
+    legacyCovered?: boolean;
+  } {
+    const hasWatermark = active.coveredThroughOrdinal !== undefined
+      || active.uncoveredItemIds !== undefined
+      || active.inheritedCoverage !== undefined
+      || active.legacyCovered !== undefined;
+    if (replaced) {
+      return {
+        coveredItemIds: [],
+        coverageComplete: active.coverageComplete,
+        ...(active.coveredThroughOrdinal !== undefined ? { coveredThroughOrdinal: 0 } : {}),
+      };
+    }
+    const nextCovered = active.coveredItemIds.filter((item) => !removed.has(item) && !uncredited.has(item));
+    if (!hasWatermark) {
+      return { coveredItemIds: nextCovered, coverageComplete: active.coverageComplete };
+    }
+    let nextWatermark = Math.min(active.coveredThroughOrdinal ?? 0, retainedOrdinal);
+    let nextLegacyCovered = active.legacyCovered === true && !rolledBackLegacy;
+    let nextInherited: InheritedCoverage | undefined = active.inheritedCoverage;
+    const uncoveredEntries = new Map<string, ReturnType<HistoryRollbackRepository["itemCoverageClassification"]>>();
+    const keepIfCoveredByWatermark = (itemId: string) => {
+      if (removed.has(itemId) || nextCovered.includes(itemId)) return;
+      const cls = this.itemCoverageClassification(threadId, itemId);
+      const coveredByWatermark = (cls.kind === "v2" && cls.ordinal <= nextWatermark)
+        || (cls.kind === "legacy" && nextLegacyCovered)
+        || (cls.kind === "inherited" && (nextInherited === "complete"
+          || (nextInherited !== undefined && nextInherited.forkId === threadId && cls.ordinal <= nextInherited.throughOrdinal)));
+      if (coveredByWatermark) uncoveredEntries.set(itemId, cls);
+    };
+    for (const item of active.uncoveredItemIds ?? []) keepIfCoveredByWatermark(item);
+    for (const item of uncredited) keepIfCoveredByWatermark(item);
+
+    // If exceptions exceed MAX_BACKING_UNCOVERED_ITEMS, lower coveredThroughOrdinal to shed high-ordinal exceptions.
+    while (uncoveredEntries.size > MAX_BACKING_UNCOVERED_ITEMS && nextWatermark > 0) {
+      let maxV2 = 0;
+      for (const cls of uncoveredEntries.values()) {
+        if (cls.kind === "v2" && cls.ordinal > maxV2) maxV2 = cls.ordinal;
+      }
+      if (maxV2 === 0) break;
+      nextWatermark = maxV2 - 1;
+      for (const [itemId, cls] of uncoveredEntries.entries()) {
+        if (cls.kind === "v2" && cls.ordinal > nextWatermark) uncoveredEntries.delete(itemId);
+      }
+    }
+    if (uncoveredEntries.size > MAX_BACKING_UNCOVERED_ITEMS && nextLegacyCovered) {
+      nextLegacyCovered = false;
+      for (const [itemId, cls] of uncoveredEntries.entries()) {
+        if (cls.kind === "legacy") uncoveredEntries.delete(itemId);
+      }
+    }
+    if (uncoveredEntries.size > MAX_BACKING_UNCOVERED_ITEMS && nextInherited !== undefined) {
+      nextInherited = undefined;
+      for (const [itemId, cls] of uncoveredEntries.entries()) {
+        if (cls.kind === "inherited") uncoveredEntries.delete(itemId);
+      }
+    }
+    const uncoveredList = [...uncoveredEntries.keys()];
+    const coverageComplete = active.coverageComplete && uncoveredList.length <= MAX_BACKING_UNCOVERED_ITEMS;
+    return {
+      coveredItemIds: nextCovered,
+      coverageComplete,
+      coveredThroughOrdinal: nextWatermark,
+      ...(uncoveredList.length > 0 ? { uncoveredItemIds: uncoveredList.slice(-MAX_BACKING_UNCOVERED_ITEMS) } : {}),
+      ...(nextInherited !== undefined ? { inheritedCoverage: nextInherited } : {}),
+      ...(nextLegacyCovered ? { legacyCovered: true } : {}),
+    };
   }
 
   /**

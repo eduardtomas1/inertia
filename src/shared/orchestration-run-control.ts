@@ -40,6 +40,7 @@ export const runSteerSchema = z.strictObject({
   messageId: id.nullable(),
   queuedMessageId: id.nullable(),
   settledAt: timestamp.nullable(),
+  readAt: timestamp.nullable().default(null),
 });
 
 export const runControlEventSchema = z.discriminatedUnion("type", [
@@ -59,6 +60,9 @@ export const runControlEventSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("run-control.steer-settled"), payload: z.strictObject({
     runId: id, attemptId: id, effectId: id, outcome: z.enum(RUN_STEER_OUTCOMES),
     messageId: id.nullable(), queuedMessageId: id.nullable(),
+  }) }),
+  z.strictObject({ type: z.literal("run-control.steer-read"), payload: z.strictObject({
+    runId: id, attemptId: id, effectId: id, readAt: timestamp,
   }) }),
 ]);
 

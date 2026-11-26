@@ -1,6 +1,10 @@
 import { withCodexControlClient, type CodexControlClient } from "../codex/control-client";
 import { objectValue, type JsonObject } from "../codex/protocol";
 import { validateCodexModelProvider } from "../codex/app-server-config";
+import {
+  isCodexArchivedThreadError,
+  isCodexClosingThreadError,
+} from "../codex/app-server-run";
 import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
 import { controlNativeConversation } from "./native-conversation-control";
 import {
@@ -10,6 +14,57 @@ import {
 
 const MAX_HISTORY_TURNS = 10_000;
 const TERMINAL = new Set(["completed", "interrupted", "failed"]);
+const CODEX_NATIVE_CLOSING_RETRY_DELAY_MS = 200;
+
+async function waitAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    timer.unref();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function requestWithUnarchiveRetry(
+  client: CodexControlClient,
+  threadId: string,
+  signal: AbortSignal,
+  execute: () => Promise<JsonObject>,
+): Promise<JsonObject> {
+  try {
+    return await execute();
+  } catch (error) {
+    signal.throwIfAborted();
+    if (isCodexArchivedThreadError(error)) {
+      await client.request("thread/unarchive", { threadId });
+      signal.throwIfAborted();
+      return await execute();
+    }
+    if (isCodexClosingThreadError(error)) {
+      await waitAbortable(CODEX_NATIVE_CLOSING_RETRY_DELAY_MS, signal);
+      signal.throwIfAborted();
+      try {
+        return await execute();
+      } catch (retryError) {
+        signal.throwIfAborted();
+        if (isCodexArchivedThreadError(retryError)) {
+          await client.request("thread/unarchive", { threadId });
+          signal.throwIfAborted();
+          return await execute();
+        }
+        throw retryError;
+      }
+    }
+    throw error;
+  }
+}
 
 function threadMetadata(response: JsonObject, expectedId: string): JsonObject {
   const thread = objectValue(response.thread);
@@ -86,7 +141,11 @@ export function createCodexNativeConversationOperations(
       const modelProvider = validateCodexModelProvider({ environment: launch.environment, modelProvider: launch.harnessConfiguration });
       return await control({ ...launch, signal, processLabel: "Codex native conversation control" }, async (client) => {
         const sourceId = request.source.nativeConversationId;
-        const thread = threadMetadata(await client.request("thread/read", { threadId: sourceId, includeTurns: false }), sourceId);
+        const thread = threadMetadata(
+          await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+            client.request("thread/read", { threadId: sourceId, includeTurns: false })),
+          sourceId,
+        );
         if (request.source.nativeSessionId !== undefined && thread.sessionId !== request.source.nativeSessionId) {
           throw new NativeConversationRejection("rejected", "native-session-mismatch");
         }
@@ -124,7 +183,8 @@ export function createCodexNativeConversationOperations(
         signal.throwIfAborted();
         if (request.kind === "fork") {
           progress.mutationMayHaveOccurred = true;
-          const result = await client.request("thread/fork", { ...config, threadId: sourceId, lastTurnId: kept });
+          const result = await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+            client.request("thread/fork", { ...config, threadId: sourceId, lastTurnId: kept }));
           const fork = objectValue(result.thread);
           if (nativeId(fork?.id) && fork.id !== sourceId) progress.createdNativeConversationId = fork.id;
           if (!fork || !nativeId(fork.id) || fork.id === sourceId
@@ -144,7 +204,11 @@ export function createCodexNativeConversationOperations(
           } };
         }
         if (objectValue(thread.status)?.type === "notLoaded") {
-          const resumed = threadMetadata(await client.request("thread/resume", { ...config, threadId: sourceId }), sourceId);
+          const resumed = threadMetadata(
+            await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+              client.request("thread/resume", { ...config, threadId: sourceId })),
+            sourceId,
+          );
           if (resumed.historyMode !== "paginated" || resumed.sessionId !== thread.sessionId) throw new Error("Native history changed while resuming.");
           if (stableHistory(await history(client, sourceId, signal))[0] !== headId) throw new NativeConversationRejection("rejected", "native-head-changed");
         }
@@ -152,7 +216,11 @@ export function createCodexNativeConversationOperations(
         if (!beforeTurnId) throw new Error("Native revert boundary is missing.");
         signal.throwIfAborted();
         progress.mutationMayHaveOccurred = true;
-        const reverted = threadMetadata(await client.request("thread/revert", { threadId: sourceId, beforeTurnId }), sourceId);
+        const reverted = threadMetadata(
+          await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+            client.request("thread/revert", { threadId: sourceId, beforeTurnId })),
+          sourceId,
+        );
         if (reverted.historyMode !== "paginated" || reverted.sessionId !== thread.sessionId
           || (stableHistory(await history(client, sourceId, signal))[0] ?? null) !== kept) {
           throw new Error("Native revert boundary was not confirmed.");

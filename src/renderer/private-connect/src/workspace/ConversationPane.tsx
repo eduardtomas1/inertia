@@ -72,7 +72,7 @@ export function ConversationPane({
             />
           )}
           {detail.waitingForLocalAction && (
-            <div className="banner">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>
+            <div className="banner" role="status">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>
           )}
           {scopes.includes("private:prompt") && (
             <form

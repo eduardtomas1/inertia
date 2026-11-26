@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { AgentTurn, ChatAttachment, Conversation } from "../../shared/contracts";
+import { modelSelectionSchema } from "../../shared/model-routing";
+import type {
+  QueueCreatedBy,
+  QueueCreationSource,
+  QueueDeliveryMode,
+  QueueItemKind,
+} from "../../shared/orchestration-queue";
 import { MAX_QUEUED_MESSAGES, MAX_UNREAD_FOLLOW_UP_ROWS, type QueuedMessage } from "../../shared/queued-messages";
 import { watcherNoteAttributionSchema, type WatcherNoteAttribution } from "../../shared/watcher";
 import { delegatedCompletionAttributionSchema, type DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
@@ -13,18 +20,64 @@ interface QueueRow {
   created_at: string; error: string | null; turn_id: string | null; user_message_id: string | null;
   watcher_note_json?: string | null;
   delegated_completion_json?: string | null;
+  queue_position?: number | null;
+  queue_held?: number | null;
+  kind?: QueueItemKind | null;
+  created_by?: QueueCreatedBy | null;
+  creation_source?: QueueCreationSource | null;
+  device_id?: string | null;
+  steer_follow_up_of_run_id?: string | null;
+  edit_revision?: number | null;
+  edited_at?: string | null;
+  creation_digest?: string | null;
+  dispatch_ordinal?: number | null;
+  run_id?: string | null;
+  delivery_mode?: QueueDeliveryMode | null;
+  steer_when_ready_run_id?: string | null;
+  selection_json?: string | null;
+  follows_thread_selection?: number | null;
 }
 const ACTIVE_STATES = "('waiting','dispatching','blocked')";
 /** An active row that names a persisted message: a follow-up its provider accepted but never read. */
 const NAMES_UNREAD_FOLLOW_UP = "user_message_id IS NOT NULL";
+function parseSelection(raw: string | null | undefined) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  try {
+    const parsed = modelSelectionSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 function project(row: QueueRow): QueuedMessage {
   const watcherNote = watcherNoteFromJson(row.watcher_note_json);
   const delegatedCompletion = delegatedCompletionFromJson(row.delegated_completion_json);
-  return { id: row.id, conversationId: row.conversation_id, content: row.content,
+  const modelSelection = parseSelection(row.selection_json);
+  return {
+    id: row.id, conversationId: row.conversation_id, content: row.content,
     attachments: rendererSafeAttachments(parseStoredAttachments(row.attachments_json)),
     state: row.state, createdAt: row.created_at, error: row.error,
-    turnId: row.turn_id, userMessageId: row.user_message_id, ...(watcherNote ? { watcherNote } : {}),
-    ...(delegatedCompletion ? { delegatedCompletion } : {}) };
+    turnId: row.turn_id, userMessageId: row.user_message_id,
+    ...(watcherNote ? { watcherNote } : {}),
+    ...(delegatedCompletion ? { delegatedCompletion } : {}),
+    ...(row.kind ? { kind: row.kind } : {}),
+    ...(row.queue_position !== undefined ? { queuePosition: row.queue_position } : {}),
+    ...(row.queue_held !== undefined && row.queue_held !== null ? { queueHeld: row.queue_held === 1 } : {}),
+    ...(row.edit_revision !== undefined && row.edit_revision !== null ? { editRevision: row.edit_revision } : {}),
+    ...(row.edited_at !== undefined ? { editedAt: row.edited_at } : {}),
+    ...(row.created_by ? { createdBy: row.created_by } : {}),
+    ...(row.creation_source ? { creationSource: row.creation_source } : {}),
+    ...(row.device_id !== undefined ? { deviceId: row.device_id } : {}),
+    ...(row.steer_when_ready_run_id !== undefined ? { steerWhenReadyRunId: row.steer_when_ready_run_id } : {}),
+    ...(row.steer_follow_up_of_run_id !== undefined ? { steerFollowUpOfRunId: row.steer_follow_up_of_run_id } : {}),
+    ...(modelSelection !== undefined ? { modelSelection } : {}),
+    ...(row.follows_thread_selection !== undefined && row.follows_thread_selection !== null
+      ? { followsThreadSelection: row.follows_thread_selection === 1 } : {}),
+    ...(row.dispatch_ordinal !== undefined && row.dispatch_ordinal !== null ? { dispatchOrdinal: row.dispatch_ordinal } : {}),
+    ...(row.run_id !== undefined ? { runId: row.run_id } : {}),
+    ...(row.delivery_mode !== undefined ? { deliveryMode: row.delivery_mode } : {}),
+  };
 }
 export function delegatedDeliveryId(parentConversationId: string, generation: number): string {
   const bytes = createHash("sha256").update(JSON.stringify(["delegated-completion", parentConversationId, generation])).digest()
@@ -122,23 +175,46 @@ export class QueuedMessageRepository {
     return { queueable, capped: false };
   }
 
+  private nextQueuePosition(conversationId: string): number {
+    const row = this.database.prepare(`SELECT COALESCE(MAX(queue_position), 0) AS max_pos FROM queued_messages
+      WHERE conversation_id = ? AND state IN ${ACTIVE_STATES} AND delegated_completion_json IS NULL`)
+      .get(conversationId) as { max_pos: number };
+    return row.max_pos + 1;
+  }
+
   requeueUnreadFollowUps(conversation: Conversation, turnId: string, messageIds: readonly string[]): string[] {
     const { queueable, capped } = this.unreadFollowUpAdmission(conversation.id, turnId, messageIds);
     if (capped) console.warn("Too many unread follow-ups wait in this chat; the rest stay in their turn.");
-    const message = this.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE id = ?`);
+    const message = this.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS}, private_connect_device_id,
+      watcher_note_json, delegated_completion_json FROM messages WHERE id = ?`);
+    const turnRow = this.database.prepare("SELECT run_id FROM agent_turns WHERE id = ?")
+      .get(turnId) as { run_id: string } | undefined;
     const original = this.database.prepare(`SELECT created_at FROM queued_messages WHERE conversation_id = ?
       AND state = 'accepted' AND user_message_id = ? ORDER BY sequence LIMIT 1`);
     const insert = this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json,
-      intent_digest, route_identity, state, created_at, user_message_id) VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`);
+      intent_digest, creation_digest, route_identity, state, created_at, user_message_id, queue_position, kind,
+      created_by, creation_source, device_id, steer_follow_up_of_run_id, selection_json, follows_thread_selection)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, 'message', ?, ?, ?, ?, ?, 0)`);
+    const selectionJson = JSON.stringify(conversation.modelSelection);
     const queued: string[] = [];
     for (const messageId of queueable) {
-      const row = message.get(messageId) as { content: string; attachments_json: string; created_at: string };
+      const row = message.get(messageId) as {
+        content: string; attachments_json: string; created_at: string;
+        private_connect_device_id?: string | null; watcher_note_json?: string | null; delegated_completion_json?: string | null;
+      };
       const attachments = rendererSafeAttachments(parseStoredAttachments(row.attachments_json));
       // The row shows the text; the adopted message carries all of it.
       const content = row.content.slice(0, 20_000);
       const createdAt = (original.get(conversation.id, messageId) as { created_at: string } | undefined)?.created_at ?? row.created_at;
-      insert.run(randomUUID(), conversation.id, content, JSON.stringify(attachments), queuedIntentDigest(content, attachments),
-        queuedRouteIdentity(conversation), createdAt, messageId);
+      const digest = queuedIntentDigest(content, attachments);
+      const isSystem = Boolean(row.watcher_note_json || row.delegated_completion_json);
+      const createdBy: QueueCreatedBy = isSystem ? "system" : "user";
+      const creationSource: QueueCreationSource = row.private_connect_device_id
+        ? "mobile"
+        : isSystem ? "server" : "web";
+      insert.run(randomUUID(), conversation.id, content, JSON.stringify(attachments), digest, digest,
+        queuedRouteIdentity(conversation), createdAt, messageId, this.nextQueuePosition(conversation.id),
+        createdBy, creationSource, row.private_connect_device_id ?? null, turnRow?.run_id ?? null, selectionJson);
       queued.push(messageId);
     }
     return queued;
@@ -156,9 +232,11 @@ export class QueuedMessageRepository {
       throw new Error("The delegated result delivery identity conflicts with its parent chat.");
     }
     const content = input.content.trim();
+    const digest = queuedIntentDigest(content, []);
     this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest,
-      route_identity, state, created_at, delegated_completion_json) VALUES (?, ?, ?, '[]', ?, ?, 'waiting', ?, ?)`)
-      .run(input.id, input.conversation.id, content, queuedIntentDigest(content, []), queuedRouteIdentity(input.conversation),
+      creation_digest, route_identity, state, created_at, delegated_completion_json, kind, created_by, creation_source,
+      follows_thread_selection) VALUES (?, ?, ?, '[]', ?, ?, ?, 'waiting', ?, ?, 'delegated-results', 'system', 'server', 1)`)
+      .run(input.id, input.conversation.id, content, digest, digest, queuedRouteIdentity(input.conversation),
         new Date().toISOString(), JSON.stringify(attribution));
     return this.get(input.conversation.id, input.id)!;
   }
@@ -188,10 +266,20 @@ export class QueuedMessageRepository {
       if (existing) return existing;
       if (this.cappedCount(input.conversation.id) >= MAX_QUEUED_MESSAGES) throw new QueuedMessageLimitError();
       const watcherNote = input.watcherNote === undefined ? null : watcherNoteAttributionSchema.parse(input.watcherNote);
-      this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity, state, created_at, watcher_note_json)
-        VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?)`).run(input.id, input.conversation.id, input.content.trim(),
-        JSON.stringify(rendererSafeAttachments(input.attachments)), input.digest, queuedRouteIdentity(input.conversation), new Date().toISOString(),
-        watcherNote ? JSON.stringify(watcherNote) : null);
+      const kind: QueueItemKind = watcherNote ? "watcher-note" : "message";
+      const createdBy: QueueCreatedBy = watcherNote ? "system" : "user";
+      const creationSource: QueueCreationSource = watcherNote ? "server" : "web";
+      const selectionJson = watcherNote ? null : JSON.stringify(input.conversation.modelSelection);
+      this.database.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest,
+        creation_digest, route_identity, state, created_at, watcher_note_json, queue_position, kind, created_by,
+        creation_source, selection_json, follows_thread_selection)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        input.id, input.conversation.id, input.content.trim(),
+        JSON.stringify(rendererSafeAttachments(input.attachments)), input.digest, input.digest,
+        queuedRouteIdentity(input.conversation), new Date().toISOString(),
+        watcherNote ? JSON.stringify(watcherNote) : null, this.nextQueuePosition(input.conversation.id),
+        kind, createdBy, creationSource, selectionJson, watcherNote ? 1 : 0,
+      );
       return this.get(input.conversation.id, input.id)!;
     })();
   }
@@ -238,7 +326,7 @@ export class QueuedMessageRepository {
     return this.database.transaction(() => {
       const item = this.get(conversationId, id);
       if (!item || !["waiting", "blocked"].includes(item.state)) return null;
-      this.database.prepare("UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL WHERE id = ? AND conversation_id = ?")
+      this.database.prepare("UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL, queue_position = NULL, queue_held = 0 WHERE id = ? AND conversation_id = ?")
         .run(id, conversationId);
       pruneTerminalQueuedMessages(this.database, conversationId);
       return item;

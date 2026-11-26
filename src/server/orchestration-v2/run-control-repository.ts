@@ -1,3 +1,5 @@
+import type Database from "better-sqlite3";
+
 import {
   orchestrationAttemptSchema,
   orchestrationRunSchema,
@@ -52,6 +54,7 @@ export class RunControlRepository {
     private readonly effects: OrchestrationEffectOutbox,
     private readonly startIntent: (runId: string) => OrchestrationEffect | null,
     private readonly clock: () => string = () => new Date().toISOString(),
+    private readonly database: Database.Database = effects.connection,
   ) {}
 
   target(runId: string): RunControlTarget | null {
@@ -129,15 +132,16 @@ export class RunControlRepository {
     const target = this.target(runId);
     const current = target ? this.attemptInterrupt(target.attemptId) : null;
     if (!target || !current || current.outcome !== null) return false;
-    if (current.effectId) {
-      this.settleClaim(current.effectId, outcome === "settled" ? null : `stop-${outcome}`);
-    }
+    const failureCode = outcome === "settled" ? null : `stop-${outcome}`;
     const event: OrchestrationDomainEvent = { type: "run-control.interrupt-settled",
       payload: { runId: target.runId, attemptId: target.attemptId, effectId: current.effectId, outcome } };
     this.events.commit({ actorId: "runtime",
       commandId: `interrupt-settled:${current.effectId ?? commandFingerprint(target.attemptId)}`,
       projectId: target.projectId, threadId: target.threadId, command: event,
-      expectedRevision: this.events.revision(target.threadId), events: [event], result: null });
+      expectedRevision: this.events.revision(target.threadId), events: [event], result: null }, () => {
+      if (current.effectId) this.settleEffectRow(current.effectId, failureCode);
+    });
+    if (current.effectId) this.releaseClaim(current.effectId);
     return true;
   }
 
@@ -158,16 +162,69 @@ export class RunControlRepository {
   settleSteer(effectId: string, outcome: RunSteerOutcome,
     refs: { messageId?: string | null; queuedMessageId?: string | null } = {}): void {
     const steer = this.steer(effectId);
-    this.settleClaim(effectId, outcome === "accepted" ? null : `steer-${outcome}`);
-    if (!steer || steer.state !== "dispatching") return;
+    const failureCode = outcome === "accepted" ? null : `steer-${outcome}`;
+    if (!steer || steer.state !== "dispatching") {
+      this.settleClaim(effectId, failureCode);
+      return;
+    }
     const target = this.target(steer.runId);
-    if (!target) return;
+    if (!target) {
+      this.settleClaim(effectId, failureCode);
+      return;
+    }
     const event: OrchestrationDomainEvent = { type: "run-control.steer-settled", payload: { runId: steer.runId,
       attemptId: steer.attemptId, effectId, outcome, messageId: refs.messageId ?? null,
       queuedMessageId: refs.queuedMessageId ?? null } };
     this.events.commit({ actorId: "runtime", commandId: `steer-settled:${effectId}`,
       projectId: target.projectId, threadId: target.threadId, command: event,
-      expectedRevision: this.events.revision(target.threadId), events: [event], result: null });
+      expectedRevision: this.events.revision(target.threadId), events: [event], result: null }, () => {
+      this.settleEffectRow(effectId, failureCode);
+    });
+    this.releaseClaim(effectId);
+  }
+
+  recordSteerRead(input: {
+    conversationId: string;
+    projectId: string;
+    runId: string;
+    attemptId: string;
+    effectId: string;
+    readAt?: string;
+  }): boolean {
+    const steer = this.steer(input.effectId);
+    if (!steer || steer.runId !== input.runId || steer.attemptId !== input.attemptId
+      || steer.state !== "settled" || steer.outcome !== "accepted") return false;
+    if (steer.readAt !== null) return false;
+    const readAt = input.readAt ?? this.clock();
+    const event: OrchestrationDomainEvent = {
+      type: "run-control.steer-read",
+      payload: { runId: input.runId, attemptId: input.attemptId, effectId: input.effectId, readAt },
+    };
+    const committed = this.events.commit({
+      actorId: "runtime",
+      commandId: `steer-read:${input.effectId}`,
+      projectId: input.projectId,
+      threadId: input.conversationId,
+      command: event,
+      expectedRevision: this.events.revision(input.conversationId),
+      events: [event],
+      result: null,
+    });
+    return !committed.replayed;
+  }
+
+  listUnreadAcceptedSteers(runId: string): RunSteer[] {
+    const target = this.target(runId);
+    if (!target) return [];
+    const rows = this.database.prepare(`SELECT payload_json FROM orchestration_v2_entities
+      WHERE kind = ? AND thread_id = ?
+        AND json_extract(payload_json, '$.runId') = ?
+        AND json_extract(payload_json, '$.state') = 'settled'
+        AND json_extract(payload_json, '$.outcome') = 'accepted'
+        AND json_extract(payload_json, '$.readAt') IS NULL
+      ORDER BY json_extract(payload_json, '$.requestedAt'), revision, id`)
+      .all(RUN_STEER_PROJECTION, target.threadId, runId) as { payload_json: string }[];
+    return rows.map(({ payload_json }) => runSteerSchema.parse(JSON.parse(payload_json)));
   }
 
   unsettledSteersBefore(effectId: string): string[] {
@@ -216,16 +273,24 @@ export class RunControlRepository {
     this.#waiters.set(effectId, { settled, resolve });
   }
 
-  private settleClaim(effectId: string, failureCode: string | null): void {
+  private settleEffectRow(effectId: string, failureCode: string | null): void {
     const claim = this.#claims.get(effectId);
+    if (claim) this.effects.settle(claim, failureCode === null ? { kind: "succeeded" } : { kind: "failed", code: failureCode });
+    else this.effects.retirePending(effectId, failureCode ?? "control-settled");
+  }
+
+  private releaseClaim(effectId: string): void {
     this.#claims.delete(effectId);
     const waiter = this.#waiters.get(effectId);
     this.#waiters.delete(effectId);
+    waiter?.resolve();
+  }
+
+  private settleClaim(effectId: string, failureCode: string | null): void {
     try {
-      if (claim) this.effects.settle(claim, failureCode === null ? { kind: "succeeded" } : { kind: "failed", code: failureCode });
-      else this.effects.retirePending(effectId, failureCode ?? "control-settled");
+      this.settleEffectRow(effectId, failureCode);
     } finally {
-      waiter?.resolve();
+      this.releaseClaim(effectId);
     }
   }
 }

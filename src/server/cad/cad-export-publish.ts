@@ -1,12 +1,25 @@
-import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { constants, type Dir } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  open,
+  opendir,
+  realpath,
+  rename,
+  rm,
+  type FileHandle,
+} from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   FILE_OPEN_DIRECTORY,
   FILE_OPEN_NO_FOLLOW,
 } from "../../node/platform-file-open-flags";
 
-const PUBLISH_TIMEOUT_MS = 15_000;
-const MAX_PUBLISH_STDOUT_BYTES = 4_096;
+const STREAM_CHUNK_BYTES = 64 * 1024;
+const WINDOWS = process.platform === "win32";
+const LINUX = process.platform === "linux";
 
 export interface PinnedExportPublishInput {
   readonly canonicalAncestor: string;
@@ -18,196 +31,214 @@ export interface PinnedExportPublishInput {
   readonly replacing: boolean;
 }
 
-const PINNED_PUBLISH_SCRIPT = `
-  const { randomBytes } = require("node:crypto");
-  const { constants } = require("node:fs");
-  const { lstat, mkdir, open, readFile, realpath, rename, rm } = require("node:fs/promises");
+function samePath(left: string, right: string): boolean {
+  return WINDOWS ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
 
-  const DIRECTORY_ONLY = ${FILE_OPEN_DIRECTORY};
-  const NO_FOLLOW = ${FILE_OPEN_NO_FOLLOW};
-  const WINDOWS = process.platform === "win32";
+function safeSegment(segment: string): boolean {
+  return segment.length > 0
+    && segment !== "."
+    && segment !== ".."
+    && !segment.includes("/")
+    && !segment.includes("\\");
+}
 
-  function samePath(left, right) {
-    return WINDOWS ? left.toLowerCase() === right.toLowerCase() : left === right;
-  }
-
-  function safeSegment(segment) {
-    return typeof segment === "string"
-      && segment.length > 0
-      && segment !== "."
-      && segment !== ".."
-      && !segment.includes("/")
-      && !segment.includes("\\\\");
-  }
-
-  async function writeNewFile(name, bytes) {
-    const handle = await open(name, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW);
-    try {
-      let offset = 0;
-      while (offset < bytes.length) {
-        const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset);
+async function streamToNewFile(
+  sourcePath: string,
+  destinationPath: string,
+): Promise<void> {
+  const source = await open(sourcePath, constants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
+  let destination: FileHandle | undefined;
+  let created = false;
+  try {
+    destination = await open(
+      destinationPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | FILE_OPEN_NO_FOLLOW,
+    );
+    created = true;
+    const buffer = Buffer.allocUnsafe(STREAM_CHUNK_BYTES);
+    let readOffset = 0;
+    for (;;) {
+      const { bytesRead } = await source.read(buffer, 0, buffer.length, readOffset);
+      if (bytesRead === 0) break;
+      let writeOffset = 0;
+      while (writeOffset < bytesRead) {
+        const { bytesWritten } = await destination.write(
+          buffer,
+          writeOffset,
+          bytesRead - writeOffset,
+          readOffset + writeOffset,
+        );
         if (bytesWritten <= 0) throw new Error("short-write");
-        offset += bytesWritten;
+        writeOffset += bytesWritten;
       }
-      await handle.sync().catch(() => undefined);
-    } finally {
-      await handle.close();
+      readOffset += bytesRead;
     }
+    await destination.sync().catch(() => undefined);
+    await destination.close();
+    destination = undefined;
+  } catch (error) {
+    if (destination !== undefined) {
+      await destination.close().catch(() => undefined);
+    }
+    if (created) {
+      await rm(destinationPath, { force: true }).catch(() => undefined);
+    }
+    throw error;
+  } finally {
+    await source.close().catch(() => undefined);
   }
-
-  async function run() {
-    const chunks = [];
-    for await (const chunk of process.stdin) chunks.push(chunk);
-    const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-
-    // Verify the kernel-pinned cwd matches the approved ancestor identity before touching anything.
-    const root = await lstat(".", { bigint: true });
-    const rootCanonical = await realpath(".");
-    if (
-      !root.isDirectory()
-      || String(root.dev) !== input.dev
-      || String(root.ino) !== input.ino
-      || !samePath(rootCanonical, input.canonicalAncestor)
-    ) {
-      throw new Error("ancestor-identity-changed");
-    }
-
-    // Create and descend one verified, non-symlink segment at a time inside the pinned cwd.
-    for (const segment of input.subdirectories) {
-      if (!safeSegment(segment)) throw new Error("invalid-segment");
-      try {
-        await mkdir(segment);
-      } catch (error) {
-        if (!error || error.code !== "EEXIST") throw error;
-      }
-      const entry = await lstat(segment, { bigint: true });
-      if (!entry.isDirectory() || entry.isSymbolicLink()) {
-        throw new Error("parent-symlink");
-      }
-      if (!WINDOWS) {
-        const dirHandle = await open(segment, constants.O_RDONLY | DIRECTORY_ONLY | NO_FOLLOW);
-        try {
-          const opened = await dirHandle.stat({ bigint: true });
-          if (!opened.isDirectory() || opened.dev !== entry.dev || opened.ino !== entry.ino) {
-            throw new Error("parent-changed");
-          }
-        } finally {
-          await dirHandle.close();
-        }
-      }
-      process.chdir(segment);
-      const pinned = await lstat(".", { bigint: true });
-      if (!pinned.isDirectory() || pinned.dev !== entry.dev || pinned.ino !== entry.ino) {
-        throw new Error("parent-changed");
-      }
-    }
-
-    if (!safeSegment(input.fileName)) throw new Error("invalid-filename");
-    const bytes = await readFile(input.produced);
-
-    if (!input.replacing) {
-      await writeNewFile(input.fileName, bytes);
-    } else {
-      const existing = await lstat(input.fileName).catch(() => undefined);
-      if (existing !== undefined && (existing.isSymbolicLink() || !existing.isFile())) {
-        throw new Error("target-symlink");
-      }
-      const temporary = "." + input.fileName + "." + randomBytes(6).toString("hex") + ".tmp";
-      await writeNewFile(temporary, bytes);
-      try {
-        const current = await lstat(input.fileName).catch(() => undefined);
-        if (current !== undefined && (current.isSymbolicLink() || !current.isFile())) {
-          throw new Error("target-symlink");
-        }
-        await rename(temporary, input.fileName);
-      } catch (error) {
-        await rm(temporary, { force: true }).catch(() => undefined);
-        throw error;
-      }
-    }
-
-    process.stdout.write(JSON.stringify({ ok: true }));
-  }
-
-  run().catch((error) => {
-    process.stderr.write(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
-`;
+}
 
 /**
- * Publishes an approved CAD export from a child process whose working directory
- * is pinned to the verified ancestor directory, creating any missing nested
- * segments one non-symlink step at a time and publishing by single relative name.
+ * Publishes an approved CAD export in-process (compatible with packaged
+ * Electron where the RunAsNode fuse is disabled) by pinning the verified
+ * ancestor and each created subdirectory with open directory handles, stepping
+ * one non-symlink segment at a time, and streaming into the target with
+ * O_CREAT | O_EXCL | O_NOFOLLOW and cleanup on partial write failures.
  */
 export async function publishToPinnedDirectory(
   input: PinnedExportPublishInput,
 ): Promise<void> {
-  const payload = JSON.stringify(input);
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const child = spawn(process.execPath, ["--no-warnings", "-e", PINNED_PUBLISH_SCRIPT], {
-      cwd: input.canonicalAncestor,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let settled = false;
-    let stdoutBytes = 0;
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
+  if (!safeSegment(input.fileName)) {
+    throw new Error("invalid-filename");
+  }
+  for (const segment of input.subdirectories) {
+    if (!safeSegment(segment)) throw new Error("invalid-segment");
+  }
 
-    const finish = (error?: Error): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) rejectPromise(error);
-      else resolvePromise();
-    };
+  const heldHandles: FileHandle[] = [];
+  const heldDirs: Dir[] = [];
+  try {
+    const ancestorCanonical = await realpath(input.canonicalAncestor);
+    if (!samePath(ancestorCanonical, input.canonicalAncestor)) {
+      throw new Error("ancestor-identity-changed");
+    }
+    const ancestorLstat = await lstat(ancestorCanonical, { bigint: true });
+    if (
+      !ancestorLstat.isDirectory()
+      || ancestorLstat.isSymbolicLink()
+      || String(ancestorLstat.dev) !== input.dev
+      || String(ancestorLstat.ino) !== input.ino
+    ) {
+      throw new Error("ancestor-identity-changed");
+    }
 
-    const timer = setTimeout(() => {
-      try {
-        child.kill(process.platform === "win32" ? undefined : "SIGKILL");
-      } catch {
-        // Ignore teardown errors on already-exited processes.
+    let currentDir = ancestorCanonical;
+    let currentDev = ancestorLstat.dev;
+    let currentIno = ancestorLstat.ino;
+    let dirBase = ancestorCanonical;
+
+    if (!WINDOWS) {
+      const ancestorHandle = await open(
+        ancestorCanonical,
+        constants.O_RDONLY | FILE_OPEN_DIRECTORY | FILE_OPEN_NO_FOLLOW,
+      );
+      heldHandles.push(ancestorHandle);
+      const pinned = await ancestorHandle.stat({ bigint: true });
+      if (!pinned.isDirectory() || pinned.dev !== currentDev || pinned.ino !== currentIno) {
+        throw new Error("ancestor-identity-changed");
       }
-      finish(new Error("Pinned CAD export publication timed out."));
-    }, PUBLISH_TIMEOUT_MS);
-    timer.unref();
+      if (LINUX) dirBase = `/proc/self/fd/${ancestorHandle.fd}`;
+    } else {
+      heldDirs.push(await opendir(ancestorCanonical));
+    }
 
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdoutBytes += Buffer.byteLength(chunk, "utf8");
-      if (stdoutBytes <= MAX_PUBLISH_STDOUT_BYTES) stdoutChunks.push(chunk);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      if (stderrChunks.length < 16) stderrChunks.push(chunk);
-    });
-    child.once("error", (error) => {
-      finish(error instanceof Error ? error : new Error(String(error)));
-    });
-    child.once("close", (code) => {
-      let receipt: unknown = null;
+    // Create and descend one verified, non-symlink segment at a time.
+    for (const segment of input.subdirectories) {
+      const nextBase = join(dirBase, segment);
+      const nextCanonical = join(currentDir, segment);
       try {
-        receipt = JSON.parse(stdoutChunks.join(""));
-      } catch {
-        receipt = null;
+        await mkdir(nextBase);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | null)?.code !== "EEXIST") throw error;
       }
+      const entry = await lstat(nextBase, { bigint: true });
+      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        throw new Error("parent-symlink");
+      }
+      if (!WINDOWS) {
+        const handle = await open(
+          nextBase,
+          constants.O_RDONLY | FILE_OPEN_DIRECTORY | FILE_OPEN_NO_FOLLOW,
+        );
+        heldHandles.push(handle);
+        const opened = await handle.stat({ bigint: true });
+        if (!opened.isDirectory() || opened.dev !== entry.dev || opened.ino !== entry.ino) {
+          throw new Error("parent-changed");
+        }
+        if (LINUX) dirBase = `/proc/self/fd/${handle.fd}`;
+        else dirBase = nextCanonical;
+      } else {
+        const resolvedNext = await realpath(nextCanonical);
+        if (!samePath(resolvedNext, nextCanonical)) {
+          throw new Error("parent-symlink");
+        }
+        heldDirs.push(await opendir(nextCanonical));
+        dirBase = nextCanonical;
+      }
+      currentDir = nextCanonical;
+      currentDev = entry.dev;
+      currentIno = entry.ino;
+    }
+
+    // Re-verify the pinned target directory immediately before creating the file.
+    if (!LINUX) {
+      const verifyDir = await lstat(currentDir, { bigint: true });
+      const verifyCanonical = await realpath(currentDir);
       if (
-        code === 0
-        && typeof receipt === "object"
-        && receipt !== null
-        && "ok" in receipt
-        && receipt.ok === true
+        !verifyDir.isDirectory()
+        || verifyDir.isSymbolicLink()
+        || verifyDir.dev !== currentDev
+        || verifyDir.ino !== currentIno
+        || !samePath(verifyCanonical, currentDir)
       ) {
-        finish();
-        return;
+        throw new Error("parent-changed");
       }
-      const detail = stderrChunks.join("").trim();
-      finish(new Error(detail || "Pinned CAD export publication failed."));
-    });
+    }
 
-    child.stdin.end(payload);
-  });
+    const targetPath = join(dirBase, input.fileName);
+    if (!input.replacing) {
+      await streamToNewFile(input.produced, targetPath);
+      return;
+    }
+
+    const existing = await lstat(targetPath).catch(() => undefined);
+    if (existing !== undefined && (existing.isSymbolicLink() || !existing.isFile())) {
+      throw new Error("target-symlink");
+    }
+    const temporaryPath = join(
+      dirBase,
+      `.${input.fileName}.${randomBytes(6).toString("hex")}.tmp`,
+    );
+    await streamToNewFile(input.produced, temporaryPath);
+    try {
+      const current = await lstat(targetPath).catch(() => undefined);
+      if (current !== undefined && (current.isSymbolicLink() || !current.isFile())) {
+        throw new Error("target-symlink");
+      }
+      if (!LINUX) {
+        const verifyBeforeRename = await lstat(currentDir, { bigint: true });
+        if (
+          !verifyBeforeRename.isDirectory()
+          || verifyBeforeRename.isSymbolicLink()
+          || verifyBeforeRename.dev !== currentDev
+          || verifyBeforeRename.ino !== currentIno
+        ) {
+          throw new Error("parent-changed");
+        }
+      }
+      await rename(temporaryPath, targetPath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  } finally {
+    for (const handle of heldHandles.reverse()) {
+      await handle.close().catch(() => undefined);
+    }
+    for (const dir of heldDirs.reverse()) {
+      await dir.close().catch(() => undefined);
+    }
+  }
 }

@@ -827,6 +827,13 @@ describe("CadExporter", () => {
     );
     expect(escaped.code).toBe("EXPORT_FAILED");
     expect(readdirSync(outside)).toEqual([]);
+
+    // 6. Replacing an owned earlier export through pinned publication overwrites cleanly without leaving .tmp files.
+    const replaceAuth = await exporter.authorizeExport({ source: dxf, format: "dwg" }, work);
+    expect(replaceAuth.target?.path).toBe(join(work, "approved.dwg"));
+    const replaced = await exporter.export({ source: dxf, format: "dwg" }, undefined, work, replaceAuth);
+    expect(replaced.path).toBe(join(work, "approved.dwg"));
+    expect(readdirSync(work).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 });
 

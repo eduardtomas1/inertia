@@ -101,6 +101,28 @@ function linuxAsset(version: string, archive: Buffer): AntigravityCliReleaseAsse
   };
 }
 
+function posixHostAssetUrl(
+  version: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string {
+  const folderOs = platform === "darwin" ? "darwin" : "linux";
+  const folderArch = arch === "arm64" ? "arm" : "x64";
+  const fileOs = platform === "darwin" ? "mac" : "linux";
+  const fileArch = arch === "arm64" ? "arm64" : "x64";
+  return `https://storage.googleapis.com/antigravity-public/antigravity-cli/${version}-101/${folderOs}-${folderArch}/cli_${fileOs}_${fileArch}.tar.gz`;
+}
+
+function posixHostAsset(version: string, archive: Buffer): AntigravityCliReleaseAsset {
+  return {
+    version,
+    url: posixHostAssetUrl(version),
+    sha512: sha512Hex(archive),
+    executableName: "antigravity",
+    format: "tar.gz",
+  };
+}
+
 function windowsAsset(version: string, binary: Buffer): AntigravityCliReleaseAsset {
   return {
     version,
@@ -316,15 +338,7 @@ describe("antigravity-managed-install", () => {
         "",
       ].join("\n"));
       const archive = buildTarGz([{ name: "antigravity", content: script }]);
-      const targetDir = process.platform === "darwin" ? "darwin" : "linux";
-      const targetArch = process.arch === "arm64" ? "arm64" : "x64";
-      const asset: AntigravityCliReleaseAsset = {
-        version: "99.0.0",
-        url: `https://storage.googleapis.com/antigravity-public/antigravity-cli/99.0.0-101/${targetDir}-${targetArch}/cli_${targetDir}_${targetArch}.tar.gz`,
-        sha512: sha512Hex(archive),
-        executableName: "antigravity",
-        format: "tar.gz",
-      };
+      const asset = posixHostAsset("99.0.0", archive);
 
       const installed = await installManagedAntigravityRelease({
         dataDirectory,
@@ -445,8 +459,6 @@ describe("antigravity-managed-install", () => {
     "updates a managed Antigravity runtime through ProviderMaintenanceController under its installation lease",
     async () => {
       const dataDirectory = await createTempDataDir();
-      const targetDir = process.platform === "darwin" ? "darwin" : "linux";
-      const targetArch = process.arch === "arm64" ? "arm64" : "x64";
       const makeRelease = (version: string) => {
         const script = Buffer.from([
           "#!/bin/sh",
@@ -456,14 +468,7 @@ describe("antigravity-managed-install", () => {
           "",
         ].join("\n"));
         const archive = buildTarGz([{ name: "antigravity", content: script }]);
-        const asset: AntigravityCliReleaseAsset = {
-          version,
-          url: `https://storage.googleapis.com/antigravity-public/antigravity-cli/${version}-101/${targetDir}-${targetArch}/cli_${targetDir}_${targetArch}.tar.gz`,
-          sha512: sha512Hex(archive),
-          executableName: "antigravity",
-          format: "tar.gz",
-        };
-        return { archive, asset };
+        return { archive, asset: posixHostAsset(version, archive) };
       };
 
       const v1 = makeRelease("1.5.17");
@@ -602,7 +607,7 @@ describe("antigravity-managed-install", () => {
           manifestCalls += 1;
           const version = manifestCalls === 1 ? "1.5.19" : v2.asset.version;
           const url = manifestCalls === 1
-            ? `https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.19-101/${targetDir}-${targetArch}/cli_${targetDir}_${targetArch}.tar.gz`
+            ? posixHostAssetUrl("1.5.19")
             : v2.asset.url;
           return new Response(
             JSON.stringify({ version, url, sha512: v2.asset.sha512 }),
@@ -690,13 +695,7 @@ describe("antigravity-managed-install", () => {
         // S7: Propagate unconfirmed process-tree termination as cleanupConfirmed: false
         const stallingScript = Buffer.from("#!/bin/sh\nsleep 30\n");
         const stallingArchive = buildTarGz([{ name: "antigravity", content: stallingScript }]);
-        const stallingAsset: AntigravityCliReleaseAsset = {
-          version: "1.5.19",
-          url: `https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.19-101/${targetDir}-${targetArch}/cli_${targetDir}_${targetArch}.tar.gz`,
-          sha512: sha512Hex(stallingArchive),
-          executableName: "antigravity",
-          format: "tar.gz",
-        };
+        const stallingAsset = posixHostAsset("1.5.19", stallingArchive);
         const abortForCleanup = new AbortController();
         const unconfirmedFetch = vi.fn(async (input: RequestInfo | URL) => {
           const url = String(input);

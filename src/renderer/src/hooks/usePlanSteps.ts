@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 import type {
   AgentPlan,
@@ -13,14 +13,13 @@ import {
   type StreamingAgentSource,
 } from "./useStreamingAgentState";
 
-function runningPlanSteps([text]: StreamingAgentState): TextPlanStep[] {
-  return planFromText("", "running", text);
-}
+const EMPTY_PLAN_STEPS: TextPlanStep[] = [];
 
 function samePlanSteps(
   left: readonly TextPlanStep[],
   right: readonly TextPlanStep[],
 ): boolean {
+  if (left === right) return true;
   return left.length === right.length && left.every((step, index) =>
     step.id === right[index]?.id
     && step.title === right[index]?.title
@@ -32,12 +31,28 @@ export function usePlanSteps(
   messages: readonly ChatMessage[],
   status: Conversation["status"],
   streaming: StreamingAgentSource,
+  streamedEnabled = true,
 ): TextPlanStep[] {
   const latestPlan = plans.at(-1);
-  const streamed = !latestPlan && status === "running";
+  const streamed = streamedEnabled && !latestPlan && status === "running";
+  const lastStreamedRef = useRef<{ text: string; steps: TextPlanStep[] }>({
+    text: "",
+    steps: EMPTY_PLAN_STEPS,
+  });
+  const selectRunningPlanSteps = useCallback(
+    ([text]: StreamingAgentState): TextPlanStep[] => {
+      if (text === lastStreamedRef.current.text) {
+        return lastStreamedRef.current.steps;
+      }
+      const steps = planFromText("", "running", text);
+      lastStreamedRef.current = { text, steps };
+      return steps;
+    },
+    [],
+  );
   const streamedSteps = useStreamingAgentSelection(
     streamed ? streaming : EMPTY_STREAMING_AGENT_SOURCE,
-    runningPlanSteps,
+    selectRunningPlanSteps,
     samePlanSteps,
   );
   const latestAssistantContent = useMemo(() => {
@@ -58,9 +73,10 @@ export function usePlanSteps(
         source: "native" as const,
       }));
     }
+    if (status === "running") {
+      return streamed ? streamedSteps : EMPTY_PLAN_STEPS;
+    }
     // Text-parsed steps are gated on plan mode by visiblePlanSteps.
-    return streamed
-      ? streamedSteps
-      : planFromText(latestAssistantContent, status);
+    return planFromText(latestAssistantContent, status);
   }, [latestAssistantContent, latestPlan, status, streamed, streamedSteps]);
 }

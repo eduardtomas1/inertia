@@ -345,6 +345,28 @@ function shortenEventStrings(
   ]));
 }
 
+function shortenOversizedClaudeEventWithBytes(
+  value: unknown,
+  maxBytes: number,
+): { value: unknown; bytes: number | null; shortened: boolean } {
+  const size = serializedEventBytes(value);
+  if (size === null || size <= maxBytes) {
+    return { value, bytes: size, shortened: false };
+  }
+  for (
+    let maxChars = Math.floor(maxBytes / 4);
+    maxChars >= MIN_SHORTENED_EVENT_STRING_CHARS;
+    maxChars = Math.floor(maxChars / 2)
+  ) {
+    const candidate = shortenEventStrings(value, maxChars, 0);
+    const candidateSize = serializedEventBytes(candidate);
+    if (candidateSize !== null && candidateSize <= maxBytes) {
+      return { value: candidate, bytes: candidateSize, shortened: true };
+    }
+  }
+  return { value, bytes: size, shortened: false };
+}
+
 /**
  * Legitimate tool output (verbose build logs, large file reads or writes) can
  * exceed the per-event cap (#338). Keep the event's structure, types and
@@ -356,18 +378,8 @@ export function shortenOversizedClaudeEvent(
   value: unknown,
   maxBytes: number,
 ): unknown | null {
-  const size = serializedEventBytes(value);
-  if (size === null || size <= maxBytes) return null;
-  for (
-    let maxChars = Math.floor(maxBytes / 4);
-    maxChars >= MIN_SHORTENED_EVENT_STRING_CHARS;
-    maxChars = Math.floor(maxChars / 2)
-  ) {
-    const candidate = shortenEventStrings(value, maxChars, 0);
-    const candidateSize = serializedEventBytes(candidate);
-    if (candidateSize !== null && candidateSize <= maxBytes) return candidate;
-  }
-  return null;
+  const result = shortenOversizedClaudeEventWithBytes(value, maxBytes);
+  return result.shortened ? result.value : null;
 }
 
 export class ClaudeRunEventBudget {
@@ -436,18 +448,22 @@ export class ClaudeRunEventBudget {
     ) {
       throw new Error("Claude exceeded the bounded encoded-media event rate for this run.");
     }
-    const shortened = shortenOversizedClaudeEvent(
+    const prepared = shortenOversizedClaudeEventWithBytes(
       projected.value,
       this.events.eventByteLimit,
     );
-    this.events.observe(shortened ?? projected.value);
+    if (prepared.bytes !== null) {
+      this.events.observeBytes(prepared.bytes);
+    } else {
+      this.events.observe(prepared.value);
+    }
     this.mediaBytes += projected.mediaBytes;
     this.mediaEncodedBytes += projected.mediaEncodedBytes;
     this.availableMediaBytes -= projected.mediaBytes;
     this.availableMediaEncodedBytes -= projected.mediaEncodedBytes;
-    return shortened === null
-      ? { value, shortened: false }
-      : { value: shortened, shortened: true };
+    return prepared.shortened
+      ? { value: prepared.value, shortened: true }
+      : { value, shortened: false };
   }
 
   private refill(): void {

@@ -96,7 +96,11 @@ export function createQueuedMessageRuntime(
       retryAfterCleanup(conversationId, manual);
       return;
     }
-    if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return;
+    if (options.signal.aborted || turns.isClosing()) return;
+    if (turns.isActive(conversationId)) {
+      if (manual) manualRetries.set(conversationId, manual);
+      return;
+    }
     if (options.compacting?.(conversationId)) {
       if (manual) manualRetries.set(conversationId, manual);
       return;
@@ -375,7 +379,7 @@ export function createQueuedMessageRuntime(
       }
       store.queuedMessages.release(conversationId, first.id);
       claimed = false;
-      if (steered.kind === "turn-ended") void schedule(conversationId).catch(() => undefined);
+      if (steered.kind === "turn-ended") retryAfterCleanup(conversationId, { id: first.id, retriesLeft: 1 });
       else throw new RuntimeRequestError("The agent did not take this message now. It will send when the turn ends.");
     } catch (error) {
       if (claimed) {
@@ -500,7 +504,7 @@ export function createQueuedMessageRuntime(
       void schedule(conversationId).catch(() => undefined);
       return undefined;
     }
-    await running.get(conversationId);
+    await running.get(conversationId)?.catch(() => undefined);
     await dispatch(conversationId, id);
     return undefined;
   }
@@ -545,7 +549,7 @@ export function createQueuedMessageRuntime(
       void schedule(conversationId).catch(() => undefined);
     } else if (command.type === "message.queue.send") {
       requireConversation(conversationId);
-      await running.get(conversationId);
+      await running.get(conversationId)?.catch(() => undefined);
       if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id);
       else await dispatch(conversationId, command.payload.id);
     } else if (command.type === "message.queue.stop-and-send") {
@@ -564,7 +568,11 @@ export function createQueuedMessageRuntime(
     withdrawWatcherNote,
     editedAttachmentConversations,
     editedAttachmentMetadata,
-    onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
+    onTurnSettled(turn: AgentTurn): void {
+      if (releasesQueue(turn) || manualRetries.has(turn.conversationId)) {
+        void schedule(turn.conversationId).catch(() => undefined);
+      }
+    },
     onCompactionSettled(conversationId: string): void {
       if (store.queuedMessages.list(conversationId).length > 0) void schedule(conversationId).catch(() => undefined);
     },

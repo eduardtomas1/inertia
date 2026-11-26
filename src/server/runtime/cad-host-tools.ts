@@ -384,9 +384,13 @@ function approvalFailure(decision: string): ProviderHostToolResult {
 export class CadHostTools {
   constructor(private readonly cad: CadService) {}
 
-  async invoke(call: ProviderHostToolCall, imagesAccepted: boolean): Promise<ProviderHostToolResult> {
+  async invoke(
+    call: ProviderHostToolCall,
+    imagesAccepted: boolean,
+    workspaceRoot?: string,
+  ): Promise<ProviderHostToolResult> {
     try {
-      return await this.dispatch(call, imagesAccepted);
+      return await this.dispatch(call, imagesAccepted, workspaceRoot);
     } catch (error) {
       if (error instanceof z.ZodError) {
         const tool = CAD_TOOL_DEFINITIONS.find(({ name: toolName }) => toolName === call.tool);
@@ -397,7 +401,11 @@ export class CadHostTools {
     }
   }
 
-  private async dispatch(call: ProviderHostToolCall, imagesAccepted: boolean): Promise<ProviderHostToolResult> {
+  private async dispatch(
+    call: ProviderHostToolCall,
+    imagesAccepted: boolean,
+    workspaceRoot?: string,
+  ): Promise<ProviderHostToolResult> {
     const { signal } = call;
     switch (call.tool) {
       case CAD_STATUS_TOOL_NAME:
@@ -430,7 +438,7 @@ export class CadHostTools {
       case CAD_GUIDE_TOOL_NAME:
         return json(this.cad.guide(guideSchema.parse(call.arguments).topic));
       case CAD_EXPORT_TOOL_NAME:
-        return await this.exportDrawing(call, imagesAccepted);
+        return await this.exportDrawing(call, imagesAccepted, workspaceRoot);
       default:
         return failure("unknown_tool", "That Inertia CAD tool is not available.");
     }
@@ -481,24 +489,34 @@ export class CadHostTools {
     };
   }
 
-  // Works on copies and never touches the live session; a destination the agent chooses is a new
-  // file on this computer, so the user approves it, as for a saved copy.
-  private async exportDrawing(call: ProviderHostToolCall, imagesAccepted: boolean): Promise<ProviderHostToolResult> {
+  // Works on copies and never touches the live session; any write outside Inertia's managed
+  // exported folder (including explicit destinations and workspace outputs) requires user approval.
+  private async exportDrawing(
+    call: ProviderHostToolCall,
+    imagesAccepted: boolean,
+    workspaceRoot?: string,
+  ): Promise<ProviderHostToolResult> {
     const input = exportSchema.parse(call.arguments);
     if (input.format === "png" && !imagesAccepted) {
       return failure("images_not_supported", "This chat's model cannot read images. Export pdf or dxf instead.");
     }
-    if (input.destination !== undefined) {
-      const destination = await this.cad.exportDestination(input);
+    const planned = typeof this.cad.exportAuthorization === "function"
+      ? await this.cad.exportAuthorization(input, workspaceRoot)
+      : { authorization: undefined, approvalTarget: await this.cad.exportApprovalTarget(input, workspaceRoot) };
+    if (planned.approvalTarget !== null) {
       const decision = await call.requestApproval({
         title: `Export a ${input.format.toUpperCase()} file`,
-        detail: `Inertia will run AutoCAD's console on a copy and write:\n${destination}`,
+        detail: `Inertia will run AutoCAD's console on a copy and write:\n${planned.approvalTarget}`,
         reason: "The open drawing and the original file are never touched.",
         permissionRoots: [],
       });
       if (decision !== "approve" || call.signal.aborted) return approvalFailure(decision);
     }
-    const { screenshot, ...rest } = await this.cad.export(input, call.signal);
+    const { screenshot, ...rest } = planned.authorization !== undefined
+      ? await this.cad.export(input, call.signal, workspaceRoot, planned.authorization)
+      : workspaceRoot === undefined
+        ? await this.cad.export(input, call.signal)
+        : await this.cad.export(input, call.signal, workspaceRoot);
     if (screenshot !== undefined && decodedBytes(screenshot.pngBase64) > MAX_PROVIDER_HOST_TOOL_IMAGE_BYTES) {
       return failure("CAPTURE_TOO_LARGE", "The rendering is too large to return. Export a smaller area.");
     }

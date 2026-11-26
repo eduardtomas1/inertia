@@ -324,3 +324,67 @@ describe("secret output redactor: identity fields", () => {
     expect(value.payload(input, true)).toBe(input);
   });
 });
+
+describe("secret output redactor: security hardening (keys, over-depth, streaming ANSI)", () => {
+  const TOKEN = "tok-secret-99887766";
+
+  it("redacts active secrets placed in object property keys", () => {
+    const value = redactor([TOKEN]);
+    const input = { [TOKEN]: "ok", nested: { [`prefix-${TOKEN}`]: "v" } };
+    const output = value.payload(input);
+    expect(output).not.toBe(input);
+    expect(JSON.stringify(output)).not.toContain(TOKEN);
+    expect(output).toEqual({ "[redacted]": "ok", nested: { "prefix-[redacted]": "v" } });
+  });
+
+  it("fails closed with [redacted:over-depth] at depth >= 32", () => {
+    const value = redactor([TOKEN]);
+    let deep: unknown = { leak: TOKEN };
+    for (let depth = 0; depth < 35; depth += 1) {
+      deep = { child: deep };
+    }
+    const output = value.payload(deep);
+    expect(output).not.toBe(deep);
+    expect(JSON.stringify(output)).not.toContain(TOKEN);
+    expect(JSON.stringify(output)).toContain("[redacted:over-depth]");
+
+    let deepArray: unknown = [TOKEN];
+    for (let depth = 0; depth < 35; depth += 1) {
+      deepArray = [deepArray];
+    }
+    const arrayOutput = value.payload(deepArray);
+    expect(JSON.stringify(arrayOutput)).not.toContain(TOKEN);
+    expect(JSON.stringify(arrayOutput)).toContain("[redacted:over-depth]");
+  });
+
+  it("strips ANSI/OSC control sequences across streamed text, reasoning, and activity chunks before matching", () => {
+    const value = redactor([TOKEN]);
+    const textEvents = [
+      ...value.events(text("value=tok-\u001b[0msecret-99887766 done")),
+      ...value.events(text(" split=tok-\u001b[")),
+      ...value.events(text("31msecret-99887766!")),
+      ...value.events({ ...BASE, type: "text-boundary" }),
+    ];
+    expect(streamed(textEvents)).toBe("value=[redacted] done split=[redacted]!");
+    expect(JSON.stringify(textEvents)).not.toContain("99887766");
+
+    const reasoningEvents = [
+      ...value.events({ ...BASE, type: "reasoning-summary", text: "r=tok-\u001b]0;title" }),
+      ...value.events({ ...BASE, type: "reasoning-summary", text: "\u0007secret-99887766 end" }),
+    ];
+    const activityEvents = [
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "started", label: "cmd", activityId: "cmd-ansi", outputDelta: "out=tok-\u001b[" }),
+      ...value.events({ ...BASE, type: "activity", kind: "command", phase: "completed", label: "cmd", activityId: "cmd-ansi", outputDelta: "0msecret-99887766\n" }),
+    ];
+    const finished = value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult);
+    const reasoningJoined = [...reasoningEvents, ...finished.events]
+      .map((event) => (event.type === "reasoning-summary" ? event.text : ""))
+      .join("");
+    const activityJoined = [...activityEvents, ...finished.events]
+      .map((event) => (event.type === "activity" ? event.outputDelta ?? "" : ""))
+      .join("");
+    expect(reasoningJoined).toBe("r=[redacted] end");
+    expect(activityJoined).toBe("out=[redacted]\n");
+    expect(JSON.stringify([...reasoningEvents, ...activityEvents, ...finished.events])).not.toContain("99887766");
+  });
+});

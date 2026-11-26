@@ -250,6 +250,7 @@ export function installPreviewAgentShadowBoundarySignal(
     : HTMLInputElement.prototype;
   const nativeString = String;
   const nativeLowerCase = String.prototype.toLowerCase;
+  const nativeIndexOf = String.prototype.indexOf;
   const getAttribute = Element.prototype.getAttribute;
   const nameAttributes = ["id", "name", "autocomplete", "placeholder", "aria-label"];
   const sensitiveName = (value: string): boolean => {
@@ -533,6 +534,7 @@ export function installPreviewAgentShadowBoundarySignal(
     }
   }
   const maximumParserSourceCharacters = 4_096;
+  const maximumOversizedParserScanCharacters = 262_144;
   const createElement = typeof Document === "undefined"
     ? undefined
     : Document.prototype.createElement;
@@ -555,8 +557,40 @@ export function installPreviewAgentShadowBoundarySignal(
     apply(objectDefineProperty!, Object, [items, iteratorSymbol, { __proto__: null, value: arrayValues }]);
     return items;
   };
+  const inspectOversizedParserSource = (value: string): void => {
+    if (value.length > maximumOversizedParserScanCharacters) {
+      signal();
+      return;
+    }
+    try {
+      const lower = apply(nativeLowerCase, value, []) as string;
+      if (apply(nativeIndexOf, lower, ["password"]) !== -1) {
+        signal();
+        return;
+      }
+      const inputIndex = apply(nativeIndexOf, lower, ["<input"]) as number;
+      if (inputIndex !== -1 && apply(nativeIndexOf, lower, ["value", inputIndex]) !== -1) {
+        signal();
+        return;
+      }
+      if (apply(nativeIndexOf, lower, ["shadowrootmode"]) !== -1) {
+        signalShadowBoundary();
+        signalClosedBoundary();
+      }
+    } catch {
+      signal();
+    }
+  };
   const signalPrivateContent = (value: unknown): void => {
-    if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return;
+    if (value === null || value === undefined) return;
+    if (typeof value !== "string") {
+      signal();
+      return;
+    }
+    if (value.length > maximumParserSourceCharacters) {
+      inspectOversizedParserSource(value);
+      return;
+    }
     if (typeof createElement !== "function" || typeof getImplementation !== "function"
       || typeof createHTMLDocument !== "function" || typeof parseSafeHTML !== "function"
       || typeof templateContent !== "function" || typeof querySelector !== "function") {
@@ -669,17 +703,23 @@ export function installPreviewAgentShadowBoundarySignal(
       ...descriptor,
       value(this: unknown, ...args: unknown[]): unknown {
         let source = "";
-        let inspectable = true;
+        let oversized = false;
         for (let index = 0; index < args.length; index += 1) {
           const argument = args[index];
-          if (typeof argument !== "string"
-            || source.length + argument.length > maximumParserSourceCharacters) {
-            inspectable = false;
-            break;
+          if (argument === null || argument === undefined) continue;
+          if (typeof argument !== "string") {
+            signal();
+            return apply(parser, this, args);
+          }
+          if (source.length + argument.length > maximumOversizedParserScanCharacters) {
+            signal();
+            return apply(parser, this, args);
           }
           source += argument;
+          if (source.length > maximumParserSourceCharacters) oversized = true;
         }
-        if (inspectable) signalPrivateContent(source);
+        if (oversized) inspectOversizedParserSource(source);
+        else if (source.length > 0) signalPrivateContent(source);
         return apply(parser, this, args);
       },
     });

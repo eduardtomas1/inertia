@@ -5,6 +5,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentHarnessEmitter } from "../../src/server/provider/agent-harness";
 import { ClaudeSubagentTraceTracker } from "../../src/server/provider/claude-subagent-trace";
 import { scrubCommandSecrets } from "../../src/server/provider/command-secrets";
+import { scrubSubagentSecrets } from "../../src/server/provider/subagent-trace";
 import {
   subagentActivityLabel,
   subagentStepKeyInput,
@@ -72,5 +73,11 @@ describe("delegated task step labels", () => {
     expect(subagentActivityLabel("Running deploy --api-key abc123\nsecond line")).toBe("Running deploy --api-key [redacted]");
     expect(subagentActivityLabel(42)).toBeNull();
     expect(subagentActivityLabel("  \n ")).toBeNull();
+  });
+
+  it("scrubs authorization headers separated by Unicode whitespace such as NBSP", () => {
+    const scrubbed = scrubSubagentSecrets("Authorization:\u00A0Bearer\u00A0topsecretvalue12345");
+    expect(scrubbed).toContain("[redacted]");
+    expect(scrubbed).not.toContain("topsecretvalue12345");
   });
 });

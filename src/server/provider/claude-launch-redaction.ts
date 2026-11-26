@@ -22,6 +22,10 @@ interface OpenStream {
   readonly field: StreamDeltaField;
   readonly parent: string;
   readonly index: number;
+  readonly standardEnvelope: boolean;
+  readonly rawSessionId: unknown;
+  readonly rawParentToolUseId: unknown;
+  readonly rawUuid: unknown;
 }
 
 export function claudeKeyedLaunchSecrets(environment: NodeJS.ProcessEnv): string[] {
@@ -110,21 +114,49 @@ export class ClaudeLaunchRedactor {
   ): SDKMessage {
     const event = message.event as Extract<SDKPartialAssistantMessage["event"], { type: "content_block_delta" }>;
     const delta = event.delta as unknown as Record<StreamDeltaField, string>;
-    const template = this.payload({
-      ...message,
-      event: { ...event, delta: { ...event.delta, [field]: "" } },
-    } as SDKPartialAssistantMessage);
     const key = `${parent}\u0000${index}\u0000${field}`;
     let stream = this.streams.get(key);
-    if (!stream) {
-      stream = {
-        redactor: new LaunchSecretStream(this.matcher),
-        template,
-        field,
-        parent,
-        index,
-      };
-      this.streams.set(key, stream);
+    const standard = isStandardDeltaEnvelope(message, event, field);
+    let template: SDKPartialAssistantMessage;
+    if (stream && standard && stream.standardEnvelope) {
+      const rawUuid = (message as { uuid?: unknown }).uuid;
+      if (
+        message.session_id === stream.rawSessionId
+        && message.parent_tool_use_id === stream.rawParentToolUseId
+        && rawUuid === stream.rawUuid
+      ) {
+        template = stream.template;
+      } else if (
+        message.session_id === stream.rawSessionId
+        && message.parent_tool_use_id === stream.rawParentToolUseId
+        && typeof rawUuid === "string"
+      ) {
+        template = { ...stream.template, uuid: this.matcher.mask(rawUuid) } as SDKPartialAssistantMessage;
+      } else {
+        template = this.payload({
+          ...message,
+          event: { ...event, delta: { ...event.delta, [field]: "" } },
+        } as SDKPartialAssistantMessage);
+      }
+    } else {
+      template = this.payload({
+        ...message,
+        event: { ...event, delta: { ...event.delta, [field]: "" } },
+      } as SDKPartialAssistantMessage);
+      if (!stream) {
+        stream = {
+          redactor: new LaunchSecretStream(this.matcher),
+          template,
+          field,
+          parent,
+          index,
+          standardEnvelope: standard,
+          rawSessionId: message.session_id,
+          rawParentToolUseId: message.parent_tool_use_id,
+          rawUuid: (message as { uuid?: unknown }).uuid,
+        };
+        this.streams.set(key, stream);
+      }
     }
     return withDeltaText(template, field, stream.redactor.push(delta[field]));
   }
@@ -139,6 +171,29 @@ export class ClaudeLaunchRedactor {
     }
     return flushed;
   }
+}
+
+function isStandardDeltaEnvelope(
+  message: SDKPartialAssistantMessage,
+  event: Extract<SDKPartialAssistantMessage["event"], { type: "content_block_delta" }>,
+  field: StreamDeltaField,
+): boolean {
+  for (const key in message) {
+    if (
+      key !== "type"
+      && key !== "event"
+      && key !== "parent_tool_use_id"
+      && key !== "session_id"
+      && key !== "uuid"
+    ) return false;
+  }
+  for (const key in event) {
+    if (key !== "type" && key !== "index" && key !== "delta") return false;
+  }
+  for (const key in event.delta) {
+    if (key !== "type" && key !== field) return false;
+  }
+  return true;
 }
 
 function withDeltaText(

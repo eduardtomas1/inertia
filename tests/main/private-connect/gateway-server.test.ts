@@ -356,12 +356,18 @@ describe("Private Connect loopback gateway", () => {
     }
     expect(pairStatuses.slice(0, 10)).toEqual(Array.from({ length: 10 }, () => 202));
     expect(pairStatuses.at(-1)).toBe(429);
-    // Serve proxies every peer through loopback. A different invitation
-    // capability must not inherit this exhausted peer's pairing quota.
+    // Serve proxies every peer through loopback. A different invitation ID
+    // must not inherit this exhausted invitation's pairing quota.
     const otherPair = await fetch(`http://${hostValue}/api/pair/start`, {
       method: "POST", headers: { Origin: origin, "Content-Type": "application/json" },
-      body: JSON.stringify({ invitation: { ...invitation, pairingSecret: "B".repeat(43) },
-        deviceId: session.deviceId, deviceLabel: "another browser", browserNonce: "b".repeat(43) }),
+      body: JSON.stringify({
+        invitation: {
+          ...invitation,
+          invitationId: "44444444-4444-4444-8444-444444444444",
+          pairingSecret: "B".repeat(43),
+        },
+        deviceId: session.deviceId, deviceLabel: "another browser", browserNonce: "b".repeat(43),
+      }),
     });
     expect(otherPair.status).toBe(202);
     const request = (requestId: string) => fetch(`http://${hostValue}/api/request`, { method: "POST", headers: { Origin: origin, Cookie: "__Host-inertia-private-connect=session-token", "Content-Type": "application/json", "x-inertia-private-connect-csrf": session.csrf }, body: JSON.stringify({ protocolVersion: 1, type: "client.ping", requestId }) });
@@ -518,5 +524,269 @@ describe("Private Connect loopback gateway", () => {
       request.end();
     });
     expect(invalidHost).toBe(400);
+  });
+
+  it("enforces pairing rate limits across distinct secret guesses and isolates authenticated session buckets from pairing floods", async () => {
+    const nowValue = 5_000_000;
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-sec5-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const server = new PrivateConnectGatewayServer({
+      host: host(),
+      staticRoot: root,
+      now: () => new Date(nowValue),
+    });
+    servers.push(server);
+    const address = await server.start();
+    const hostValue = hostHeader(address);
+    const origin = `https://${hostValue}`;
+    const baseInvitation = {
+      protocolVersion: 1,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      invitationId: "33333333-3333-4333-8333-333333333333",
+      createdAt: "2029-12-31T23:55:00.000Z",
+      expiresAt: "2030-01-01T00:05:00.000Z",
+    };
+
+    // 1. Varying pairingSecret on the same invitationId cannot bypass pairingAttemptsPerMinute.
+    const guessStatuses: number[] = [];
+    for (let index = 0; index < PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute + 1; index += 1) {
+      const secret = `S${String(index).padStart(42, "0")}`;
+      const response = await fetch(`http://${hostValue}/api/pair/start`, {
+        method: "POST",
+        headers: { Origin: origin, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invitation: { ...baseInvitation, pairingSecret: secret },
+          deviceId: session.deviceId,
+          deviceLabel: "attacker",
+          browserNonce: `N${String(index).padStart(42, "0")}`,
+        }),
+      });
+      guessStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    expect(guessStatuses.slice(0, PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute))
+      .toEqual(Array.from({ length: PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute }, () => 202));
+    expect(guessStatuses.at(-1)).toBe(429);
+
+    // 2. Exhaust authenticated request quota, flood 135 distinct unauthenticated pairing requests,
+    // and verify the authenticated session's bucket was NOT evicted.
+    const authedPing = (index: number) => fetch(`http://${hostValue}/api/request`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: "__Host-inertia-private-connect=session-token",
+        "Content-Type": "application/json",
+        "x-inertia-private-connect-csrf": session.csrf,
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        type: "client.ping",
+        requestId: `55555555-5555-4555-8555-${String(index + 1).padStart(12, "0")}`,
+      }),
+    });
+    for (let index = 0; index < PRIVATE_CONNECT_LIMITS.requestsPerMinute; index += 1) {
+      const response = await authedPing(index);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+    }
+    expect((await authedPing(999)).status).toBe(429);
+
+    for (let index = 0; index < 135; index += 1) {
+      const response = await fetch(`http://${hostValue}/api/pair/start`, {
+        method: "POST",
+        headers: { Origin: origin, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invitation: {
+            ...baseInvitation,
+            invitationId: `66666666-6666-4666-8666-${String(index + 1).padStart(12, "0")}`,
+            pairingSecret: `P${String(index).padStart(42, "0")}`,
+          },
+          deviceId: session.deviceId,
+          deviceLabel: "flood",
+          browserNonce: `M${String(index).padStart(42, "0")}`,
+        }),
+      });
+      await response.arrayBuffer();
+    }
+    expect((await authedPing(1000)).status).toBe(429);
+  });
+
+  it("bounds failed pairing verification before host calls while isolating legitimate invitations and approval polling", async () => {
+    const nowValue = 6_000_000;
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-s5-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const validInvitationId = "77777777-7777-4777-8777-777777777777";
+    const validSecret = "S".repeat(43);
+    const validRequestId = "88888888-8888-4888-8888-888888888888";
+    const validNonce = "N".repeat(43);
+    let pairStartCalls = 0;
+    let pairStatusCalls = 0;
+    const verifyingHost: PrivateConnectGatewayHost = {
+      ...host(),
+      async pairStart(request) {
+        pairStartCalls += 1;
+        if (request.invitation.invitationId !== validInvitationId || request.invitation.pairingSecret !== validSecret) {
+          throw new Error("Invalid invitation.");
+        }
+        return { requestId: validRequestId, expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123-456" };
+      },
+      async pairStatus(requestId, browserNonce) {
+        pairStatusCalls += 1;
+        if (requestId !== validRequestId || browserNonce !== validNonce) {
+          throw new Error("Invalid status request.");
+        }
+        return { status: "pending", requestId, expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123-456" };
+      },
+    };
+    const server = new PrivateConnectGatewayServer({
+      host: verifyingHost,
+      staticRoot: root,
+      now: () => new Date(nowValue),
+    });
+    servers.push(server);
+    const address = await server.start();
+    const hostValue = hostHeader(address);
+    const origin = `https://${hostValue}`;
+
+    // Flood invalid pairStart guesses as an attacker peer beyond the failure limit.
+    const invalidStartStatuses: number[] = [];
+    for (let i = 0; i < PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute + 5; i += 1) {
+      const response = await fetch(`http://${hostValue}/api/pair/start`, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          "Content-Type": "application/json",
+          "Tailscale-User-Login": "attacker@example.com",
+        },
+        body: JSON.stringify({
+          invitation: {
+            protocolVersion: 1,
+            hostId: "11111111-1111-4111-8111-111111111111",
+            invitationId: validInvitationId,
+            pairingSecret: `X${String(i).padStart(42, "0")}`,
+            createdAt: "2029-12-31T23:55:00.000Z",
+            expiresAt: "2030-01-01T00:05:00.000Z",
+          },
+          deviceId: session.deviceId,
+          deviceLabel: "attacker",
+          browserNonce: `B${String(i).padStart(42, "0")}`,
+        }),
+      });
+      invalidStartStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    expect(invalidStartStatuses.slice(0, PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute))
+      .toEqual(Array.from({ length: PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute }, () => 400));
+    expect(invalidStartStatuses.slice(PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute))
+      .toEqual([429, 429, 429, 429, 429]);
+    // Requests past the failure limit were rejected before calling host.pairStart.
+    expect(pairStartCalls).toBe(PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute);
+
+    // Legitimate pairStart from another peer with the real secret still succeeds.
+    const validStart = await fetch(`http://${hostValue}/api/pair/start`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        "Content-Type": "application/json",
+        "Tailscale-User-Login": "owner@example.com",
+      },
+      body: JSON.stringify({
+        invitation: {
+          protocolVersion: 1,
+          hostId: "11111111-1111-4111-8111-111111111111",
+          invitationId: validInvitationId,
+          pairingSecret: validSecret,
+          createdAt: "2029-12-31T23:55:00.000Z",
+          expiresAt: "2030-01-01T00:05:00.000Z",
+        },
+        deviceId: session.deviceId,
+        deviceLabel: "legit",
+        browserNonce: validNonce,
+      }),
+    });
+    expect(validStart.status).toBe(202);
+    await validStart.arrayBuffer();
+
+    // Flood invalid pairStatus guesses as the attacker peer beyond the failure limit.
+    const invalidPollStatuses: number[] = [];
+    for (let i = 0; i < PRIVATE_CONNECT_LIMITS.requestsPerMinute + 5; i += 1) {
+      const response = await fetch(`http://${hostValue}/api/pair/status`, {
+        method: "POST",
+        headers: {
+          Origin: origin,
+          "Content-Type": "application/json",
+          "Tailscale-User-Login": "attacker@example.com",
+        },
+        body: JSON.stringify({
+          requestId: validRequestId,
+          browserNonce: `W${String(i).padStart(42, "0")}`,
+        }),
+      });
+      invalidPollStatuses.push(response.status);
+      await response.arrayBuffer();
+    }
+    expect(invalidPollStatuses.slice(0, PRIVATE_CONNECT_LIMITS.requestsPerMinute))
+      .toEqual(Array.from({ length: PRIVATE_CONNECT_LIMITS.requestsPerMinute }, () => 400));
+    expect(invalidPollStatuses.slice(PRIVATE_CONNECT_LIMITS.requestsPerMinute))
+      .toEqual([429, 429, 429, 429, 429]);
+    // Requests past the failure limit were rejected before calling host.pairStatus.
+    expect(pairStatusCalls).toBe(PRIVATE_CONNECT_LIMITS.requestsPerMinute);
+
+    // Legitimate approval polling from the owner peer with the real browserNonce still succeeds.
+    const validPoll = await fetch(`http://${hostValue}/api/pair/status`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        "Content-Type": "application/json",
+        "Tailscale-User-Login": "owner@example.com",
+      },
+      body: JSON.stringify({
+        requestId: validRequestId,
+        browserNonce: validNonce,
+      }),
+    });
+    expect(validPoll.status).toBe(200);
+    await validPoll.arrayBuffer();
+
+    // Overlapping concurrent invalid pairStatus requests from a fresh attacker cannot exceed requestsPerMinute.
+    let concurrentCalls = 0;
+    const slowHost: PrivateConnectGatewayHost = {
+      ...host(),
+      async pairStatus() {
+        concurrentCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        throw new Error("Invalid status request.");
+      },
+    };
+    const concurrentServer = new PrivateConnectGatewayServer({
+      host: slowHost,
+      staticRoot: root,
+      now: () => new Date(nowValue),
+    });
+    servers.push(concurrentServer);
+    const concurrentAddress = await concurrentServer.start();
+    const concurrentHost = hostHeader(concurrentAddress);
+    const concurrentOrigin = `https://${concurrentHost}`;
+    const concurrentResults = await Promise.all(
+      Array.from({ length: PRIVATE_CONNECT_LIMITS.requestsPerMinute + 10 }, async (_, index) => {
+        const response = await fetch(`http://${concurrentHost}/api/pair/status`, {
+          method: "POST",
+          headers: {
+            Origin: concurrentOrigin,
+            "Content-Type": "application/json",
+            "Tailscale-User-Login": "burst-attacker@example.com",
+          },
+          body: JSON.stringify({
+            requestId: validRequestId,
+            browserNonce: `C${String(index).padStart(42, "0")}`,
+          }),
+        });
+        await response.arrayBuffer();
+        return response.status;
+      }),
+    );
+    expect(concurrentCalls).toBe(PRIVATE_CONNECT_LIMITS.requestsPerMinute);
+    expect(concurrentResults.filter((status) => status === 400)).toHaveLength(PRIVATE_CONNECT_LIMITS.requestsPerMinute);
+    expect(concurrentResults.filter((status) => status === 429)).toHaveLength(10);
   });
 });

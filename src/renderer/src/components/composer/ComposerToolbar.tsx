@@ -1,4 +1,4 @@
-import { lazy, Suspense, useContext, useEffect, useId, useRef } from "react";
+import { lazy, memo, Suspense, useCallback, useContext, useEffect, useId, useMemo, useRef } from "react";
 import {
   ChevronDown,
   Ellipsis,
@@ -197,7 +197,7 @@ export interface ComposerToolbarProps {
   awaitingInput?: boolean;
 }
 
-export function ComposerToolbar({
+export const ComposerToolbar = memo(function ComposerToolbar({
   actions,
   disabled,
   running,
@@ -317,8 +317,20 @@ export function ComposerToolbar({
     railRef,
     branchChip?.attention ? BRANCH_ATTENTION : NO_ATTENTION,
   );
-  const moreTrigger = (): HTMLButtonElement | null =>
-    railRef.current?.querySelector<HTMLButtonElement>(".composer-more-trigger") ?? null;
+  const moreTrigger = useCallback(
+    (): HTMLButtonElement | null =>
+      railRef.current?.querySelector<HTMLButtonElement>(".composer-more-trigger") ?? null,
+    [],
+  );
+  const modelChooserConfiguration = useMemo(() => ({
+    accessMode: conversation.accessMode,
+    interactionMode: conversation.interactionMode,
+    fastMode: selectedFastMode,
+  }), [conversation.accessMode, conversation.interactionMode, selectedFastMode]);
+  const handleModelChooserOpenChange = useCallback((open: boolean) => {
+    if (open) dismissMenu("context-change");
+  }, [dismissMenu]);
+  const handleOpenBranch = useCallback(() => branchMenuRef.current?.() ?? false, []);
   useEffect(() => {
     const more = moreTrigger();
     const moreShown = Boolean(more?.getClientRects().length);
@@ -336,7 +348,7 @@ export function ComposerToolbar({
       if (moreShown) more?.focus({ preventScroll: true });
       else onFocusInput?.();
     }
-  }, [dismissMenu, folded, menu, onFocusInput]);
+  }, [dismissMenu, folded, menu, moreTrigger, onFocusInput]);
   const toolsId = useId();
   const toolsOpen = useComposerToolsOpen();
   const toolsVisible = toolsOpen || (menu !== null && COMPOSER_TOOL_MENUS.has(menu));
@@ -357,16 +369,10 @@ export function ComposerToolbar({
           <ModelChooser
             routes={modelRoutes}
             selectedRoute={selectedModelRoute}
-            configuration={{
-              accessMode: conversation.accessMode,
-              interactionMode: conversation.interactionMode,
-              fastMode: selectedFastMode,
-            }}
+            configuration={modelChooserConfiguration}
             disabled={disabled || running}
             closeSignal={menu}
-            onOpenChange={(open) => {
-              if (open) dismissMenu("context-change");
-            }}
+            onOpenChange={handleModelChooserOpenChange}
             onSelect={onChooseModelRoute}
           />
           {conversationUpdateError ? (
@@ -437,7 +443,7 @@ export function ComposerToolbar({
               branch={branchChip
                 ? { label: branchChip.text, available: branchChip.interactive, attention: branchChip.attention }
                 : null}
-              onOpenBranch={() => branchMenuRef.current?.() ?? false}
+              onOpenBranch={handleOpenBranch}
             />
           </Suspense>
         </div>
@@ -669,4 +675,4 @@ export function ComposerToolbar({
       </div>
     </div>
   );
-}
+});

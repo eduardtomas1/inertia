@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, normalize, sep, win32 } from "node:path";
+import { appendFile, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, sep, win32 } from "node:path";
 
 import { z } from "zod";
 
@@ -30,6 +30,7 @@ import {
   type PaperSize,
 } from "./cad-export-scripts";
 import { CadError, type CadDocument } from "./cad-hosts";
+import { publishToPinnedDirectory } from "./cad-export-publish";
 
 export {
   DWG_NEXT,
@@ -83,6 +84,8 @@ export interface CadExporterOptions {
   systemRoot?: string;
   /** The open AutoCAD drawings, to resolve documentIds and report unsaved changes. */
   documents: () => Promise<CadDocument[]>;
+  /** Optional default workspace root for raw filesystem CAD inputs when a call does not pass one. */
+  workspaceRoot?: string;
   run?: ExportRunner;
   now?: () => number;
 }
@@ -210,8 +213,32 @@ class ExportQueue {
   }
 }
 
+async function canonicalOrNormalized(target: string): Promise<string> {
+  const normalized = normalize(target);
+  try {
+    return await realpath(normalized);
+  } catch {
+    const parent = dirname(normalized);
+    if (parent === normalized) return normalized;
+    return join(await canonicalOrNormalized(parent), basename(normalized));
+  }
+}
+
+async function isWithinDirectory(candidatePath: string, directoryPath: string): Promise<boolean> {
+  const [root, target] = await Promise.all([
+    canonicalOrNormalized(directoryPath),
+    canonicalOrNormalized(candidatePath),
+  ]);
+  const rel = relative(
+    windowsPaths ? root.toLowerCase() : root,
+    windowsPaths ? target.toLowerCase() : target,
+  );
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
 interface Drawing {
   path: string;
+  canonicalPath: string;
   savedAt: string;
   liveUnsaved: boolean;
 }
@@ -221,6 +248,7 @@ interface Prepared {
   source: Drawing;
   template: Drawing | undefined;
   destination: string | undefined;
+  workspaceRoot: string | undefined;
 }
 
 interface Outcome {
@@ -229,6 +257,105 @@ interface Outcome {
   paperSize: PaperSize | undefined;
   bytes: Buffer | undefined;
   path: string | undefined;
+}
+
+export interface CadExportParentIdentity {
+  ancestorPath: string;
+  canonicalAncestor: string;
+  dev: string;
+  ino: string;
+}
+
+export interface CadExportAuthorization {
+  target: {
+    basePath: string;
+    path: string;
+    explicit: boolean;
+    stamped: boolean;
+    managed: boolean;
+    parentIdentity: CadExportParentIdentity;
+  } | null;
+}
+
+async function inspectParentDirectoryIdentity(targetPath: string): Promise<CadExportParentIdentity> {
+  const targetStats = await lstat(targetPath).catch(() => undefined);
+  if (targetStats?.isSymbolicLink()) {
+    throw invalid("destination cannot be a symbolic link.");
+  }
+  let current = dirname(targetPath);
+  for (;;) {
+    const linkStats = await lstat(current).catch(() => undefined);
+    if (linkStats !== undefined) {
+      const canonicalAncestor = await realpath(current).catch(() => undefined);
+      if (canonicalAncestor === undefined) {
+        throw invalid("destination parent directory is not accessible.");
+      }
+      const stats = await stat(canonicalAncestor, { bigint: true }).catch(() => undefined);
+      if (stats === undefined || !stats.isDirectory()) {
+        throw invalid("destination parent directory is not a directory.");
+      }
+      return {
+        ancestorPath: current,
+        canonicalAncestor,
+        dev: String(stats.dev),
+        ino: String(stats.ino),
+      };
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      throw invalid("destination parent directory is not accessible.");
+    }
+    current = parent;
+  }
+}
+
+function sameParentIdentity(
+  left: CadExportParentIdentity,
+  right: CadExportParentIdentity,
+): boolean {
+  return samePath(left.ancestorPath, right.ancestorPath)
+    && samePath(left.canonicalAncestor, right.canonicalAncestor)
+    && left.dev === right.dev
+    && left.ino === right.ino;
+}
+
+async function verifyAuthorizedAncestorBeforePublish(
+  targetPath: string,
+  authorizedParent: CadExportParentIdentity,
+): Promise<{ subdirectories: string[]; fileName: string }> {
+  const ancestorCanonical = await realpath(authorizedParent.ancestorPath).catch(() => undefined);
+  if (ancestorCanonical === undefined || !samePath(ancestorCanonical, authorizedParent.canonicalAncestor)) {
+    throw new Error("ancestor-changed");
+  }
+  const ancestorStats = await stat(ancestorCanonical, { bigint: true }).catch(() => undefined);
+  if (
+    ancestorStats === undefined
+    || !ancestorStats.isDirectory()
+    || String(ancestorStats.dev) !== authorizedParent.dev
+    || String(ancestorStats.ino) !== authorizedParent.ino
+  ) {
+    throw new Error("ancestor-identity-changed");
+  }
+  const relDir = relative(
+    windowsPaths ? authorizedParent.ancestorPath.toLowerCase() : authorizedParent.ancestorPath,
+    windowsPaths ? dirname(targetPath).toLowerCase() : dirname(targetPath),
+  );
+  if (relDir === ".." || relDir.startsWith(`..${sep}`) || isAbsolute(relDir)) {
+    throw new Error("parent-escaped");
+  }
+  // Preserve original casing from dirname(targetPath) when splitting segments on Windows.
+  const rawRelDir = relative(authorizedParent.ancestorPath, dirname(targetPath));
+  const subdirectories = rawRelDir === "" ? [] : rawRelDir.split(sep);
+  for (const segment of subdirectories) {
+    if (segment === "" || segment === "." || segment === ".." || segment.includes("/") || segment.includes("\\")) {
+      throw new Error("invalid-segment");
+    }
+  }
+  const fileName = basename(targetPath);
+  if (fileName === "" || fileName === "." || fileName === ".." || fileName.includes("/") || fileName.includes("\\")) {
+    throw new Error("invalid-filename");
+  }
+  return { subdirectories, fileName };
 }
 
 /**
@@ -242,6 +369,7 @@ export class CadExporter {
   private readonly now: () => number;
   private readonly receiptsFile: string;
   private readonly profileDirectory: string;
+  readonly exportedDirectory: string;
   private readonly lock = new ExportQueue();
   private located: string | undefined;
 
@@ -252,6 +380,7 @@ export class CadExporter {
     // Its own file: the apply receipts are trimmed, and export ownership must never be dropped.
     this.receiptsFile = join(options.stateDirectory, "exports.jsonl");
     this.profileDirectory = join(options.stateDirectory, "accoreconsole");
+    this.exportedDirectory = join(options.stateDirectory, "exported");
   }
 
   /** Whether AutoCAD's console is installed, so exports can run. */
@@ -259,26 +388,62 @@ export class CadExporter {
     return (await this.locate()) !== undefined;
   }
 
+  async isManagedExportPath(targetPath: string): Promise<boolean> {
+    return await isWithinDirectory(targetPath, this.exportedDirectory);
+  }
+
+  /**
+   * Computes the exact destination path, managed-folder classification, and
+   * parent directory identity before approval or execution so delivery can
+   * refuse any drift after AutoCAD runs.
+   */
+  async authorizeExport(input: CadExportInput, workspaceRoot?: string): Promise<CadExportAuthorization> {
+    const prepared = await this.prepare(input, workspaceRoot);
+    await this.requireConsole();
+    const target = await this.target(prepared);
+    if (target === undefined) return { target: null };
+    const planned = await this.delivery(target.path, target.explicit, inputsOf(prepared));
+    const [managed, parentIdentity] = await Promise.all([
+      this.isManagedExportPath(planned.path),
+      inspectParentDirectoryIdentity(planned.path),
+    ]);
+    return {
+      target: {
+        basePath: target.path,
+        path: planned.path,
+        explicit: target.explicit,
+        stamped: !samePath(planned.path, target.path),
+        managed,
+        parentIdentity,
+      },
+    };
+  }
+
   /**
    * The file an export would write, checked before the user approves a custom destination.
    * A default name may still gain a later timestamp; a png without destination writes no file
    * and is refused here.
    */
-  async destinationFor(input: CadExportInput): Promise<string> {
-    const prepared = await this.prepare(input);
-    await this.requireConsole();
-    const target = await this.target(prepared);
-    if (target === undefined) {
+  async destinationFor(input: CadExportInput, workspaceRoot?: string): Promise<string> {
+    const authorization = await this.authorizeExport(input, workspaceRoot);
+    if (authorization.target === null) {
       throw invalid("A png without destination writes no file; the image is returned instead.");
     }
-    return (await this.delivery(target.path, target.explicit, inputsOf(prepared))).path;
+    return authorization.target.path;
   }
 
-  async export(input: CadExportInput, signal?: AbortSignal): Promise<CadExportResult> {
-    const prepared = await this.prepare(input);
+  async export(
+    input: CadExportInput,
+    signal?: AbortSignal,
+    workspaceRoot?: string,
+    authorization?: CadExportAuthorization,
+  ): Promise<CadExportResult> {
+    const prepared = await this.prepare(input, workspaceRoot);
     const accoreconsole = await this.requireConsole();
     const deadline = this.now() + EXPORT_BUDGET_MS;
-    const outcome = await this.lock.run(async () => await this.runExport(prepared, accoreconsole, deadline, signal));
+    const outcome = await this.lock.run(
+      async () => await this.runExport(prepared, accoreconsole, deadline, signal, authorization),
+    );
     const size = outcome.bytes === undefined ? undefined : pngSize(outcome.bytes);
     return {
       format: input.format,
@@ -346,8 +511,9 @@ export class CadExporter {
   }
 
   /** Every check that needs no console: options per format, the source, template and destination. */
-  private async prepare(input: CadExportInput): Promise<Prepared> {
+  private async prepare(input: CadExportInput, workspaceRoot?: string): Promise<Prepared> {
     if (this.options.platform !== "win32") throw new CadError("UNSUPPORTED_PLATFORM", UNSUPPORTED);
+    const effectiveWorkspaceRoot = workspaceRoot ?? this.options.workspaceRoot;
     const reject = (field: string, allowed: string): CadError => invalid(`${field} applies only to ${allowed}.`);
     if (input.format !== "png" && input.format !== "pdf") {
       for (const field of ["area", "layout", "plotStyle"] as const) {
@@ -366,24 +532,41 @@ export class CadExporter {
     ) {
       throw invalid("dwg builds a new drawing from a .dxf file you wrote; pass its absolute path as source.");
     }
-    const source = await this.resolveDrawing(input.source, "source", input.format === "dwg" ? [".dxf"] : [".dwg", ".dxf"]);
+    const source = await this.resolveDrawing(
+      input.source,
+      "source",
+      input.format === "dwg" ? [".dxf"] : [".dwg", ".dxf"],
+      effectiveWorkspaceRoot,
+    );
     const template = input.template === undefined
       ? undefined
-      : await this.resolveDrawing(input.template, "template", [".dwg", ".dwt"]);
+      : await this.resolveDrawing(input.template, "template", [".dwg", ".dwt"], effectiveWorkspaceRoot);
     const destination = input.destination === undefined
       ? undefined
       : localPath(input.destination, "destination", [`.${input.format}`]);
-    return { input, source, template, destination };
+    if (destination !== undefined) {
+      const destinationStats = await lstat(destination).catch(() => undefined);
+      if (destinationStats?.isSymbolicLink()) {
+        throw invalid("destination cannot be a symbolic link.");
+      }
+    }
+    return { input, source, template, destination, workspaceRoot: effectiveWorkspaceRoot };
   }
 
   /** A documentId or path, and whether the open drawing has unsaved changes. */
-  private async resolveDrawing(reference: string, field: "source" | "template", extensions: readonly string[]): Promise<Drawing> {
+  private async resolveDrawing(
+    reference: string,
+    field: "source" | "template",
+    extensions: readonly string[],
+    workspaceRoot: string | undefined,
+  ): Promise<Drawing> {
     if (reference.startsWith("skp:")) {
       throw invalid("inertia_cad_export works on AutoCAD drawings; SketchUp models are not supported.");
     }
     const documents = async (): Promise<CadDocument[]> => await this.options.documents().catch(() => []);
     let path: string;
     let document: CadDocument | undefined;
+    let authorizedByOpenDocument = false;
     if (reference.startsWith("acad:")) {
       document = (await documents()).find((candidate) => candidate.documentId === reference);
       if (document === undefined) {
@@ -393,41 +576,89 @@ export class CadExporter {
         throw invalid("This drawing has never been saved, so there is no file to export. Ask the designer to save it first.");
       }
       path = localPath(document.path, field, extensions);
+      authorizedByOpenDocument = true;
     } else {
       path = localPath(reference, field, extensions);
       // Only the designer's drawings are open in AutoCAD; DXFs are the agent's own.
       if (extname(path).toLowerCase() !== ".dxf") {
-        document = (await documents()).find(
+        const openDocuments = await documents();
+        document = openDocuments.find(
           (candidate) => candidate.path != null && samePath(normalize(candidate.path), path),
         );
+        if (document !== undefined) authorizedByOpenDocument = true;
       }
     }
-    const stats = await stat(path).catch(() => undefined);
-    if (stats === undefined || !stats.isFile() || stats.size === 0) {
+    const linkStats = await lstat(path).catch(() => undefined);
+    if (linkStats?.isSymbolicLink()) {
+      throw invalid(`The ${field} file cannot be a symbolic link.`);
+    }
+    const canonicalPath = linkStats ? await realpath(path).catch(() => undefined) : undefined;
+    if (!authorizedByOpenDocument && canonicalPath !== undefined && extname(path).toLowerCase() !== ".dxf") {
+      const openDocuments = await documents();
+      for (const candidate of openDocuments) {
+        if (candidate.path == null) continue;
+        const candidateCanonical = await realpath(candidate.path).catch(() => undefined);
+        if (candidateCanonical !== undefined && samePath(candidateCanonical, canonicalPath)) {
+          document = candidate;
+          authorizedByOpenDocument = true;
+          break;
+        }
+      }
+    }
+    if (!authorizedByOpenDocument) {
+      const checkPath = canonicalPath ?? path;
+      const withinWorkspace = workspaceRoot !== undefined
+        && await isWithinDirectory(checkPath, workspaceRoot);
+      const withinExported = await isWithinDirectory(checkPath, this.exportedDirectory);
+      if (!withinWorkspace && !withinExported) {
+        throw invalid(`The ${field} path must be inside the active workspace or an open AutoCAD drawing.`);
+      }
+    }
+    if (linkStats === undefined || !linkStats.isFile() || linkStats.size === 0 || canonicalPath === undefined) {
       throw new CadError("SOURCE_NOT_FOUND", `The ${field} file ${path} does not exist or is empty.`);
     }
-    return { path, savedAt: new Date(stats.mtimeMs).toISOString(), liveUnsaved: document?.modified === true };
+    return {
+      path,
+      canonicalPath,
+      savedAt: new Date(linkStats.mtimeMs).toISOString(),
+      liveUnsaved: document?.modified === true,
+    };
   }
 
   /** Where the output goes before the overwrite rule; undefined for a png only returned inline. */
   private async target(prepared: Prepared): Promise<{ path: string; explicit: boolean } | undefined> {
-    const { input, source, destination } = prepared;
+    const { input, source, destination, workspaceRoot } = prepared;
     if (destination !== undefined) return { path: destination, explicit: true };
     if (input.format === "png") return undefined;
-    const folder = (await this.ownSource(source.path))
+    const folder = (await this.ownSource(source, workspaceRoot))
       ? dirname(source.path)
-      : join(this.options.stateDirectory, "exported");
+      : this.exportedDirectory;
     return { path: defaultDestination(folder, source.path, input.format), explicit: false };
   }
 
-  /** A DXF the agent wrote, or an earlier Inertia export: its exports may go beside it. */
-  private async ownSource(sourcePath: string): Promise<boolean> {
-    if (extname(sourcePath).toLowerCase() === ".dxf") return true;
-    const sha256 = await sha256File(sourcePath);
-    return sha256 !== undefined && (await this.ownedExports()).has(ledgerKey(sourcePath, sha256));
+  /** A DXF inside the workspace, or an earlier Inertia export: its exports may go beside it. */
+  private async ownSource(source: Drawing, workspaceRoot: string | undefined): Promise<boolean> {
+    if (
+      extname(source.path).toLowerCase() === ".dxf"
+      && workspaceRoot !== undefined
+      && await isWithinDirectory(source.canonicalPath, workspaceRoot)
+    ) {
+      return true;
+    }
+    const sha256 = await sha256File(source.canonicalPath);
+    if (sha256 === undefined) return false;
+    const owned = await this.ownedExports();
+    return owned.has(ledgerKey(source.path, sha256))
+      || owned.has(ledgerKey(source.canonicalPath, sha256));
   }
 
-  private async runExport(prepared: Prepared, accoreconsole: string, deadline: number, signal: AbortSignal | undefined): Promise<Outcome> {
+  private async runExport(
+    prepared: Prepared,
+    accoreconsole: string,
+    deadline: number,
+    signal: AbortSignal | undefined,
+    authorization?: CadExportAuthorization,
+  ): Promise<Outcome> {
     if (signal?.aborted) throw cancelled();
     const { input, source, template } = prepared;
     let workDirectory: string;
@@ -440,8 +671,14 @@ export class CadExporter {
     try {
       const drawing = `in${extname(source.path).toLowerCase()}`;
       try {
-        await copyFile(source.path, join(workDirectory, drawing));
-        if (template !== undefined) await copyFile(template.path, join(workDirectory, "template.dwg"));
+        const sourceCheck = await lstat(source.canonicalPath);
+        if (!sourceCheck.isFile() || sourceCheck.isSymbolicLink()) throw new Error("symlink");
+        await copyFile(source.canonicalPath, join(workDirectory, drawing));
+        if (template !== undefined) {
+          const templateCheck = await lstat(template.canonicalPath);
+          if (!templateCheck.isFile() || templateCheck.isSymbolicLink()) throw new Error("symlink");
+          await copyFile(template.canonicalPath, join(workDirectory, "template.dwg"));
+        }
       } catch {
         throw new CadError("SOURCE_NOT_FOUND", "Could not copy the drawing; it may be locked or gone.");
       }
@@ -482,6 +719,61 @@ export class CadExporter {
       }
       const bytes = input.format === "png" ? await readFile(produced) : undefined;
       const target = await this.target(prepared);
+      if (authorization !== undefined) {
+        if (authorization.target === null) {
+          if (target !== undefined) {
+            throw new CadError("EXPORT_FAILED", "Export destination changed after authorization.");
+          }
+          return { warnings, areaPlotted, paperSize, bytes, path: undefined };
+        }
+        if (
+          target === undefined
+          || !samePath(target.path, authorization.target.basePath)
+          || target.explicit !== authorization.target.explicit
+        ) {
+          throw new CadError("EXPORT_FAILED", "Export destination changed after authorization.");
+        }
+        const inputs = inputsOf(prepared);
+        let resolved: { path: string; replacing: boolean };
+        if (authorization.target.stamped) {
+          // Reuse the already-approved stamped path rather than recomputing a
+          // new timestamp if AutoCAD crossed a clock second boundary.
+          const aliasesInput = (await Promise.all(
+            inputs.map(async (inputPath) => await sameFile(authorization.target!.path, inputPath)),
+          )).some(Boolean);
+          const alreadyExists = (await lstat(authorization.target.path).catch(() => undefined)) !== undefined;
+          if (aliasesInput || alreadyExists) {
+            throw new CadError(
+              "DESTINATION_EXISTS",
+              "Export destination changed after approval; refusing to write an unapproved path.",
+            );
+          }
+          resolved = { path: authorization.target.path, replacing: false };
+        } else {
+          resolved = await this.delivery(target.path, target.explicit, inputs);
+          if (!samePath(resolved.path, authorization.target.path)) {
+            throw new CadError(
+              "DESTINATION_EXISTS",
+              "Export destination changed after approval; refusing to write an unapproved path.",
+            );
+          }
+        }
+        const [managed, parentIdentity] = await Promise.all([
+          this.isManagedExportPath(resolved.path),
+          inspectParentDirectoryIdentity(resolved.path),
+        ]);
+        if (
+          managed !== authorization.target.managed
+          || !sameParentIdentity(parentIdentity, authorization.target.parentIdentity)
+        ) {
+          throw new CadError(
+            "EXPORT_FAILED",
+            "Export destination folder changed after approval; refusing to write.",
+          );
+        }
+        const path = await this.deliverResolved(produced, resolved, authorization.target.parentIdentity);
+        return { warnings, areaPlotted, paperSize, bytes, path };
+      }
       const path = target === undefined ? undefined : await this.deliver(produced, target.path, target.explicit, inputsOf(prepared));
       return { warnings, areaPlotted, paperSize, bytes, path };
     } finally {
@@ -557,19 +849,44 @@ export class CadExporter {
   }
 
   private async deliver(produced: string, target: string, explicit: boolean, inputs: readonly string[]): Promise<string> {
-    const { path, replacing } = await this.delivery(target, explicit, inputs);
+    const resolved = await this.delivery(target, explicit, inputs);
+    return await this.deliverResolved(produced, resolved);
+  }
+
+  private async deliverResolved(
+    produced: string,
+    resolved: { path: string; replacing: boolean },
+    authorizedParent?: CadExportParentIdentity,
+  ): Promise<string> {
+    const { path, replacing } = resolved;
     const sha256 = await sha256File(produced);
     try {
-      await mkdir(dirname(path), { recursive: true });
-      if (!replacing) {
-        await copyFile(produced, path, constants.COPYFILE_EXCL);
-      } else {
-        const temporary = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-        await copyFile(produced, temporary, constants.COPYFILE_EXCL);
-        await rename(temporary, path).catch(async (error: unknown) => {
-          await rm(temporary, { force: true });
-          throw error;
+      if (authorizedParent !== undefined) {
+        const { subdirectories, fileName } = await verifyAuthorizedAncestorBeforePublish(
+          path,
+          authorizedParent,
+        );
+        await publishToPinnedDirectory({
+          canonicalAncestor: authorizedParent.canonicalAncestor,
+          dev: authorizedParent.dev,
+          ino: authorizedParent.ino,
+          subdirectories,
+          fileName,
+          produced,
+          replacing,
         });
+      } else {
+        await mkdir(dirname(path), { recursive: true });
+        if (!replacing) {
+          await copyFile(produced, path, constants.COPYFILE_EXCL);
+        } else {
+          const temporary = `${path}.${randomBytes(6).toString("hex")}.tmp`;
+          await copyFile(produced, temporary, constants.COPYFILE_EXCL);
+          await rename(temporary, path).catch(async (error: unknown) => {
+            await rm(temporary, { force: true });
+            throw error;
+          });
+        }
       }
     } catch {
       throw new CadError(

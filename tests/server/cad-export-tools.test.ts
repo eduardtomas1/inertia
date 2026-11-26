@@ -1,5 +1,6 @@
 // @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import {
   CAD_GUIDE_SKETCHUP,
 } from "../../src/server/cad/bridge-sources";
 import { CadError } from "../../src/server/cad/cad-hosts";
-import type { CadExporter, CadExportInput, CadExportResult } from "../../src/server/cad/cad-export";
+import { CadExporter, type CadExportInput, type CadExportResult } from "../../src/server/cad/cad-export";
 import { CadService } from "../../src/server/cad/cad-service";
 import type {
   ProviderHostToolApprovalDecision,
@@ -56,6 +57,7 @@ const PNG_RESULT: CadExportResult = {
 function fakeExporter(result: CadExportResult = PDF_RESULT, headless = true) {
   const exporter = {
     headless: vi.fn(async () => headless),
+    isManagedExportPath: vi.fn(async (target: string) => target === "C:\\Inertia\\exported\\Plan.pdf"),
     destinationFor: vi.fn(async (input: CadExportInput) => input.destination ?? "C:\\Inertia\\exported\\Plan.pdf"),
     export: vi.fn(async (_input: CadExportInput, _signal?: AbortSignal) => result),
   };
@@ -201,5 +203,69 @@ describe("inertia_cad_export", () => {
     const { tools } = await service({ exporter: typed });
     const result = await tools.invoke(call("inertia_cad_export", { source: ACAD_DOCUMENT_ID, format: "dxf" }), true);
     expect(body(result)).toEqual({ error: { code: "NOT_INSTALLED", message: "AutoCAD's console was not found." } });
+  });
+
+  it("blocks out-of-workspace sources and requires approval before writing beside an in-workspace DXF", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-cad-export-sec3-"));
+    roots.push(root);
+    const acadDirectory = join(root, "AutoCAD 2025");
+    mkdirSync(acadDirectory);
+    writeFileSync(join(acadDirectory, "accoreconsole.exe"), "");
+    const workspace = join(root, "workspace");
+    const outside = join(root, "outside");
+    mkdirSync(workspace);
+    mkdirSync(outside);
+    const outsideDwg = join(outside, "secret.dwg");
+    const outsideDxf = join(outside, "other.dxf");
+    const insideDxf = join(workspace, "plan.dxf");
+    writeFileSync(outsideDwg, "AC1032");
+    writeFileSync(outsideDxf, "0\nEOF");
+    writeFileSync(insideDxf, "0\nEOF");
+
+    const consoleRuns: string[] = [];
+    const exporter = new CadExporter({
+      stateDirectory: join(root, "state"),
+      platform: "win32",
+      programFiles: root,
+      systemRoot: join(root, "Windows"),
+      documents: async () => [],
+      run: async (executable, args) => {
+        if (executable.toLowerCase().endsWith("reg.exe")) {
+          return {
+            stdout: Buffer.from(
+              `\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Autodesk\\AutoCAD\\R25.0\\ACAD-8101:409\r\n    AcadLocation    REG_SZ    ${acadDirectory}\r\n`,
+              "latin1",
+            ),
+          };
+        }
+        consoleRuns.push(args.join(" "));
+        return { stdout: Buffer.from("", "utf16le") };
+      },
+    });
+    const { tools } = await service({ exporter });
+
+    const outDwgCall = call("inertia_cad_export", { source: outsideDwg, format: "png" });
+    const outDwgResult = await tools.invoke(outDwgCall, true, workspace);
+    expect(outDwgResult.success).toBe(false);
+    expect(body(outDwgResult)).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+
+    const outDxfCall = call("inertia_cad_export", { source: outsideDxf, format: "pdf" });
+    const outDxfResult = await tools.invoke(outDxfCall, true, workspace);
+    expect(outDxfResult.success).toBe(false);
+    expect(body(outDxfResult)).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+    expect(outDwgCall.requestApproval).not.toHaveBeenCalled();
+    expect(outDxfCall.requestApproval).not.toHaveBeenCalled();
+    expect(readdirSync(outside).sort()).toEqual(["other.dxf", "secret.dwg"]);
+
+    // In-workspace DXF without explicit destination writes outside stateDirectory/exported -> requires approval.
+    const inWorkspaceDenied = call("inertia_cad_export", { source: insideDxf, format: "pdf" }, "deny");
+    const deniedResult = await tools.invoke(inWorkspaceDenied, true, workspace);
+    expect(deniedResult.success).toBe(false);
+    expect(body(deniedResult)).toMatchObject({ error: { code: "user_denied" } });
+    expect(inWorkspaceDenied.requestApproval).toHaveBeenCalledTimes(1);
+    expect(inWorkspaceDenied.requestApproval.mock.calls[0]![0]).toMatchObject({
+      detail: expect.stringContaining(join(workspace, "plan.pdf")),
+    });
+    expect(consoleRuns).toEqual([]);
   });
 });

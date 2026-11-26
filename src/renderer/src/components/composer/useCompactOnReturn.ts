@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
   ConversationLatestTurnSummary,
@@ -123,6 +123,19 @@ export function useCompactOnReturn(options: {
   const fail = useCallback((owner: string, message: string) => {
     setFailure({ conversationId: owner, message });
   }, []);
+  const failureMessage = failure?.conversationId === conversationId ? failure.message : null;
+  const toggleVisible = failure?.conversationId !== conversationId;
+  const action = useMemo<ComposerCompactOnReturnAction | null>(
+    () => tooltip ? { mode, tooltip, onToggle: toggle, toggleVisible } : null,
+    [mode, toggle, toggleVisible, tooltip],
+  );
+  const promptCacheSource = usage?.promptCache?.source ?? "assumed";
+  const promptCache = useMemo(
+    () => eligible && lifetimeMs !== null && lastRequestStartedAt !== null
+      ? { lastRequestStartedAt, lifetimeMs, source: promptCacheSource }
+      : null,
+    [eligible, lastRequestStartedAt, lifetimeMs, promptCacheSource],
+  );
   return {
     offered,
     active: offered && mode === "compact",
@@ -130,11 +143,9 @@ export function useCompactOnReturn(options: {
     tooltip,
     compacting,
     compactingOnReturn,
-    failure: failure?.conversationId === conversationId ? failure.message : null,
-    action: tooltip ? { mode, tooltip, onToggle: toggle, toggleVisible: failure?.conversationId !== conversationId } : null,
-    promptCache: eligible && lifetimeMs !== null && lastRequestStartedAt !== null
-      ? { lastRequestStartedAt, lifetimeMs, source: usage?.promptCache?.source ?? "assumed" }
-      : null,
+    failure: failureMessage,
+    action,
+    promptCache,
     notice: (manual) => compactingOnReturn
       ? COMPACTING_BEFORE_SENDING_NOTICE
       : compacting && !manual ? COMPACTING_CONTEXT_NOTICE : manual,

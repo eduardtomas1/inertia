@@ -50,6 +50,7 @@ import { useConversationProjection } from "./useConversationProjection";
 import { useConversationWorkspaceOptions } from "./useConversationWorkspaceOptions";
 import { useMarkRunSeen } from "./useMarkRunSeen";
 import { usePlanSteps } from "./usePlanSteps";
+import { runningTurnPlanMode } from "../utils/planFromText";
 import { useDesktopTools } from "./useDesktopTools";
 import type { useInertiaConnection } from "./useInertiaConnection";
 import type { useProviderMaintenance } from "./useProviderMaintenance";
@@ -305,6 +306,11 @@ export function useSplitWorkspaceScene({
     projection.messages,
     splitConversation?.status ?? "idle",
     projection.streaming,
+    runningTurnPlanMode(
+      projection.turns,
+      splitConversation?.interactionMode ?? null,
+      projection.latestTurnSummary?.id ?? null,
+    ),
   );
   const turnActions = useMemo(() => createWorkspaceTurnActions({
     conversation: splitConversation,

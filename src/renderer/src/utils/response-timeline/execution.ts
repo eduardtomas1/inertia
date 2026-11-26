@@ -18,10 +18,10 @@ export {
   type ActivityAttentionSeverity,
 } from "./activity-attention";
 
-function timestamp(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
+import {
+  EN_COLLATOR,
+  compareTimestampsAsc as compareTimestamps,
+} from "../fastCompare";
 
 export interface ActivityDetailPresentation {
   preview: string | null;
@@ -152,13 +152,22 @@ function mergeChronologically(
   pending: TurnWorkStreamEntry[],
 ): TurnWorkStreamEntry[] {
   const merged: TurnWorkStreamEntry[] = [];
+  let pendingIndex = 0;
   for (const entry of stream) {
-    while (pending.length > 0 && timestamp(pending[0]!.createdAt) <= timestamp(entry.createdAt)) {
-      merged.push(pending.shift()!);
+    while (
+      pendingIndex < pending.length
+      && compareTimestamps(pending[pendingIndex]!.createdAt, entry.createdAt) <= 0
+    ) {
+      merged.push(pending[pendingIndex]!);
+      pendingIndex += 1;
     }
     merged.push(entry);
   }
-  return [...merged, ...pending];
+  while (pendingIndex < pending.length) {
+    merged.push(pending[pendingIndex]!);
+    pendingIndex += 1;
+  }
+  return merged;
 }
 
 export function withHtmlRenders(
@@ -222,10 +231,13 @@ export function followUpAnswers(
   turn: Pick<ResponseTurn, "followUpMessages" | "commentaryMessages">,
 ): Set<ChatMessage> {
   const answers = new Set<ChatMessage>();
+  if (turn.followUpMessages.length === 0 || turn.commentaryMessages.length === 0) {
+    return answers;
+  }
   for (const followUp of turn.followUpMessages) {
     let answer: ChatMessage | undefined;
     for (const message of turn.commentaryMessages) {
-      if (timestamp(message.createdAt) <= timestamp(followUp.createdAt)) answer = message;
+      if (compareTimestamps(message.createdAt, followUp.createdAt) <= 0) answer = message;
     }
     if (answer) answers.add(answer);
   }
@@ -352,10 +364,9 @@ export function buildTurnExecutionStream(
   items.sort((left, right) =>
     Number(left.kind === "commentary" && left.streaming)
       - Number(right.kind === "commentary" && right.streaming)
-    ||
-    timestamp(left.createdAt) - timestamp(right.createdAt)
+    || compareTimestamps(left.createdAt, right.createdAt)
     || left.order - right.order
-    || left.id.localeCompare(right.id, "en"));
+    || EN_COLLATOR.compare(left.id, right.id));
 
   const stream: TurnExecutionStreamEntry[] = [];
   let streamEpisode = 0;

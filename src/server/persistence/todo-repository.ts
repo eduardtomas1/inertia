@@ -15,6 +15,8 @@ import {
   type TodoPatch,
 } from "../../shared/todos";
 
+import { cachedStatement } from "./statement-cache";
+
 interface TodoRow {
   id: string;
   title: string;
@@ -106,22 +108,65 @@ export function assertTodoCanHandOff(todo: Todo, replaces: string | undefined): 
   }
 }
 
+interface TodoListCache {
+  generation: number;
+  dataVersion: number;
+  totalChanges: number;
+  todos: Todo[];
+}
+
+function cloneTodos(todos: readonly Todo[]): Todo[] {
+  return todos.map((todo) => ({ ...todo }));
+}
+
 export class TodoRepository {
+  private generation = 0;
+  private cache: TodoListCache | null = null;
+
   constructor(
     private readonly database: Database.Database,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
   list(): Todo[] {
-    return (this.database.prepare(`
+    const inTransaction = this.database.inTransaction;
+    const versionBefore = inTransaction ? null : this.cacheVersion();
+    if (
+      versionBefore !== null
+      && this.cache !== null
+      && this.cache.generation === this.generation
+      && this.cache.dataVersion === versionBefore.dataVersion
+      && this.cache.totalChanges === versionBefore.totalChanges
+    ) {
+      return cloneTodos(this.cache.todos);
+    }
+    const rows = cachedStatement(this.database, `
       SELECT ${TODO_COLUMNS}
       FROM todos
       ORDER BY created_at ASC, id ASC
-    `).all() as TodoRow[]).flatMap((row) => todoFromRow(row) ?? []);
+    `).all() as TodoRow[];
+    const todos = rows.flatMap((row) => todoFromRow(row) ?? []);
+    if (versionBefore !== null && !this.database.inTransaction) {
+      const versionAfter = this.cacheVersion();
+      if (
+        versionAfter.dataVersion === versionBefore.dataVersion
+        && versionAfter.totalChanges === versionBefore.totalChanges
+      ) {
+        this.cache = {
+          generation: this.generation,
+          dataVersion: versionAfter.dataVersion,
+          totalChanges: versionAfter.totalChanges,
+          todos,
+        };
+        return cloneTodos(todos);
+      }
+      this.cache = null;
+    }
+    return todos;
   }
 
   get(todoId: string): Todo | null {
-    const row = this.database.prepare(`
+    const row = cachedStatement(this.database, `
       SELECT ${TODO_COLUMNS}
       FROM todos
       WHERE id = ?
@@ -132,11 +177,11 @@ export class TodoRepository {
   create(input: TodoCreateInput): Todo {
     const { id, ...fields } = input;
     const { sourceConversationId = null, ...draft } = parse(todoDraftSchema, fields);
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       if (this.openCount() >= MAX_OPEN_TODOS) {
         throw new TodoRepositoryError(TODO_OPEN_LIMIT_MESSAGE);
       }
-      if (this.database.prepare("SELECT 1 FROM todos WHERE id = ?").get(id)) {
+      if (cachedStatement(this.database, "SELECT 1 FROM todos WHERE id = ?").get(id)) {
         throw new TodoRepositoryError("That task already exists.");
       }
       this.assertProject(draft.projectId);
@@ -153,7 +198,7 @@ export class TodoRepository {
         updatedAt: timestamp,
       });
       this.makeRoom([...this.list(), todo], todo.id);
-      this.database.prepare(`
+      cachedStatement(this.database, `
         INSERT INTO todos (${TODO_COLUMNS})
         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
       `).run(
@@ -171,12 +216,12 @@ export class TodoRepository {
         todo.updatedAt,
       );
       return todo;
-    })();
+    });
   }
 
   update(todoId: string, input: TodoPatch): Todo {
     const { completed, ...patch } = parse(todoPatchSchema, input);
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const current = this.list();
       const existing = this.require(current, todoId);
       const completedAt = completed === undefined
@@ -206,11 +251,11 @@ export class TodoRepository {
       });
       if (existing.completedAt === null && completedAt !== null) this.pruneDone();
       return next;
-    })();
+    });
   }
 
   link(todoId: string, conversationId: string, options: TodoLinkOptions = {}): Todo {
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const current = this.list();
       const existing = this.require(current, todoId);
       assertTodoCanHandOff(existing, options.replaces);
@@ -220,33 +265,54 @@ export class TodoRepository {
         linkedAt: this.now(),
         projectId: this.conversationProjectId(conversationId) ?? existing.projectId,
       });
-    })();
+    });
   }
 
   delete(todoId: string): void {
-    this.database.transaction(() => {
-      if (this.database.prepare("DELETE FROM todos WHERE id = ?").run(todoId).changes === 0) {
+    this.mutate(() => {
+      if (cachedStatement(this.database, "DELETE FROM todos WHERE id = ?").run(todoId).changes === 0) {
         throw new TodoRepositoryError(TODO_MISSING_MESSAGE);
       }
-    })();
+    });
   }
 
   clearDone(todoIds: readonly string[]): number {
-    const remove = this.database.prepare(
+    const remove = cachedStatement(
+      this.database,
       "DELETE FROM todos WHERE id = ? AND completed_at IS NOT NULL",
     );
-    return this.database.transaction(() =>
-      todoIds.reduce((count, todoId) => count + remove.run(todoId).changes, 0))();
+    return this.mutate(() =>
+      todoIds.reduce((count, todoId) => count + remove.run(todoId).changes, 0));
+  }
+
+  private mutate<T>(change: () => T): T {
+    this.generation += 1;
+    this.cache = null;
+    try {
+      return this.database.transaction(change)();
+    } finally {
+      this.generation += 1;
+      this.cache = null;
+    }
+  }
+
+  private cacheVersion(): { dataVersion: number; totalChanges: number } {
+    const dataVersion = Number(this.database.pragma("data_version", { simple: true }) ?? 0);
+    const totalChanges = (
+      cachedStatement(this.database, "SELECT total_changes() AS total").get() as { total: number }
+    ).total;
+    return { dataVersion, totalChanges };
   }
 
   private openCount(): number {
-    return (this.database.prepare(
+    return (cachedStatement(
+      this.database,
       "SELECT COUNT(*) AS count FROM todos WHERE completed_at IS NULL",
     ).get() as { count: number }).count;
   }
 
   private pruneDone(): void {
-    this.database.prepare(`
+    cachedStatement(this.database, `
       DELETE FROM todos
       WHERE completed_at IS NOT NULL
         AND id NOT IN (
@@ -259,14 +325,16 @@ export class TodoRepository {
   }
 
   private conversationProjectId(conversationId: string): string | null {
-    const conversation = this.database.prepare(
+    const conversation = cachedStatement(
+      this.database,
       "SELECT project_id FROM conversations WHERE id = ?",
     ).get(conversationId) as { project_id: string | null } | undefined;
     return conversation?.project_id ?? null;
   }
 
   private assertSourceConversation(conversationId: string, projectId: string | null): void {
-    const conversation = this.database.prepare(
+    const conversation = cachedStatement(
+      this.database,
       "SELECT project_id FROM conversations WHERE id = ?",
     ).get(conversationId) as { project_id: string | null } | undefined;
     if (!conversation) throw new TodoRepositoryError(TODO_SOURCE_CHAT_MISSING_MESSAGE);
@@ -277,7 +345,7 @@ export class TodoRepository {
 
   private assertProject(projectId: string | null): void {
     if (projectId === null) return;
-    if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
+    if (!cachedStatement(this.database, "SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
       throw new TodoRepositoryError(TODO_PROJECT_MISSING_MESSAGE);
     }
   }
@@ -285,7 +353,7 @@ export class TodoRepository {
   private write(current: readonly Todo[], candidate: Todo): Todo {
     const next = parse(todoSchema, { ...candidate, updatedAt: this.now() });
     this.makeRoom(current.map((todo) => todo.id === next.id ? next : todo), next.id);
-    this.database.prepare(`
+    cachedStatement(this.database, `
       UPDATE todos SET
         title = ?, note = ?, priority = ?, due_date = ?, due_time = ?,
         project_id = ?, completed_at = ?, conversation_id = ?, linked_at = ?,
@@ -330,7 +398,7 @@ export class TodoRepository {
     if (total > MAX_TODOS_SERIALIZED_BYTES) {
       throw new TodoRepositoryError("Tasks exceed the safe local storage limit.");
     }
-    const remove = this.database.prepare("DELETE FROM todos WHERE id = ?");
+    const remove = cachedStatement(this.database, "DELETE FROM todos WHERE id = ?");
     for (const id of evicted) remove.run(id);
   }
 }

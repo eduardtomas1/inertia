@@ -1188,6 +1188,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       closing = Promise.resolve().then(async () => {
         const shutdownTrace = createTestShutdownTrace(dataDirectory);
         runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
+        store.beginShutdown();
         projectIdentities.dispose();
         snapshotBroadcasts.close();
         mascotStatus.close();

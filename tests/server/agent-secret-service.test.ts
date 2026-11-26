@@ -181,6 +181,11 @@ describe("agent secret service: pending request, private file and turn wait", ()
     expect(parsed(result)).toMatchObject({ error: { code: "secret_value_not_allowed" } });
     expect(harness.store.transcriptRepository.secretRequests.pendingAll()).toEqual([]);
     expect(harness.events).toEqual([]);
+    // Also catches secrets placed in object keys or nested past MAX_DEPTH.
+    expect(harness.service.containsSecret({ answers: { [SECRET]: "ok" } })).toBe(true);
+    let deep: unknown = { value: SECRET };
+    for (let depth = 0; depth < 35; depth += 1) deep = { nested: deep };
+    expect(harness.service.containsSecret(deep)).toBe(true);
   });
 
   it("writes the delivered value to an owner-only file in a fresh token directory and returns its path and expiry", async () => {

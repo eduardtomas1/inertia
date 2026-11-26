@@ -144,9 +144,21 @@ export class MascotStatusPublisher {
       : event.type === "agent.input.resolved" || event.type === "agent.approval.resolved"
         || event.type === "agent.completed" || event.type === "agent.failed" ? event : null;
     if (!owner) return;
-    const shell = this.lookup?.(owner.conversationId);
-    if (shell) this.store(shell);
-    const entry = this.conversations.get(owner.conversationId);
+    const incremental = event.type === "agent.activity"
+      || event.type === "agent.commentary.persisted"
+      || event.type === "agent.plan.updated";
+    const cached = this.conversations.get(owner.conversationId);
+    const cacheMatchesLiveTurn = incremental
+      && cached !== undefined
+      && cached.status.activeCount > 0
+      && owner.turnId !== null
+      && owner.turnId === cached.status.turnId
+      && (!("runId" in owner) || owner.runId === cached.status.runId);
+    if (!cacheMatchesLiveTurn) {
+      const shell = this.lookup?.(owner.conversationId);
+      if (shell) this.store(shell);
+    }
+    const entry = cacheMatchesLiveTurn ? cached : this.conversations.get(owner.conversationId);
     if (!entry || !owner.turnId || owner.turnId !== entry.status.turnId
       || ("runId" in owner && owner.runId !== entry.status.runId)) return;
     const { status, requests } = entry;

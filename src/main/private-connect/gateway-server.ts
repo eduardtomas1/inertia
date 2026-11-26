@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { readFile, realpath, stat } from "node:fs/promises";
@@ -24,6 +24,7 @@ const MAX_CONNECTIONS = 8;
 const MAX_DEVICE_CONNECTIONS = 2;
 const MAX_HTTP_CONNECTIONS = 128;
 const MAX_PAIRING_BODY_BYTES = 4 * 1024;
+const MAX_ADMISSION_BUCKETS = 128;
 const REQUEST_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 60_000;
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -95,7 +96,9 @@ export class PrivateConnectGatewayServer {
   private quarantined = false;
   private listenRequested = false;
   private readonly socketSessions = new Map<WebSocket, PrivateConnectSession>();
-  private readonly admissions = new Map<string, number[]>();
+  private readonly sessionAdmissions = new Map<string, number[]>();
+  private readonly pairingAdmissions = new Map<string, number[]>();
+  private readonly pairingFailureAdmissions = new Map<string, Array<{ at: number; token: symbol }>>();
   private readonly inFlightBySession = new Map<string, number>();
 
   constructor(options: PrivateConnectGatewayServerOptions) {
@@ -306,7 +309,7 @@ export class PrivateConnectGatewayServer {
       return;
     }
     if (url.pathname === "/api/pair/status") {
-      await this.handlePairStatus(body, response);
+      await this.handlePairStatus(body, request, response);
       return;
     }
     if (!session) {
@@ -367,7 +370,16 @@ export class PrivateConnectGatewayServer {
       writeJson(response, 400, { error: "invalid", message: "The pairing invitation is invalid." });
       return;
     }
-    if (!this.admitPairing(response, "start", invitation.data.invitationId, invitation.data.pairingSecret)) return;
+    const caller = this.pairingCallerKey(request);
+    if (this.isPairingQuotaExhausted("start", invitation.data.invitationId)) {
+      this.writePairingRateLimited(response);
+      return;
+    }
+    const releaseFailureSlot = this.reserveFailedPairingSlot("start", caller);
+    if (!releaseFailureSlot) {
+      this.writePairingRateLimited(response);
+      return;
+    }
     try {
       const result = await this.host.pairStart({
         invitation: invitation.data,
@@ -375,20 +387,39 @@ export class PrivateConnectGatewayServer {
         deviceId: body.deviceId,
         browserNonce: body.browserNonce,
       }, normalizeNetworkLabel(request.headers["tailscale-user-login"]));
+      releaseFailureSlot();
+      if (!this.recordVerifiedPairing("start", invitation.data.invitationId)) {
+        this.writePairingRateLimited(response);
+        return;
+      }
       writeJson(response, 202, result);
     } catch (error) {
       writeJson(response, 400, { error: "invalid", message: error instanceof Error ? error.message : "Pairing was rejected." });
     }
   }
 
-  private async handlePairStatus(body: unknown, response: ServerResponse): Promise<void> {
+  private async handlePairStatus(body: unknown, request: IncomingMessage, response: ServerResponse): Promise<void> {
     if (!plainObject(body) || !isPrivateConnectUuid(body.requestId) || !isPrivateConnectPairingNonce(body.browserNonce)) {
       writeJson(response, 400, { error: "invalid", message: "The pairing status request is invalid." });
       return;
     }
-    if (!this.admitPairing(response, "status", body.requestId, body.browserNonce)) return;
+    const caller = this.pairingCallerKey(request);
+    if (this.isPairingQuotaExhausted("status", body.requestId)) {
+      this.writePairingRateLimited(response);
+      return;
+    }
+    const releaseFailureSlot = this.reserveFailedPairingSlot("status", caller);
+    if (!releaseFailureSlot) {
+      this.writePairingRateLimited(response);
+      return;
+    }
     try {
       const status = await this.host.pairStatus(body.requestId, body.browserNonce);
+      releaseFailureSlot();
+      if (!this.recordVerifiedPairing("status", body.requestId)) {
+        this.writePairingRateLimited(response);
+        return;
+      }
       if (status.status === "approved") {
         response.setHeader("Set-Cookie", status.cookie);
         writeJson(response, 200, { status: "approved", requestId: status.requestId, expiresAt: status.expiresAt });
@@ -565,32 +596,158 @@ export class PrivateConnectGatewayServer {
       && secretsMatch(presented, this.host.csrf(session));
   }
 
-  private admitPairing(response: ServerResponse, stage: "start" | "status", id: string, secret: string): boolean {
-    // Proxy IP and public device IDs are not browser authority. Hash the
-    // bounded capability so unrelated peers cannot exhaust its retry quota.
-    const key = createHash("sha256").update(id).update("\0").update(secret).digest("hex");
-    const limit = stage === "start" ? PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute : PRIVATE_CONNECT_LIMITS.requestsPerMinute;
-    if (this.admit(`pair-${stage}:${key}`, limit)) return true;
+  private writePairingRateLimited(response: ServerResponse): void {
     response.setHeader("Connection", "close");
     writeJson(response, 429, { error: "rate-limited", message: "Pairing requests are temporarily limited." });
-    return false;
+  }
+
+  private pairingLimitFor(stage: "start" | "status"): number {
+    return stage === "start"
+      ? PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute
+      : PRIVATE_CONNECT_LIMITS.requestsPerMinute;
+  }
+
+  private pairingCallerKey(request: IncomingMessage): string {
+    const networkLabel = normalizeNetworkLabel(request.headers["tailscale-user-login"]);
+    if (networkLabel) return `user:${networkLabel.toLowerCase()}`;
+    const address = request.socket.remoteAddress?.trim();
+    return address ? `ip:${address}` : "ip:unknown";
+  }
+
+  private failedPairingBucketKey(stage: "start" | "status", caller: string, now: number): string {
+    const key = `pair-failed-${stage}:${caller}`;
+    if (this.pairingFailureAdmissions.has(key)) return key;
+    if (this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS - 2) {
+      this.pruneFailureAdmissions(now - RATE_WINDOW_MS);
+      if (this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS - 2) {
+        return `pair-failed-overflow:${stage}`;
+      }
+    }
+    return key;
+  }
+
+  private pruneFailureAdmissions(cutoff: number): void {
+    for (const [key, entries] of this.pairingFailureAdmissions) {
+      const active = entries.filter((entry) => entry.at > cutoff);
+      if (active.length === 0) this.pairingFailureAdmissions.delete(key);
+      else if (active.length !== entries.length) this.pairingFailureAdmissions.set(key, active);
+    }
+  }
+
+  private isBucketExhausted(store: Map<string, number[]>, key: string, limit: number): boolean {
+    const values = store.get(key);
+    if (!values) return false;
+    const cutoff = this.now().getTime() - RATE_WINDOW_MS;
+    const active = values.filter((value) => value > cutoff);
+    if (active.length === 0) {
+      store.delete(key);
+      return false;
+    }
+    if (active.length !== values.length) store.set(key, active);
+    return active.length >= limit;
+  }
+
+  private isPairingQuotaExhausted(stage: "start" | "status", id: string): boolean {
+    return this.isBucketExhausted(
+      this.pairingAdmissions,
+      `pair-verified-${stage}:${id}`,
+      this.pairingLimitFor(stage),
+    );
+  }
+
+  /**
+   * Synchronously reserves a caller failure slot before awaiting host verification
+   * so overlapping floods cannot exceed the verification limit; call the returned
+   * releaser once verification succeeds so valid requests spend zero failure quota.
+   */
+  private reserveFailedPairingSlot(stage: "start" | "status", caller: string): (() => void) | null {
+    const now = this.now().getTime();
+    const cutoff = now - RATE_WINDOW_MS;
+    const key = this.failedPairingBucketKey(stage, caller, now);
+    const limit = this.pairingLimitFor(stage);
+    const active = (this.pairingFailureAdmissions.get(key) ?? []).filter((entry) => entry.at > cutoff);
+    if (active.length >= limit) {
+      if (active.length > 0) this.pairingFailureAdmissions.set(key, active);
+      else this.pairingFailureAdmissions.delete(key);
+      return null;
+    }
+    if (!this.pairingFailureAdmissions.has(key) && this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS) {
+      this.pruneFailureAdmissions(cutoff);
+      if (this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS) return null;
+    }
+    const token = Symbol("pair-failure-slot");
+    active.push({ at: now, token });
+    this.pairingFailureAdmissions.set(key, active);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const current = this.pairingFailureAdmissions.get(key);
+      if (!current) return;
+      const remaining = current.filter((entry) => entry.token !== token);
+      if (remaining.length === 0) this.pairingFailureAdmissions.delete(key);
+      else this.pairingFailureAdmissions.set(key, remaining);
+    };
+  }
+
+  private recordVerifiedPairing(stage: "start" | "status", id: string): boolean {
+    return this.admitBoundedBucket(
+      this.pairingAdmissions,
+      `pair-verified-${stage}:${id}`,
+      this.pairingLimitFor(stage),
+      MAX_ADMISSION_BUCKETS,
+    );
+  }
+
+  private admitBoundedBucket(
+    store: Map<string, number[]>,
+    key: string,
+    limit: number,
+    maxBuckets: number,
+  ): boolean {
+    const now = this.now().getTime();
+    const cutoff = now - RATE_WINDOW_MS;
+    const values = (store.get(key) ?? []).filter((value) => value > cutoff);
+    if (values.length >= limit) {
+      if (values.length > 0) store.set(key, values);
+      else store.delete(key);
+      return false;
+    }
+    if (!store.has(key) && store.size >= maxBuckets) {
+      this.pruneAdmissions(store, cutoff);
+      if (store.size >= maxBuckets) return false;
+    }
+    values.push(now);
+    store.set(key, values);
+    return true;
   }
 
   private admit(key: string, limit: number): boolean {
     const now = this.now().getTime();
     const cutoff = now - RATE_WINDOW_MS;
-    const values = (this.admissions.get(key) ?? []).filter((value) => value > cutoff);
+    const values = (this.sessionAdmissions.get(key) ?? []).filter((value) => value > cutoff);
     if (values.length >= limit) {
-      this.admissions.set(key, values);
+      this.sessionAdmissions.set(key, values);
       return false;
     }
-    values.push(now);
-    this.admissions.set(key, values);
-    if (this.admissions.size > 128) {
-      const oldest = this.admissions.keys().next().value;
-      if (typeof oldest === "string") this.admissions.delete(oldest);
+    if (!this.sessionAdmissions.has(key) && this.sessionAdmissions.size >= MAX_ADMISSION_BUCKETS) {
+      this.pruneAdmissions(this.sessionAdmissions, cutoff);
+      if (this.sessionAdmissions.size >= MAX_ADMISSION_BUCKETS) {
+        const oldest = this.sessionAdmissions.keys().next().value;
+        if (typeof oldest === "string") this.sessionAdmissions.delete(oldest);
+      }
     }
+    values.push(now);
+    this.sessionAdmissions.set(key, values);
     return true;
+  }
+
+  private pruneAdmissions(store: Map<string, number[]>, cutoff: number): void {
+    for (const [key, timestamps] of store) {
+      const active = timestamps.filter((value) => value > cutoff);
+      if (active.length === 0) store.delete(key);
+      else if (active.length !== timestamps.length) store.set(key, active);
+    }
   }
 
   private beginSessionRequest(session: PrivateConnectSession): (() => void) | null {

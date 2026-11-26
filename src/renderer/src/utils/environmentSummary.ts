@@ -22,6 +22,7 @@ import {
   type ContextUsageDataQuality,
   type UsageQuotaSource,
 } from "./usageDisplay";
+import { EN_COLLATOR, compareIsoTextDesc as compareTextDesc } from "./fastCompare";
 
 export type EnvironmentRunItem = Pick<
   WorkspaceRun,
@@ -307,55 +308,85 @@ export function buildWorkspaceSurfaceSummary({
   latestTurnId = null, usageProvider = null, usageIdentity = null,
   usageQuotaSource = "isolated",
 }: EnvironmentSummaryInput): WorkspaceSurfaceSummary {
-  const visibleProjectIds = new Set(additionalVisibleProjectIds);
-  if (projectId) visibleProjectIds.add(projectId);
-  const knownProjects = new Map(projects.map((project) => [project.id, project]));
-  const projectNameCounts = new Map<string, number>();
-  for (const { name } of projects) {
-    projectNameCounts.set(name, (projectNameCounts.get(name) ?? 0) + 1);
-  }
-  const knownConversations = new Map(
-    conversations.map((conversation) => [conversation.id, conversation]),
-  );
-  const projectsWithConversations = new Set(
-    conversations.map(({ projectId: ownerProjectId }) => ownerProjectId),
-  );
-  const sortedRuns = [...runs].sort((left, right) =>
-    right.startedAt.localeCompare(left.startedAt, "en")
-    || right.id.localeCompare(left.id, "en"));
-  let passiveRows = 0;
-  const visibleRuns = connectionStatus === "online" ? sortedRuns.filter((run) => {
-    if (run.canStop) return true;
-    if (!visibleProjectIds.has(run.projectId)) return false;
-    if (workspaceRunPreviewUrl(run)) return true;
-    if (passiveRows >= 3) return false;
-    const attention = workspaceRunAttentionView(run);
-    if (
-      run.status !== "running"
-      && run.status !== "waiting"
-      && !attention.needsAttention
-    ) {
-      return false;
+  const visibleRuns: WorkspaceRun[] = [];
+  if (connectionStatus === "online" && runs.length > 0) {
+    const visibleProjectIds = new Set(additionalVisibleProjectIds);
+    if (projectId) visibleProjectIds.add(projectId);
+    const sortedRuns = runs.length > 1
+      ? [...runs].sort((left, right) =>
+          compareTextDesc(left.startedAt, right.startedAt)
+          || EN_COLLATOR.compare(right.id, left.id))
+      : runs;
+    let passiveRows = 0;
+    for (const run of sortedRuns) {
+      if (run.canStop) {
+        visibleRuns.push(run);
+        continue;
+      }
+      if (!visibleProjectIds.has(run.projectId)) continue;
+      if (workspaceRunPreviewUrl(run)) {
+        visibleRuns.push(run);
+        continue;
+      }
+      if (passiveRows >= 3) continue;
+      const attention = workspaceRunAttentionView(run);
+      if (
+        run.status !== "running"
+        && run.status !== "waiting"
+        && !attention.needsAttention
+      ) {
+        continue;
+      }
+      passiveRows += 1;
+      visibleRuns.push(run);
     }
-    passiveRows += 1;
-    return true;
-  }) : [];
-  const runItems = visibleRuns.map((run) => {
-    const attention = workspaceRunAttentionView(run);
-    const ownerConversation = run.conversationId
-      ? knownConversations.get(run.conversationId)
-      : undefined;
-    const ownerProject = knownProjects.get(run.projectId);
-    const routeKnown = ownerProject !== undefined
-      && (
-        run.conversationId === null
-          ? projectsWithConversations.has(run.projectId)
-          : ownerConversation?.projectId === run.projectId
-      );
-    return {
-      run,
-      previewUrl: workspaceRunPreviewUrl(run),
-      item: {
+  }
+  const localServers: EnvironmentLocalServer[] = [];
+  const checks: EnvironmentSummaryCheck[] = [];
+  if (visibleRuns.length > 0) {
+    const knownProjects = new Map(projects.map((project) => [project.id, project]));
+    const projectNameCounts = new Map<string, number>();
+    for (const { name } of projects) {
+      projectNameCounts.set(name, (projectNameCounts.get(name) ?? 0) + 1);
+    }
+    const neededConversationIds = new Set<string>();
+    const neededProjectIds = new Set<string>();
+    for (const run of visibleRuns) {
+      if (run.conversationId) neededConversationIds.add(run.conversationId);
+      else neededProjectIds.add(run.projectId);
+    }
+    const knownConversations = new Map<
+      string,
+      NonNullable<EnvironmentSummaryInput["conversations"]>[number]
+    >();
+    const projectsWithConversations = new Set<string>();
+    if (neededConversationIds.size > 0 || neededProjectIds.size > 0) {
+      for (const entry of conversations) {
+        if (neededConversationIds.has(entry.id)) {
+          knownConversations.set(entry.id, entry);
+          neededConversationIds.delete(entry.id);
+        }
+        if (neededProjectIds.has(entry.projectId)) {
+          projectsWithConversations.add(entry.projectId);
+          neededProjectIds.delete(entry.projectId);
+        }
+        if (neededConversationIds.size === 0 && neededProjectIds.size === 0) break;
+      }
+    }
+    for (const run of visibleRuns) {
+      const attention = workspaceRunAttentionView(run);
+      const ownerConversation = run.conversationId
+        ? knownConversations.get(run.conversationId)
+        : undefined;
+      const ownerProject = knownProjects.get(run.projectId);
+      const routeKnown = ownerProject !== undefined
+        && (
+          run.conversationId === null
+            ? projectsWithConversations.has(run.projectId)
+            : ownerConversation?.projectId === run.projectId
+        );
+      const previewUrl = workspaceRunPreviewUrl(run);
+      const item: EnvironmentRunItem = {
         id: run.id,
         kind: run.kind,
         projectId: run.projectId,
@@ -380,17 +411,14 @@ export function buildWorkspaceSurfaceSummary({
             : null,
           run.detail,
         ].filter((part): part is string => Boolean(part)).join(" · ") || null,
-        canOpenPreview: routeKnown && workspaceRunPreviewUrl(run) !== null,
+        canOpenPreview: routeKnown && previewUrl !== null,
         canAcknowledge: attention.needsAttention && attention.canAcknowledge,
         canDismiss: attention.canDismiss,
-      } satisfies EnvironmentRunItem,
-    };
-  });
-  const localServers = runItems.flatMap(({ previewUrl, item }) =>
-    previewUrl ? [{ ...item, url: previewUrl }] : []);
-  const checks = runItems
-    .filter(({ previewUrl }) => previewUrl === null)
-    .map(({ item }) => item);
+      };
+      if (previewUrl) localServers.push({ ...item, url: previewUrl });
+      else checks.push(item);
+    }
+  }
   const workspaceScanIncomplete = Boolean(
     workspaceGitStatus?.partial || workspaceGitStatus?.truncated,
   );

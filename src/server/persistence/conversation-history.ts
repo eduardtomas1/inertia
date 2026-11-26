@@ -5,7 +5,12 @@ import {
   type ConversationHistoryCursor,
   type ConversationHistoryRequest,
 } from "../../shared/conversation-history";
+import {
+  ACTIVITY_DETAIL_ERROR_EXCERPT_CHARS,
+  ACTIVITY_DETAIL_PREVIEW_CHARS,
+} from "./activity-detail-preview";
 import { RecordNotFoundError } from "./errors";
+import { cachedStatement } from "./statement-cache";
 
 export interface ConversationHistoryScope {
   units: ConversationHistoryCursor[];
@@ -28,17 +33,17 @@ export function selectConversationHistory(
 ): ConversationHistoryScope {
   let target: ConversationHistoryCursor | undefined;
   if (request.messageId) {
-    const message = database.prepare(`SELECT id, turn_id, created_at FROM messages
+    const message = cachedStatement(database, `SELECT id, turn_id, created_at FROM messages
       WHERE conversation_id = ? AND id = ?`).get(conversationId, request.messageId) as
       { id: string; turn_id: string | null; created_at: string } | undefined;
     if (!message) throw new RecordNotFoundError("This message is no longer available.");
     if (message.turn_id) {
-      target = database.prepare(`SELECT id, requested_at AS at, 'turn' AS kind
+      target = cachedStatement(database, `SELECT id, requested_at AS at, 'turn' AS kind
         FROM agent_turns WHERE conversation_id = ? AND id = ?`)
         .get(conversationId, message.turn_id) as ConversationHistoryCursor | undefined;
     } else target = { id: message.id, at: message.created_at, kind: "message" };
   } else if (request.turnId) {
-    target = database.prepare(`SELECT id, requested_at AS at, 'turn' AS kind
+    target = cachedStatement(database, `SELECT id, requested_at AS at, 'turn' AS kind
       FROM agent_turns WHERE conversation_id = ? AND id = ?`)
       .get(conversationId, request.turnId) as ConversationHistoryCursor | undefined;
   }
@@ -47,13 +52,13 @@ export function selectConversationHistory(
   }
   const cursor = request.before ?? target;
   const boundary = cursor ? `WHERE (at, id, kind) ${target ? "<=" : "<"} (?, ?, ?)` : "";
-  const units = database.prepare(`SELECT * FROM (${HISTORY_UNITS}) ${boundary}
+  const units = cachedStatement(database, `SELECT * FROM (${HISTORY_UNITS}) ${boundary}
     ORDER BY at DESC, id DESC, kind DESC LIMIT ?`).all(
     conversationId, conversationId, ...(cursor ? [cursor.at, cursor.id, cursor.kind] : []), limit + 1,
   ) as ConversationHistoryCursor[];
   const hasMore = units.length > limit;
   if (hasMore) units.pop();
-  const next = target ? database.prepare(`SELECT MIN(at) AS at FROM (${HISTORY_UNITS}) WHERE at > ?`)
+  const next = target ? cachedStatement(database, `SELECT MIN(at) AS at FROM (${HISTORY_UNITS}) WHERE at > ?`)
     .get(conversationId, conversationId, target.at) as { at: string | null } : null;
   return { units, older: hasMore ? units.at(-1)! : null, upper: request.before?.at ?? next?.at ?? null };
 }
@@ -63,6 +68,7 @@ const HISTORY_TABLES = ["agent_turns", "turn_git_artifacts", "messages", "activi
 type HistoryTable = typeof HISTORY_TABLES[number];
 const CONVERSATION_TABLES = ["thread_usage", "agent_goals", "diff_review_summaries",
   "diff_review_states", "diff_review_notes"] as const;
+const PREVIEWED_ACTIVITY_DETAIL_BYTE_CAP = ACTIVITY_DETAIL_PREVIEW_CHARS + ACTIVITY_DETAIL_ERROR_EXCERPT_CHARS;
 
 function historyConversationColumn(table: HistoryTable): string {
   return table === "conversation_context_packets" ? "target_conversation_id" : "conversation_id";
@@ -75,37 +81,48 @@ export function historyPredicate(
 ): { sql: string; parameters: string[] } {
   const turns = scope.units.filter(({ kind }) => kind === "turn").map(({ id }) => id);
   const messages = scope.units.filter(({ kind }) => kind === "message").map(({ id }) => id);
-  const inValues = (field: string, values: string[]) => values.length
-    ? `${table}.${field} IN (${values.map(() => "?").join(",")})` : "0";
+  const turnsJson = turns.length ? JSON.stringify(turns) : null;
+  const messagesJson = messages.length ? JSON.stringify(messages) : null;
+  const inClause = (prefix: string, field: string, json: string | null) =>
+    json !== null ? `${prefix}.${field} IN (SELECT value FROM json_each(?))` : "0";
+  const turnsParams = turnsJson !== null ? [turnsJson] : [];
+  const messagesParams = messagesJson !== null ? [messagesJson] : [];
   const scoped = (sql: string, parameters: string[]) => ({
     sql: `(${table}.${historyConversationColumn(table)} = ? AND ${sql})`,
     parameters: [conversationId, ...parameters],
   });
-  if (table === "agent_turns") return scoped(inValues("id", turns), turns);
+  if (table === "agent_turns") return scoped(inClause(table, "id", turnsJson), turnsParams);
   if (table === "messages") {
-    return scoped(`(${inValues("turn_id", turns)} OR ${inValues("id", messages)})`, [...turns, ...messages]);
+    return scoped(
+      `(${inClause(table, "turn_id", turnsJson)} OR ${inClause(table, "id", messagesJson)})`,
+      [...turnsParams, ...messagesParams],
+    );
   }
   if (table === "conversation_context_packets") {
-    return scoped(`(consumed_message_id IS NULL OR consumed_message_id IN (SELECT id FROM messages
-      WHERE ${inValues("turn_id", turns).replaceAll(`${table}.`, "messages.")} OR ${inValues("id", messages).replaceAll(`${table}.`, "messages.")}))`,
-    [...turns, ...messages]);
+    return scoped(
+      `(consumed_message_id IS NULL OR consumed_message_id IN (SELECT id FROM messages
+      WHERE ${inClause("messages", "turn_id", turnsJson)} OR ${inClause("messages", "id", messagesJson)}))`,
+      [...turnsParams, ...messagesParams],
+    );
   }
   if (table === "turn_git_artifacts" || table === "subagent_traces") {
-    return scoped(inValues("turn_id", turns), turns);
+    return scoped(inClause(table, "turn_id", turnsJson), turnsParams);
   }
   const timestamp = table === "agent_plans" ? "updated_at" : "created_at";
   const lower = scope.older ? scope.units.at(-1)?.at : undefined;
   const legacy = [`${table}.conversation_id = ?`, `${table}.turn_id IS NULL`,
     ...(lower ? [`${table}.${timestamp} >= ?`] : []),
     ...(scope.upper ? [`${table}.${timestamp} <= ?`] : [])];
-  return { sql: `((${table}.conversation_id = ? AND ${inValues("turn_id", turns)}) OR (${legacy.join(" AND ")}))`,
-    parameters: [conversationId, ...turns, conversationId, ...(lower ? [lower] : []), ...(scope.upper ? [scope.upper] : [])] };
+  return {
+    sql: `((${table}.conversation_id = ? AND ${inClause(table, "turn_id", turnsJson)}) OR (${legacy.join(" AND ")}))`,
+    parameters: [conversationId, ...turnsParams, conversationId, ...(lower ? [lower] : []), ...(scope.upper ? [scope.upper] : [])],
+  };
 }
 
 const columns = new WeakMap<Database.Database, Map<string, string[]>>();
+const conversationBytesSqlCache = new WeakMap<Database.Database, string>();
 
-function storedBytes(database: Database.Database, table: string,
-  where: { sql: string; parameters: string[] }): number {
+function tableColumns(database: Database.Database, table: string): string[] {
   let cache = columns.get(database);
   if (!cache) { cache = new Map(); columns.set(database, cache); }
   let names = cache.get(table);
@@ -114,8 +131,27 @@ function storedBytes(database: Database.Database, table: string,
       .map(({ name }) => name);
     cache.set(table, names);
   }
-  const lengths = names.map((name) => `COALESCE(length(CAST("${name}" AS BLOB)), 0)`).join(" + ");
-  return (database.prepare(`SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes
+  return names;
+}
+
+function columnLengthsSql(
+  database: Database.Database,
+  table: string,
+  capActivityPreviewDetail = false,
+): string {
+  const names = tableColumns(database, table);
+  return names.map((name) => {
+    if (capActivityPreviewDetail && table === "activities" && name === "detail") {
+      return `CASE WHEN kind = 'error' THEN COALESCE(octet_length("detail"), 0) ELSE MIN(COALESCE(octet_length("detail"), 0), ${PREVIEWED_ACTIVITY_DETAIL_BYTE_CAP}) END`;
+    }
+    return `COALESCE(octet_length("${name}"), 0)`;
+  }).join(" + ");
+}
+
+function storedBytes(database: Database.Database, table: string,
+  where: { sql: string; parameters: string[] }, capActivityPreviewDetail = false): number {
+  const lengths = columnLengthsSql(database, table, capActivityPreviewDetail);
+  return (cachedStatement(database, `SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes
     FROM ${table} WHERE ${where.sql}`)
     .get(...where.parameters) as { bytes: number }).bytes;
 }
@@ -125,11 +161,11 @@ export function historyStoredBytes(database: Database.Database, conversationId: 
   let bytes = 0;
   for (const table of HISTORY_TABLES) {
     const where = historyPredicate(table, scope, conversationId);
-    bytes += storedBytes(database, table, where);
+    bytes += storedBytes(database, table, where, table === "activities");
     if (table === "messages" || table === "agent_reasonings") {
       const chunkTable = table === "messages" ? "message_content_chunks" : "reasoning_content_chunks";
       const key = table === "messages" ? "message_id" : "reasoning_id";
-      bytes += (database.prepare(`SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS bytes
+      bytes += (cachedStatement(database, `SELECT COALESCE(SUM(octet_length(content)), 0) AS bytes
         FROM ${chunkTable} WHERE ${key} IN (SELECT id FROM ${table} WHERE ${where.sql})`)
         .get(...where.parameters) as { bytes: number }).bytes;
     }
@@ -139,8 +175,118 @@ export function historyStoredBytes(database: Database.Database, conversationId: 
 }
 
 export function conversationStoredBytes(database: Database.Database, conversationId: string): number {
-  return CONVERSATION_TABLES.reduce((bytes, table) =>
-    bytes + storedBytes(database, table, { sql: `${table}.conversation_id = ?`, parameters: [conversationId] }), 0);
+  let sql = conversationBytesSqlCache.get(database);
+  if (!sql) {
+    const parts = CONVERSATION_TABLES.map((table) => {
+      const lengths = columnLengthsSql(database, table);
+      return `SELECT COALESCE(SUM(${lengths}), 0) + COUNT(*) * 256 AS bytes FROM ${table} WHERE ${table}.conversation_id = @conversationId`;
+    });
+    sql = `SELECT COALESCE(SUM(bytes), 0) AS bytes FROM (${parts.join(" UNION ALL ")})`;
+    conversationBytesSqlCache.set(database, sql);
+  }
+  return (cachedStatement(database, sql).get({ conversationId }) as { bytes: number }).bytes;
+}
+
+function jsonStringUtf8Bytes(value: string): number {
+  let bytes = 2;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 0x80) {
+      if (
+        code === 0x22 || code === 0x5c || code === 0x08
+        || code === 0x0c || code === 0x0a || code === 0x0d || code === 0x09
+      ) {
+        bytes += 2;
+      } else if (code < 0x20) {
+        bytes += 6;
+      } else {
+        bytes += 1;
+      }
+    } else if (code < 0x800) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = i + 1 < value.length ? value.charCodeAt(i + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i += 1;
+      } else {
+        bytes += 6;
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      bytes += 6;
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Computes a fast structural UTF-8 JSON byte upper bound without allocating a
+ * serialized multi-MB string. Returns a value >= the exact JSON UTF-8 byte
+ * length (or `limit + 1` once exceeded).
+ */
+export function estimateJsonUtf8BytesBound(value: unknown, limit: number): number {
+  let total = 0;
+  const walk = (node: unknown, depth: number): boolean => {
+    if (depth > 32) {
+      total = limit + 1;
+      return false;
+    }
+    if (node === null) {
+      total += 4;
+      return total <= limit;
+    }
+    const kind = typeof node;
+    if (kind === "string") {
+      total += jsonStringUtf8Bytes(node as string);
+      return total <= limit;
+    }
+    if (kind === "number") {
+      total += 24;
+      return total <= limit;
+    }
+    if (kind === "boolean") {
+      total += node ? 4 : 5;
+      return total <= limit;
+    }
+    if (kind !== "object") {
+      total += 4;
+      return total <= limit;
+    }
+    if (Array.isArray(node)) {
+      total += 2;
+      if (total > limit) return false;
+      for (let i = 0; i < node.length; i += 1) {
+        if (i > 0) total += 1;
+        if (!walk(node[i], depth + 1)) return false;
+      }
+      return total <= limit;
+    }
+    const record = node as Record<string, unknown>;
+    if (typeof record.toJSON === "function") {
+      total = limit + 1;
+      return false;
+    }
+    total += 2;
+    if (total > limit) return false;
+    let first = true;
+    for (const key in record) {
+      if (!Object.hasOwn(record, key)) continue;
+      const entry = record[key];
+      if (entry === undefined || typeof entry === "function" || typeof entry === "symbol") {
+        continue;
+      }
+      if (!first) total += 1;
+      first = false;
+      total += jsonStringUtf8Bytes(key) + 1;
+      if (total > limit) return false;
+      if (!walk(entry, depth + 1)) return false;
+    }
+    return total <= limit;
+  };
+  walk(value, 0);
+  return total;
 }
 
 export const HISTORY_TOO_LARGE_MESSAGE =

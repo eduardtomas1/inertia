@@ -130,6 +130,15 @@ function subagentTaskUsageJson(usage: SubagentTaskUsage | null): string | null {
   return usage ? JSON.stringify(usage) : null;
 }
 
+function existingSubagentTaskUsage(value: string | null): SubagentTaskUsage | null {
+  if (value === null) return null;
+  try {
+    return validateSubagentTaskUsage(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
 const NON_AGENT_TASK_KINDS: readonly SubagentTaskKind[] = ["shell", "monitor", "mcp"];
 export const SUBAGENT_STOP_REQUESTED_PROGRESS = "Stop requested.";
 /** What a background command still live at turn end is doing when cleanup was not confirmed. */
@@ -167,7 +176,7 @@ export class ExecutionLedgerRepository {
   upsertAgentPlan(plan: AgentPlan): void {
     this.context.requireConversation(plan.conversationId);
     if (plan.turnId) this.context.assertAgentTurnIdentity(plan.conversationId, plan.runId, plan.turnId);
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       INSERT INTO agent_plans (conversation_id, run_id, turn_id, explanation, steps_json, updated_at)
       VALUES (@conversationId, @runId, @turnId, @explanation, @stepsJson, @updatedAt)
       ON CONFLICT(conversation_id, run_id) DO UPDATE SET
@@ -205,6 +214,27 @@ export class ExecutionLedgerRepository {
   }
 
   updateActivity(id: string, update: Partial<Pick<AgentActivity, "title" | "detail" | "status">>): AgentActivity {
+    if (update.title !== undefined && update.detail !== undefined && update.status !== undefined) {
+      const row = cachedStatement(
+        this.context.database,
+        `UPDATE activities
+         SET title = ?, detail = ?, status = ?
+         WHERE id = ?
+         RETURNING id, conversation_id, run_id, turn_id, kind, title, status, created_at`,
+      ).get(update.title, update.detail, update.status, id) as Omit<ActivityRow, "detail"> | undefined;
+      if (!row) throw new RecordNotFoundError("Activity not found.");
+      return {
+        id: row.id,
+        conversationId: row.conversation_id,
+        runId: row.run_id,
+        turnId: row.turn_id,
+        kind: row.kind,
+        title: row.title,
+        detail: update.detail,
+        status: row.status,
+        createdAt: row.created_at,
+      };
+    }
     const row = cachedStatement(this.context.database, "SELECT * FROM activities WHERE id = ?").get(id) as ActivityRow | undefined;
     if (!row) throw new RecordNotFoundError("Activity not found.");
     const next = { ...activityFromRow(row), ...update };
@@ -213,7 +243,8 @@ export class ExecutionLedgerRepository {
   }
 
   subagentTrace(traceId: string): SubagentTrace {
-    const row = this.context.database.prepare(
+    const row = cachedStatement(
+      this.context.database,
       "SELECT * FROM subagent_traces WHERE id = ?",
     ).get(traceId) as SubagentTraceRow | undefined;
     if (!row) throw new RecordNotFoundError("Delegated task not found.");
@@ -225,7 +256,7 @@ export class ExecutionLedgerRepository {
     updatedAt = new Date().toISOString(),
   ): UpsertSubagentTraceResult | null {
     const now = requireTimestamp(updatedAt, "Delegated task stop time");
-    const result = this.context.database.prepare(`
+    const result = cachedStatement(this.context.database, `
       UPDATE subagent_traces
       SET status = 'cancelled',
           is_live = 0,
@@ -250,7 +281,7 @@ export class ExecutionLedgerRepository {
     updatedAt = new Date().toISOString(),
   ): UpsertSubagentTraceResult | null {
     const now = requireTimestamp(updatedAt, "Delegated task stop request time");
-    const result = this.context.database.prepare(`
+    const result = cachedStatement(this.context.database, `
       UPDATE subagent_traces
       SET progress = @progress,
           updated_at = MAX(updated_at, @updatedAt)
@@ -276,14 +307,14 @@ export class ExecutionLedgerRepository {
       input.providerId,
     ] as const;
     const byTask = providerTaskId
-      ? this.context.database.prepare(`
+      ? cachedStatement(this.context.database, `
           SELECT * FROM subagent_traces
           WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
             AND provider_task_id = ?
         `).get(...identityParams, providerTaskId) as SubagentTraceRow | undefined
       : undefined;
     const byAgent = providerAgentId
-      ? this.context.database.prepare(`
+      ? cachedStatement(this.context.database, `
           SELECT * FROM subagent_traces
           WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
             AND provider_agent_id = ?
@@ -292,7 +323,7 @@ export class ExecutionLedgerRepository {
     if (byTask && byAgent && byTask.id !== byAgent.id) return null;
     const providerToolUseId = boundedSubagentIdentifier(input.providerToolUseId);
     const byToolUse = !byTask && !byAgent && providerToolUseId
-      ? this.context.database.prepare(`
+      ? cachedStatement(this.context.database, `
           SELECT * FROM subagent_traces
           WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
             AND provider_tool_use_id = ?
@@ -337,7 +368,7 @@ export class ExecutionLedgerRepository {
       input.parentProviderToolUseId,
     );
     const parentByAgent = parentProviderAgentId
-      ? this.context.database.prepare(`
+      ? cachedStatement(this.context.database, `
           SELECT id FROM subagent_traces
           WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
             AND provider_agent_id = ?
@@ -346,7 +377,7 @@ export class ExecutionLedgerRepository {
         `).get(...identityParams, parentProviderAgentId) as { id: string } | undefined
       : undefined;
     const parentByToolUse = !parentByAgent && parentProviderToolUseId
-      ? this.context.database.prepare(`
+      ? cachedStatement(this.context.database, `
           SELECT id FROM subagent_traces
           WHERE conversation_id = ? AND run_id = ? AND provider_id = ?
             AND provider_tool_use_id = ?
@@ -433,7 +464,7 @@ export class ExecutionLedgerRepository {
     };
 
     if (existing) {
-      this.context.database.prepare(`
+      const updated = cachedStatement(this.context.database, `
         UPDATE subagent_traces
         SET provider_task_id = COALESCE(@providerTaskId, provider_task_id),
             provider_agent_id = COALESCE(@providerAgentId, provider_agent_id),
@@ -490,13 +521,14 @@ export class ExecutionLedgerRepository {
             sequence = @sequence,
             updated_at = @updatedAt
         WHERE id = @id
-      `).run({
+        RETURNING *
+      `).get({
         id: existing.id,
         ...normalized,
         customAgentId,
         ...shape,
         usageJson: subagentTaskUsageJson(mergeSubagentTaskUsage(
-          subagentTraceFromRow(existing).usage,
+          existingSubagentTaskUsage(existing.usage_json),
           usage,
         )),
         status: input.status,
@@ -504,22 +536,23 @@ export class ExecutionLedgerRepository {
         revived: revived ? 1 : 0,
         sequence: input.sequence,
         updatedAt: now < existing.updated_at ? existing.updated_at : now,
-      });
-      this.linkSubagentChildren(existing.id);
+      }) as SubagentTraceRow | undefined;
+      if (!updated) throw new RecordNotFoundError("Delegated task not found.");
+      this.linkSubagentChildren(updated);
       return {
-        trace: this.subagentTrace(existing.id),
+        trace: subagentTraceFromRow(updated),
         changed: true,
       };
     }
 
-    const count = (this.context.database.prepare(`
+    const count = (cachedStatement(this.context.database, `
       SELECT COUNT(*) AS count
       FROM subagent_traces
       WHERE turn_id = ?
     `).get(input.turnId) as { count: number }).count;
     if (count >= MAX_SUBAGENT_TRACES_PER_TURN) return null;
     if (NON_AGENT_TASK_KINDS.includes(taskKind)) {
-      const nonAgentCount = (this.context.database.prepare(`
+      const nonAgentCount = (cachedStatement(this.context.database, `
         SELECT COUNT(*) AS count
         FROM subagent_traces
         WHERE turn_id = ? AND task_kind IN ('shell', 'monitor', 'mcp')
@@ -548,7 +581,7 @@ export class ExecutionLedgerRepository {
       createdAt: now,
       updatedAt: now,
     };
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       INSERT INTO subagent_traces (
         id, conversation_id, run_id, turn_id, provider_id,
         provider_task_id, provider_agent_id, parent_trace_id,
@@ -587,7 +620,14 @@ export class ExecutionLedgerRepository {
       createdAt: trace.createdAt,
       updatedAt: trace.updatedAt,
     });
-    this.linkSubagentChildren(trace.id);
+    this.linkSubagentChildren({
+      id: trace.id,
+      conversation_id: trace.conversationId,
+      run_id: trace.runId,
+      provider_id: trace.providerId,
+      provider_agent_id: trace.providerAgentId,
+      provider_tool_use_id: trace.providerToolUseId,
+    });
     return { trace, changed: true };
   }
 
@@ -598,7 +638,7 @@ export class ExecutionLedgerRepository {
     providerCleanupUnconfirmed = false,
   ): SubagentTrace[] {
     const now = requireTimestamp(updatedAt, "Delegated task settlement time");
-    const rows = this.context.database.prepare(`
+    const rows = cachedStatement(this.context.database, `
       SELECT * FROM subagent_traces
       WHERE turn_id = ?
         AND is_live = 1
@@ -610,7 +650,7 @@ export class ExecutionLedgerRepository {
     // the provider's process tree was not confirmed gone, they may still be
     // running, so their outcome is unknown. A remote agent keeps running in
     // its cloud session, so its outcome is unknown here rather than lost.
-    const update = this.context.database.prepare(`
+    const update = cachedStatement(this.context.database, `
       UPDATE subagent_traces
       SET status = CASE
             WHEN task_kind = 'remote' THEN 'unknown'
@@ -657,12 +697,12 @@ export class ExecutionLedgerRepository {
       status: "running",
       createdAt: new Date().toISOString(),
     };
-    this.context.database.prepare(`INSERT INTO agent_reasonings (id, conversation_id, run_id, turn_id, content, status, created_at) VALUES (@id, @conversationId, @runId, @turnId, @content, @status, @createdAt)`).run(reasoning);
+    cachedStatement(this.context.database, `INSERT INTO agent_reasonings (id, conversation_id, run_id, turn_id, content, status, created_at) VALUES (@id, @conversationId, @runId, @turnId, @content, @status, @createdAt)`).run(reasoning);
     return reasoning;
   }
 
   updateReasoning(id: string, update: Partial<Pick<AgentReasoning, "content" | "status">>): AgentReasoning {
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT ${REASONING_PROJECTION_COLUMNS}
       FROM agent_reasonings
       WHERE agent_reasonings.id = ?
@@ -705,7 +745,7 @@ export class ExecutionLedgerRepository {
       ...(promptCache ? { promptCache } : {}),
       updatedAt: new Date().toISOString(),
     };
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       INSERT INTO thread_usage (conversation_id, turn_id, used_tokens, total_processed_tokens, total_processed_scope, max_tokens, input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens, reasoning_output_tokens, compacts_automatically, last_request_started_at, prompt_cache_lifetime_ms, prompt_cache_source, updated_at)
       VALUES (@conversationId, @turnId, @usedTokens, @totalProcessedTokens, @totalProcessedScope, @maxTokens, @inputTokens, @cachedInputTokens, @cacheWriteInputTokens, @outputTokens, @reasoningOutputTokens, @compactsAutomatically, @lastRequestStartedAt, @promptCacheLifetimeMs, @promptCacheSource, @updatedAt)
       ON CONFLICT(conversation_id) DO UPDATE SET
@@ -747,7 +787,8 @@ export class ExecutionLedgerRepository {
 
   usageForConversation(conversationId: string): ThreadUsageSnapshot | null {
     this.context.requireConversation(conversationId);
-    const row = this.context.database.prepare(
+    const row = cachedStatement(
+      this.context.database,
       "SELECT * FROM thread_usage WHERE conversation_id = ?",
     ).get(conversationId) as ThreadUsageRow | undefined;
     return row ? usageFromRow(row) : null;
@@ -755,7 +796,8 @@ export class ExecutionLedgerRepository {
 
   checkpointCount(conversationId: string): number {
     this.context.requireConversation(conversationId);
-    const row = this.context.database.prepare(
+    const row = cachedStatement(
+      this.context.database,
       "SELECT COUNT(*) AS count FROM checkpoints WHERE conversation_id = ?",
     ).get(conversationId) as { count: number };
     return row.count;
@@ -773,7 +815,7 @@ export class ExecutionLedgerRepository {
       }
     }
     const checkpoint: CheckpointSummary = { ...input, turnId, id: randomUUID(), createdAt: new Date().toISOString() };
-    this.context.database.prepare(`INSERT INTO checkpoints (id, conversation_id, turn_id, ref, label, turn_index, files_changed, insertions, deletions, created_at) VALUES (@id, @conversationId, @turnId, @ref, @label, @turnIndex, @filesChanged, @insertions, @deletions, @createdAt)`).run(checkpoint);
+    cachedStatement(this.context.database, `INSERT INTO checkpoints (id, conversation_id, turn_id, ref, label, turn_index, files_changed, insertions, deletions, created_at) VALUES (@id, @conversationId, @turnId, @ref, @label, @turnIndex, @filesChanged, @insertions, @deletions, @createdAt)`).run(checkpoint);
     return checkpoint;
   }
 
@@ -782,7 +824,7 @@ export class ExecutionLedgerRepository {
     conversationId: string,
   ): boolean {
     this.context.requireConversation(conversationId);
-    const result = this.context.database.prepare(`
+    const result = cachedStatement(this.context.database, `
       DELETE FROM checkpoints
       WHERE id = ? AND conversation_id = ? AND turn_id IS NULL
     `).run(checkpointId, conversationId);
@@ -791,17 +833,18 @@ export class ExecutionLedgerRepository {
 
   associateCheckpointWithTurn(checkpointId: string, conversationId: string, runId: string, turnId: string): CheckpointSummary {
     this.context.assertAgentTurnIdentity(conversationId, runId, turnId);
-    const row = this.context.database.prepare("SELECT * FROM checkpoints WHERE id = ?").get(checkpointId) as CheckpointRow | undefined;
+    const row = cachedStatement(this.context.database, "SELECT * FROM checkpoints WHERE id = ?").get(checkpointId) as CheckpointRow | undefined;
     if (!row || row.conversation_id !== conversationId) throw new RecordNotFoundError("Checkpoint not found.");
     if (row.turn_id !== null && row.turn_id !== turnId) {
       throw new Error("The checkpoint is already owned by a different turn.");
     }
-    if (row.turn_id === null) this.context.database.prepare("UPDATE checkpoints SET turn_id = ? WHERE id = ?").run(turnId, checkpointId);
+    if (row.turn_id === null) cachedStatement(this.context.database, "UPDATE checkpoints SET turn_id = ? WHERE id = ?").run(turnId, checkpointId);
     return { ...checkpointFromRow(row), turnId };
   }
 
   checkpoint(checkpointId: string): CheckpointSummary {
-    const row = this.context.database.prepare(
+    const row = cachedStatement(
+      this.context.database,
       "SELECT * FROM checkpoints WHERE id = ?",
     ).get(checkpointId) as CheckpointRow | undefined;
     if (!row) throw new RecordNotFoundError("Checkpoint not found.");
@@ -813,7 +856,8 @@ export class ExecutionLedgerRepository {
     expiredAt = new Date().toISOString(),
   ): number {
     if (checkpointIds.length === 0) return 0;
-    const statement = this.context.database.prepare(
+    const statement = cachedStatement(
+      this.context.database,
       "UPDATE checkpoints SET expired_at = ? WHERE id = ? AND expired_at IS NULL",
     );
     return this.context.database.transaction(() => {
@@ -826,7 +870,7 @@ export class ExecutionLedgerRepository {
   }
 
   activeCheckpointsForRetention(): RetainedCheckpointRecord[] {
-    const rows = this.context.database.prepare(`
+    const rows = cachedStatement(this.context.database, `
       SELECT
         c.id,
         c.conversation_id,
@@ -883,27 +927,25 @@ export class ExecutionLedgerRepository {
   }
 
   checkpointExpirationRevision(): string {
-    return JSON.stringify(this.context.database.prepare(
+    return JSON.stringify(cachedStatement(
+      this.context.database,
       "SELECT id, expired_at FROM checkpoints WHERE expired_at IS NOT NULL ORDER BY id ASC",
     ).all());
   }
 
-  private linkSubagentChildren(parentTraceId: string): void {
-    const parent = this.context.database.prepare(`
-      SELECT conversation_id, run_id, provider_id, provider_agent_id,
-             provider_tool_use_id
-      FROM subagent_traces
-      WHERE id = ?
-    `).get(parentTraceId) as Pick<
+  private linkSubagentChildren(
+    parent: Pick<
       SubagentTraceRow,
+      | "id"
       | "conversation_id"
       | "run_id"
       | "provider_id"
       | "provider_agent_id"
       | "provider_tool_use_id"
-    > | undefined;
-    if (!parent) return;
-    this.context.database.prepare(`
+    >,
+  ): void {
+    if (parent.provider_agent_id === null && parent.provider_tool_use_id === null) return;
+    cachedStatement(this.context.database, `
       UPDATE subagent_traces
       SET parent_trace_id = ?
       WHERE id <> ?
@@ -923,8 +965,8 @@ export class ExecutionLedgerRepository {
           )
         )
     `).run(
-      parentTraceId,
-      parentTraceId,
+      parent.id,
+      parent.id,
       parent.conversation_id,
       parent.run_id,
       parent.provider_id,

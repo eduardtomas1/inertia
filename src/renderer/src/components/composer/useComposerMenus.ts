@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -63,6 +64,11 @@ export function useComposerMenus(): ComposerMenuController {
   const menuTriggerRefs = useRef(new Map<ComposerMenu, HTMLButtonElement | HTMLTextAreaElement>());
   const menuPopoverRef = useRef<HTMLDivElement | null>(null);
 
+  const menuRef = useRef(menu);
+  menuRef.current = menu;
+  const moreSectionRef = useRef(moreSection);
+  moreSectionRef.current = moreSection;
+
   const setMenuTrigger = useCallback((
     name: ComposerMenu,
     node: HTMLButtonElement | HTMLTextAreaElement | null,
@@ -72,7 +78,7 @@ export function useComposerMenus(): ComposerMenuController {
     else menuTriggerRefs.current.delete(name);
   }, [setDismissibleMenuTrigger]);
 
-  const setMenuPopover = (
+  const setMenuPopover = useCallback((
     name: ComposerMenu,
     node: HTMLDivElement | null,
   ): void => {
@@ -80,7 +86,7 @@ export function useComposerMenus(): ComposerMenuController {
     if (node) {
       menuPopoverRef.current = node;
     } else menuPopoverRef.current = null;
-  };
+  }, [setDismissibleMenuPopover]);
 
   useEffect(() => {
     if (menu === "more") return;
@@ -124,12 +130,12 @@ export function useComposerMenus(): ComposerMenuController {
     }
   }, []);
 
-  const clearMoreHoverTimer = () => {
+  const clearMoreHoverTimer = useCallback(() => {
     const timer = moreHoverTimerRef.current;
     if (timer === null) return;
     clearTimeout(timer);
     moreHoverTimerRef.current = null;
-  };
+  }, []);
 
   const availableMoreSubmenuSide = (): HorizontalSubmenuSide | null => {
     const side = morePopoverRef.current?.parentElement
@@ -147,7 +153,7 @@ export function useComposerMenus(): ComposerMenuController {
     });
   };
 
-  const openMoreSection = (
+  const openMoreSection = useCallback((
     section: MoreSection,
     focusSubmenu = false,
   ) => {
@@ -157,9 +163,9 @@ export function useComposerMenus(): ComposerMenuController {
     setMoreSection(section);
     setMoreSubmenuSide(side);
     if (focusSubmenu) focusFirstMoreSubmenuItem();
-  };
+  }, [clearMoreHoverTimer]);
 
-  const previewMoreSection = (section: MoreSection) => {
+  const previewMoreSection = useCallback((section: MoreSection) => {
     clearMoreHoverTimer();
     if (!moreSectionExplicitRef.current) {
       moreHoverTimerRef.current = window.setTimeout(() => {
@@ -170,9 +176,9 @@ export function useComposerMenus(): ComposerMenuController {
         setMoreSubmenuSide(side);
       }, 140);
     }
-  };
+  }, [clearMoreHoverTimer]);
 
-  const closeMorePreview = () => {
+  const closeMorePreview = useCallback(() => {
     clearMoreHoverTimer();
     if (moreSectionExplicitRef.current) return;
     moreHoverTimerRef.current = window.setTimeout(() => {
@@ -181,10 +187,10 @@ export function useComposerMenus(): ComposerMenuController {
       setMoreSection(null);
       setMoreSubmenuSide(null);
     }, 180);
-  };
+  }, [clearMoreHoverTimer]);
 
-  const returnToMoreRoot = (focusTrigger = false) => {
-    const previousSection = moreSection;
+  const returnToMoreRoot = useCallback((focusTrigger = false) => {
+    const previousSection = moreSectionRef.current;
     clearMoreHoverTimer();
     moreSectionExplicitRef.current = false;
     setMoreSection(null);
@@ -193,38 +199,29 @@ export function useComposerMenus(): ComposerMenuController {
       window.requestAnimationFrame(() =>
         moreSectionTriggerRefs.current.get(previousSection)?.focus());
     }
-  };
+  }, [clearMoreHoverTimer]);
 
-  const handleMoreMenuNavigation = (
+  const handleMoreMenuNavigation = useCallback((
     event: React.KeyboardEvent<HTMLDivElement>,
-  ) => navigateMenuItems(event, "button:not(:disabled)");
+  ) => navigateMenuItems(event, "button:not(:disabled)"), []);
 
-  const focusComposerMenuEdge = (
-    menuName: ComposerMenu,
-    edge: "first" | "last" = "first",
-  ): void => {
-    void import("../../utils/composerPopoverPlacement").then((module) =>
-      module.focusComposerPopoverEdge(menuId(menuName), edge));
-  };
-
-  const handleComposerMenuNavigation = (
+  const handleComposerMenuNavigation = useCallback((
     event: React.KeyboardEvent<HTMLDivElement>,
-  ): void => navigateMenuItems(event, ":scope > button:not(:disabled)");
+  ): void => navigateMenuItems(event, ":scope > button:not(:disabled)"), []);
 
-  const handleComposerMenuTriggerKeyDown = (
+  const handleComposerMenuTriggerKeyDown = useCallback((
     menuName: ComposerMenu,
     event: React.KeyboardEvent<HTMLButtonElement>,
   ): void => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
-    if (menu !== menuName) toggleMenu(menuName);
-    focusComposerMenuEdge(
-      menuName,
-      event.key === "ArrowUp" ? "last" : "first",
-    );
-  };
+    if (menuRef.current !== menuName) toggleMenu(menuName);
+    const edge = event.key === "ArrowUp" ? "last" : "first";
+    void import("../../utils/composerPopoverPlacement").then((module) =>
+      module.focusComposerPopoverEdge(menuId(menuName), edge));
+  }, [toggleMenu]);
 
-  return {
+  return useMemo(() => ({
     menu,
     toggleMenu,
     dismissMenu,
@@ -242,5 +239,21 @@ export function useComposerMenus(): ComposerMenuController {
     handleMoreMenuNavigation,
     handleComposerMenuNavigation,
     handleComposerMenuTriggerKeyDown,
-  };
+  }), [
+    clearMoreHoverTimer,
+    closeMorePreview,
+    dismissMenu,
+    handleComposerMenuNavigation,
+    handleComposerMenuTriggerKeyDown,
+    handleMoreMenuNavigation,
+    menu,
+    moreSection,
+    moreSubmenuSide,
+    openMoreSection,
+    previewMoreSection,
+    returnToMoreRoot,
+    setMenuPopover,
+    setMenuTrigger,
+    toggleMenu,
+  ]);
 }

@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export const MAX_CACHED_STATEMENTS_PER_DATABASE = 32;
+export const MAX_CACHED_STATEMENTS_PER_DATABASE = 256;
 
 const statementCaches = new WeakMap<
   Database.Database,
@@ -17,7 +17,11 @@ export function cachedStatement(
     statementCaches.set(database, cache);
   }
   const cached = cache.get(sql);
-  if (cached) return cached;
+  if (cached) {
+    cache.delete(sql);
+    cache.set(sql, cached);
+    return cached;
+  }
   const statement = database.prepare(sql);
   if (cache.size >= MAX_CACHED_STATEMENTS_PER_DATABASE) {
     cache.delete(cache.keys().next().value!);

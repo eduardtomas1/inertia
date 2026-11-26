@@ -488,14 +488,14 @@ export function ChatWorkspace({
   } | null>(null);
   const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
-  const ownedTurns = recordsOwnedByConversation(turns, conversationId);
+  const ownedTurns = useMemo(() => recordsOwnedByConversation(turns, conversationId), [conversationId, turns]);
   const queueTurnOwner = latestTurnSummary ?? ownedTurns.at(-1) ?? null;
   const queuedTurnAuthoritative = !queueTurnOwner
     || !terminalProjections?.[turnEventOwner({
       runId: queueTurnOwner.runId,
       turnId: queueTurnOwner.id,
     })];
-  const ownedMessages = recordsOwnedByConversation(messages, conversationId);
+  const ownedMessages = useMemo(() => recordsOwnedByConversation(messages, conversationId), [conversationId, messages]);
   const hasVisibleHistory = ownedMessages.some(({ role }) =>
     role === "user" || role === "assistant");
   const stopTurn = latestTurnSummary
@@ -564,20 +564,14 @@ export function ChatWorkspace({
     const restoreFocus = composerFocusRestorer(document.activeElement);
     void stopWithPromptRestore().then(restoreFocus, () => undefined);
   }, [stopWithPromptRestore]);
-  const ownedActivities = recordsOwnedByConversation(activities, conversationId);
-  const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);
-  const ownedReasonings = recordsOwnedByConversation(reasonings, conversationId);
-  const ownedPlans = recordsOwnedByConversation(plans, conversationId);
-  const ownedCheckpoints = recordsOwnedByConversation(checkpoints, conversationId);
-  const ownedTurnGitArtifacts = recordsOwnedByConversation(
-    turnGitArtifacts,
-    conversationId,
-  );
-  const ownedApprovals = recordsOwnedByConversation(approvals, conversationId);
-  const ownedInputRequests = recordsOwnedByConversation(
-    inputRequests,
-    conversationId,
-  );
+  const ownedActivities = useMemo(() => recordsOwnedByConversation(activities, conversationId), [activities, conversationId]);
+  const ownedSubagents = useMemo(() => recordsOwnedByConversation(subagents, conversationId), [conversationId, subagents]);
+  const ownedReasonings = useMemo(() => recordsOwnedByConversation(reasonings, conversationId), [conversationId, reasonings]);
+  const ownedPlans = useMemo(() => recordsOwnedByConversation(plans, conversationId), [conversationId, plans]);
+  const ownedCheckpoints = useMemo(() => recordsOwnedByConversation(checkpoints, conversationId), [checkpoints, conversationId]);
+  const ownedTurnGitArtifacts = useMemo(() => recordsOwnedByConversation(turnGitArtifacts, conversationId), [conversationId, turnGitArtifacts]);
+  const ownedApprovals = useMemo(() => recordsOwnedByConversation(approvals, conversationId), [approvals, conversationId]);
+  const ownedInputRequests = useMemo(() => recordsOwnedByConversation(inputRequests, conversationId), [conversationId, inputRequests]);
   const agentContextRequest = [...ownedInputRequests].reverse().find(
     (request) => request.conversationContextRequest !== undefined,
   )?.conversationContextRequest ?? null;
@@ -618,7 +612,7 @@ export function ChatWorkspace({
     if (followCorrectionFrameRef.current !== null) {
       window.cancelAnimationFrame(followCorrectionFrameRef.current);
     }
-    const correctMeasuredBottom = (remainingFrames: number): void => {
+    const correctMeasuredBottom = (remainingFrames: number, settledFrames = 0): void => {
       followCorrectionFrameRef.current = window.requestAnimationFrame(() => {
         followCorrectionFrameRef.current = null;
         const current = scrollRef.current;
@@ -630,16 +624,16 @@ export function ChatWorkspace({
         ) return;
         if (!transcriptNavigationFollowsContent(navigationRef.current)) {
           if (remainingFrames > 1) {
-            correctMeasuredBottom(remainingFrames - 1);
+            correctMeasuredBottom(remainingFrames - 1, 0);
           }
           return;
         }
-        current.scrollTo({ top: current.scrollHeight, behavior: "auto" });
-        // A clamped scroll reports a zero gap before the virtualizer publishes
-        // its next measurement. Keep the bounded correction window alive even
-        // when this frame appears settled; reader intent still stops it above.
-        if (remainingFrames > 1) {
-          correctMeasuredBottom(remainingFrames - 1);
+        const deficit = current.scrollHeight - current.clientHeight - current.scrollTop;
+        if (deficit >= 1) {
+          current.scrollTo({ top: current.scrollHeight, behavior: "auto" });
+          if (remainingFrames > 1) correctMeasuredBottom(remainingFrames - 1, 0);
+        } else if (settledFrames + 1 < 2 && remainingFrames > 1) {
+          correctMeasuredBottom(remainingFrames - 1, settledFrames + 1);
         }
       });
     };

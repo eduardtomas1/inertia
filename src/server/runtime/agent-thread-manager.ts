@@ -500,7 +500,11 @@ export class AgentThreadManager {
         if (this.dependencies.store.project(current.projectId).preferences?.cadAccess !== true) {
           return failure(CAD_ACCESS_DISABLED.code, CAD_ACCESS_DISABLED.message);
         }
-        return await this.dependencies.cadTools.invoke(call, imagesAccepted(source.turn, this.dependencies.providerInfo()));
+        return await this.dependencies.cadTools.invoke(
+          call,
+          imagesAccepted(source.turn, this.dependencies.providerInfo()),
+          this.dependencies.store.conversationPath(current.id),
+        );
       }
       if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
         // The turn's offer already withholds these tools when Browser access

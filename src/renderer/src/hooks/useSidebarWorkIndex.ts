@@ -84,7 +84,11 @@ export function sidebarWorkLayoutKey(
   compact: boolean,
   items: readonly { id: string }[],
 ): string {
-  return JSON.stringify([compact, items.map(({ id }) => id)]);
+  let key = compact ? "1" : "0";
+  for (let index = 0; index < items.length; index += 1) {
+    key += `\0${items[index]!.id}`;
+  }
+  return key;
 }
 
 interface SidebarWorkIndexOptions {
@@ -247,45 +251,57 @@ export function useSidebarWorkIndex({
     observer.observe(navigation);
     return () => observer.disconnect();
   }, [compact, enabled, items.length, navigationRef, updateViewport, virtualized]);
-  let renderedItems: Array<{
-    index: number;
-    item: WorkIndexItem;
-    start: number | undefined;
-  }>;
-  if (!virtualized) {
-    renderedItems = items.map((item, index) => ({ item, index, start: undefined }));
-  } else {
-    const startIndex = Math.max(0, firstVisible - WORK_INDEX_OVERSCAN);
-    const endIndex = Math.min(items.length, lastVisible + WORK_INDEX_OVERSCAN);
-    renderedItems = items.slice(startIndex, endIndex).map((item, offset) => {
-      const index = startIndex + offset;
-      return { item, index, start: offsets[index] ?? 0 };
-    });
-  }
-  const activeIndex = items.findIndex((item) => (
-    (item.kind === "thread" || item.kind === "watcher")
-    && item.conversation.id === activeConversationId
-  ));
+  const activeIndex = activeConversationId
+    ? indexByIdentity.get(`thread:${activeConversationId}`)
+      ?? indexByIdentity.get(`watcher:${activeConversationId}`)
+      ?? -1
+    : -1;
   const retainedTargetIndex = (retainedIdentity === null ? undefined : indexByIdentity.get(retainedIdentity)) ?? activeIndex;
-  if (
-    virtualized
-    && retainedTargetIndex >= 0
-    && !renderedItems.some(({ index }) => index === retainedTargetIndex)
-  ) {
-    const item = items[retainedTargetIndex];
-    if (item) {
-      renderedItems = [
-        ...renderedItems,
-        { item, index: retainedTargetIndex, start: offsets[retainedTargetIndex] ?? 0 },
-      ].sort((left, right) => left.index - right.index);
+  const renderedItems = useMemo(() => {
+    let next: Array<{
+      index: number;
+      item: WorkIndexItem;
+      start: number | undefined;
+    }>;
+    if (!virtualized) {
+      next = items.map((item, index) => ({ item, index, start: undefined }));
+    } else {
+      const startIndex = Math.max(0, firstVisible - WORK_INDEX_OVERSCAN);
+      const endIndex = Math.min(items.length, lastVisible + WORK_INDEX_OVERSCAN);
+      next = [];
+      for (let index = startIndex; index < endIndex; index += 1) {
+        next.push({ item: items[index]!, index, start: offsets[index] ?? 0 });
+      }
+      if (
+        retainedTargetIndex >= 0
+        && (retainedTargetIndex < startIndex || retainedTargetIndex >= endIndex)
+      ) {
+        const retained = items[retainedTargetIndex];
+        if (retained) {
+          const entry = {
+            item: retained,
+            index: retainedTargetIndex,
+            start: offsets[retainedTargetIndex] ?? 0,
+          };
+          if (retainedTargetIndex < startIndex) next.unshift(entry);
+          else next.push(entry);
+        }
+      }
     }
-  }
-  const renderedConversationIds = new Set(renderedItems.flatMap(({ item }) => (
-    item.kind === "thread" || item.kind === "watcher" ? [item.conversation.id] : []
-  )));
+    return next;
+  }, [firstVisible, items, lastVisible, offsets, retainedTargetIndex, virtualized]);
+  const renderedConversationIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const { item } of renderedItems) {
+      if (item.kind === "thread" || item.kind === "watcher") {
+        ids.add(item.conversation.id);
+      }
+    }
+    return ids;
+  }, [renderedItems]);
   const layoutKey = useMemo(
-    () => sidebarWorkLayoutKey(compact, items),
-    [compact, items],
+    () => (motionEnabled ? sidebarWorkLayoutKey(compact, items) : ""),
+    [compact, items, motionEnabled],
   );
   useSidebarIndexMotion({
     containerRef: streamRef,

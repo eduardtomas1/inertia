@@ -4,6 +4,7 @@ import {
   selectConversationWorkspaceRun,
   workspaceRunAttentionView,
 } from "../../../shared/attention";
+import { EN_COLLATOR, compareIsoTextDesc as compareTextDesc } from "./fastCompare";
 
 export type SidebarThreadStatus = "working" | "approval" | "input" | "failed" | "limited" | "completed" | "idle";
 type SidebarConversation = Conversation & {
@@ -95,6 +96,11 @@ const previousViews = new WeakMap<
   readonly [activeConversationId: string | null, views: ReadonlyMap<string, SidebarThreadView>]
 >();
 
+const cachedConversationViews = new WeakMap<
+  SidebarConversation,
+  { active: boolean; run: WorkspaceRun | null; view: SidebarThreadView }
+>();
+
 export function sidebarThreadViewMap(
   conversations: readonly SidebarConversation[],
   activeConversationId: string | null,
@@ -103,14 +109,26 @@ export function sidebarThreadViewMap(
   const runsByConversation = indexConversationWorkspaceRuns(runs);
   const [previousActiveConversationId, previous] = previousViews.get(conversations) ?? [];
   const prior = previousActiveConversationId === activeConversationId ? previous : undefined;
-  let reused = prior !== undefined;
-  const views = new Map(conversations.map((conversation) => {
+  let reused = prior !== undefined && prior.size === conversations.length;
+  const views = new Map<string, SidebarThreadView>();
+  for (const conversation of conversations) {
     const run = runsByConversation.get(conversation.id) ?? null;
-    const view = prior?.get(conversation.id);
-    if (view?.run === run) return [conversation.id, view];
+    const priorView = prior?.get(conversation.id);
+    if (priorView && priorView.conversation === conversation && priorView.run === run) {
+      views.set(conversation.id, priorView);
+      continue;
+    }
     reused = false;
-    return [conversation.id, sidebarThreadViewForRun(conversation, activeConversationId, run)];
-  }));
+    const active = conversation.id === activeConversationId;
+    const cached = cachedConversationViews.get(conversation);
+    if (cached && cached.active === active && cached.run === run) {
+      views.set(conversation.id, cached.view);
+      continue;
+    }
+    const view = sidebarThreadViewForRun(conversation, activeConversationId, run);
+    cachedConversationViews.set(conversation, { active, run, view });
+    views.set(conversation.id, view);
+  }
   const result = reused ? prior! : views;
   previousViews.set(conversations, [activeConversationId, result]);
   return result;
@@ -144,7 +162,7 @@ export function sortActivityThreads(
 export function sortSidebarThreadViews(
   threads: readonly SidebarThreadView[],
 ): SidebarThreadView[] {
-  return [...threads]
+  return threads
     .filter(({ conversation }) => conversation.archivedAt === null)
     .sort((a, b) => (
       Number(a.settled) - Number(b.settled)
@@ -155,11 +173,13 @@ export function sortSidebarThreadViews(
       || Number(b.unread) - Number(a.unread)
       || (
         a.status === "working" && b.status === "working"
-          ? (b.run?.startedAt ?? b.conversation.createdAt)
-              .localeCompare(a.run?.startedAt ?? a.conversation.createdAt, "en")
-          : b.conversation.updatedAt.localeCompare(a.conversation.updatedAt, "en")
+          ? compareTextDesc(
+              a.run?.startedAt ?? a.conversation.createdAt,
+              b.run?.startedAt ?? b.conversation.createdAt,
+            )
+          : compareTextDesc(a.conversation.updatedAt, b.conversation.updatedAt)
       )
-      || a.conversation.id.localeCompare(b.conversation.id, "en")
+      || EN_COLLATOR.compare(a.conversation.id, b.conversation.id)
     ));
 }
 

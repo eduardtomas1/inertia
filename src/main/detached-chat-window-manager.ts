@@ -46,6 +46,12 @@ interface DetachedChatWindowRecord {
   readySettled: boolean;
   loaded: boolean;
   closing: boolean;
+  closingSettled: Promise<void> | null;
+  resolveClosingSettled: (() => void) | null;
+}
+
+export interface DetachedChatWindowOpenOptions {
+  onBeforeCreate?: () => void;
 }
 
 const UNTRUSTED_SENDER_ERROR = "Rejected untrusted detached-chat renderer";
@@ -63,17 +69,30 @@ export class DetachedChatWindowManager {
 
   async open(
     request: DetachedChatWindowRequest,
+    options?: DetachedChatWindowOpenOptions,
   ): Promise<DetachedChatWindowOpenResult> {
     if (this.#closeAllOperation) {
       throw new Error("Detached chat windows are closing.");
     }
     const existing = this.#byConversation.get(request.conversationId);
     if (existing) {
+      if (existing.closing || existing.window.isDestroyed()) {
+        if (existing.window.isDestroyed()) {
+          this.#removeRecord(existing);
+        } else {
+          await this.#ensureClosingSettled(existing);
+        }
+        return await this.open(request, options);
+      }
       existing.request = { ...request };
       this.#setTitle(existing);
       await existing.ready;
-      if (this.#byConversation.get(request.conversationId) !== existing) {
-        return await this.open(request);
+      if (
+        this.#byConversation.get(request.conversationId) !== existing
+        || existing.closing
+        || existing.window.isDestroyed()
+      ) {
+        return await this.open(request, options);
       }
       this.#focusRecord(existing);
       return { disposition: "focused", ...this.#recordSummary(existing) };
@@ -84,6 +103,7 @@ export class DetachedChatWindowManager {
       );
     }
 
+    options?.onBeforeCreate?.();
     const bounds = this.#options.state.restore(
       request.conversationId,
       this.#options.getDisplays(),
@@ -110,6 +130,8 @@ export class DetachedChatWindowManager {
       readySettled: false,
       loaded: false,
       closing: false,
+      closingSettled: null,
+      resolveClosingSettled: null,
     };
     this.#byConversation.set(request.conversationId, record);
     this.#bySender.set(record.contents, record);
@@ -165,6 +187,11 @@ export class DetachedChatWindowManager {
       && !record.window.isDestroyed()
       && record.window.isFocused(),
     );
+  }
+
+  hasOpenWindow(conversationId: string): boolean {
+    const record = this.#byConversation.get(conversationId);
+    return Boolean(record && !record.closing && !record.window.isDestroyed());
   }
 
   windowForConversation(conversationId: string): BrowserWindow | null {
@@ -279,12 +306,14 @@ export class DetachedChatWindowManager {
     record.window.on("resize", scheduleSave);
     record.window.on("close", () => {
       record.closing = true;
+      void this.#ensureClosingSettled(record);
       this.#rememberBounds(record);
       this.#options.state.flush();
     });
     record.contents.on("will-prevent-unload", () => {
       if (this.#ownsRecord(record) && !record.window.isDestroyed()) {
         record.closing = false;
+        this.#resolveClosingSettled(record);
         this.#emitWindowsChanged();
       }
     });
@@ -297,6 +326,7 @@ export class DetachedChatWindowManager {
       }
       this.#notifyWindowClosed(record);
       this.#removeRecord(record);
+      this.#resolveClosingSettled(record);
     });
     record.contents.once("render-process-gone", () => {
       if (
@@ -408,6 +438,23 @@ export class DetachedChatWindowManager {
       this.#byConversation.delete(record.request.conversationId);
       this.#emitWindowsChanged();
     }
+    this.#resolveClosingSettled(record);
+  }
+
+  #ensureClosingSettled(record: DetachedChatWindowRecord): Promise<void> {
+    if (record.closingSettled) return record.closingSettled;
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    record.closingSettled = promise;
+    record.resolveClosingSettled = resolve;
+    return promise;
+  }
+
+  #resolveClosingSettled(record: DetachedChatWindowRecord): void {
+    const resolve = record.resolveClosingSettled;
+    record.closingSettled = null;
+    record.resolveClosingSettled = null;
+    resolve?.();
   }
 
   #resolveReady(record: DetachedChatWindowRecord): void {

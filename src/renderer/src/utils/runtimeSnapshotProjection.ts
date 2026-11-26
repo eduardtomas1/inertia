@@ -3,6 +3,7 @@ import type {
   RuntimeMutationEvent,
 } from "@shared/contracts";
 
+import { EN_COLLATOR, compareTimestampsAsc } from "./fastCompare";
 import { structurallyEqual } from "./structuralEquality";
 
 type ConversationShellEvent = Extract<
@@ -12,17 +13,43 @@ type ConversationShellEvent = Extract<
 type TodosEvent = Extract<RuntimeMutationEvent, { type: "todos.updated" }>;
 type LibraryEvent = Extract<RuntimeMutationEvent, { type: "library.updated" }>;
 
+function compareDescendingTimestamp<
+  Item extends { id: string; startedAt?: string; updatedAt?: string },
+>(left: Item, right: Item): number {
+  const leftRaw = left.startedAt ?? left.updatedAt ?? "";
+  const rightRaw = right.startedAt ?? right.updatedAt ?? "";
+  const diff = compareTimestampsAsc(rightRaw, leftRaw);
+  if (diff !== 0) return diff;
+  return EN_COLLATOR.compare(left.id, right.id);
+}
+
 function sortDescendingTimestamp<
   Item extends { id: string; startedAt?: string; updatedAt?: string },
 >(items: Item[]): Item[] {
-  const times = new Map(items.map((item) => [
-    item,
-    Date.parse(item.startedAt ?? item.updatedAt ?? "") || 0,
-  ]));
-  return items.sort((left, right) => (
-    times.get(right)! - times.get(left)!
-    || left.id.localeCompare(right.id, "en")
-  ));
+  return items.sort(compareDescendingTimestamp);
+}
+
+function upsertSortedConversation<
+  Item extends { id: string; startedAt?: string; updatedAt?: string },
+>(items: readonly Item[], incoming: Item): Item[] {
+  const next: Item[] = [];
+  let inserted = false;
+  let sorted = true;
+  let previous: Item | null = null;
+  for (const entry of items) {
+    if (entry.id === incoming.id) continue;
+    if (previous !== null && compareDescendingTimestamp(previous, entry) > 0) {
+      sorted = false;
+    }
+    if (!inserted && compareDescendingTimestamp(incoming, entry) <= 0) {
+      next.push(incoming);
+      inserted = true;
+    }
+    next.push(entry);
+    previous = entry;
+  }
+  if (!inserted) next.push(incoming);
+  return sorted ? next : sortDescendingTimestamp(next);
 }
 
 /**
@@ -63,24 +90,22 @@ export function applyConversationShellEvent(
   const eventRuns = event.runs.map((run) => currentRuns.find((existing) => (
     existing.id === run.id && structurallyEqual(existing, run)
   )) ?? run);
-  if (
-    conversation === current
-    && currentRuns.length === eventRuns.length
-    && eventRuns.every((run) => currentRuns.includes(run))
-  ) return snapshot;
-  const conversations = sortDescendingTimestamp([
-    ...snapshot.conversations.filter(({ id }) => id !== conversationId),
-    conversation,
-  ]);
+  const runsUnchanged = currentRuns.length === eventRuns.length
+    && eventRuns.every((run) => currentRuns.includes(run));
+  if (conversation === current && runsUnchanged) return snapshot;
+  const conversations = conversation === current
+    ? snapshot.conversations
+    : upsertSortedConversation(snapshot.conversations, conversation);
+  const runs = runsUnchanged
+    ? snapshot.runs
+    : sortDescendingTimestamp([
+        ...snapshot.runs.filter((run) => run.conversationId !== conversationId),
+        ...eventRuns,
+      ]).slice(0, 200);
   return {
     ...snapshot,
-    conversations: conversations.every((item, index) => item === snapshot.conversations[index])
-      ? snapshot.conversations
-      : conversations,
-    runs: sortDescendingTimestamp([
-      ...snapshot.runs.filter((run) => run.conversationId !== conversationId),
-      ...eventRuns,
-    ]).slice(0, 200),
+    conversations,
+    runs,
   };
 }
 

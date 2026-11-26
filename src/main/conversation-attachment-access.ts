@@ -15,6 +15,7 @@ import type {
 } from "./attachment-import-file.js";
 import type { ValidatedAttachmentPreview } from "./attachment-registry.js";
 import { AttachmentRegistry } from "./attachment-registry.js";
+import type { AttachmentPreviewScopePolicy } from "./attachment-window-scope.js";
 
 export type ConversationAttachmentAccess =
   Promise<ConversationAttachmentStore>;
@@ -104,13 +105,23 @@ export async function resolveAttachmentPreviewResponse(
   id: string,
   extractDocument?: AttachmentDocumentPreviewExtractor,
   signal?: AbortSignal,
+  scopePolicy?: AttachmentPreviewScopePolicy,
 ): Promise<Response | null> {
-  const temporaryPreview = temporary
+  const allowTemporary = scopePolicy?.allowTemporary
+    ? scopePolicy.allowTemporary()
+    : true;
+  const temporaryPreview = temporary && allowTemporary
     ? await temporary.preview(id, signal).catch(() => null)
     : null;
-  const retainedPreview = temporaryPreview
-    ? null
-    : await retained?.then((store) => store.preview(id, signal)).catch(() => null);
+  let retainedPreview = null;
+  if (!temporaryPreview && retained) {
+    const allowRetained = scopePolicy?.allowRetained
+      ? await scopePolicy.allowRetained()
+      : true;
+    if (allowRetained) {
+      retainedPreview = await retained.then((store) => store.preview(id, signal)).catch(() => null);
+    }
+  }
   let preview: ValidatedAttachmentPreview | null = temporaryPreview;
   if (!preview && retainedPreview) {
     if (isExtractedDocumentAttachmentMimeType(retainedPreview.attachment.mimeType)) {
@@ -160,8 +171,14 @@ export async function openPdfAttachment(
   temporary: AttachmentRegistry,
   retained: ConversationAttachmentAccess | null,
   id: string,
+  scopePolicy?: AttachmentPreviewScopePolicy,
 ): Promise<void> {
-  const temporaryAttachment = await temporary.resolve(id).catch(() => null);
+  const allowTemporary = scopePolicy?.allowTemporary
+    ? scopePolicy.allowTemporary()
+    : true;
+  const temporaryAttachment = allowTemporary
+    ? await temporary.resolve(id).catch(() => null)
+    : null;
   if (temporaryAttachment) {
     if (temporaryAttachment.mimeType !== "application/pdf") {
       throw new Error("The PDF attachment is unavailable.");
@@ -171,6 +188,12 @@ export async function openPdfAttachment(
       throw new Error("The platform PDF app could not open the attachment.");
     }
     return;
+  }
+  const allowRetained = scopePolicy?.allowRetained
+    ? await scopePolicy.allowRetained()
+    : true;
+  if (!allowRetained) {
+    throw new Error("The PDF attachment is unavailable.");
   }
   const retainedPreview = await retained?.then((store) => store.preview(id));
   if (retainedPreview?.attachment.mimeType !== "application/pdf") {

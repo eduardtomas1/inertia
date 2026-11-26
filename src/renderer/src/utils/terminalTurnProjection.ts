@@ -32,7 +32,8 @@ export function appendStreamingText(
   chunk: string,
   limit: number,
 ): StreamingAgentState {
-  return [`${text}${chunk}`.slice(-limit), reasoning, "text"];
+  const combined = text.length === 0 ? chunk : `${text}${chunk}`;
+  return [combined.length > limit ? combined.slice(-limit) : combined, reasoning, "text"];
 }
 
 export function appendStreamingReasoning(
@@ -40,7 +41,22 @@ export function appendStreamingReasoning(
   chunk: string,
   limit: number,
 ): StreamingAgentState {
-  return [text, `${reasoning}${chunk}`.slice(-limit), "reasoning"];
+  const combined = reasoning.length === 0 ? chunk : `${reasoning}${chunk}`;
+  return [text, combined.length > limit ? combined.slice(-limit) : combined, "reasoning"];
+}
+
+export function sameAgentPlanSteps(
+  left: AgentPlan["steps"],
+  right: AgentPlan["steps"],
+): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]!;
+    const b = right[index]!;
+    if (a.step !== b.step || a.status !== b.status) return false;
+  }
+  return true;
 }
 
 export function sameAgentPlan(
@@ -52,7 +68,7 @@ export function sameAgentPlan(
     && left.runId === right.runId
     && left.turnId === right.turnId
     && left.explanation === right.explanation
-    && JSON.stringify(left.steps) === JSON.stringify(right.steps);
+    && sameAgentPlanSteps(left.steps, right.steps);
 }
 
 export function interactionKey(
@@ -98,11 +114,52 @@ export function compareCreatedAt(
       : 0;
 }
 
+function isStrictlyOrdered<T>(
+  items: readonly T[],
+  compare: (left: T, right: T) => number,
+): boolean {
+  for (let index = 1; index < items.length; index += 1) {
+    if (compare(items[index - 1]!, items[index]!) >= 0) return false;
+  }
+  return true;
+}
+
 export function mergeProjectionRecords<T extends { id: string }>(
   persisted: readonly T[],
   live: readonly T[],
   compare: (left: T, right: T) => number,
 ): T[] {
+  if (live.length === 0) {
+    if (isStrictlyOrdered(persisted, compare)) return persisted as T[];
+    const deduplicated = new Map(persisted.map((value) => [value.id, value]));
+    return [...deduplicated.values()].sort(compare);
+  }
+  if (live.length <= 16 && isStrictlyOrdered(persisted, compare)) {
+    const liveById = new Map<string, T>();
+    for (const value of live) liveById.set(value.id, value);
+    const result: T[] = [];
+    let ordered = true;
+    let previous: T | null = null;
+    for (let index = 0; index < persisted.length; index += 1) {
+      const entry = persisted[index]!;
+      const replacement = liveById.get(entry.id);
+      const next = replacement ?? entry;
+      if (replacement !== undefined) liveById.delete(entry.id);
+      result.push(next);
+      if (ordered && previous !== null && compare(previous, next) > 0) {
+        ordered = false;
+      }
+      previous = next;
+    }
+    for (const remaining of liveById.values()) {
+      result.push(remaining);
+      if (ordered && previous !== null && compare(previous, remaining) > 0) {
+        ordered = false;
+      }
+      previous = remaining;
+    }
+    return ordered ? result : result.sort(compare);
+  }
   const merged = new Map(persisted.map((value) => [value.id, value]));
   for (const value of live) merged.set(value.id, value);
   return [...merged.values()].sort(compare);

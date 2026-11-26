@@ -20,7 +20,7 @@ import {
 } from "../../../shared/model-routing";
 import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import { CheckpointError, deleteCheckpoints } from "../../checkpoints";
-import { mayBeInsideGitRepository } from "../../git/paths";
+import { mayBeInsideGitRepository, repositoryRoot } from "../../git/paths";
 import type { RuntimeStore } from "../../database";
 import {
   inspectUnacknowledgedWorktreeCreation,
@@ -634,6 +634,7 @@ export function createConversationCommandHandler(
           );
         }
         const goalReadHolds: Array<() => void> = [];
+        let exclusiveReservationHeld: string | null = null;
         const holdGoalReads = async (scope: NativeGoalReadScope): Promise<void> => {
           const release = await dependencies.nativeGoalReads?.quiesce(scope);
           if (release) goalReadHolds.push(release);
@@ -707,7 +708,9 @@ export function createConversationCommandHandler(
             throw error;
           }
           await holdGoalReads({ conversationId: conversation.id });
-          if (ownership?.ownsWorktree) {
+          const ownedWorktree = ownership?.ownsWorktree ? ownership : null;
+          let removeOwnedCheckout = false;
+          if (ownedWorktree) {
             const sharedCheckout = dependencies.store.projectConversations(conversation.projectId)
               .find((candidate) => (
                 candidate.id !== conversation.id
@@ -721,58 +724,86 @@ export function createConversationCommandHandler(
                 sharedCheckout.id,
               );
             } else {
-              await holdGoalReads({ checkoutPath: ownership.path });
-              const repositoryPath = dependencies.store.projectPath(
-                conversation.projectId,
-              );
-              const removal = await removeOwnedWorktree(
-                repositoryPath,
-                ownership.path,
-                ownership.branch,
-                ownership.branchHead,
-                ownership.worktreeId,
-                ownership.repositoryIdentity,
-                ownership.ownershipToken,
-                ownership.filesystemReceipt,
-              );
-              if (removal === "conflict") {
-                throw new RuntimeRequestError(
-                  "The isolated worktree was replaced or changed ownership, so it was preserved.",
-                );
-              }
-              if (removal === "retained") {
-                throw new RuntimeRequestError(
-                  "The isolated worktree is still registered. Inertia preserved it because Git cannot atomically verify ownership during removal. Remove this linked worktree manually with Git, then delete the thread again.",
-                );
-              }
+              removeOwnedCheckout = true;
             }
           }
-          if (dependencies.store.project(conversation.projectId).workspaceKind !== "scratch") {
-            const projectPath = dependencies.store.projectPath(conversation.projectId);
-            try {
-              if (await mayBeInsideGitRepository(projectPath)) {
-                await deleteCheckpoints(projectPath, conversation.id);
+          const isScratchProject = dependencies.store.project(conversation.projectId).workspaceKind === "scratch";
+          const projectPath = dependencies.store.projectPath(conversation.projectId);
+          const shouldDeleteCheckpoints = !isScratchProject && await mayBeInsideGitRepository(projectPath);
+          if (removeOwnedCheckout || shouldDeleteCheckpoints) {
+            const serializationRoot = await repositoryRoot(projectPath).catch(() => null);
+            const runGitMutations = async (): Promise<void> => {
+              if (removeOwnedCheckout && ownedWorktree) {
+                const exclusiveReservationId = `conversation-delete-exclusive:${command.requestId}`;
+                dependencies.providerTerminalResumes.release(conversation.id);
+                if (!dependencies.store.conversationWork.reserveExclusiveCheckout(
+                  exclusiveReservationId,
+                  conversation.projectId,
+                  ownedWorktree.path,
+                )) {
+                  throw new RuntimeRequestError(
+                    "Stop active work before deleting this thread.",
+                  );
+                }
+                exclusiveReservationHeld = exclusiveReservationId;
+                await holdGoalReads({ checkoutPath: ownedWorktree.path });
+                const removal = await removeOwnedWorktree(
+                  projectPath,
+                  ownedWorktree.path,
+                  ownedWorktree.branch,
+                  ownedWorktree.branchHead,
+                  ownedWorktree.worktreeId,
+                  ownedWorktree.repositoryIdentity,
+                  ownedWorktree.ownershipToken,
+                  ownedWorktree.filesystemReceipt,
+                );
+                if (removal === "conflict") {
+                  throw new RuntimeRequestError(
+                    "The isolated worktree was replaced or changed ownership, so it was preserved.",
+                  );
+                }
+                if (removal === "retained") {
+                  throw new RuntimeRequestError(
+                    "The isolated worktree is still registered. Inertia preserved it because Git cannot atomically verify ownership during removal. Remove this linked worktree manually with Git, then delete the thread again.",
+                  );
+                }
               }
-            } catch (error) {
-              if (
-                !(error instanceof CheckpointError
-                  && (error.message === "not-repository" || error.message === "not-found"))
-              ) {
-                console.warn("Conversation checkpoint ref cleanup failed.", {
-                  projectId: conversation.projectId,
-                  conversationId: conversation.id,
-                  reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
-                });
-                dependencies.reportIncident?.({
-                  code: "git.command-failed",
-                  outcome: "failed",
-                  context: {
-                    projectId: conversation.projectId,
-                    conversationId: conversation.id,
-                    commandType: "conversation.delete",
-                  },
-                });
+              if (shouldDeleteCheckpoints) {
+                try {
+                  await deleteCheckpoints(projectPath, conversation.id);
+                } catch (error) {
+                  if (
+                    !(error instanceof CheckpointError
+                      && (error.message === "not-repository" || error.message === "not-found"))
+                  ) {
+                    console.warn("Conversation checkpoint ref cleanup failed.", {
+                      projectId: conversation.projectId,
+                      conversationId: conversation.id,
+                      reason: error instanceof Error ? error.message.slice(0, 240) : String(error).slice(0, 240),
+                    });
+                    dependencies.reportIncident?.({
+                      code: "git.command-failed",
+                      outcome: "failed",
+                      context: {
+                        projectId: conversation.projectId,
+                        conversationId: conversation.id,
+                        commandType: "conversation.delete",
+                      },
+                    });
+                  }
+                }
               }
+            };
+            if (
+              serializationRoot
+              && typeof dependencies.workspaceRuns?.serializeRepositoryMutation === "function"
+            ) {
+              await dependencies.workspaceRuns.serializeRepositoryMutation(
+                serializationRoot,
+                runGitMutations,
+              );
+            } else {
+              await runGitMutations();
             }
           }
           const finalConversation = dependencies.store.conversation(
@@ -821,6 +852,9 @@ export function createConversationCommandHandler(
           return "mutation";
         } finally {
           for (const release of goalReadHolds) release();
+          if (exclusiveReservationHeld) {
+            dependencies.store.conversationWork.release(exclusiveReservationHeld);
+          }
           dependencies.providerTerminalResumes.release(conversation.id);
         }
       }

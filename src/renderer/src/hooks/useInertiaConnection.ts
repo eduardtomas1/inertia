@@ -12,7 +12,7 @@ import {
 } from "../utils/runtimeSequencing";
 import { serializeRuntimeClientCommand } from "@shared/runtime-websocket";
 import {
-  deliverDecodedServerEvent,
+  deliverDecodedServerEventSync,
   notifyConnectionListeners,
   RuntimeCommandError,
   settlePendingConnectionRequest,
@@ -173,8 +173,18 @@ export function useInertiaConnection(
 
         socket.addEventListener("message", (message) => {
           if (disposed || socketRef.current !== socket || !acceptingFrames) return;
-
-          void deliverDecodedServerEvent(
+          const onDeliveryError = (error: unknown): void => {
+            if (
+              disposed
+              || socketRef.current !== socket
+              || !acceptingFrames
+            ) return;
+            console.error(error);
+            setError("Inertia could not apply a response from its local service.");
+            condemnSocket();
+          };
+          try {
+            const delivered = deliverDecodedServerEventSync(
             message.data,
             (receivedEvent) => {
               if (
@@ -331,16 +341,11 @@ export function useInertiaConnection(
                 condemnSocket();
               }
             },
-          ).catch((error: unknown) => {
-            if (
-              disposed
-              || socketRef.current !== socket
-              || !acceptingFrames
-            ) return;
-            console.error(error);
-            setError("Inertia could not apply a response from its local service.");
-            condemnSocket();
-          });
+          );
+            if (typeof delivered !== "boolean") void delivered.catch(onDeliveryError);
+          } catch (error: unknown) {
+            onDeliveryError(error);
+          }
         });
 
         socket.addEventListener("close", () => {

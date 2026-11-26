@@ -5,6 +5,10 @@ import { SNAPSHOT_MAX_IMAGE_BYTES, type SnapshotDelivery } from "../shared/snaps
 import { reviewedSnapshotBackend, type SnapshotReview, type SnapshotReviewRequest, type SnapshotReviewArea } from "../shared/snapshot-review.js";
 import type { AttachmentImportDocument, RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
+import {
+  attachmentWindowScopeForRegistry,
+  type AttachmentWindowOwner,
+} from "./attachment-window-scope.js";
 
 const MAX_SOURCES = 48;
 const MAX_PREVIEW_BYTES = 4 * 1024 * 1024;
@@ -66,6 +70,7 @@ interface ReviewOwner {
   document: AttachmentImportDocument;
   window: BrowserWindow;
   conversationId: string;
+  windowOwner?: AttachmentWindowOwner;
 }
 interface PendingReview extends ReviewOwner {
   id: string;
@@ -147,6 +152,12 @@ export class SnapshotReviewService {
               name: "reviewed-screenshot.png", mimeType: "image/png", data: png,
             }], signal));
           if (!this.live(review)) { await this.options.imports.cancel(review.document, review.batchId); return; }
+          if (review.windowOwner && attachments.length > 0) {
+            attachmentWindowScopeForRegistry(this.options.registry()).recordAttachments(
+              attachments.map((attachment) => attachment.id),
+              review.windowOwner,
+            );
+          }
           review.window.webContents.send(DESKTOP_IPC.snapshotReady, {
             conversationId: review.conversationId, selection: { batchId: review.batchId, attachments },
           } satisfies SnapshotDelivery);

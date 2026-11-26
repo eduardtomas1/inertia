@@ -229,14 +229,23 @@ export class DetachedChatMain {
         const request = parseDetachedChatWindowOpenRequest(args[0]);
         if (!request) throw new Error("Invalid detached-chat window request");
         const { draft, terminalIds, ...windowRequest } = request;
-        if (!this.#manager.windowForConversation(request.conversationId)) {
-          this.#drafts.set(request.conversationId, draft);
-          this.#terminalHandoffs.set(request.conversationId, terminalIds);
-        }
+        let stagedHandoff = false;
         try {
-          return await this.#manager.open(windowRequest);
+          return await this.#manager.open(windowRequest, {
+            onBeforeCreate: () => {
+              if (this.#shuttingDown) {
+                throw new Error("Detached chats are shutting down.");
+              }
+              this.#drafts.set(request.conversationId, draft);
+              this.#terminalHandoffs.set(request.conversationId, terminalIds);
+              stagedHandoff = true;
+            },
+          });
         } catch (error) {
-          if (!this.#manager.windowForConversation(request.conversationId)) {
+          if (
+            stagedHandoff
+            && !this.#manager.windowForConversation(request.conversationId)
+          ) {
             this.#drafts.delete(request.conversationId);
             this.#terminalHandoffs.delete(request.conversationId);
           }
@@ -572,12 +581,12 @@ export class DetachedChatMain {
     };
     this.#scheduledClosures.set(sender, closure);
     this.#closingHandoffs.delete(context.conversationId);
-    this.#sendTerminalHandoff(closure);
+    if (!this.#shuttingDown) this.#sendTerminalHandoff(closure);
     window.once("closed", () => {
       const scheduled = this.#scheduledClosures.get(sender);
       this.#scheduledClosures.delete(sender);
       if (!scheduled) return;
-      if (scheduled.dock) {
+      if (scheduled.dock && !this.#shuttingDown) {
         void Promise.resolve()
           .then(() => this.#options.onDock(scheduled.conversationId))
           .catch(() => undefined);

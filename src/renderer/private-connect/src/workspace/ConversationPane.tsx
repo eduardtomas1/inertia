@@ -2,8 +2,13 @@ import { PRIVATE_CONNECT_LIMITS } from "../../../../shared/private-connect/proto
 import { QuestionForm } from "../components/QuestionForm";
 import type { Detail, Shell } from "../types";
 import { ActivitySummary } from "./ActivitySummary";
+import { QueueSection, type PrivateConnectQueueProjection } from "./QueueSection";
 
 const FOLLOW_LATEST_THRESHOLD_PX = 80;
+
+export type ConversationDetailWithQueue = Detail & {
+  queue?: PrivateConnectQueueProjection;
+};
 
 export function ConversationPane({
   shell,
@@ -17,9 +22,13 @@ export function ConversationPane({
   onSendPrompt,
   onAnswer,
   onStopRun,
+  onSendQueueItem,
+  onEditQueueItem,
+  onRemoveQueueItem,
+  onResumeQueue,
 }: {
   shell: Shell | null;
-  detail: Detail | null;
+  detail: ConversationDetailWithQueue | null;
   prompt: string;
   busy: boolean;
   offline: boolean;
@@ -29,8 +38,14 @@ export function ConversationPane({
   onSendPrompt: () => void;
   onAnswer: (answers: Record<string, string[]>) => void;
   onStopRun: () => void;
+  onSendQueueItem?: (id: string) => Promise<void> | void;
+  onEditQueueItem?: (id: string, expectedRevision: number, content: string) => Promise<boolean | void> | void;
+  onRemoveQueueItem?: (id: string) => Promise<void> | void;
+  onResumeQueue?: () => Promise<void> | void;
 }): React.JSX.Element {
   const scopes = shell?.capabilities.scopes ?? [];
+  const canPrompt = scopes.includes("private:prompt");
+  const isRunning = detail?.conversation.status === "running";
   return (
     <section className="conversation-pane">
       {detail ? (
@@ -63,6 +78,20 @@ export function ConversationPane({
             ))}
           </div>
           <ActivitySummary detail={detail} />
+          {detail.queue && detail.queue.items.length > 0 && (
+            <QueueSection
+              queue={detail.queue}
+              canMutate={canPrompt}
+              hasPendingQuestions={detail.questions.length > 0}
+              waitingForLocalAction={detail.waitingForLocalAction}
+              busy={busy}
+              offline={offline}
+              onSendItem={onSendQueueItem}
+              onEditItem={onEditQueueItem}
+              onRemoveItem={onRemoveQueueItem}
+              onResume={onResumeQueue}
+            />
+          )}
           {detail.questions.length > 0 && detail.inputRequestId && scopes.includes("private:input") && (
             <QuestionForm
               key={detail.inputRequestId}
@@ -74,7 +103,7 @@ export function ConversationPane({
           {detail.waitingForLocalAction && (
             <div className="banner" role="status">This conversation needs an action on the desktop. Secrets and approvals stay local.</div>
           )}
-          {scopes.includes("private:prompt") && (
+          {canPrompt && (
             <form
               className="composer"
               onSubmit={(event) => {
@@ -87,7 +116,7 @@ export function ConversationPane({
                 maxLength={PRIVATE_CONNECT_LIMITS.promptCharacters}
                 value={prompt}
                 onChange={(event) => onPromptChange(event.target.value)}
-                placeholder="Send a supervised prompt"
+                placeholder={isRunning ? "Queue a follow-up prompt" : "Send a supervised prompt"}
                 disabled={busy || offline}
               />
               <button type="submit" disabled={busy || offline || !prompt.trim()}>Send</button>

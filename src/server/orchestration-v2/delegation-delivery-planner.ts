@@ -8,22 +8,34 @@ import {
   type DelegationEvent,
   type DelegationMailbox,
 } from "../../shared/orchestration-delegation";
+import {
+  queueContentCharCount,
+  type QueueEvent,
+  type QueueItemProjection,
+} from "../../shared/orchestration-queue";
 import type { QueuedMessage } from "../../shared/queued-messages";
-import { delegatedDeliveryId, type QueuedMessageRepository } from "../persistence/queued-message-repository";
+import {
+  delegatedDeliveryId,
+  queuedRouteIdentity,
+  type QueuedMessageRepository,
+} from "../persistence/queued-message-repository";
 import type { DelegationReads } from "./delegation-reads";
 import { delegatedWakeText } from "./delegation-text";
 import { commandFingerprint } from "./json";
 
 export type DelegationPlanMode = "automatic" | "user";
 export type EffectiveMailboxPhase = "idle" | "queued" | "dispatched" | "removed";
+export type DelegationPlanEvent = DelegationEvent | QueueEvent;
 
 export interface DelegationPlanContext {
   database: Database.Database;
   reads: DelegationReads;
   queue: QueuedMessageRepository;
   conversation(id: string): Conversation;
+  revision(parentConversationId: string): number;
+  queueItem(itemId: string): QueueItemProjection | null;
   commit(parentConversationId: string, commandId: string, command: { type: string; [key: string]: string | number | string[] },
-    events: DelegationEvent[], compatibility?: () => void): boolean;
+    events: DelegationPlanEvent[], compatibility?: () => void): boolean;
 }
 
 export interface EffectiveMailbox {
@@ -41,18 +53,46 @@ export interface DelegationPlanResult {
 }
 
 export interface QueuedRemoval {
-  events: DelegationEvent[];
+  events: DelegationPlanEvent[];
   compatibility: () => void;
 }
 
 const IDLE = (parentConversationId: string): DelegationMailbox => ({ parentConversationId, generation: 0, deliveryId: null,
   taskIds: [], phase: "settled", wakeTurnId: null, nextGeneration: 1, updatedAt: new Date(0).toISOString() });
 
+function compareTimestamps(left: string, right: string): number {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs !== rightMs) return leftMs - rightMs;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Earliest undelivered completion timestamp across the mailbox's tasks (`4c8cb0445`). */
+export function earliestCompletionTimestamp(
+  context: Pick<DelegationPlanContext, "reads">,
+  taskIds: readonly string[],
+): string {
+  let earliest: string | null = null;
+  for (const taskId of taskIds) {
+    const finalizedAt = context.reads.task(taskId)?.result?.finalizedAt ?? null;
+    if (!finalizedAt) continue;
+    if (earliest === null || compareTimestamps(finalizedAt, earliest) < 0) earliest = finalizedAt;
+  }
+  return earliest ?? new Date().toISOString();
+}
+
 export function effectiveMailbox(context: DelegationPlanContext, parentConversationId: string): EffectiveMailbox {
   const mailbox = context.reads.mailbox(parentConversationId) ?? IDLE(parentConversationId);
   if (mailbox.phase === "dispatched") return { mailbox, phase: "dispatched", row: null };
   if (mailbox.phase !== "queued" || mailbox.deliveryId === null) return { mailbox, phase: "idle", row: null };
   const row = context.queue.get(parentConversationId, mailbox.deliveryId);
+  const queueItem = context.queueItem(mailbox.deliveryId);
+  if (queueItem && (queueItem.state === "delivered" || queueItem.state === "dispatching")) {
+    return { mailbox, phase: "dispatched", row };
+  }
+  if (queueItem && queueItem.state === "cancelled") {
+    return { mailbox, phase: "removed", row };
+  }
   if (row && (row.state === "waiting" || row.state === "blocked")) return { mailbox, phase: "queued", row };
   if (row && (row.state === "dispatching" || row.turnId !== null)) return { mailbox, phase: "dispatched", row };
   if (context.reads.wakeTurnId(parentConversationId, mailbox.generation)) return { mailbox, phase: "dispatched", row };
@@ -94,12 +134,22 @@ export function removeFromQueuedDelivery(context: DelegationPlanContext, parentC
   const remaining = mailbox.taskIds.filter((taskId) => !removed.includes(taskId));
   const deliveryId = mailbox.deliveryId!;
   if (!remaining.length) {
-    return { events: [mailboxEvent({ ...mailbox, phase: "withdrawn" })],
-      compatibility: () => { context.queue.withdrawDelegatedDelivery(parentConversationId, deliveryId); } };
+    const queueItem = context.queueItem(deliveryId);
+    const events: DelegationPlanEvent[] = [mailboxEvent({ ...mailbox, phase: "withdrawn" })];
+    if (queueItem && (queueItem.state === "waiting" || queueItem.state === "blocked")) {
+      events.push({ type: "queue.item-cancelled", payload: { itemId: deliveryId, reason: "withdrawn" } });
+    }
+    return {
+      events,
+      compatibility: () => { context.queue.withdrawDelegatedDelivery(parentConversationId, deliveryId); },
+    };
   }
+  const requestedAt = earliestCompletionTimestamp(context, remaining);
   return { events: [mailboxEvent({ ...mailbox, taskIds: remaining })], compatibility: () => {
     context.queue.updateDelegatedDelivery(parentConversationId, deliveryId, deliveryContent(context, remaining),
       { parentConversationId, generation: mailbox.generation, taskIds: remaining });
+    context.database.prepare("UPDATE queued_messages SET created_at = ? WHERE id = ? AND conversation_id = ?")
+      .run(requestedAt, deliveryId, parentConversationId);
   } };
 }
 
@@ -118,11 +168,17 @@ export function planDelegatedDelivery(context: DelegationPlanContext, parentConv
   if (archived === null || (archived && mode === "user")) return result;
   const effective = effectiveMailbox(context, parentConversationId);
   if (mode === "user" && effective.phase === "dispatched") return result;
-  const events: DelegationEvent[] = [];
+  const events: DelegationPlanEvent[] = [];
   const compat: (() => void)[] = [];
   if (effective.phase === "removed") {
     const claimed = effective.mailbox.taskIds.filter((taskId) => context.reads.task(taskId)?.delivery.state === "claimed");
     events.push(...deliveryEvent(claimed, "disposed", "user-dismiss"), mailboxEvent({ ...effective.mailbox, phase: "withdrawn" }));
+    if (effective.mailbox.deliveryId !== null) {
+      const staleItem = context.queueItem(effective.mailbox.deliveryId);
+      if (staleItem && (staleItem.state === "waiting" || staleItem.state === "blocked")) {
+        events.push({ type: "queue.item-cancelled", payload: { itemId: effective.mailbox.deliveryId, reason: "withdrawn" } });
+      }
+    }
     result.disposed.push(...claimed);
     effective.phase = "idle";
     effective.mailbox = { ...effective.mailbox, phase: "withdrawn" };
@@ -153,22 +209,48 @@ export function planDelegatedDelivery(context: DelegationPlanContext, parentConv
       const generation = queued ? mailbox.generation : mailbox.nextGeneration;
       const deliveryId = queued ? mailbox.deliveryId! : delegatedDeliveryId(parentConversationId, generation);
       const taskIds = [...(queued ? mailbox.taskIds : []), ...claimed.map(({ taskId }) => taskId)];
+      const content = deliveryContent(context, taskIds);
+      const requestedAt = earliestCompletionTimestamp(context, taskIds);
+      const attribution = { parentConversationId, generation, taskIds };
       result.claimed.push(...claimed.map(({ taskId }) => taskId));
       result.generation = generation;
       result.deliveryId = deliveryId;
       events.push(...deliveryEvent(result.claimed, "claimed", mode === "user" ? "user-send" : queued ? "merged" : "planned", generation),
         mailboxEvent({ generation, deliveryId, taskIds, phase: "queued", wakeTurnId: null,
           nextGeneration: Math.max(mailbox.nextGeneration, generation + 1) }));
+      if (!queued) {
+        const parent = context.conversation(parentConversationId);
+        events.push({
+          type: "queue.item-enqueued",
+          payload: {
+            itemId: deliveryId,
+            kind: "delegated-results",
+            userMessageId: null,
+            createdBy: "system",
+            creationSource: "server",
+            contentRef: { chars: queueContentCharCount(content), editRevision: 0 },
+            attachmentIds: [],
+            routeIdentity: queuedRouteIdentity(parent),
+            followsThreadSelection: true,
+            requestedAt,
+            attribution: { delegatedCompletion: attribution },
+            origin: "automatic",
+          },
+        });
+      }
       compat.push(() => {
-        const content = deliveryContent(context, taskIds);
-        const attribution = { parentConversationId, generation, taskIds };
         if (queued) {
           if (!context.queue.updateDelegatedDelivery(parentConversationId, deliveryId, content, attribution)) {
             throw new Error("The queued delegated result delivery changed while it was being merged.");
           }
+          context.database.prepare("UPDATE queued_messages SET created_at = ? WHERE id = ? AND conversation_id = ?")
+            .run(requestedAt, deliveryId, parentConversationId);
         } else {
           context.queue.insertDelegatedDelivery({ id: deliveryId, conversation: context.conversation(parentConversationId),
             content, attribution });
+          const projected = context.queueItem(deliveryId);
+          context.database.prepare("UPDATE queued_messages SET created_at = ?, queue_held = ? WHERE id = ? AND conversation_id = ?")
+            .run(requestedAt, projected?.queueHeld ? 1 : 0, deliveryId, parentConversationId);
         }
       });
     }
@@ -176,8 +258,11 @@ export function planDelegatedDelivery(context: DelegationPlanContext, parentConv
   events.push(...deliveryEvent(result.pending, "pending", "deferred"));
   if (!events.length) return result;
   const command = { type: "delegation.deliver", parentConversationId, mode, plan: commandFingerprint(events as never) };
+  const scopeKey = result.generation !== null
+    ? String(result.generation)
+    : `${mailbox.generation}:r${context.revision(parentConversationId)}`;
   context.commit(parentConversationId,
-    `delegation:deliver:${parentConversationId}:${result.generation ?? mailbox.generation}:${command.plan}`, command, events,
+    `delegation:deliver:${parentConversationId}:${scopeKey}:${command.plan}`, command, events,
     () => { for (const write of compat) write(); });
   return result;
 }

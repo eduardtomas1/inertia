@@ -8,7 +8,10 @@ import type { CommandTicket } from "../../orchestration-v2/command-authority";
 import { providerImageRequestLimitError } from "../../provider/provider-image-read";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TrustedAttachmentResolver } from "../attachments/trusted-attachment-resolver";
+import { setFollowUpQueueHint } from "../queue-follow-up-hints";
+import { executeSteerViaEffectRuntime } from "../run-control-effect-handlers";
 import type { FollowUpAdmissionLease, FollowUpSteerResult } from "../turns/turn-controller-types";
+import { bindSteerEffectId } from "../turns/turn-follow-up-coordinator";
 import { awaitMessageSendPreparation, messageSendPreparationDeadline } from "./message-send-preparation";
 import {
   classifiedMessageSendError,
@@ -130,25 +133,56 @@ async function steerActiveFollowUp(
       attachments = await awaitMessageSendPreparation(retention, preparationDeadlineAt, () => retentionAbort.abort());
       retentionCompleted = true;
     }
+    // Snapshot items already in the queue before the steer's first effect so N2 placement preserves order.
+    const priorActiveItemIds = dependencies.store.orchestration.queue.listActive(conversation.id).map(({ id }) => id);
     const steerRequest = await ticket.inLane(() => runControl.requestSteer(ticket, admission.runId, admission.turnId));
-    if (steerRequest.kind === "requested") steerEffectId = steerRequest.effectId;
+    if (steerRequest.kind === "requested") {
+      steerEffectId = steerRequest.effectId;
+      bindSteerEffectId(admission, steerRequest.effectId);
+    }
     const steered: FollowUpSteerResult = steerRequest.kind === "closed"
       ? { kind: "turn-ended" }
-      : await dependencies.turns.steer(
-        admission,
-        { content: command.payload.content, imagePaths: attachments.map(({ path }) => path) },
-        attachments,
-        () => {
-          providerAcknowledged = true;
-          enterStage("follow-up-publication");
-          if (!retentionId) return;
-          dependencies.conversationAttachments.acceptRetention(retentionId);
-          retentionAccepted = true;
-        },
-        AbortSignal.timeout(Math.max(0, preparationDeadlineAt - Date.now())),
+      : await executeSteerViaEffectRuntime(
+        dependencies.store,
+        steerEffectId,
+        () => dependencies.turns.steer(
+          admission,
+          { content: command.payload.content, imagePaths: attachments.map(({ path }) => path) },
+          attachments,
+          () => {
+            providerAcknowledged = true;
+            enterStage("follow-up-publication");
+            if (!retentionId) return;
+            dependencies.conversationAttachments.acceptRetention(retentionId);
+            retentionAccepted = true;
+          },
+          AbortSignal.timeout(Math.max(0, preparationDeadlineAt - Date.now())),
+        ),
       );
     if ((steered.kind === "turn-ended" || steered.kind === "refused" || steered.kind === "unconfirmed") && dependencies.undeliveredFollowUps) {
       let queued: MessageQueueResult | null = null;
+      const sourceRunCancelled = (() => {
+        try {
+          return runControl.target(admission.runId)?.interruptRequested === true
+            || dependencies.store.agentTurn(admission.turnId).status === "cancelled";
+        } catch {
+          return false;
+        }
+      })();
+      if (steered.kind === "refused") {
+        setFollowUpQueueHint(command.requestId, {
+          placement: { afterItemIds: priorActiveItemIds },
+          steerFollowUpOfRunId: admission.runId,
+          ...(sourceRunCancelled ? { queueHeld: true } : {}),
+        });
+      } else if (steered.kind === "turn-ended") {
+        // Turn-ended steer becomes an ordinary user client send without steerFollowUpOfRunId,
+        // going behind unheld items and releasing held items (R1).
+        setFollowUpQueueHint(command.requestId, {
+          placement: "end",
+          releaseHoldsR1: true,
+        });
+      }
       const adopt = () => {
         queued = dependencies.undeliveredFollowUps!.adopt(
           { ...undelivered, attachments },

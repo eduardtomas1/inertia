@@ -5,8 +5,9 @@ import {
   useRef,
   useState,
 } from "react";
+import type { IconNode } from "morphicons/react";
 import { TooltipButton } from "../TooltipButton";
-import type { ChatAttachment } from "@shared/contracts";
+import type { ChatAttachment, ProviderInfo } from "@shared/contracts";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
   arrowUpMorphIcon,
@@ -17,6 +18,10 @@ import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryActi
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import "./ComposerSendActions.css";
 import type { QueueCommandRunner, QueuedMessageEdit } from "./runtimeQueueClient";
+
+const playMorphIcon = [
+  ["path", { d: "M6 3 20 12 6 21 6 3Z" }],
+] as const satisfies IconNode;
 
 const ComposerQueuedActions = lazy(async () => ({
   default: (await import("./ComposerQueuedActions")).ComposerQueuedActions,
@@ -56,6 +61,16 @@ function primaryPresentation(
       icon: squareMorphIcon,
       iconState: "stop",
       label: "Stop and send",
+    };
+  }
+  if (state === "resume-ready" || state === "resume-pending") {
+    return {
+      action: "resume" as const,
+      busy: state === "resume-pending",
+      disabled: state === "resume-pending",
+      icon: state === "resume-pending" ? loaderCircleMorphIcon : playMorphIcon,
+      iconState: state === "resume-pending" ? "sending" : "resume",
+      label: state === "resume-pending" ? "Resuming queue" : "Resume queue",
     };
   }
   if (state === "submitting") {
@@ -103,6 +118,15 @@ export function ComposerSendActions({
   primaryAction,
   canSendQueuedNow,
   running,
+  canSteer,
+  canInterrupt,
+  providerSwitchWaitsForTurn,
+  hasPendingQuestionOrApproval,
+  resuming,
+  onResume,
+  providers,
+  queueHost: explicitQueueHost,
+  editBannerHost,
   latestTurnId,
   latestTurnStatus,
   latestTurnAuthoritative = true,
@@ -121,6 +145,15 @@ export function ComposerSendActions({
   primaryAction: ComposerPrimaryActionState;
   canSendQueuedNow: boolean;
   running: boolean;
+  canSteer?: boolean;
+  canInterrupt?: boolean;
+  providerSwitchWaitsForTurn?: boolean;
+  hasPendingQuestionOrApproval?: boolean;
+  resuming?: boolean;
+  onResume?: () => Promise<unknown>;
+  providers?: readonly ProviderInfo[];
+  queueHost?: HTMLElement | null;
+  editBannerHost?: HTMLElement | null;
   latestTurnId: string | null;
   latestTurnStatus: AgentTurnStatus | null;
   latestTurnAuthoritative?: boolean;
@@ -138,11 +171,15 @@ export function ComposerSendActions({
   onStop: () => Promise<void>;
   onFocusInput?: () => void;
 }): React.JSX.Element {
-  const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
+  const [fallbackQueueHost, setFallbackQueueHost] = useState<HTMLElement | null>(null);
   const primaryRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
-    setQueueHost(primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
-  }, [conversationId]);
+    if (explicitQueueHost !== undefined) return;
+    const shell = primaryRef.current?.closest<HTMLElement>(".composer-shell");
+    const slot = shell?.querySelector<HTMLElement>(":scope > .composer-queue-slot") ?? null;
+    setFallbackQueueHost(slot ?? primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
+  }, [conversationId, explicitQueueHost]);
+  const queueHost = explicitQueueHost !== undefined ? explicitQueueHost : fallbackQueueHost;
   const focusedElement = document.activeElement;
   const focusedGroup = focusedElement?.closest(".composer-actions");
   const focusedAction = focusedElement?.classList.contains("send-button")
@@ -156,6 +193,7 @@ export function ComposerSendActions({
   const presentation = primaryPresentation(primaryAction, compactOnReturn, compacting, awaitingInput);
   const showsToggle = compactOnReturn !== null && compactOnReturn.toggleVisible && primaryAction === "send-ready";
   const resting = "resting" in presentation && presentation.resting;
+  const isStopButton = presentation.action === "stop" || presentation.action === "stop-and-send";
   return (
     <>
       <Suspense fallback={null}>
@@ -163,10 +201,18 @@ export function ComposerSendActions({
           conversationId={conversationId}
           canSendQueuedNow={canSendQueuedNow}
           running={running}
+          canSteer={canSteer}
+          canInterrupt={canInterrupt}
+          providerSwitchWaitsForTurn={providerSwitchWaitsForTurn}
+          hasPendingQuestionOrApproval={hasPendingQuestionOrApproval}
+          resuming={resuming}
+          onResume={onResume}
+          providers={providers}
           latestTurnId={latestTurnId}
           latestTurnStatus={latestTurnStatus}
           latestTurnAuthoritative={latestTurnAuthoritative}
           queueHost={queueHost}
+          editBannerHost={editBannerHost}
           onSendQueued={onSendQueued}
           onQueueCommand={onQueueCommand}
           queueEdit={queueEdit}
@@ -180,7 +226,7 @@ export function ComposerSendActions({
         tooltip={"tooltip" in presentation && presentation.tooltip ? presentation.tooltip : presentation.label}
         aria-label={presentation.label}
         className={`icon-button send-button${
-          presentation.action !== "send" ? " stop-button" : ""
+          isStopButton ? " stop-button" : ""
         }${presentation.iconState === "sending" ? " send-button-loading" : ""}${
           "visibleLabel" in presentation && presentation.visibleLabel ? " has-label" : ""
         }`}
@@ -190,6 +236,7 @@ export function ComposerSendActions({
         aria-disabled={resting || undefined}
         onClick={() => {
           if (presentation.action === "stop") void onStop();
+          else if (presentation.action === "resume") void onResume?.();
           else if (resting) onFocusInput?.();
           else void onSubmit();
         }}

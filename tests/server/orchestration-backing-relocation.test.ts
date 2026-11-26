@@ -7,12 +7,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { projectBackingEvent, relocatedBackingId } from "../../src/server/orchestration-v2/backing-projector";
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { commandFingerprint } from "../../src/server/orchestration-v2/json";
 import { OrchestrationConflict, type OrchestrationEvent, type Projection } from "../../src/server/orchestration-v2/types";
 import { sessionCwdMobility } from "../../src/server/provider/session-cwd-mobility";
 import { CheckoutMoveBackgroundWorkError } from "../../src/server/runtime/turns/turn-context-handoff";
 import type { ProviderBackgroundWorkSession } from "../../src/server/provider/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import type { ProviderBacking } from "../../src/shared/orchestration-backings";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
   turnControllerTestIdentity, type TurnControllerTestRuntime,
@@ -78,6 +80,12 @@ const lookup = (runtime: TurnControllerTestRuntime, providerId: "codex" | "claud
     .filter((turn) => turn.providerId === providerId).at(-1)!.continuationIdentity,
 });
 
+function covers(runtime: TurnControllerTestRuntime, backing: ProviderBacking | null | undefined, itemId: string, runId: string): boolean {
+  if (!backing) return false;
+  const run = runtime.store.orchestration.events.projection("run", runId)?.value as { ordinal?: number } | undefined;
+  return isItemCovered(backing, itemId, typeof run?.ordinal === "number" ? run.ordinal : null);
+}
+
 describe("session cwd mobility", () => {
   it("resumes across checkouts only where a harness is proven to, and starts fresh everywhere else", () => {
     for (const harnessId of ["codex-app-server", "claude-agent-sdk", "claude-cli", "pi-rpc", "cursor-sdk"]) {
@@ -103,7 +111,7 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
       expect(runtime.provider.input).toMatchObject({ sessionId: "codex-native", cwd: moved });
       const b1 = runtime.store.orchestration.backings.find(lookup(runtime, "codex", moved))!;
       expect(b1).toMatchObject({ id: relocatedBackingId(a1, moved), nativeSessionId: "codex-native", status: "ready" });
-      expect(b1.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, inB.message.id]));
+      for (const entry of [first, inB]) expect(covers(runtime, b1, entry.message.id, entry.turn.runId)).toBe(true);
 
       runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
       const claude = await completeTurn(runtime, "Claude request in B", "claude-native", "Claude answer in B");
@@ -139,7 +147,7 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
       await flushTurnControllerTestPromises();
       const a2 = runtime.store.orchestration.backings.get(a2Id)!;
       expect(a2).toMatchObject({ workspaceKey: original, nativeSessionId: "codex-native", status: "ready", coverageComplete: true });
-      expect(a2.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, inB.message.id, claude.message.id, back.message.id]));
+      for (const entry of [first, inB, claude, back]) expect(covers(runtime, a2, entry.message.id, entry.turn.runId)).toBe(true);
       expect(runtime.store.orchestration.backings.find(lookup(runtime, "codex", original))?.id).toBe(a2Id);
       expect(runtime.store.orchestration.backings.current(lookup(runtime, "codex", original))?.id).toBe(a2Id);
 
@@ -363,7 +371,8 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
       await flushTurnControllerTestPromises();
       expect(runtime.store.orchestration.backings.handoff(refused.turn.runId)?.state).toBe("abandoned");
       const kept = runtime.store.orchestration.backings.get(relocatedId)!;
-      expect(kept).toMatchObject({ status: "ready", workspaceKey: moved, coveredItemIds: a1.coveredItemIds });
+      expect(kept).toMatchObject({ status: "ready", workspaceKey: moved, coveredItemIds: a1.coveredItemIds,
+        coveredThroughOrdinal: a1.coveredThroughOrdinal });
       expect(runtime.store.orchestration.backings.get(a1.id)?.status).toBe("retired");
 
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Codex in B again" });
@@ -410,7 +419,7 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
       const b1 = runtime.store.orchestration.backings.find(lookup(runtime, "codex", moved))!;
       expect(events(runtime).filter(({ type }) => type === "provider.backing-invalidated").map(({ payload }) => payload))
         .toEqual([{ backingId: a1.id, reason: "workspace-changed" }]);
-      expect(b1.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, carriedTurn.message.id]));
+      for (const entry of [first, carriedTurn]) expect(covers(runtime, b1, entry.message.id, entry.turn.runId)).toBe(true);
       const legacy = projectionRows(runtime.store);
 
       moveTo(original);
@@ -418,7 +427,8 @@ describe("a backing follows its native session across checkouts (T3 restart_and_
       expect(back.turn.providerSessionBefore).toBe("codex-native");
       expect(runtime.store.orchestration.backings.handoff(back.turn.runId)).toBeNull();
       const a2 = runtime.store.orchestration.backings.find(lookup(runtime, "codex", original))!;
-      expect(a2).toMatchObject({ id: relocatedBackingId(b1, original), status: "ready", coveredItemIds: b1.coveredItemIds });
+      expect(a2).toMatchObject({ id: relocatedBackingId(b1, original), status: "ready", coveredItemIds: b1.coveredItemIds,
+        coveredThroughOrdinal: b1.coveredThroughOrdinal });
       expect(runtime.store.orchestration.backings.get(a1.id)?.status).toBe("retired");
       // Rows written before the upgrade keep their values; only the moved-from row changes, to retired.
       const now = new Map(projectionRows(runtime.store).map((row) => [`${(row as { kind: string }).kind}:${(row as { id: string }).id}`, row]));
@@ -496,7 +506,7 @@ describe("a backing follows a session its harness copied into the moved checkout
       expect(forkedEvent.payload).toEqual({ runId: inB.turn.runId, attemptId: handoffBefore.attemptId, backingId: relocatedId,
         fromNativeSessionId: "native-a", nativeSessionId: "native-b", handoffId: handoffBefore.id });
       expect(runtime.store.orchestration.backings.get(relocatedId)).toMatchObject({ nativeSessionId: "native-b", workspaceKey: moved });
-      expect(runtime.store.orchestration.backings.get(relocatedId)!.coveredItemIds).toContain(first.message.id);
+      expect(covers(runtime, runtime.store.orchestration.backings.get(relocatedId), first.message.id, first.turn.runId)).toBe(true);
       expect(runtime.store.orchestration.events.projection("attempt", handoffBefore.attemptId)?.value)
         .toMatchObject({ nativeSessionId: "native-b" });
       expect(runtime.store.orchestration.backings.handoff(inB.turn.runId))
@@ -506,7 +516,7 @@ describe("a backing follows a session its harness copied into the moved checkout
       await flushTurnControllerTestPromises();
       const b1 = runtime.store.orchestration.backings.get(relocatedId)!;
       expect(b1).toMatchObject({ nativeSessionId: "native-b", status: "ready", coverageComplete: true });
-      expect(b1.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, claude.message.id, inB.message.id]));
+      for (const entry of [first, claude, inB]) expect(covers(runtime, b1, entry.message.id, entry.turn.runId)).toBe(true);
       expect(runtime.store.orchestration.backings.handoff(inB.turn.runId)).toMatchObject({ state: "delivered", nativeSessionId: "native-b" });
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("native-b");
       // The original session stays retired everywhere; nothing was invalidated.
@@ -557,7 +567,7 @@ describe("a backing follows a session its harness copied into the moved checkout
       await flushTurnControllerTestPromises();
       const fresh = runtime.store.orchestration.backings.find(lookup(runtime, "codex", moved))!;
       expect(fresh).toMatchObject({ nativeSessionId: "fresh-b", status: "ready" });
-      expect(fresh.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, claude.message.id, inB.message.id]));
+      for (const entry of [first, claude, inB]) expect(covers(runtime, fresh, entry.message.id, entry.turn.runId)).toBe(true);
       expect(runtime.controller.queue({ conversationId: runtime.conversationId, content: "Next in B" }).turn.providerSessionBefore)
         .toBe("fresh-b");
     } finally { await runtime.controller.dispose(); closeQuietly(runtime.store); }
@@ -572,7 +582,7 @@ describe("a backing follows a session its harness copied into the moved checkout
       await flushTurnControllerTestPromises();
       expect(runtime.store.orchestration.backings.handoff(inB.turn.runId)?.state).toBe("abandoned");
       expect(runtime.store.orchestration.backings.get(relocatedId)).toMatchObject({ nativeSessionId: "native-b", status: "ready",
-        workspaceKey: moved, coveredItemIds: a1.coveredItemIds });
+        workspaceKey: moved, coveredItemIds: a1.coveredItemIds, coveredThroughOrdinal: a1.coveredThroughOrdinal });
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Again in B" });
       expect(retry.turn.providerSessionBefore).toBe("native-b");
       expect(runtime.store.orchestration.backings.handoff(retry.turn.runId)).toMatchObject({ targetBackingId: relocatedId,

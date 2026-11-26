@@ -93,6 +93,7 @@ import { TurnSecretRequests } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession, reportsReplacedSession, REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure } from "./turn-fresh-session-fallback";
 import { turnHistoryInjection } from "./turn-history-injection";
+import { persistActiveTurnConversationSession, recordActiveTurnSteerRead } from "./turn-session-persistence";
 
 export type {
   QueuedTurn,
@@ -297,9 +298,10 @@ export class TurnController {
   }
 
   isActive(conversationId: string): boolean {
-    return this.activeByConversation.has(conversationId)
-      || this.providers.isRunning(conversationId)
-      || hasLiveProviderRun(this.store, conversationId);
+    return this.activeByConversation.has(conversationId) || this.providers.isRunning(conversationId) || hasLiveProviderRun(this.store, conversationId);
+  }
+  isPreparing(conversationId: string): boolean {
+    return this.activeByConversation.get(conversationId)?.runState.awaitingProviderTurn() === true;
   }
 
   async withNativeGoalMutation<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
@@ -763,8 +765,8 @@ export class TurnController {
       kind: "agent",
       projectId: active.conversation.projectId,
       conversationId: active.conversation.id,
-      label: active.conversation.model
-        ? `${PROVIDER_INFO[active.turn.providerId].name} · ${active.conversation.model}`
+      label: active.turn.model
+        ? `${PROVIDER_INFO[active.turn.providerId].name} · ${active.turn.model}`
         : PROVIDER_INFO[active.turn.providerId].name,
       detail: active.conversation.title,
       status: "running",
@@ -860,6 +862,7 @@ export class TurnController {
           }
         },
         onEvent: (event) => { this.handleProviderEvent(event, startedAttemptId); },
+        onSteerRead: (steerId, readAt) => { recordActiveTurnSteerRead(this.store, active, startedAttemptId, steerId, readAt); },
         freshSessionFallback: (prior) => applyFreshSessionFallback(this.store, this.hooks, active, this.now(), prior,
           (attemptId) => (event) => { this.handleProviderEvent(event, attemptId); }),
       });
@@ -1136,10 +1139,7 @@ export class TurnController {
       releaseUnavailableProviderSession(this.store, active, result);
     } else if (!outcomeAlreadyRequested && result.sessionId) {
       updateActiveTurnProviderSession(active, result.sessionId);
-      this.store.updateConversation(active.conversation.id, {
-        providerSessionId: result.sessionId,
-        continuationIdentity: active.turn.continuationIdentity,
-      });
+      persistActiveTurnConversationSession(this.store, active, result.sessionId);
     }
     if (!outcomeAlreadyRequested) this.streams.reconcileAssistant(active, result);
     if (!outcomeAlreadyRequested) recordUnreadFollowUps(this.store, active, result);

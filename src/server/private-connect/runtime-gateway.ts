@@ -34,6 +34,21 @@ import {
 } from "../../shared/private-connect/sanitizer";
 import { WATCHER_NOTE_HISTORY_LABELS, type WatcherPrivateConnect } from "../../shared/watcher";
 import { PROVIDER_INFO } from "../provider/catalog";
+import { OrchestrationConflict } from "../orchestration-v2/types";
+import {
+  enqueueBusyPrivateConnectPrompt,
+  normalizePrivateConnectText,
+} from "./prompt-admission";
+import {
+  handlePrivateConnectQueueCommand,
+  isPrivateConnectRuntimeQueueCommand,
+  isPrivateConnectRuntimeQueueRequest,
+  projectPrivateConnectQueue,
+  replayPrivateConnectPromptFromStore,
+  trimPrivateConnectQueueToBudget,
+  type PrivateConnectQueueCommandHandlers,
+  type PrivateConnectQueueStore,
+} from "./queue-gateway";
 import { PrivateConnectTranscriptCache } from "./transcript-cache";
 
 interface PrivateConnectGatewayDependencies {
@@ -42,15 +57,21 @@ interface PrivateConnectGatewayDependencies {
   detail(conversationId: string): ConversationDetail | null;
   isConversationActive(conversationId: string): boolean;
   preparePrompt(conversation: Conversation): Promise<void>;
-  queuePrompt(conversationId: string, content: string, deviceId: string): {
-    turnId: string;
-  };
+  queuePrompt(
+    conversationId: string,
+    content: string,
+    deviceId: string,
+    deliveryId?: string,
+  ): { turnId: string | null; queuedMessageId?: string };
   respondToInput?(conversationId: string, inputRequestId: string, answers: Record<string, string[]>): boolean;
   stopRun?(conversationId: string, runId: string): { stopped: boolean; alreadyStopped: boolean };
   inputs?(): Iterable<AgentInputRequest>;
   privateConnectPromptSafety?(conversation: Conversation): PrivateConnectPromptSafety;
   watcherParent?(conversationId: string): PrivateConnectWatcherParent | null;
   transcriptCache?: PrivateConnectTranscriptCache;
+  store?: PrivateConnectQueueStore;
+  queueHandlers?: PrivateConnectQueueCommandHandlers;
+  onQueueMutated?(conversationId: string): void;
   now?(): Date;
 }
 
@@ -169,11 +190,49 @@ export class PrivateConnectRuntimeGateway {
     if (request.type === "run.stop") {
       return this.stopRun(subject, request);
     }
+    if (isPrivateConnectRuntimeQueueRequest(request)) {
+      return await this.handleQueueCommand(subject, request);
+    }
     return failedResponse(
       request.requestId,
       "invalid",
       "Private Connect prompts require an authorized prepare and commit.",
     );
+  }
+
+  private async handleQueueCommand(
+    subject: PrivateConnectRuntimeAuthorization,
+    request: Extract<
+      PrivateConnectRuntimeRequest,
+      { type: "queue.send" | "queue.edit" | "queue.remove" | "queue.resume" }
+    >,
+  ): Promise<PrivateConnectRuntimeResponse> {
+    const conversation = this.dependencies.conversation(request.conversationId);
+    if (!conversation || !this.authorized(subject, conversation)) {
+      return unavailableConversationResponse(request.requestId);
+    }
+    const safetyRejection = this.promptSafetyRejection(request.requestId, conversation);
+    if (safetyRejection) return safetyRejection;
+    const store = this.dependencies.store;
+    if (!store) {
+      return failedResponse(
+        request.requestId,
+        "unavailable",
+        "Queue controls are not available while the local runtime is restarting.",
+      );
+    }
+    try {
+      return await handlePrivateConnectQueueCommand(
+        store,
+        subject,
+        conversation,
+        request,
+        this.dependencies.queueHandlers,
+        this.dependencies.onQueueMutated,
+      );
+    } catch (error) {
+      return failedResponse(request.requestId, "unavailable", publicPrivateConnectError(error));
+    }
   }
 
   private respondToInput(
@@ -248,6 +307,17 @@ export class PrivateConnectRuntimeGateway {
     ) ?? null;
     const answerableInput = remotelyAnswerableInput(pendingInput);
     const conditional = request.ifNoneMatch !== undefined;
+    const waitingForLocalAction = projectedConversation.pendingLocalApproval
+      || (pendingInput !== null && answerableInput === null)
+      || shell.conversations.some(
+        ({ id, pendingInput: waiting }) => id === request.conversationId && waiting,
+      );
+    const queueProjection = this.dependencies.store
+      ? projectPrivateConnectQueue(this.dependencies.store, detail.conversation, {
+          isActive: this.dependencies.isConversationActive(request.conversationId),
+          waitingForLocalAction,
+        })
+      : undefined;
     const response = boundPrivateConnectProjection({
       type: "response",
       requestId: request.requestId,
@@ -307,12 +377,8 @@ export class PrivateConnectRuntimeGateway {
           plan: safePrivateConnectPlan(detail.plans.at(-1)),
           questions: safePrivateConnectQuestions(answerableInput),
           inputRequestId: answerableInput?.id ?? null,
-          waitingForLocalAction:
-            projectedConversation.pendingLocalApproval
-            || (pendingInput !== null && answerableInput === null)
-            || shell.conversations.some(
-              ({ id, pendingInput: waiting }) => id === request.conversationId && waiting,
-            ),
+          waitingForLocalAction,
+          ...(queueProjection ? { queue: queueProjection } : {}),
         },
       },
     });
@@ -345,16 +411,26 @@ export class PrivateConnectRuntimeGateway {
     if (!conversation || !this.authorized(subject, conversation)) {
       return unavailableConversationResponse(request.requestId);
     }
+    const normalizedContent = normalizePrivateConnectText(request.content);
     const receipt = this.receipts.get(request.deliveryId);
     if (receipt) {
       return receipt.conversationId === request.conversationId
-        && receipt.content === request.content
+        && receipt.content === normalizedContent
         ? { ...receipt.response, requestId: request.requestId }
         : failedResponse(
             request.requestId,
             "invalid",
             "That delivery identifier was already used.",
           );
+    }
+    if (this.dependencies.store) {
+      const durableReplay = replayPrivateConnectPromptFromStore(
+        this.dependencies.store,
+        subject,
+        request,
+        normalizedContent,
+      );
+      if (durableReplay) return durableReplay;
     }
     const initialRejection = this.promptBoundaryRejection(
       subject,
@@ -488,12 +564,34 @@ export class PrivateConnectRuntimeGateway {
     if (!conversation) return unavailableConversationResponse(request.requestId);
     const rejection = this.promptBoundaryRejection(subject, request, conversation);
     if (rejection) return rejection;
-    try {
-      const queued = this.dependencies.queuePrompt(
-        request.conversationId,
-        request.content,
-        subject.deviceId,
+    const normalizedContent = normalizePrivateConnectText(request.content);
+    if (this.dependencies.store) {
+      const durableReplay = replayPrivateConnectPromptFromStore(
+        this.dependencies.store,
+        subject,
+        request,
+        normalizedContent,
       );
+      if (durableReplay) return durableReplay;
+    }
+    try {
+      const active = this.dependencies.isConversationActive(request.conversationId);
+      const queued = active && this.dependencies.store
+        ? enqueueBusyPrivateConnectPrompt(
+            this.dependencies.store,
+            request.conversationId,
+            normalizedContent,
+            subject.deviceId,
+            request.deliveryId,
+          )
+        : this.dependencies.queuePrompt(
+            request.conversationId,
+            normalizedContent,
+            subject.deviceId,
+          );
+      if (active && this.dependencies.store) {
+        this.dependencies.onQueueMutated?.(request.conversationId);
+      }
       const response: PrivateConnectRuntimeResponse = {
         type: "response",
         requestId: request.requestId,
@@ -502,11 +600,18 @@ export class PrivateConnectRuntimeGateway {
           kind: "prompt.accepted",
           deliveryId: request.deliveryId,
           turnId: queued.turnId,
+          ...(queued.queuedMessageId ? { queuedMessageId: queued.queuedMessageId } : {}),
         },
       };
-      this.rememberReceipt(request, response);
+      this.rememberReceipt({ ...request, content: normalizedContent }, response);
       return response;
     } catch (error) {
+      if (error instanceof OrchestrationConflict) {
+        if (error.code === "command-conflict") {
+          return failedResponse(request.requestId, "invalid", "That delivery identifier was already used.");
+        }
+        return failedResponse(request.requestId, "busy", "This conversation's queue is full.");
+      }
       return failedResponse(
         request.requestId,
         "unavailable",
@@ -533,9 +638,37 @@ export class PrivateConnectRuntimeGateway {
         "This device cannot view Private Connect.",
       );
     }
-    if ((request.type === "input.respond" || request.type === "run.stop")
-      && !subject.scopes.includes("prompt")) {
+    if (
+      (
+        request.type === "input.respond"
+        || request.type === "run.stop"
+        || isPrivateConnectRuntimeQueueCommand(request.type)
+      )
+      && !subject.scopes.includes("prompt")
+    ) {
       return failedResponse(request.requestId, "forbidden", "This device cannot change a running conversation.");
+    }
+    return null;
+  }
+
+  private promptSafetyRejection(
+    requestId: string,
+    conversation: Conversation,
+  ): PrivateConnectRuntimeResponse | null {
+    if (conversation.accessMode !== "supervised") {
+      return failedResponse(
+        requestId,
+        "forbidden",
+        "PrivateConnect prompting requires Supervised access on the desktop.",
+      );
+    }
+    const safety = this.promptSafety(conversation);
+    if (!privateConnectPromptSafetyIsUsable(safety)) {
+      return failedResponse(
+        requestId,
+        "forbidden",
+        safety.explanation,
+      );
     }
     return null;
   }
@@ -548,29 +681,7 @@ export class PrivateConnectRuntimeGateway {
     if (!this.authorized(subject, conversation)) {
       return unavailableConversationResponse(request.requestId);
     }
-    if (conversation.accessMode !== "supervised") {
-      return failedResponse(
-        request.requestId,
-        "forbidden",
-        "PrivateConnect prompting requires Supervised access on the desktop.",
-      );
-    }
-    const safety = this.promptSafety(conversation);
-    if (!privateConnectPromptSafetyIsUsable(safety)) {
-      return failedResponse(
-        request.requestId,
-        "forbidden",
-        safety.explanation,
-      );
-    }
-    if (this.dependencies.isConversationActive(request.conversationId)) {
-      return failedResponse(
-        request.requestId,
-        "busy",
-        "Wait for the active run to finish on the desktop.",
-      );
-    }
-    return null;
+    return this.promptSafetyRejection(request.requestId, conversation);
   }
 
   private rememberReceipt(
@@ -890,6 +1001,11 @@ export function boundPrivateConnectProjection(
     }
     newestMessage.content = content.slice(0, low);
   }
+  trimPrivateConnectQueueToBudget(
+    response,
+    privateConnectBytes,
+    PRIVATE_CONNECT_RUNTIME_LIMITS.plaintextBytes,
+  );
   return response;
 }
 

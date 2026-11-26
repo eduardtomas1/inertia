@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_BACKING_COVERAGE_ITEMS } from "../../src/shared/orchestration-backings";
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { rollbackConversationHistory } from "../../src/server/runtime/history-rollback-service";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest } from "../../src/server/provider/native-conversation-operations";
@@ -73,7 +74,7 @@ describe("rollback across complete backing history", () => {
 });
 
 describe("backing coverage cap", () => {
-  it("stops reusing a backing past the coverage cap and restores the full history on a fresh session", async () => {
+  it("keeps a contiguous backing reusable past 2,048 items via the coveredThroughOrdinal watermark (N18)", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {
       const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Original Codex request" });
@@ -90,6 +91,48 @@ describe("backing coverage cap", () => {
       const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
         identity: first.turn.continuationIdentity };
       const backing = runtime.store.orchestration.backings.find(lookup)!;
+      expect(backing).toMatchObject({
+        nativeSessionId: "codex-native", status: "ready", coverageComplete: true,
+        coveredThroughOrdinal: 1, coveredItemIds: [],
+      });
+      expect(isItemCovered(backing, first.message.id, 1)).toBe(true);
+
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue" });
+      expect(next.turn.providerSessionBefore).toBe("codex-native");
+      expect(runtime.store.orchestration.backings.handoff(next.turn.runId)).toBeNull();
+      runtime.controller.start(next.turn.id);
+      expect(runtime.provider.input?.sessionId).toBe("codex-native");
+      runtime.provider.resolve({ text: "Continued answer", sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+    } finally { runtime.store.close(); }
+  });
+
+  it("stops reusing a backing past the non-contiguous exception-array cap and restores the full history on a fresh session", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Original Codex request" });
+      runtime.controller.start(first.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-old" });
+      runtime.provider.resolve({ text: "Original Codex answer", sessionId: "codex-old" });
+      await flushTurnControllerTestPromises();
+      const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
+        identity: first.turn.continuationIdentity };
+      // Retire turn 1's backing and start a goal turn without restoring turn 1 so ordinal 1 remains a gap before ordinal 2.
+      runtime.store.orchestration.backings.invalidate(runtime.store.orchestration.backings.find(lookup)!, "workspace-changed");
+
+      const goal = runtime.controller.queue({ conversationId: runtime.conversationId, content: "/goal Ship the exporter",
+        goalStart: { objective: "Ship the exporter" } });
+      runtime.controller.start(goal.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "codex-native" });
+      const database = (runtime.store as unknown as { database: Database.Database }).database;
+      database.transaction(() => {
+        for (let index = 0; index < MAX_BACKING_COVERAGE_ITEMS; index += 1) {
+          runtime.store.createMessage(runtime.conversationId, `Progress note ${index}`, "assistant", [], goal.turn.id);
+        }
+      })();
+      runtime.provider.resolve({ text: "Goal progress answer", sessionId: "codex-native" });
+      await flushTurnControllerTestPromises();
+      const backing = runtime.store.orchestration.backings.find({ ...lookup, nativeSessionId: "codex-native" })!;
       expect(backing).toMatchObject({ nativeSessionId: "codex-native", status: "ready", coverageComplete: false });
       expect(backing.coveredItemIds).toHaveLength(MAX_BACKING_COVERAGE_ITEMS);
 

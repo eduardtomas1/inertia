@@ -27,7 +27,7 @@ describe("delegation boot order", () => {
     const f = await createDelegationQueueFixture();
     try {
       const { task } = await crashedParent(f, "runtime-crash", "settled_only");
-      const reconcile = vi.spyOn(f.store.queuedMessages, "reconcile");
+      const reconcile = vi.spyOn(f.store.orchestration.queue, "adoptLegacyRows");
       const finalize = vi.spyOn(f.store.orchestration.delegation, "finalizeIfReady");
       const plan = vi.spyOn(f.store.orchestration.delegation, "planDelivery");
       const lanes = vi.spyOn(f.store.orchestration.lanes, "run");

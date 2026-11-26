@@ -2,8 +2,10 @@
 import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { ModelSelection } from "../../src/shared/contracts";
+import type { ProviderBacking } from "../../src/shared/orchestration-backings";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
   turnControllerTestIdentity, type TurnControllerTestRuntime,
@@ -55,6 +57,12 @@ function run(runtime: TurnControllerTestRuntime, runId: string) {
   return runtime.store.orchestration.events.projection("run", runId)?.value as Record<string, unknown>;
 }
 
+function covers(runtime: TurnControllerTestRuntime, backing: ProviderBacking | null | undefined, itemId: string, runId: string): boolean {
+  if (!backing) return false;
+  const projected = runtime.store.orchestration.events.projection("run", runId)?.value as { ordinal?: number } | undefined;
+  return isItemCovered(backing, itemId, typeof projected?.ordinal === "number" ? projected.ordinal : null);
+}
+
 function projectionRows(runtime: TurnControllerTestRuntime) {
   return (runtime.store as unknown as { database: Database.Database }).database
     .prepare("SELECT kind, id, project_id, thread_id, revision, payload_json FROM orchestration_v2_entities ORDER BY kind, id").all();
@@ -65,7 +73,8 @@ async function expectResent(runtime: TurnControllerTestRuntime, f: Awaited<Retur
   const { backings } = runtime.store.orchestration;
   const kept = backings.find(f.lookup)!;
   expect(kept).toMatchObject({ status: "ready", lastRunId: f.first.turn.runId });
-  for (const id of [f.codex.message.id, f.dropped.message.id]) expect(kept.coveredItemIds).not.toContain(id);
+  expect(covers(runtime, kept, f.first.message.id, f.first.turn.runId)).toBe(true);
+  for (const entry of [f.codex, f.dropped]) expect(covers(runtime, kept, entry.message.id, entry.turn.runId)).toBe(false);
   // The return turn is not delivered, so the switch it attempted is still due.
   expect(backings.deliveredRouteTurnId(runtime.conversationId)).toBe(f.codex.turn.id);
   const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try the rename again" });
@@ -79,7 +88,8 @@ async function expectResent(runtime: TurnControllerTestRuntime, f: Awaited<Retur
   runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "cursor-agent" });
   runtime.provider.resolve({ sessionId: "cursor-agent", text: "Renamed" });
   await flushTurnControllerTestPromises();
-  expect(backings.find(f.lookup)?.coveredItemIds).toEqual(expect.arrayContaining([f.codex.message.id, f.dropped.message.id]));
+  const updated = backings.find(f.lookup);
+  for (const entry of [f.codex, f.dropped]) expect(covers(runtime, updated, entry.message.id, entry.turn.runId)).toBe(true);
 }
 
 describe("a Cursor SDK turn that ends before its first checkpoint did not deliver its prompt (T3 c5fa33b27)", () => {
@@ -138,7 +148,8 @@ describe("a Cursor SDK turn that ends before its first checkpoint did not delive
       expect(run(runtime, kept.turn.runId)).not.toHaveProperty("promptDropped");
       const { backings, events } = runtime.store.orchestration;
       expect(backings.handoff(kept.turn.runId)?.state).toBe("delivered");
-      expect(backings.find(f.lookup)?.coveredItemIds).toEqual(expect.arrayContaining([f.codex.message.id, kept.message.id]));
+      const keptBacking = backings.find(f.lookup);
+      for (const entry of [f.codex, kept]) expect(covers(runtime, keptBacking, entry.message.id, entry.turn.runId)).toBe(true);
       expect(backings.deliveredRouteTurnId(runtime.conversationId)).toBe(kept.turn.id);
       // Only a run marked `promptDropped` takes back an inline handoff its output delivered.
       const handoff = backings.handoff(kept.turn.runId)!;
@@ -164,15 +175,15 @@ describe("a Cursor SDK turn that ends before its first checkpoint did not delive
       const foreign = await failTurn("Now update the callers", { runId: "another-run" });
       expect(run(runtime, foreign.turn.runId)).not.toHaveProperty("delivery");
       expect(backings.find(f.lookup)).toMatchObject({ lastRunId: foreign.turn.runId });
-      expect(backings.find(f.lookup)?.coveredItemIds).toContain(foreign.message.id);
+      expect(covers(runtime, backings.find(f.lookup), foreign.message.id, foreign.turn.runId)).toBe(true);
 
       // The exact run's dropped prompt is taken back alone: what earlier runs delivered stays covered.
       const lost = await failTurn("And the tests", {});
       expect(run(runtime, lost.turn.runId)).toMatchObject({ status: "failed", delivery: "not-delivered", promptDropped: true });
       const backing = backings.find(f.lookup)!;
       expect(backing).toMatchObject({ status: "ready", lastRunId: foreign.turn.runId });
-      expect(backing.coveredItemIds).toEqual(expect.arrayContaining([f.codex.message.id, kept.message.id, foreign.message.id]));
-      expect(backing.coveredItemIds).not.toContain(lost.message.id);
+      for (const entry of [f.codex, kept, foreign]) expect(covers(runtime, backing, entry.message.id, entry.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, lost.message.id, lost.turn.runId)).toBe(false);
       expect(backings.deliveredRouteTurnId(runtime.conversationId)).toBe(foreign.turn.id);
     } finally { runtime.store.close(); }
   });

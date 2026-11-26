@@ -130,10 +130,22 @@ export function useAppRuntimeActions(options: {
     }
     return event.result;
   }, [sendCommand]);
-  const runQueueCommand = useCallback<QueueCommandRunner>(async (command) => {
+  const runQueueCommand = useCallback<QueueCommandRunner>(async (command, commandOptions) => {
     const adds = command.type === "message.queue.enqueue" || command.type === "message.queue.stop-and-send";
     const request = { ...command, requestId: adds ? command.payload.id : crypto.randomUUID() };
-    const attachments = adds ? command.payload.attachments : [];
+    let handoffIds: readonly string[] = [];
+    if (adds) {
+      handoffIds = command.payload.attachments.map(({ id }) => id);
+    } else if (
+      command.type === "message.queue.edit"
+      && "attachments" in command.payload
+      && command.payload.attachments
+    ) {
+      const present = new Set(command.payload.attachments.map(({ id }) => id));
+      handoffIds = commandOptions?.handoffAttachmentIds !== undefined
+        ? commandOptions.handoffAttachmentIds.filter((id) => present.has(id))
+        : command.payload.attachments.map(({ id }) => id);
+    }
     let handoff = false;
     let ambiguous = false;
     try {
@@ -143,11 +155,11 @@ export function useAppRuntimeActions(options: {
         } }));
         if (known.type === "request.result" && known.result.kind === "message.queue" && known.result.receipt) return known.result;
       }
-      if (attachments.length > 0) {
-        await window.inertia.prepareAttachmentHandoff({ requestId: request.requestId, attachmentIds: attachments.map(({ id }) => id) });
+      if (handoffIds.length > 0) {
+        await window.inertia.prepareAttachmentHandoff({ requestId: request.requestId, attachmentIds: [...handoffIds] });
         handoff = true;
       }
-      const event = await sendCommand(request);
+      const event = await sendCommand(request as ClientCommand);
       if (event.type !== "request.result" || event.result.kind !== "message.queue") throw new Error("The local service returned an unexpected queue response.");
       return event.result;
     } catch (error) {

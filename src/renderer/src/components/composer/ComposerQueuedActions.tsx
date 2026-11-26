@@ -1,29 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 
-import type { ChatAttachment } from "@shared/contracts";
+import type { ChatAttachment, ProviderInfo } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
-import { runtimeCommandDelivery } from "../../utils/connectionMessages";
-import type { QueueCommandRunner, QueuedMessageEdit } from "./runtimeQueueClient";
+import {
+  enqueueRuntimePrompt,
+  type QueueCommandRunner,
+  type QueuedMessageEdit,
+} from "./runtimeQueueClient";
 import { discardComposerDraftAttachments } from "../../utils/composerDraftAttachments";
 import { IconButton } from "../ui";
 import { TooltipText } from "../TooltipText";
 import { RuntimeComposerQueuedActions } from "./RuntimeComposerQueuedActions";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
-  clearComposerQueuedPromptDispatched,
   composerQueueKey,
   composerQueueLockName,
   enqueueComposerPrompt,
-  markComposerQueuedPromptDispatched,
   readComposerQueue,
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
   takeComposerQueuedPrompts,
 } from "./composerQueuedPrompts";
-
-const UNCONFIRMED_SEND_REASON = "A previous send did not confirm. Check the transcript before sending again.";
 
 export { enqueueComposerPrompt };
 export { queueComposerDraft } from "./queueComposerDraft";
@@ -45,47 +44,33 @@ export async function releaseDeletedComposerQueue(
   await navigator.locks.request(composerQueueLockName(conversationId), drain);
 }
 
-function LegacyComposerQueuedActions({
+/**
+ * Displays legacy browser-local queued prompts for explicit migration or
+ * discard (Decision 4.5). Never sends automatically.
+ */
+function LegacySavedQueueSection({
   conversationId,
-  canSendQueuedNow,
-  running,
-  latestTurnId,
-  latestTurnStatus,
-  latestTurnAuthoritative,
   queueHost,
-  onSendQueued,
+  onQueueCommand,
   onReleaseAttachment,
-  automaticEnabled = true,
 }: {
   conversationId: string;
-  canSendQueuedNow: boolean;
-  running: boolean;
-  latestTurnId: string | null;
-  latestTurnStatus: AgentTurnStatus | null;
-  latestTurnAuthoritative: boolean;
   queueHost: HTMLElement | null;
-  onSendQueued: (
-    content: string,
-    attachments: ChatAttachment[],
-  ) => Promise<unknown>;
+  onQueueCommand?: QueueCommandRunner;
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
-  automaticEnabled?: boolean;
 }): React.JSX.Element | null {
   const [queuedPrompts, setQueuedPrompts] = useState(() =>
     readComposerQueue(conversationId));
-  const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
-  const queueSendingRef = useRef<string | null>(null);
-  const conversationIdRef = useRef(conversationId);
-  const autoQueuedTurnRef = useRef<string | null>(null);
-  conversationIdRef.current = conversationId;
+  const [movingId, setMovingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
   const syncQueue = useCallback((): void => {
     setQueuedPrompts(readComposerQueue(conversationId));
   }, [conversationId]);
 
   useEffect(() => {
-    queueSendingRef.current = null;
-    autoQueuedTurnRef.current = null;
-    setQueueSendingId(null);
+    setMovingId(null);
+    setError(null);
     syncQueue();
     const onStorage = (event: StorageEvent): void => {
       if (event.key === composerQueueKey(conversationId)) syncQueue();
@@ -110,178 +95,163 @@ function LegacyComposerQueuedActions({
     return () => window.removeEventListener("beforeunload", releaseQueuedMedia);
   }, [onReleaseAttachment]);
 
-  const removeQueued = useCallback((
-    promptId: string,
-    releaseAttachments = true,
-  ): void => {
+  const discardLegacy = useCallback((promptId: string): void => {
     const removed = removeComposerQueuedPrompt(conversationId, promptId);
-    if (!removed || !releaseAttachments) return;
+    if (!removed) return;
+    setError(null);
     for (const attachment of removed.attachments) {
       void onReleaseAttachment(attachment.id);
     }
   }, [conversationId, onReleaseAttachment]);
 
-  const sendQueued = useCallback(async (
-    promptId: string,
-    origin: "automatic" | "manual",
-  ): Promise<void> => {
-    const dispatch = async (): Promise<void> => {
-      if (queueSendingRef.current || !canSendQueuedNow) return;
-      const queued = readComposerQueue(conversationId).find(
-        ({ id }) => id === promptId,
-      );
-      if (!queued) return;
-      // Re-read under the lock: an earlier attempt in this or another window
-      // may have dispatched the prompt since the effect looked at it.
-      if (origin === "automatic" && queued.dispatchedAt) return;
-      // The intent is durable before the send crosses the boundary, so a
-      // renderer that reloads or crashes before the reply cannot send the
-      // same prompt again automatically. No record, no send.
-      if (!markComposerQueuedPromptDispatched(conversationId, promptId)) return;
-      queueSendingRef.current = promptId;
-      setQueueSendingId(promptId);
-      try {
-        await onSendQueued(queued.content, queued.attachments);
-        removeQueued(promptId, false);
-      } catch (error) {
-        // The workspace owns the error surface; keep the draft for retry.
-        // Only a delivery the runtime is known not to have accepted restores
-        // automatic sending; an unknown outcome stays manual-retry only.
-        const delivery = runtimeCommandDelivery(error);
-        if (delivery === "not-sent" || delivery === "rejected") {
-          clearComposerQueuedPromptDispatched(conversationId, promptId);
-        }
-      } finally {
-        if (
-          conversationIdRef.current === conversationId
-          && queueSendingRef.current === promptId
-        ) {
-          queueSendingRef.current = null;
-          setQueueSendingId(null);
-        }
-      }
-    };
-    if (!navigator.locks) {
-      await dispatch();
-      return;
+  const moveToQueue = useCallback(async (promptId: string): Promise<void> => {
+    if (!onQueueCommand || movingId !== null) return;
+    const prompt = readComposerQueue(conversationId).find(({ id }) => id === promptId);
+    if (!prompt) return;
+    setMovingId(promptId);
+    setError(null);
+    try {
+      await enqueueRuntimePrompt(onQueueCommand, conversationId, prompt.content, prompt.attachments);
+      // Remove the local copy only after the durable queue confirmed receipt; keep attachments.
+      removeComposerQueuedPrompt(conversationId, promptId);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "The saved draft could not be moved to the queue.");
+    } finally {
+      setMovingId((current) => (current === promptId ? null : current));
     }
-    await navigator.locks.request(
-      composerQueueLockName(conversationId),
-      { ifAvailable: true },
-      async (lock) => {
-        if (lock) await dispatch();
-      },
-    );
-  }, [canSendQueuedNow, conversationId, onSendQueued, removeQueued]);
+  }, [conversationId, movingId, onQueueCommand]);
 
-  useEffect(() => {
-    const queued = queuedPrompts[0];
-    if (
-      !automaticEnabled
-      || running
-      || queueSendingRef.current
-      || !canSendQueuedNow
-      || !queued
-      || !latestTurnId
-      || latestTurnStatus !== "completed"
-      || !latestTurnAuthoritative
-      || queued.dispatchedAt
-    ) return;
-    const terminalKey = `${conversationId}:${latestTurnId}`;
-    if (autoQueuedTurnRef.current === terminalKey) return;
-    autoQueuedTurnRef.current = terminalKey;
-    void sendQueued(queued.id, "automatic");
-  }, [
-    automaticEnabled,
-    canSendQueuedNow,
-    conversationId,
-    latestTurnId,
-    latestTurnAuthoritative,
-    latestTurnStatus,
-    queuedPrompts,
-    running,
-    sendQueued,
-  ]);
+  if (queuedPrompts.length === 0) return null;
 
-  const queued = queuedPrompts[0] ?? null;
-  if (!queued) return null;
-  const sending = queueSendingId === queued.id;
-  const unconfirmed = Boolean(queued.dispatchedAt) && !sending;
-  const queueElement = (
-    <div className="composer-queue" role="list" aria-label="Queued messages">
-      <div
-        className={`composer-queue-item${
-          queued.attachments.length > 0 ? " has-media" : ""
-        }`}
-        role="listitem"
-      >
-        <CornerDownRight size={14} aria-hidden="true" />
-        <span className="composer-queue-copy" title={queued.content}>
-          {queued.content}
-        </span>
-        {queued.attachments.length > 0 && (
-          <TooltipText
-            className="composer-queue-media"
-            tooltip={queued.attachments.map(({ name }) => name).join(", ")}
-          >
-            <Paperclip size={14} aria-hidden="true" />
-            {queued.attachments.length === 1
-              ? "1 image"
-              : `${queued.attachments.length} images`}
-          </TooltipText>
-        )}
-        {unconfirmed ? (
-          <>
-            <TooltipText
-              className="composer-queue-count"
-              tooltip={UNCONFIRMED_SEND_REASON}
+  const section = (
+    <div className="composer-queue composer-legacy-queue" role="region" aria-label="Saved from an earlier version">
+      <div className="composer-legacy-queue-header">Saved from an earlier version</div>
+      <div role="list" aria-label="Saved drafts from an earlier version">
+        {queuedPrompts.map((queued, index) => {
+          const moving = movingId === queued.id;
+          const suffix = queuedPrompts.length > 1 ? ` ${index + 1} of ${queuedPrompts.length}` : "";
+          return (
+            <div
+              key={queued.id}
+              className={`composer-queue-item${queued.attachments.length > 0 ? " has-media" : ""}`}
+              role="listitem"
             >
-              Send unconfirmed
-            </TooltipText>
-            <span className="visually-hidden">{UNCONFIRMED_SEND_REASON}</span>
-          </>
-        ) : (
-          <small className="composer-queue-count">
-            {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
-          </small>
-        )}
-        <button
-          type="button"
-          className="composer-queue-send"
-          aria-label="Send queued message now"
-          disabled={!canSendQueuedNow || queueSendingId !== null}
-          onClick={() => void sendQueued(queued.id, "manual")}
-        >
-          {sending ? "Sending…" : "Send now"}
-        </button>
-        <IconButton
-          label="Remove"
-          aria-label="Remove queued message"
-          className="composer-queue-remove"
-          disabled={queueSendingId === queued.id}
-          onClick={() => removeQueued(queued.id)}
-        >
-          <Trash2 size={14} aria-hidden="true" />
-        </IconButton>
+              <CornerDownRight size={14} aria-hidden="true" />
+              <span className="composer-queue-copy" title={queued.content}>
+                {queued.content}
+              </span>
+              {queued.attachments.length > 0 && (
+                <TooltipText
+                  className="composer-queue-media"
+                  tooltip={queued.attachments.map(({ name }) => name).join(", ")}
+                >
+                  <Paperclip size={14} aria-hidden="true" />
+                  {queued.attachments.length === 1
+                    ? "1 image"
+                    : `${queued.attachments.length} images`}
+                </TooltipText>
+              )}
+              <button
+                type="button"
+                className="composer-queue-send"
+                aria-label={`Move saved draft${suffix} to queue`}
+                disabled={!onQueueCommand || movingId !== null}
+                onClick={() => void moveToQueue(queued.id)}
+              >
+                {moving ? "Moving…" : "Move to queue"}
+              </button>
+              <IconButton
+                label="Discard"
+                aria-label={`Discard saved draft${suffix}`}
+                className="composer-queue-remove"
+                disabled={moving}
+                onClick={() => discardLegacy(queued.id)}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+              </IconButton>
+            </div>
+          );
+        })}
       </div>
+      {error && <span className="composer-queue-alert" role="alert">{error}</span>}
     </div>
   );
-  return queueHost ? createPortal(queueElement, queueHost) : queueElement;
+
+  return queueHost ? createPortal(section, queueHost) : section;
 }
 
-export function ComposerQueuedActions({ onQueueCommand, queueEdit, onFocusInput, ...props }: React.ComponentProps<typeof LegacyComposerQueuedActions> & {
+export interface ComposerQueuedActionsProps {
+  conversationId: string;
+  canSendQueuedNow: boolean;
+  running: boolean;
+  canSteer?: boolean;
+  canInterrupt?: boolean;
+  providerSwitchWaitsForTurn?: boolean;
+  hasPendingQuestionOrApproval?: boolean;
+  resuming?: boolean;
+  onResume?: () => Promise<unknown>;
+  providers?: readonly ProviderInfo[];
+  latestTurnId: string | null;
+  latestTurnStatus: AgentTurnStatus | null;
+  latestTurnAuthoritative?: boolean;
+  queueHost: HTMLElement | null;
+  editBannerHost?: HTMLElement | null;
+  onSendQueued?: (content: string, attachments: ChatAttachment[]) => Promise<unknown>;
   onQueueCommand?: QueueCommandRunner;
   queueEdit?: QueuedMessageEdit;
+  onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onFocusInput?: () => void;
-}): React.JSX.Element {
-  if (!onQueueCommand) return <LegacyComposerQueuedActions {...props} />;
-  return <>
-    <RuntimeComposerQueuedActions conversationId={props.conversationId} onCommand={onQueueCommand}
-      canSend={props.canSendQueuedNow} running={props.running} latestTurnId={props.latestTurnId}
-      latestTurnStatus={props.latestTurnStatus} queueHost={props.queueHost}
-      edit={queueEdit} onFocusInput={onFocusInput} />
-    {/* Older local drafts retain their explicit retry control; an unknown old
-        delivery must never be silently re-admitted as a new runtime intent. */}
-    <LegacyComposerQueuedActions {...props} automaticEnabled={false} />
-  </>;
+}
+
+export function ComposerQueuedActions({
+  conversationId,
+  canSendQueuedNow,
+  running,
+  canSteer,
+  canInterrupt,
+  providerSwitchWaitsForTurn,
+  hasPendingQuestionOrApproval,
+  resuming,
+  onResume,
+  providers,
+  latestTurnId,
+  latestTurnStatus,
+  queueHost,
+  editBannerHost,
+  onQueueCommand,
+  queueEdit,
+  onReleaseAttachment,
+  onFocusInput,
+}: ComposerQueuedActionsProps): React.JSX.Element {
+  return (
+    <>
+      {onQueueCommand && (
+        <RuntimeComposerQueuedActions
+          conversationId={conversationId}
+          onCommand={onQueueCommand}
+          canSend={canSendQueuedNow}
+          running={running}
+          canSteer={canSteer}
+          canInterrupt={canInterrupt}
+          providerSwitchWaitsForTurn={providerSwitchWaitsForTurn}
+          hasPendingQuestionOrApproval={hasPendingQuestionOrApproval}
+          resuming={resuming}
+          onResume={onResume}
+          providers={providers}
+          latestTurnId={latestTurnId}
+          latestTurnStatus={latestTurnStatus}
+          queueHost={queueHost}
+          editBannerHost={editBannerHost}
+          edit={queueEdit}
+          onFocusInput={onFocusInput}
+        />
+      )}
+      <LegacySavedQueueSection
+        conversationId={conversationId}
+        queueHost={queueHost}
+        onQueueCommand={onQueueCommand}
+        onReleaseAttachment={onReleaseAttachment}
+      />
+    </>
+  );
 }

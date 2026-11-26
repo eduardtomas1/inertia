@@ -250,7 +250,8 @@ describe("CLI conversation import authority and persistence", () => {
     expect(options[0]).toMatchObject({ resume: sessionId, env: expect.objectContaining({ CLAUDE_CONFIG_DIR: configDirectory }) });
     expect(options[0]!.env).not.toHaveProperty("GITHUB_TOKEN");
   });
-  it.each(["codex", "claude"] as const)("fails an imported %s chat closed when its native session is gone", async (providerId) => {
+  it("fails an imported codex chat closed when its native session is gone", async () => {
+    const providerId = "codex" as const;
     const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId, modelId: "provider-default" }) });
     try {
       const sessionId = randomUUID();
@@ -258,7 +259,6 @@ describe("CLI conversation import authority and persistence", () => {
       const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
       const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
       const unavailable = { reason: "provider-error", message: "The saved provider session is no longer available.", sessionUnavailable: true } as const;
-      const label = providerId === "codex" ? "Codex" : "Claude Code";
       for (const content of ["Continue.", "Try again."]) {
         const queued = runtime.controller.queue({ conversationId, content });
         expect(queued.turn).toMatchObject({ providerSessionBefore: sessionId, continuationReasonCode: "same-continuation" });
@@ -269,11 +269,38 @@ describe("CLI conversation import authority and persistence", () => {
         await flushTurnControllerTestPromises();
         expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "failed", providerSessionBefore: sessionId, providerSessionAfter: sessionId });
         const errors = (runtime.store.conversationDetail(conversationId)?.activities ?? []).filter(({ kind, turnId }) => kind === "error" && turnId === queued.turn.id);
-        expect(errors).toEqual([expect.objectContaining({ title: `The original ${label} session for this imported chat is no longer available.` })]);
+        expect(errors).toEqual([expect.objectContaining({ title: "The original Codex session for this imported chat is no longer available." })]);
         expect(runtime.store.conversation(conversationId)).toMatchObject({ providerSessionId: sessionId, continuationIdentity });
         expect(runtime.store.importedCliConversation(providerId, sessionId)).toBe(conversationId);
       }
       expect(runtime.controller.queue({ conversationId, content: "Once more." }).turn).toMatchObject({ providerSessionBefore: sessionId, continuationReasonCode: "same-continuation" });
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+  it("falls back to portable history on a fresh session when an imported claude chat's native session is gone (N20)", async () => {
+    const providerId = "claude" as const;
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId, modelId: "provider-default" }) });
+    try {
+      const sessionId = randomUUID();
+      const freshSessionId = randomUUID();
+      const selection = providerNativeModelSelection({ providerId });
+      const continuationIdentity = runtime.provider.resolveModelRoute(selection).continuationIdentity;
+      const conversationId = runtime.store.importCliConversation({ projectId: runtime.store.conversation(runtime.conversationId).projectId, sourceKey: "b".repeat(64), providerId, sessionId, cwd: runtime.store.conversationPath(runtime.conversationId), title: "Imported", messages: [{ role: "user", content: "Earlier work", createdAt: "2026-09-25T10:00:00.000Z" }], selection, continuationIdentity, omittedMessages: 0, omittedBytes: 0, droppedRecords: 0, continuation: "native" as const });
+      const queued = runtime.controller.queue({ conversationId, content: "Continue." });
+      expect(queued.turn).toMatchObject({ providerSessionBefore: sessionId, continuationReasonCode: "same-continuation" });
+      runtime.controller.start(queued.turn.id);
+      expect(runtime.provider.input?.sessionId).toBe(sessionId);
+      const fresh = runtime.provider.freshSession();
+      expect(fresh).not.toBeNull();
+      expect(fresh!.prompt).toContain("Earlier work");
+      expect(fresh!.prompt).toContain("Continue.");
+      runtime.provider.resolve({ status: "completed", sessionId: freshSessionId, text: "Continued on a fresh session." });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "completed", providerSessionAfter: freshSessionId });
+      expect(runtime.store.conversation(conversationId)).toMatchObject({ providerSessionId: freshSessionId });
+      expect(runtime.store.importedCliConversation(providerId, sessionId)).toBe(conversationId);
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

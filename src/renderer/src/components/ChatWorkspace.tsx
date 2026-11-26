@@ -1176,6 +1176,7 @@ export function ChatWorkspace({
           agentContextRequest={agentContextRequest}
           onConversationContextCommand={onConversationContextCommand}
           onQueueCommand={onQueueCommand}
+          hasPendingQuestionOrApproval={ownedApprovals.length > 0 || ownedInputRequests.length > 0 || pendingSecret !== null}
           onLimitResetCommand={onLimitResetCommand}
           previewContextUrl={previewContextUrl}
           providerIdentityLabels={providerIdentityLabels}

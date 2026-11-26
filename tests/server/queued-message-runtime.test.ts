@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/shared/contracts";
 import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
-import { createQueuedMessageRuntime, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END, QUEUED_EDIT_GRANT_MS, UNREAD_FOLLOW_UP_ROUTE_CHANGED } from "../../src/server/runtime/queued-message-runtime";
+import { createQueuedMessageRuntime, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END, UNREAD_FOLLOW_UP_ROUTE_CHANGED } from "../../src/server/runtime/queued-message-runtime";
+import { MAX_QUEUED_USER_AND_AGENT_ITEMS, MAX_QUEUED_WATCHER_NOTES } from "../../src/shared/orchestration-queue";
 import { QUEUED_ROUTE_CHANGED_ERROR } from "../../src/shared/queued-messages";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { RuntimeStore } from "../../src/server/database";
@@ -195,15 +196,20 @@ describe("stop and send", () => {
     } finally { await f.close(); }
   });
 
-  it("refuses without stopping the agent while earlier queued messages wait", async () => {
+  it("holds earlier queued messages (H1-stop) and sends the Stop-and-send item at position 1", async () => {
     const f = await fixture();
     try {
       const initial = startRunning(f);
-      await f.command("message.queue.enqueue", randomUUID());
-      await expect(f.stopAndSend(randomUUID(), initial.turn.id)).rejects.toThrow("Send or remove the queued message first.");
-      expect(f.store.queuedMessages.list(f.conversationId)).toHaveLength(1);
-      expect(f.store.agentTurn(initial.turn.id).status).toBe("running");
-      expect(f.provider.cancelCount).toBe(0);
+      const earlierId = randomUUID();
+      await f.command("message.queue.enqueue", earlierId);
+      const urgentId = randomUUID();
+      await f.stopAndSend(urgentId, initial.turn.id, "Urgent override.");
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, urgentId)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+      expect(f.provider.cancelCount).toBe(1);
+      expect(f.store.orchestration.queue.getItem(earlierId)?.queueHeld).toBe(true);
+      expect(f.store.queuedMessages.get(f.conversationId, earlierId)?.state).toBe("waiting");
     } finally { await f.close(); }
   });
 });
@@ -264,22 +270,22 @@ describe("follow-ups that never reach the running agent", () => {
     try {
       startRunning(f);
       f.provider.steerSupported = false;
-      vi.spyOn(f.store.queuedMessages, "add").mockImplementationOnce(() => {
+      vi.spyOn(f.store.orchestration.queue, "enqueue").mockImplementationOnce(() => {
         throw new QueuedMessageLimitError();
       });
-      await expect(f.followUp()).rejects.toThrow("This follow-up did not reach the agent, and this chat already has three queued messages.");
+      await expect(f.followUp()).rejects.toThrow(`This follow-up did not reach the agent, and this chat already has ${MAX_QUEUED_USER_AND_AGENT_ITEMS} queued messages.`);
       expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
     } finally { await f.close(); }
   });
 
-  it("rejects a refused follow-up without queueing it when three messages already wait", async () => {
+  it("rejects a refused follow-up without queueing it when the queue is full (20 messages)", async () => {
     const f = await fixture();
     try {
       startRunning(f);
-      for (let index = 0; index < 3; index += 1) await f.command("message.queue.enqueue", randomUUID());
+      for (let index = 0; index < MAX_QUEUED_USER_AND_AGENT_ITEMS; index += 1) await f.command("message.queue.enqueue", randomUUID());
       f.provider.steerSupported = false;
-      await expect(f.followUp("A fourth message.")).rejects.toThrow("already has three queued messages");
-      expect(f.store.queuedMessages.list(f.conversationId).map(({ content }) => content)).toEqual(Array(3).fill("Do the next task."));
+      await expect(f.followUp("A twenty-first message.")).rejects.toThrow(`already has ${MAX_QUEUED_USER_AND_AGENT_ITEMS} queued messages`);
+      expect(f.store.queuedMessages.list(f.conversationId).map(({ content }) => content)).toEqual(Array(MAX_QUEUED_USER_AND_AGENT_ITEMS).fill("Do the next task."));
     } finally { await f.close(); }
   });
 });
@@ -505,20 +511,20 @@ describe("durable runtime message queue", () => {
     const f = await fixture();
     try {
       const image = { id: randomUUID(), name: "rollback.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
-      vi.spyOn(f.store.queuedMessages, "add").mockImplementationOnce(() => { throw new Error("SQLite unavailable"); });
+      vi.spyOn(f.store.orchestration.queue, "enqueue").mockImplementationOnce(() => { throw new Error("SQLite unavailable"); });
       await expect(f.command("message.queue.enqueue", randomUUID(), [image])).rejects.toThrow("SQLite unavailable");
       expect(await f.attachments.preview(image.id)).toBeNull();
       expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
     } finally { await f.close(); }
   });
 
-  it("blocks automatic and explicit dispatch after the access route changes", async () => {
+  it("blocks automatic and explicit dispatch after the workspace route changes (Decision 4.3)", async () => {
     const f = await fixture();
     try {
       const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
-      f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      f.store.updateConversation(f.conversationId, { worktreePath: join(f.workspace, "other-worktree") });
       await f.command("message.queue.send", id);
-      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "blocked", error: expect.stringContaining("access") });
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "blocked", error: expect.stringContaining("workspace") });
       expect(f.provider.runCount).toBe(0);
       await f.command("message.queue.remove", id);
       expect(f.store.queuedMessages.list(f.conversationId)).toEqual([]);
@@ -552,7 +558,7 @@ describe("durable runtime message queue", () => {
       const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
       const sending = f.command("message.queue.send", id);
       await vi.waitFor(() => expect(verify).toHaveBeenCalledOnce());
-      if (change === "route") f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      if (change === "route") f.store.updateConversation(f.conversationId, { worktreePath: join(f.workspace, "changed-worktree") });
       else f.store.archiveConversation(f.conversationId, true);
       release(); await sending;
       expect(f.provider.runCount).toBe(0);
@@ -564,8 +570,9 @@ describe("durable runtime message queue", () => {
     const f = await fixture();
     try {
       const first = randomUUID(); await f.command("message.queue.enqueue", first); await f.drain();
-      f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      f.store.updateConversation(f.conversationId, { worktreePath: join(f.workspace, "other-worktree") });
       await f.command("message.queue.send", first);
+      f.store.updateConversation(f.conversationId, { worktreePath: null });
       const second = randomUUID(); await f.command("message.queue.enqueue", second); await f.drain();
       const initial = f.controller.queue({ conversationId: f.conversationId, content: "Another task" });
       f.controller.start(initial.turn.id); f.provider.resolve({ status: "completed" }); await f.drain();
@@ -952,13 +959,13 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
     const f = await fixture();
     try {
       startRunning(f);
-      for (let index = 0; index < 3; index += 1) await f.command("message.queue.enqueue", randomUUID());
+      for (let index = 0; index < MAX_QUEUED_USER_AND_AGENT_ITEMS; index += 1) await f.command("message.queue.enqueue", randomUUID());
       vi.spyOn(f.provider, "steer").mockRejectedValue(new ProviderSteerDeliveryUnknownError(true));
-      await expect(f.followUp("A fourth message.")).rejects.toMatchObject({
+      await expect(f.followUp("A twenty-first message.")).rejects.toMatchObject({
         delivery: "ambiguous",
         message: "The provider did not confirm whether it received this follow-up. Check this chat before retrying.",
       });
-      expect(f.store.queuedMessages.list(f.conversationId)).toHaveLength(3);
+      expect(f.store.queuedMessages.list(f.conversationId)).toHaveLength(MAX_QUEUED_USER_AND_AGENT_ITEMS);
     } finally { await f.close(); }
   });
 
@@ -987,7 +994,7 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       delivery: "queue" as const,
     };
 
-    it("waits behind user-authored queued messages and dispatches with its attribution and note instruction", async () => {
+    it("dispatches in FIFO order with user-authored queued messages and carries its attribution and note instruction", async () => {
       const f = await fixture();
       try {
         startRunning(f);
@@ -998,23 +1005,23 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
         expect(receipt.receipt).toMatchObject({ id: noteId, watcherNote: note });
         const userId = randomUUID();
         await f.command("message.queue.enqueue", userId);
-        expect(f.store.queuedMessages.list(f.conversationId).map(({ id }) => id)).toEqual([userId, noteId]);
+        expect(f.store.orchestration.queue.listActive(f.conversationId).map(({ id }) => id)).toEqual([noteId, userId]);
 
         f.provider.resolve({ status: "completed", text: "Done" });
         await f.drain();
-        expect(f.store.queuedMessages.get(f.conversationId, userId)?.state).toBe("accepted");
-        expect(f.store.queuedMessages.get(f.conversationId, noteId)?.state).toBe("waiting");
-        expect(f.provider.input?.prompt).not.toContain("inertia-watcher-note");
-
-        f.provider.resolve({ status: "completed", text: "Done again" });
-        await f.drain();
         const accepted = f.store.queuedMessages.get(f.conversationId, noteId)!;
         expect(accepted.state).toBe("accepted");
+        expect(f.store.queuedMessages.get(f.conversationId, userId)?.state).toBe("waiting");
         expect(f.store.message(accepted.userMessageId!)).toMatchObject({
           content: "Check the Windows path handling.", watcherNote: note,
         });
         expect(f.provider.input?.prompt).toContain("[inertia-watcher-note]");
         expect(f.provider.input?.prompt).toContain("Treat it as review feedback from a colleague");
+
+        f.provider.resolve({ status: "completed", text: "Done again" });
+        await f.drain();
+        expect(f.store.queuedMessages.get(f.conversationId, userId)?.state).toBe("accepted");
+        expect(f.provider.input?.prompt).not.toContain("inertia-watcher-note");
       } finally { await f.close(); }
     });
 
@@ -1056,13 +1063,20 @@ describe("follow-ups accepted as the agent finishes its answer", () => {
       } finally { await f.close(); }
     });
 
-    it("names the main chat's full queue", async () => {
+    it("names the main chat's full watcher queue (5 distinct watchers)", async () => {
       const f = await fixture();
       try {
         startRunning(f);
-        for (let index = 0; index < 3; index += 1) await f.command("message.queue.enqueue", randomUUID());
+        for (let index = 0; index < MAX_QUEUED_WATCHER_NOTES; index += 1) {
+          f.queue.enqueueWatcherNote({
+            conversationId: f.conversationId,
+            id: randomUUID(),
+            content: `Finding ${index + 1}.`,
+            watcherNote: { ...note, linkId: randomUUID(), wakeId: randomUUID() },
+          });
+        }
         expect(() => f.queue.enqueueWatcherNote({
-          conversationId: f.conversationId, id: randomUUID(), content: "One more finding.", watcherNote: note,
+          conversationId: f.conversationId, id: randomUUID(), content: "One more finding.", watcherNote: { ...note, linkId: randomUUID(), wakeId: randomUUID() },
         })).toThrow("The main chat's queue is full");
       } finally { await f.close(); }
     });
@@ -1238,9 +1252,12 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       await f.drain();
       const [row] = unreadRows(f);
       // The crash: claimed, never committed.
-      expect(f.store.queuedMessages.claim(f.conversationId, row!.id)).toBe(true);
+      f.store.orchestration.queue.claim({ conversationId: f.conversationId, itemId: row!.id, mode: "run" });
       f.compaction.active = false;
       await restart(f);
+      // Phase 5 H5-restart holds active items on boot; explicit resume dispatches once.
+      expect(f.store.orchestration.queue.getItem(row!.id)?.queueHeld).toBe(true);
+      await f.queue.resume(f.conversationId, randomUUID());
       await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
       expect(f.store.queuedMessages.get(f.conversationId, row!.id)).toMatchObject({ state: "accepted", userMessageId: message.id });
       complete(f);
@@ -1489,7 +1506,7 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
     } finally { await f.close(); }
   });
 
-  it("blocks a follow-up whose chat changed route since its turn, until the user switches back", async () => {
+  it("blocks a follow-up whose chat changed workspace route since its turn, until the user switches back", async () => {
     const f = await fixture({}, realClock);
     try {
       startRunning(f);
@@ -1497,7 +1514,8 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       f.compaction.active = true;
       complete(f, { unreadFollowUps: [steerId] });
       await f.drain();
-      f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      const originalWorktree = f.store.conversation(f.conversationId).worktreePath;
+      f.store.updateConversation(f.conversationId, { worktreePath: join(f.workspace, "other-worktree") });
       f.compaction.active = false;
       f.queue.onCompactionSettled(f.conversationId);
       await f.drain();
@@ -1509,23 +1527,23 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
       await f.drain();
       expect(f.store.queuedMessages.get(f.conversationId, row!.id)).toMatchObject({ state: "blocked" });
       expect(f.provider.runCount).toBe(1);
-      f.store.updateConversation(f.conversationId, { accessMode: "supervised" });
+      f.store.updateConversation(f.conversationId, { worktreePath: originalWorktree });
       await f.command("message.queue.send", row!.id);
       await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
       expect(f.store.latestAgentTurnForConversation(f.conversationId)).toMatchObject({ userMessageId: message.id, accessMode: "supervised" });
     } finally { await f.close(); }
   });
 
-  it("starts a direct send at once when the queue is full after a failed turn", async () => {
+  it("starts a direct send at once when the queue is full (20 items) after a failed turn", async () => {
     const f = await fixture({}, realClock);
     try {
       startRunning(f);
       const { steerId } = await steer(f, "Also look at this.");
-      for (const _ of [1, 2, 3]) await f.command("message.queue.enqueue", randomUUID());
+      for (let i = 0; i < MAX_QUEUED_USER_AND_AGENT_ITEMS; i += 1) await f.command("message.queue.enqueue", randomUUID());
       f.provider.resolve({ status: "failed", unreadFollowUps: [steerId], error: "Claude could not complete the request.",
         failure: { reason: "provider-error", message: "Claude could not complete the request." } });
       await f.drain();
-      expect(rows(f)).toHaveLength(4);
+      expect(rows(f)).toHaveLength(MAX_QUEUED_USER_AND_AGENT_ITEMS + 1);
       await expect(send(f, "Direct request.")).resolves.toEqual(expect.any(String));
       await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
       expect(f.provider.input!.prompt).toContain("Direct request.");
@@ -1627,16 +1645,16 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
     return message;
   };
 
-  it("keeps a parent's queued messages behind an unread follow-up, which does not count toward the three", async () => {
+  it("keeps a parent's queued messages behind an unread follow-up, which does not count toward the 20-item cap", async () => {
     const f = await fixture({}, realClock);
     try {
       const message = await failWithUnread(f);
       await tick();
-      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const ids = Array.from({ length: MAX_QUEUED_USER_AND_AGENT_ITEMS }, () => randomUUID());
       for (const [index, id] of ids.entries()) {
         f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id, content: `Managed task ${index + 1}` });
       }
-      expect(() => f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id: randomUUID(), content: "Fourth" }))
+      expect(() => f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id: randomUUID(), content: "Overflow" }))
         .toThrow(QueuedMessageLimitError);
       expect(rows(f).map(({ id, userMessageId }) => userMessageId ?? id)).toEqual([message.id, ...ids]);
       await f.drain();
@@ -1669,17 +1687,17 @@ describe("follow-ups the agent accepted but never read (T3 e8c4824b7)", () => {
 });
 
 describe("messages a parent chat queues for its managed child", () => {
-  it("wait in the child's own queue behind the running turn, refuse a fourth, and send after the turn completes", async () => {
+  it("wait in the child's own queue behind the running turn, refuse past 20, and send after the turn completes", async () => {
     const f = await fixture();
     try {
       startRunning(f);
-      const ids = [randomUUID(), randomUUID(), randomUUID()];
+      const ids = Array.from({ length: MAX_QUEUED_USER_AND_AGENT_ITEMS }, () => randomUUID());
       for (const [index, id] of ids.entries()) {
         const result = f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id, content: `  Managed task ${index + 1}  ` });
         expect(result.receipt).toMatchObject({ id, state: "waiting", content: `Managed task ${index + 1}` });
         expect(result.entries.map((entry) => entry.id)).toEqual(ids.slice(0, index + 1));
       }
-      expect(() => f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id: randomUUID(), content: "Fourth" }))
+      expect(() => f.queue.enqueueManagedMessage({ conversationId: f.conversationId, id: randomUUID(), content: "Overflow" }))
         .toThrow(QueuedMessageLimitError);
       await f.drain();
       expect(f.provider.runCount).toBe(1);
@@ -1702,8 +1720,16 @@ describe("editing, re-confirming and documents in the queue", () => {
     const event = queueResult(f, command.requestId);
     return event?.type === "request.result" && event.result.kind === "message.queue" ? event.result : null;
   };
-  const edit = (f: Fixture, id: string) => run(f, {
-    type: "message.queue.edit", requestId: randomUUID(), payload: { conversationId: f.conversationId, id },
+  const edit = (
+    f: Fixture,
+    id: string,
+    content = "Updated queued prompt.",
+    expectedRevision = 0,
+    attachments?: ChatAttachment[],
+  ) => run(f, {
+    type: "message.queue.edit",
+    requestId: randomUUID(),
+    payload: { conversationId: f.conversationId, id, content, expectedRevision, ...(attachments !== undefined ? { attachments } : {}) },
   });
   const reconfirm = (f: Fixture, id: string, confirmed?: Access) => run(f, {
     type: "message.queue.reconfirm", requestId: randomUUID(),
@@ -1717,29 +1743,21 @@ describe("editing, re-confirming and documents in the queue", () => {
     } as unknown as TurnInteractionCommandDependencies["attachmentResolver"];
   };
 
-  it("takes a queued message back atomically with its content and attachments, then frees the stored copies once the edit grant ends", async () => {
+  it("edits a queued message in place with expectedRevision, updating content and releasing dropped attachments", async () => {
     const f = await fixture();
     try {
       const id = randomUUID();
       const image = { id: randomUUID(), name: "queued.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
       await f.command("message.queue.enqueue", id, [image]); await f.drain();
-      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-      const result = await edit(f, id);
-      expect(result?.edited).toMatchObject({ id, content: "Do the next task.", attachments: [{ id: image.id, name: "queued.png" }] });
-      expect(result?.entries).toEqual([]);
-      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("cancelled");
-      expect(f.queue.editedAttachmentConversations(image.id)).toEqual([f.conversationId]);
-      expect(f.queue.editedAttachmentConversations(randomUUID())).toEqual([]);
-      expect(await f.attachments.preview(image.id)).not.toBeNull();
-      await vi.advanceTimersByTimeAsync(QUEUED_EDIT_GRANT_MS);
-      vi.useRealTimers();
-      await vi.waitFor(async () => expect(await f.attachments.preview(image.id)).toBeNull());
-      expect(f.queue.editedAttachmentConversations(image.id)).toEqual([]);
-      await expect(edit(f, id)).rejects.toThrow("already being sent");
-    } finally { vi.useRealTimers(); await f.close(); }
+      const result = await edit(f, id, "Edited task in place.", 0, []);
+      expect(result?.receipt).toMatchObject({ id, content: "Edited task in place.", attachments: [], editRevision: 1, state: "waiting" });
+      expect(result?.entries).toHaveLength(1);
+      expect(await f.attachments.preview(image.id)).toBeNull();
+      await expect(edit(f, id, "Stale revision edit.", 0)).rejects.toThrow("changed before your edit");
+    } finally { await f.close(); }
   });
 
-  it("never lets an edited message dispatch, and refuses to edit one that is already dispatching", async () => {
+  it("keeps an in-place edited message at its slot, and refuses to edit one that is already dispatching", async () => {
     const f = await fixture();
     try {
       const initial = startRunning(f);
@@ -1747,17 +1765,16 @@ describe("editing, re-confirming and documents in the queue", () => {
       const claimed = randomUUID();
       await f.command("message.queue.enqueue", edited); await f.drain();
       await f.command("message.queue.enqueue", claimed); await f.drain();
-      await edit(f, edited);
-      expect(f.store.queuedMessages.claim(f.conversationId, claimed)).toBe(true);
-      await expect(edit(f, claimed)).rejects.toThrow("already being sent");
-      expect(f.store.queuedMessages.get(f.conversationId, claimed)?.state).toBe("dispatching");
-      expect(f.store.queuedMessages.release(f.conversationId, claimed)).toBe(true);
-      await edit(f, claimed);
+      await edit(f, edited, "Edited first task.", 0);
+      f.store.orchestration.queue.claim({ conversationId: f.conversationId, itemId: claimed, mode: "run" });
+      await expect(edit(f, claimed, "Cannot edit dispatching.", 0)).rejects.toThrow("already being sent");
+      expect(f.store.orchestration.queue.getItem(claimed)?.state).toBe("dispatching");
+      f.store.orchestration.queue.releaseClaim({ conversationId: f.conversationId, itemId: claimed, reason: "transient" });
+      await edit(f, claimed, "Edited second task.", 0);
       f.provider.resolve({ status: "completed" }); await f.drain();
       expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
-      expect(f.provider.runCount).toBe(1);
-      expect(f.store.queuedMessages.get(f.conversationId, edited)?.state).toBe("cancelled");
-      expect(f.store.queuedMessages.get(f.conversationId, claimed)?.state).toBe("cancelled");
+      expect(f.provider.runCount).toBe(2);
+      expect(f.provider.input?.prompt).toContain("Edited first task.");
     } finally { await f.close(); }
   });
 
@@ -1769,18 +1786,19 @@ describe("editing, re-confirming and documents in the queue", () => {
         linkId: randomUUID(), wakeId: randomUUID(), watcherConversationId: randomUUID(),
         preset: "reviewer", watcherLabel: "Codex · test route", delivery: "queue",
       } });
-      await expect(edit(f, id)).rejects.toThrow("watcher note");
+      await expect(edit(f, id, "Try editing note.", 0)).rejects.toThrow("watcher note");
       expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
     } finally { await f.close(); }
   });
 
-  it("re-confirms a route-blocked message with no wider current settings and sends it through the queue", async () => {
+  it("re-confirms a workspace-route-blocked message and sends it through the queue", async () => {
     const f = await fixture();
     try {
       const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
-      f.store.updateConversation(f.conversationId, { modelSelection: { ...f.store.conversation(f.conversationId).modelSelection, modelId: "other-model" } });
+      f.store.updateConversation(f.conversationId, { worktreePath: join(f.workspace, "other-worktree") });
       await f.command("message.queue.send", id);
       expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "blocked", error: QUEUED_ROUTE_CHANGED_ERROR });
+      f.store.updateConversation(f.conversationId, { worktreePath: null });
       const result = await reconfirm(f, id);
       expect(result?.confirmation).toBeUndefined();
       await f.drain();
@@ -1789,34 +1807,27 @@ describe("editing, re-confirming and documents in the queue", () => {
     } finally { await f.close(); }
   });
 
-  it("asks for confirmation instead of silently widening access, and requires the exact current settings", async () => {
+  it("Decision 4.3: does not block queued dispatch when accessMode widens to full", async () => {
     const f = await fixture();
     try {
       const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
       f.store.updateConversation(f.conversationId, { accessMode: "full" });
       await f.command("message.queue.send", id);
-      const asked = await reconfirm(f, id);
-      expect(asked?.confirmation).toEqual({
-        id, queued: { interactionMode: "build", accessMode: "supervised" }, current: { interactionMode: "build", accessMode: "full" },
-      });
-      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "blocked", error: QUEUED_ROUTE_CHANGED_ERROR });
-      const stale = await reconfirm(f, id, { interactionMode: "build", accessMode: "auto-edit" });
-      expect(stale?.confirmation).toBeDefined();
-      expect(f.provider.runCount).toBe(0);
-      await reconfirm(f, id, { interactionMode: "build", accessMode: "full" }); await f.drain();
+      await f.drain();
       expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
       expect(f.provider.runCount).toBe(1);
     } finally { await f.close(); }
   });
 
-  it("treats leaving Plan for Build as wider access", async () => {
+  it("Decision 4.3: does not block queued dispatch when leaving Plan for Build", async () => {
     const f = await fixture({}, { interactionMode: "plan" });
     try {
       const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
       f.store.updateConversation(f.conversationId, { interactionMode: "build" });
       await f.command("message.queue.send", id);
-      expect((await reconfirm(f, id))?.confirmation?.queued).toEqual({ interactionMode: "plan", accessMode: "supervised" });
-      expect(f.provider.runCount).toBe(0);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(1);
     } finally { await f.close(); }
   });
 

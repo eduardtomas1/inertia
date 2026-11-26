@@ -73,23 +73,23 @@ Every preset tells the watcher to answer `SILENT` when it has nothing to add.
 
 A finding appears in the dock as a card. Its first line is the card's title, the rest follows below, and **Check *N* · *time*** says which check found it. The card offers **Send** and **Dismiss**.
 
-- **Send** queues the note for the main chat's next turn. If the main chat is idle, the note starts its next turn right away.
-- When the main chat is running on an agent that can take a message mid-turn (Claude Code, Codex or OpenCode), the arrow next to **Send** opens **Queue for next turn** and **Steer now**. **Steer now** delivers the note into the running turn. If the turn ends or the agent refuses the note before it arrives, the note is queued instead, or starts the main chat's next turn when the chat is idle and nothing else waits, and the card says so.
+- **Send** queues the note for the main chat's next turn. If the main chat is idle and nothing else is queued ahead of it, the note starts its next turn right away.
+- When the main chat is running on an agent whose capability manifest supports mid-turn steering (such as Claude Code, Codex, OpenCode, Pi or Cursor SDK), the arrow next to **Send** opens **Queue for next turn** and **Steer now**. **Steer now** delivers the note into the running turn. If the turn ends or the agent refuses the note before it arrives, the note is queued instead, or starts the main chat's next turn when the chat is idle and nothing else waits, and the card says so.
 - **Dismiss** removes the card without sending anything.
 
 After **Send**, the card shows its status, such as **Queued · sends after the current turn** or **Sent 9:12 PM · after the turn ended**. When **Steer now** fell back, the status says why, for example **Queued · the turn ended before the note arrived** or **Sent 9:12 PM · the turn ended before the note arrived**. If Inertia can't confirm that a steered note arrived, the card says **Not sent** with the reason. A card can be sent only once.
 
-If a queued note leaves the main chat's queue without being sent, because you removed it there or a change to the chat's model, access or workspace blocked it, the card says **Not sent** with the reason, and you can send or dismiss it again. Sending it again or dismissing it withdraws a blocked copy from the queue. A blocked note never holds back the messages queued after it.
+If a queued note leaves the main chat's queue without being sent—because you removed it there, a newer note from the same watcher superseded it, the note became stale (its watcher detached, its finding was dismissed, or the reviewed turn was rolled back), or a route issue blocked it—the card says **Not sent** with the reason, and you can send or dismiss it again. Sending it again or dismissing it withdraws any blocked copy from the queue. A blocked note never holds back the messages queued after it.
 
-Your own queued messages always go before watcher notes. The main chat can hold three queued messages; when it is full, the card says **Not sent** with the reason, and you can send the note once the queue has room. In the main chat's queue, notes are labelled **From watcher**.
+Watcher notes queue in FIFO order alongside your own queued messages (and merge with delegated result deliveries by request time). Watcher notes have their own cap, independent of the main chat's 20-item user and agent queue cap: at most **1 waiting note per watcher** (a newer note from the same watcher automatically supersedes its earlier waiting note) and **5 waiting watcher notes in total** across distinct watchers. When 5 watcher notes are already waiting, the new note is refused, its card says **Not sent** with the reason, and you can send it once a slot opens. In the main chat's queue, notes are labelled **From watcher** and follow the main chat's current model selection when they start.
 
 In the main chat, a delivered note follows a **Note from watcher** divider that names the preset and the watcher's agent, and a steered note carries the same tag. The main agent is told that the note comes from the watcher and, for a note sent automatically, that you didn't choose to send it. The note's **From watcher** label says the same when you point at it. A note is never presented as your own words.
 
 ### Send findings automatically
 
-With **Send findings automatically** on, each finding is sent as soon as its check ends, the same way as **Send**: the note is queued for the main chat's next turn, after your own queued messages, or starts that turn when the main chat is idle. It never steers a running turn. The card's status says that the note was sent automatically, for example **Sent 9:12 PM · automatically · started the main chat's next turn**. Turn it on when you add the watcher or later in the dock's menu; it is off by default.
+With **Send findings automatically** on, each finding is sent as soon as its check ends, the same way as **Send**: the note is queued in FIFO order for the main chat's next turn, or starts that turn when the main chat is idle and nothing waits ahead of it. It never steers a running turn. The card's status says that the note was sent automatically, for example **Sent 9:12 PM · automatically · started the main chat's next turn**. Turn it on when you add the watcher or later in the dock's menu; it is off by default.
 
-A finding from a turn that a watcher note started is never sent automatically, so the watcher and the main agent can't keep each other going. Its card waits for you to choose **Send** or **Dismiss**. Automatic sending also leaves the last place in the main chat's queue for you: when the queue is full or has one place left, the card says **Not sent**, and you can choose **Send** yourself once the queue has room.
+A finding from a turn that a watcher note started is never sent automatically, so the watcher and the main agent can't keep each other going. Its card waits for you to choose **Send** or **Dismiss**. Automatic sending follows the same watcher-note limits (1 waiting note per watcher, superseded by a newer note, and 5 watcher notes in total across distinct watchers, independent of your 20-item queue cap).
 
 ## Access
 
@@ -217,15 +217,15 @@ The watcher has chat access, and its access needs your approval for what it is t
 
 ### Send doesn't queue the note
 
-The main chat already has three queued messages. Send or remove one, then send the note again.
+The main chat already has five queued watcher notes across watchers. Send or remove one, then send the note again.
 
 ### Steer now is missing
 
-**Steer now** appears only while the main chat is running on Claude Code, Codex or OpenCode. Otherwise the note is queued for the next turn.
+**Steer now** appears only while the main chat is running on an agent whose capability manifest declares native mid-turn steering (Claude Code, Codex, OpenCode, Pi or Cursor SDK). Otherwise the note is queued for the next turn.
 
 ### A finding wasn't sent automatically
 
-It came from a turn that a watcher note started, or the main chat's queue was full or had one place left. Choose **Send** on its card.
+It came from a turn that a watcher note started, or the main chat already had five queued watcher notes. Choose **Send** on its card once a slot opens.
 
 ### A chat can't be deleted
 

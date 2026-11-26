@@ -6,7 +6,8 @@ import {
   type DelegatedTask,
   type DelegatedTaskView,
 } from "../../../shared/orchestration-delegation";
-import { randomUUID } from "node:crypto";
+import type { RunInterruptCause } from "../../../shared/orchestration-run-control";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { RuntimeStore } from "../../database";
 import {
@@ -23,15 +24,17 @@ import {
 } from "../../orchestration-v2/delegation-recovery";
 import type { StoredLimitResetPlan } from "../../persistence/limit-reset-repository";
 import type { RestartContinuationPlan } from "../../persistence/restart-continuation-repository";
-import { stopOwnedManagedTurn } from "../managed-turn-ownership";
+import { RuntimeRequestError } from "../../runtime-errors";
+import { requestAgentStop, SUPERSEDED_STOP_CODE } from "../commands/agent-stop-command";
 import {
   limitResetCancel,
   onScheduledPlanSettled,
   scheduledPlanSettled,
   type ScheduledPlanSettlement,
 } from "../scheduled-plan-settlements";
+import { liveProviderRunOwnership } from "../turns/turn-checkout-activity";
 import type { TurnController } from "../turns/turn-controller";
-import { sameTurnOwner } from "../turns/turn-ownership";
+import { sameTurnOwner, type TurnOwnerIdentity } from "../turns/turn-ownership";
 import { activeTaskTurn, decorateDelegationNeedsAction, delegatedTaskView, type DelegationInteractions } from "./task-view";
 import { clampDelegatedWaitTimeout, DelegatedTaskSignals, waitForDelegatedTask } from "./task-wait";
 
@@ -57,6 +60,7 @@ export interface DelegationTaskServiceDependencies {
   changed?(conversationIds: readonly string[]): void;
   automaticWakes?(): boolean;
   pollMs?: number;
+  offerRetryDelayMs?(attempt: number): number;
 }
 
 export interface DelegationCaller {
@@ -81,6 +85,8 @@ export interface DelegationFollowUpInput {
 
 const MAX_CANCEL_DEPTH = 3;
 const MAX_PROPAGATION_DEPTH = 4;
+const MAX_OFFER_RETRIES = 3;
+const DEFAULT_OFFER_RETRY_DELAY_MS = (attempt: number): number => 250 * 2 ** (attempt - 1);
 const CONTINUATION_DISMISSED = "The delegated task was cancelled.";
 
 function followUpTitle(title: string): string {
@@ -89,6 +95,7 @@ function followUpTitle(title: string): string {
 
 export class DelegationTaskService {
   readonly signals = new DelegatedTaskSignals();
+  readonly #offerRetries = new Map<string, { attempt: number; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(private readonly dependencies: DelegationTaskServiceDependencies) {
     onScheduledPlanSettled(dependencies.store, (settlement) => {
@@ -203,7 +210,8 @@ export class DelegationTaskService {
     const task = callerConversationId === null ? this.requireTask(taskId) : this.owned(callerConversationId, taskId);
     const target = this.cancelTarget(task);
     if (task.status === "running" && !target.identity && !this.nestedUnresolved(task).length && !this.armedLimitPlan(task)
-      && !this.pendingContinuation(task) && this.delegation.reads.workState(task) !== "waiting_for_children") {
+      && !this.pendingContinuation(task) && !this.hasActiveChildQueue(task)
+      && this.delegation.reads.workState(task) !== "waiting_for_children") {
       throw new DelegationTaskError("task_not_cancellable",
         "The delegated task has no running turn, agents of its own or armed resume to cancel.");
     }
@@ -215,8 +223,9 @@ export class DelegationTaskService {
     const { task } = target;
     const child = task.childConversationId;
     if (target.identity && sameTurnOwner(this.dependencies.turns.activeIdentity(child), target.identity)) {
-      await stopOwnedManagedTurn(this.dependencies.store, this.dependencies.turns, child, target.identity);
+      await this.stopChildTurn(child, target.identity, actor);
     }
+    this.withdrawAgentChildQueueItems(child);
     const plan = this.armedLimitPlan(task);
     if (plan) this.cancelLimitPlan(plan);
     const continuation = this.pendingContinuation(task);
@@ -402,8 +411,109 @@ export class DelegationTaskService {
     const queue = this.dependencies.queue();
     if (!queue) return;
     for (const conversationId of new Set(conversationIds)) {
-      if (!this.dependencies.store.queuedMessages.activeDelegatedDelivery(conversationId)) continue;
-      await queue.offerDelegated(conversationId).catch(() => undefined);
+      if (!this.hasActiveDelegatedDelivery(conversationId)) {
+        this.clearOfferRetry(conversationId);
+        continue;
+      }
+      try {
+        await queue.offerDelegated(conversationId);
+        this.clearOfferRetry(conversationId);
+      } catch (error) {
+        this.scheduleOfferRetry(conversationId, error);
+      }
+    }
+  }
+
+  private hasActiveDelegatedDelivery(conversationId: string): boolean {
+    return this.dependencies.store.queuedMessages.activeDelegatedDelivery(conversationId) !== null
+      || this.dependencies.store.orchestration.queue.listActive(conversationId)
+        .some((item) => item.kind === "delegated-results");
+  }
+
+  private clearOfferRetry(conversationId: string): void {
+    const pending = this.#offerRetries.get(conversationId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.#offerRetries.delete(conversationId);
+  }
+
+  private scheduleOfferRetry(conversationId: string, error: unknown): void {
+    const previous = this.#offerRetries.get(conversationId);
+    const attempt = (previous?.attempt ?? 0) + 1;
+    if (previous) clearTimeout(previous.timer);
+    const detail = error instanceof Error ? error.message : "unknown error";
+    if (attempt > MAX_OFFER_RETRIES) {
+      this.#offerRetries.delete(conversationId);
+      console.warn("Delegated delivery offer retries exhausted.", detail);
+      return;
+    }
+    console.warn(`Delegated delivery offer failed (attempt ${attempt}/${MAX_OFFER_RETRIES}); scheduling retry.`, detail);
+    const delayMs = Math.max(0, (this.dependencies.offerRetryDelayMs ?? DEFAULT_OFFER_RETRY_DELAY_MS)(attempt));
+    const timer = setTimeout(() => {
+      if (this.#offerRetries.get(conversationId)?.timer !== timer) return;
+      void this.offer([conversationId]);
+    }, delayMs);
+    timer.unref?.();
+    this.#offerRetries.set(conversationId, { attempt, timer });
+  }
+
+  private async stopChildTurn(conversationId: string, owner: TurnOwnerIdentity, actor: string): Promise<void> {
+    const cause: RunInterruptCause = actor.startsWith("user-") ? "user" : "agent";
+    const actorId = actor.startsWith("user-") ? "human" : "agent";
+    const rawCommandId = `delegation-cancel:${actor}:${owner.turnId}`;
+    const commandId = rawCommandId.length <= 240
+      ? rawCommandId
+      : `delegation-cancel:${createHash("sha256").update(rawCommandId).digest("hex")}`;
+    const command = {
+      type: "agent.stop",
+      requestId: commandId,
+      payload: { conversationId, expectedTurnId: owner.turnId, expectedRunId: owner.runId },
+    };
+    try {
+      await requestAgentStop(
+        { store: this.dependencies.store, turns: this.dependencies.turns },
+        {
+          conversationId,
+          expectedTurnId: owner.turnId,
+          expectedRunId: owner.runId,
+          cause,
+          rejection: null,
+          source: { actorId, commandId, command },
+        },
+      );
+    } catch (error) {
+      if (error instanceof RuntimeRequestError && error.code === SUPERSEDED_STOP_CODE) return;
+      throw error;
+    }
+    await this.dependencies.turns.waitForProviderCleanup([conversationId]);
+    const ownsProvider = liveProviderRunOwnership(
+      this.dependencies.store,
+      this.dependencies.store.providerRunOwnership.forConversation(conversationId),
+    ).some((run) => sameTurnOwner(run, owner));
+    if (ownsProvider || sameTurnOwner(this.dependencies.turns.activeIdentity(conversationId), owner)) {
+      throw new Error("Stop was requested, but exact provider cleanup was not confirmed.");
+    }
+  }
+
+  private hasActiveChildQueue(task: DelegatedTask): boolean {
+    return this.dependencies.store.orchestration.queue.listActive(task.childConversationId).length > 0
+      || this.dependencies.store.queuedMessages.list(task.childConversationId).length > 0;
+  }
+
+  private withdrawAgentChildQueueItems(childConversationId: string): void {
+    const active = this.dependencies.store.orchestration.queue.listActive(childConversationId);
+    for (const item of active) {
+      if (item.createdBy !== "agent" || (item.state !== "waiting" && item.state !== "blocked")) continue;
+      try {
+        this.dependencies.store.orchestration.queue.cancel({
+          conversationId: childConversationId,
+          itemId: item.id,
+          reason: "withdrawn",
+          detail: CONTINUATION_DISMISSED,
+        });
+      } catch {
+        // Ignore race if the item already transitioned before cancellation.
+      }
     }
   }
 

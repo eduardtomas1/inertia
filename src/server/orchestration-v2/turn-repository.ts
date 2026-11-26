@@ -209,25 +209,49 @@ export class OrchestratedTurnRepository {
           events.push({ type: "thread.configured", payload: { providerId: turn.providerId,
             selection, workspaceKey, title: conversation.title } });
         }
+        const runAcceptedIndex = events.length;
         events.push({ type: "run.accepted", payload: {
           run: { id: turn.runId, threadId: conversation.id, projectId: conversation.projectId,
             turnId: turn.id, messageId: queued.message.id, attemptId, providerInstanceId: instanceId,
             providerId: turn.providerId, selection, workspaceKey,
             status: "queued", executionState: "queued", providerState: null,
             stateRevision: 0, requestedAt: turn.requestedAt,
-            startedAt: null, completedAt: null, terminalMessageId: null },
+            startedAt: null, completedAt: null, terminalMessageId: null,
+            ...(input.queuedMessageId ? { queueItemId: input.queuedMessageId } : {}) },
           attempt: { id: attemptId, runId: turn.runId, turnId: turn.id, threadId: conversation.id,
             providerInstanceId: instanceId, status: "queued", nativeSessionId: turn.providerSessionBefore,
             nativeThreadId: null, nativeTurnId: null, interruptRequestedAt: null,
             cleanup: "not-started", runtimeId: this.runtimeId },
         } });
+        const queueItemRow = input.queuedMessageId ? this.events.projection("queue-item", input.queuedMessageId) : null;
+        const queueItemState = queueItemRow && typeof queueItemRow.value === "object" && queueItemRow.value !== null
+          ? (queueItemRow.value as { state?: unknown }).state
+          : null;
+        if (input.queuedMessageId && queueItemState === "dispatching") {
+          const deliveryRow = this.database.prepare("SELECT delivery_mode FROM queued_messages WHERE id = ? AND conversation_id = ?")
+            .get(input.queuedMessageId, conversation.id) as { delivery_mode: string | null } | undefined;
+          events.push({
+            type: "queue.item-delivered",
+            payload: {
+              itemId: input.queuedMessageId,
+              delivery: {
+                mode: deliveryRow?.delivery_mode === "after-stop" ? "after-stop" : "run",
+                runId: turn.runId,
+                attemptId,
+                turnId: turn.id,
+                messageId: queued.message.id,
+                deliveredAt: turn.requestedAt,
+              },
+            },
+          });
+        }
         if (relocatedFrom) events.push(this.backings.relocation({ id: turn.runId, attemptId, threadId: conversation.id,
           providerInstanceId: instanceId, workspaceKey }, relocatedFrom.id, turn.providerSessionBefore));
         if (input.contextHandoff) events.push(this.backings.preparation(turn.runId, attemptId,
           conversation.id, turn.requestedAt, input.contextHandoff, relocatedFrom ?? undefined));
         this.events.commit({ ...identity, command,
           expectedRevision: this.events.revision(conversation.id), events,
-          effects: [{ id: this.startEffectId(turn.runId), eventIndex: events.length - 1,
+          effects: [{ id: this.startEffectId(turn.runId), eventIndex: runAcceptedIndex,
             kind: "provider.start", replayPolicy: "process-bound",
             payload: { runId: turn.runId, turnId: turn.id, attemptId } }],
           result: { turnId: turn.id, runId: turn.runId, messageId: queued.message.id, attemptId },

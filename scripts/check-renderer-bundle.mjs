@@ -86,9 +86,9 @@ const budgets = {
   // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
   // x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 967_089 bytes on
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 1_002_485 bytes on
   // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  mainWorkbenchFirstLoadJavaScript: 967_089 + 512,
+  mainWorkbenchFirstLoadJavaScript: 1_002_485 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -100,9 +100,9 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 849_024 bytes on
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 884_457 bytes on
   // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  detachedChatFirstLoadJavaScript: 849_024 + 512,
+  detachedChatFirstLoadJavaScript: 884_457 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -186,9 +186,9 @@ const budgets = {
   // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
   filesFirstLoadJavaScript: 164_294 + 512,
   deferredMarkdownJavaScript: 440 * kibibyte,
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 704_753 bytes on
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 705_426 bytes on
   // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  transcriptJavaScript: 704_753 + 512,
+  transcriptJavaScript: 705_426 + 512,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -210,9 +210,9 @@ const budgets = {
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 17_464 bytes on
-  // Linux x64 (#777 queue edit/reattach additions); retain 256-byte headroom.
-  deferredComposerQueueJavaScript: 17_464 + 256,
+  // Orchestrator V2 Phase 5 deferred queue closure (excluding initial routes) measures 20_773 bytes on
+  // Linux x64; retain 256-byte headroom.
+  deferredComposerQueueJavaScript: 20_773 + 256,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
   // Account only this new module here; all existing ceilings remain unchanged.
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
@@ -283,9 +283,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 2_791_207 bytes on
-  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  coreJavaScript: 2_791_207 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 2_821_249 bytes on
+  // Linux x64 (after subtracting full deferredComposerQueueJavaScript closure); keep 512-byte headroom.
+  coreJavaScript: 2_821_249 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -625,8 +625,22 @@ const deferredProviderAuthJavaScriptBytes = await assetBytes(
 const deferredProviderMaintenanceJavaScriptBytes = await assetBytes(
   `assets/${deferredProviderMaintenanceJavaScript}`,
 );
-const deferredComposerQueueJavaScriptBytes = await assetBytes(
-  `assets/${deferredComposerQueueJavaScript}`,
+if (
+  entryJavaScriptClosure.has(deferredComposerQueueJavaScript)
+  || mainWorkbenchJavaScriptClosure.has(deferredComposerQueueJavaScript)
+  || detachedChatJavaScriptClosure.has(deferredComposerQueueJavaScript)
+) {
+  throw new Error(
+    "Renderer bundle check found the deferred composer queue surface in an initial chat route.",
+  );
+}
+const deferredComposerQueueJavaScriptBytes = await closureBytes(
+  await javaScriptClosure(deferredComposerQueueJavaScript),
+  new Set([
+    ...entryJavaScriptClosure,
+    ...mainWorkbenchJavaScriptClosure,
+    ...detachedChatJavaScriptClosure,
+  ]),
 );
 const deferredTerminalJavaScriptBytes = await assetBytes(
   `assets/${deferredTerminalJavaScript}`,

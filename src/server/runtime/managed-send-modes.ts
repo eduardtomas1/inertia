@@ -1,27 +1,45 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
 import type { Conversation } from "../../shared/contracts";
-import { MAX_QUEUED_MESSAGES, type MessageQueueResult } from "../../shared/queued-messages";
+import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
+import {
+  MAX_QUEUED_USER_AND_AGENT_ITEMS,
+  queueAgentCommandId,
+  type QueueEnqueuePlacement,
+} from "../../shared/orchestration-queue";
+import type { MessageQueueResult } from "../../shared/queued-messages";
 import type { RuntimeStore } from "../database";
-import { QueuedMessageLimitError, releasesQueue } from "../persistence/queued-message-repository";
+import { OrchestrationConflict } from "../orchestration-v2/types";
+import { QueuedMessageLimitError } from "../persistence/queued-message-repository";
 import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../provider/contracts";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import type { ProviderManager } from "../providers";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 import { prepareForkSession } from "./fork-session-service";
 import { MAX_PROMPT_CHARS, MULTILINE_PATTERN, idSchema, safeMultilineSchema } from "./managed-chat-schemas";
-import { recordManagedTurn, recordQueuedManagedTurn } from "./managed-turn-ownership";
+import {
+  MANAGED_TURN_GONE_MESSAGE,
+  recordManagedTurn,
+  recordQueuedManagedTurn,
+  stopManagedTurnForAgent,
+} from "./managed-turn-ownership";
+import type { HiddenProviderInstruction } from "./turns/request-context";
 import type { TurnController } from "./turns/turn-controller";
+import { sameTurnOwner, type TurnOwnerIdentity } from "./turns/turn-ownership";
+import { neutralizeUntrustedAgentText } from "./untrusted-agent-text";
 
+/** Maximum queued user + agent items per managed chat (Phase 5 Decision 4.1). */
+export const MAX_QUEUED_USER_MESSAGES = MAX_QUEUED_USER_AND_AGENT_ITEMS;
 /** The queued-message store keeps at most this many characters per message. */
 const MAX_QUEUED_CONTENT_CHARS = 20_000;
+const LEADING_COMMAND_OR_SKILL_PATTERN = /^(?:\/|\$)[\w:-]+(?:\s|$)/u;
+
 export const STEER_IDLE = "The managed chat has no running turn to steer; send with mode auto or queue.";
 export const RESTART_IDLE = "The managed chat has no running turn to restart; send with mode auto.";
-const QUEUE_FULL = `The managed chat already has ${MAX_QUEUED_MESSAGES} queued messages; wait for one to run, or send with another mode.`;
+const QUEUE_FULL = `The managed chat already has ${MAX_QUEUED_USER_MESSAGES} queued messages; wait for one to run, or send with another mode.`;
 const QUEUE_UNAVAILABLE = "Queued sends are not available in this Inertia runtime.";
-const QUEUE_HELD_NEXT = "Its last turn did not complete, so its queue waits for the user to send this; to start a turn now, send with mode auto.";
 const TERMINAL_RESUMED = "End the resumed provider terminal for the target chat before sending another message.";
 export const STEER_ENDED = "The managed chat's turn ended before the follow-up was sent; nothing was sent. Send with mode auto to start a new turn.";
 
@@ -52,7 +70,7 @@ export const sendSchema = z.object({
 
 export const SEND_MESSAGE_TOOL_DEFINITION: ProviderHostToolDefinition = {
   name: "inertia_send_message",
-  description: `Send \`content\` to a chat this chat created. \`mode\`: auto steers a running turn, else starts one; queue runs after the current turn (max ${MAX_QUEUED_MESSAGES}, ${MAX_QUEUED_CONTENT_CHARS.toLocaleString("en")} chars); steer needs a running turn; restart stops it and starts anew. Inertia asks the user first.`,
+  description: `Send \`content\` to a chat this chat created. \`mode\`: auto steers a running turn when steerable else queues or starts one; queue runs after the current turn (max ${MAX_QUEUED_USER_MESSAGES}, ${MAX_QUEUED_CONTENT_CHARS.toLocaleString("en")} chars) or starts immediately when idle; steer needs a running turn; restart stops it and queues at position 1. Supervised/auto-edit ask the user first.`,
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -67,9 +85,10 @@ export const SEND_MESSAGE_TOOL_DEFINITION: ProviderHostToolDefinition = {
   readOnly: false,
 };
 
-/** The message queue a parent's `mode: "queue"` sends go through. */
+/** The message queue a parent's queued sends coordinate with. */
 export interface ManagedMessageQueue {
-  enqueueManagedMessage(input: { conversationId: string; id: string; content: string }): MessageQueueResult;
+  enqueueManagedMessage?(input: { conversationId: string; id: string; content: string }): MessageQueueResult;
+  schedule?(conversationId: string): void | Promise<void>;
 }
 
 /** Links a child turn a send dispatched to the parent's delegated task for that child, answering its task id. */
@@ -79,15 +98,56 @@ export interface ManagedDispatchDependencies {
   store: RuntimeStore;
   turns: TurnController;
   providers: Pick<ProviderManager, "resolveModelRoute" | "nativeConversation" | "isRunning">;
-  providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "acquire" | "release">;
+  providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "acquire" | "isActive" | "release">;
   /** Resolved per call: the queue runtime starts after the chat manager. */
   messageQueue?(): ManagedMessageQueue | undefined;
+  isCompacting?(conversationId: string): boolean;
   broadcastSnapshot(): void;
   now(): string;
 }
 
 function json(value: unknown): ProviderHostToolResult {
   return { success: true, text: JSON.stringify(value) };
+}
+
+/**
+ * Deterministic UUID per operation so a G5 replay of `agent-queue:<operationId>`
+ * targets the exact same queue item identity.
+ */
+export function deterministicAgentQueueItemId(operationId: string): string {
+  const bytes = createHash("sha256").update(`agent-queue-item\u0000${operationId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function agentSenderLine(source: Pick<Conversation, "id" | "title">): string {
+  const safeTitle = neutralizeUntrustedAgentText(source.title).replace(/\s+/gu, " ").trim().slice(0, 120) || "Untitled chat";
+  return `[Inertia: the agent in chat "${safeTitle}" (${source.id}) sent this message, not the user.]`;
+}
+
+/**
+ * T3 `b0b2c4f95` (`withMessageSenderNote`): attributes agent-sent messages in
+ * provider-visible text while leaving leading `/command` and `$skill` mentions
+ * untouched and never altering the user-visible persisted message text.
+ */
+export function withAgentSenderNote(content: string, source: Pick<Conversation, "id" | "title">): string {
+  if (LEADING_COMMAND_OR_SKILL_PATTERN.test(content.trimStart())) return content;
+  return `${agentSenderLine(source)}\n\n${content}`;
+}
+
+/**
+ * Hidden provider instruction variant for new turns so the persisted user
+ * message keeps its exact visible text while the provider clearly sees that
+ * another agent chat sent it.
+ */
+export function agentSenderHiddenInstruction(
+  content: string,
+  source: Pick<Conversation, "id" | "title">,
+): HiddenProviderInstruction[] {
+  if (LEADING_COMMAND_OR_SKILL_PATTERN.test(content.trimStart())) return [];
+  return [{ label: "inertia-agent-sender", text: agentSenderLine(source) }];
 }
 
 function dispatching(dependencies: ManagedDispatchDependencies, operationId: string, target: Conversation): void {
@@ -100,6 +160,57 @@ function dispatching(dependencies: ManagedDispatchDependencies, operationId: str
   );
 }
 
+export function activeUserAndAgentQueueCount(store: RuntimeStore, conversationId: string): number {
+  const v2Count = store.orchestration.queue.listActive(conversationId)
+    .filter((item) => item.kind === "message"
+      && item.userMessageId === null
+      && item.steerFollowUpOfRunId === undefined
+      && item.requeuedFromRunId === undefined)
+    .length;
+  return Math.max(v2Count, store.queuedMessages.cappedCount(conversationId));
+}
+
+export function hasUnheldWaitingAgentItem(store: RuntimeStore, conversationId: string): boolean {
+  if (store.orchestration.queue.listActive(conversationId).some((item) =>
+    item.kind === "message" && item.createdBy === "agent" && item.state === "waiting" && !item.queueHeld)) {
+    return true;
+  }
+  return store.queuedMessages.list(conversationId).some((entry) =>
+    entry.createdBy === "agent" && entry.state === "waiting" && entry.queueHeld !== true);
+}
+
+export function hasUnheldWaitingQueueItem(store: RuntimeStore, conversationId: string): boolean {
+  if (store.orchestration.queue.listActive(conversationId).some((item) =>
+    item.state === "waiting" && !item.queueHeld)) {
+    return true;
+  }
+  return store.queuedMessages.list(conversationId).some((entry) =>
+    entry.state === "waiting" && entry.queueHeld !== true && entry.userMessageId === null);
+}
+
+/**
+ * N10 & T3 `0a159c9fb`: in `mode: "auto"`, queue instead of steering when the
+ * target chat is stopping (`interruptRequested`), compacting, preparing/not yet
+ * steerable, lacks steer capability (`!supportsActiveParentFollowUp`), or
+ * already has an unheld waiting agent item in its queue.
+ */
+export function shouldAutoQueueInsteadOfSteer(
+  dependencies: Pick<ManagedDispatchDependencies, "store" | "turns" | "isCompacting">,
+  target: Conversation,
+): boolean {
+  if (dependencies.isCompacting?.(target.id) === true) return true;
+  if (dependencies.store.orchestration.runControl.interruptRequested(target.id)) return true;
+  const activeIdentity = dependencies.turns.activeIdentity(target.id);
+  const latestTurn = dependencies.store.latestAgentTurnForConversation(target.id);
+  const activeTurn = activeIdentity && latestTurn?.id === activeIdentity.turnId ? latestTurn : null;
+  if (activeTurn?.runState?.state === "cancelling") return true;
+  if (dependencies.turns.isPreparing?.(target.id) === true || activeTurn?.status === "starting") return true;
+  const activeHarnessId = activeTurn?.harnessId ?? target.modelSelection.harnessId;
+  if (!supportsActiveParentFollowUp(activeHarnessId)) return true;
+  if (hasUnheldWaitingAgentItem(dependencies.store, target.id)) return true;
+  return false;
+}
+
 /** Delivers `content` into the child's running turn as a follow-up. */
 export async function steerManagedTurn(
   dependencies: ManagedDispatchDependencies,
@@ -108,17 +219,19 @@ export async function steerManagedTurn(
   operationId: string,
   signal: AbortSignal,
   link?: ManagedFollowUpLink,
+  source?: Pick<Conversation, "id" | "title">,
 ): Promise<ProviderHostToolResult> {
   const lease = dependencies.turns.acquireFollowUpAdmission(target.id);
   if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
   try {
     dispatching(dependencies, operationId, target);
+    const providerContent = source ? withAgentSenderNote(content, source) : content;
     const steered = await dependencies.turns.steer(lease, {
       content,
       imagePaths: [],
     }, [], () => recordManagedTurn(dependencies.store, operationId, {
       id: lease.turnId, runId: lease.runId,
-    }, dependencies.now()), signal);
+    }, dependencies.now()), signal, { providerContent });
     if (steered.kind !== "accepted" || !steered.message.turnId) throw new Error("The target provider did not accept the follow-up.");
     const taskId = await link?.({ id: lease.turnId, runId: lease.runId }, "steer") ?? null;
     dependencies.broadcastSnapshot();
@@ -135,10 +248,9 @@ export async function steerManagedTurn(
 }
 
 /**
- * Starts a new child turn with `content`, recorded as this operation's dispatch, so it stays linked to the parent's
- * delegated task and is cancelled with a parent turn that fails. Unlike the user's direct send, it does not wait
- * behind an unread follow-up or a delegated result in the child's queue; the queue runs those after this turn.
- * Deviation until Phase 5 package 2: T3 places an unread steer before a racing start (N2).
+ * Starts a new child turn with `content`, recorded as this operation's dispatch.
+ * Under P1, an agent send to an idle chat with a held queue starts immediately
+ * past the held items while leaving those items held.
  */
 export async function startManagedTurn(
   dependencies: ManagedDispatchDependencies,
@@ -146,8 +258,13 @@ export async function startManagedTurn(
   content: string,
   operationId: string,
   signal: AbortSignal,
-  options: { restarted?: { stoppedTurnId: string }; link?: ManagedFollowUpLink } = {},
-): Promise<ProviderHostToolResult> {
+  options: {
+    source?: Pick<Conversation, "id" | "title">;
+    restarted?: { stoppedTurnId: string; queuedMessageId?: string };
+    link?: ManagedFollowUpLink;
+    alreadyDispatching?: boolean;
+  } = {},
+): Promise<{ result: ProviderHostToolResult; turnId: string; runId: string; messageId: string }> {
   const { restarted } = options;
   if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
   if (dependencies.store.conversationWork.restoreBlocksConversation(target.id)) {
@@ -161,11 +278,14 @@ export async function startManagedTurn(
     if (!admission) throw new Error("The target chat cannot accept a message right now.");
     await prepareForkSession(dependencies, target.id, signal);
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
-    dispatching(dependencies, operationId, target);
+    if (!options.alreadyDispatching) dispatching(dependencies, operationId, target);
+    const internalInstructions = options.source ? agentSenderHiddenInstruction(content, options.source) : [];
     const queued = dependencies.turns.queue({
       conversationId: target.id,
       content,
       activateConversation: false,
+      ...(restarted?.queuedMessageId ? { queuedMessageId: restarted.queuedMessageId } : {}),
+      ...(internalInstructions.length > 0 ? { internalInstructions } : {}),
     }, undefined, admission);
     recordQueuedManagedTurn(dependencies.store, dependencies.turns, operationId, queued.turn, dependencies.now());
     const taskId = await options.link?.(queued.turn, "send") ?? null;
@@ -174,14 +294,16 @@ export async function startManagedTurn(
       throw new Error("The target chat could not start the new turn.");
     }
     dependencies.broadcastSnapshot();
-    return json({
+    const result = json({
       conversationId: target.id,
       turnId: queued.turn.id,
-      disposition: "new-turn",
+      disposition: restarted ? "restarted" : "new-turn",
       accepted: true,
       ...(restarted ? { stoppedTurnId: restarted.stoppedTurnId } : {}),
+      ...(restarted?.queuedMessageId ? { queuedMessageId: restarted.queuedMessageId } : {}),
       ...(taskId ? { taskId } : {}),
     });
+    return { result, turnId: queued.turn.id, runId: queued.turn.runId, messageId: queued.message.id };
   } finally {
     admission?.release();
     dependencies.providerTerminalResumes.release(target.id);
@@ -189,8 +311,9 @@ export async function startManagedTurn(
 }
 
 /**
- * Refuses what would keep a new child turn from starting. A restart checks it before its approval and again just
- * before its stop, so it never stops a turn and then sends nothing for these reasons.
+ * Refuses what would keep a new child turn from starting. A restart checks it
+ * before its approval and again just before its stop, so it never stops a turn
+ * and then sends nothing for these reasons.
  */
 export function assertManagedTurnCanStart(
   dependencies: Pick<ManagedDispatchDependencies, "store"> & {
@@ -214,43 +337,287 @@ export function assertManagedQueueRoom(
   target: Conversation,
 ): void {
   messageQueue(dependencies);
-  // The queue's own cap: unread follow-ups and a delegated result wait outside it.
-  if (dependencies.store.queuedMessages.cappedCount(target.id) >= MAX_QUEUED_MESSAGES) {
+  if (activeUserAndAgentQueueCount(dependencies.store, target.id) >= MAX_QUEUED_USER_MESSAGES) {
     throw new Error(QUEUE_FULL);
   }
 }
 
 /**
- * Adds the message to the child's ordinary message queue, which sends it
- * after the current turn completes. The turn it starts is the user's queue
- * at work, not this operation's dispatch, so a parent turn that later fails
- * does not cancel it; the user can still remove it from the queue.
+ * Commits a managed queued message atomically via V2 `store.orchestration.queue`
+ * under a G5 receipt `agent-queue:<operationId>`, inheriting hold state under
+ * H2 unless `skipHoldInheritance` is set (for Stop-and-send restarts).
  */
 export function queueManagedMessage(
   dependencies: ManagedDispatchDependencies,
   target: Conversation,
   content: string,
   operationId: string,
-): ProviderHostToolResult {
+  options: {
+    placement?: QueueEnqueuePlacement;
+    queueHeld?: boolean;
+    skipHoldInheritance?: true;
+    skipDispatchTransition?: boolean;
+  } = {},
+): { result: ProviderHostToolResult; itemId: string; queueHeld: boolean; position: number } {
   const queue = messageQueue(dependencies);
-  dispatching(dependencies, operationId, target);
-  const id = randomUUID();
-  let queued: MessageQueueResult;
+  const itemId = deterministicAgentQueueItemId(operationId);
+  const existingItem = dependencies.store.orchestration.queue.getItem(itemId);
+  if (!existingItem && activeUserAndAgentQueueCount(dependencies.store, target.id) >= MAX_QUEUED_USER_MESSAGES) {
+    throw new Error(QUEUE_FULL);
+  }
+  if (!options.skipDispatchTransition) dispatching(dependencies, operationId, target);
+  let enqueued: ReturnType<RuntimeStore["orchestration"]["queue"]["enqueue"]>;
   try {
-    queued = queue.enqueueManagedMessage({ conversationId: target.id, id, content });
+    enqueued = dependencies.store.orchestration.queue.enqueue({
+      conversationId: target.id,
+      itemId,
+      content,
+      kind: "message",
+      createdBy: "agent",
+      creationSource: "mcp",
+      followsThreadSelection: true,
+      ...(options.placement !== undefined ? { placement: options.placement } : {}),
+      ...(options.queueHeld !== undefined ? { queueHeld: options.queueHeld } : {}),
+      ...(options.skipHoldInheritance ? { skipHoldInheritance: true as const } : {}),
+      requestedAt: dependencies.now(),
+      commandType: "message.queue.enqueue",
+      source: {
+        actorId: "runtime",
+        commandId: queueAgentCommandId(operationId),
+        command: {
+          type: "message.queue.enqueue",
+          conversationId: target.id,
+          id: itemId,
+          content,
+          createdBy: "agent",
+          creationSource: "mcp",
+        },
+      },
+    });
   } catch (error) {
-    if (error instanceof QueuedMessageLimitError) throw new Error(QUEUE_FULL);
+    if (error instanceof QueuedMessageLimitError || (error instanceof OrchestrationConflict && error.code === "revision-conflict")) {
+      throw new Error(QUEUE_FULL);
+    }
     throw error;
   }
-  const position = queued.entries.findIndex((entry) => entry.id === id) + 1;
-  const held = !dependencies.turns.isActive(target.id)
-    && !releasesQueue(dependencies.store.latestAgentTurnForConversation(target.id));
-  return json({
+  const listed = dependencies.store.queuedMessages.list(target.id);
+  const listedPos = listed.findIndex((entry) => entry.id === itemId) + 1;
+  const position = listedPos > 0 ? listedPos : (enqueued.value.queuePosition ?? 1);
+  void Promise.resolve(queue.schedule?.(target.id)).catch(() => undefined);
+  dependencies.broadcastSnapshot();
+  const result = json({
     conversationId: target.id,
-    queuedMessageId: id,
+    queuedMessageId: itemId,
     disposition: "queued",
     ...(position > 0 ? { position } : {}),
+    ...(enqueued.value.queueHeld ? { held: true } : {}),
     accepted: true,
-    ...(held ? { next: QUEUE_HELD_NEXT } : {}),
   });
+  return { result, itemId, queueHeld: enqueued.value.queueHeld, position };
+}
+
+/**
+ * N19 row `b` & `c`: `mode: "restart"` routes through Stop-and-send at position
+ * 1 while keeping the turn identity captured before approval (recorded
+ * deviation c). Stops only the exact captured turn, enqueues at position 1
+ * unheld under `agent-queue:<operationId>`, and starts it immediately once
+ * cleanup is confirmed (unless an earlier delegated delivery precedes it).
+ */
+export async function restartManagedTurn(
+  dependencies: ManagedDispatchDependencies,
+  source: Pick<Conversation, "id" | "title">,
+  target: Conversation,
+  content: string,
+  operationId: string,
+  signal: AbortSignal,
+  restart: TurnOwnerIdentity | null,
+  link?: ManagedFollowUpLink,
+): Promise<ProviderHostToolResult> {
+  if (!restart) throw new Error(RESTART_IDLE);
+  assertManagedTurnCanStart(dependencies, target);
+  if (!sameTurnOwner(dependencies.turns.activeIdentity(target.id), restart)) {
+    throw new Error(MANAGED_TURN_GONE_MESSAGE);
+  }
+  const stopped = await stopManagedTurnForAgent(
+    dependencies.store,
+    dependencies.turns,
+    target.id,
+    restart,
+    operationId,
+  );
+  if (stopped !== "stopped") throw new Error(MANAGED_TURN_GONE_MESSAGE);
+  if (signal.aborted) {
+    throw new Error("The parent turn ended after the managed chat stopped; the new message was not sent.");
+  }
+  const itemId = deterministicAgentQueueItemId(operationId);
+  dispatching(dependencies, operationId, target);
+  dependencies.store.orchestration.queue.enqueue({
+    conversationId: target.id,
+    itemId,
+    content,
+    kind: "message",
+    createdBy: "agent",
+    creationSource: "mcp",
+    followsThreadSelection: true,
+    placement: "front",
+    queueHeld: false,
+    skipHoldInheritance: true,
+    requestedAt: dependencies.now(),
+    commandType: "message.queue.stop-and-send",
+    source: {
+      actorId: "runtime",
+      commandId: queueAgentCommandId(operationId),
+      command: {
+        type: "message.queue.stop-and-send",
+        conversationId: target.id,
+        id: itemId,
+        turnId: restart.turnId,
+        content,
+        createdBy: "agent",
+        creationSource: "mcp",
+      },
+    },
+  });
+  const ordered = dependencies.store.orchestration.queue.listActive(target.id);
+  const firstUnheld = ordered.find((item) => item.state === "waiting" && !item.queueHeld);
+  const canStartNow = !dependencies.turns.isActive(target.id)
+    && firstUnheld?.id === itemId
+    && dependencies.isCompacting?.(target.id) !== true;
+  if (!canStartNow) {
+    void Promise.resolve(dependencies.messageQueue?.()?.schedule?.(target.id)).catch(() => undefined);
+    dependencies.broadcastSnapshot();
+    return json({
+      conversationId: target.id,
+      queuedMessageId: itemId,
+      position: 1,
+      disposition: "restarted",
+      accepted: true,
+      stoppedTurnId: restart.turnId,
+    });
+  }
+  dependencies.store.orchestration.queue.claim({
+    conversationId: target.id,
+    itemId,
+    mode: "after-stop",
+  });
+  try {
+    const started = await startManagedTurn(dependencies, target, content, operationId, signal, {
+      source,
+      restarted: { stoppedTurnId: restart.turnId, queuedMessageId: itemId },
+      link,
+      alreadyDispatching: true,
+    });
+    const attemptId = dependencies.store.orchestration.currentAttemptId(started.runId) ?? started.runId;
+    dependencies.store.orchestration.queue.deliver({
+      conversationId: target.id,
+      itemId,
+      delivery: {
+        mode: "after-stop",
+        outcome: "restarted",
+        runId: started.runId,
+        attemptId,
+        turnId: started.turnId,
+        messageId: started.messageId,
+        deliveredAt: dependencies.now(),
+      },
+    });
+    return started.result;
+  } catch (error) {
+    try {
+      const currentItem = dependencies.store.orchestration.queue.getItem(itemId);
+      if (currentItem?.state === "dispatching") {
+        dependencies.store.orchestration.queue.releaseClaim({
+          conversationId: target.id,
+          itemId,
+          reason: "transient",
+        });
+      }
+    } catch {
+      // Best-effort release if start failed after claim.
+    }
+    throw error;
+  }
+}
+
+/**
+ * Preflight checks for `inertia_send_message` before approval / reservation.
+ */
+export function preflightManagedSend(
+  dependencies: Pick<ManagedDispatchDependencies, "store" | "turns" | "messageQueue" | "isCompacting"> & {
+    providerTerminalResumes: Pick<ProviderTerminalResumeRegistry, "isActive">;
+  },
+  target: Conversation,
+  mode: SendMode,
+): void {
+  const active = dependencies.turns.isActive(target.id);
+  const compacting = dependencies.isCompacting?.(target.id) === true;
+  if (mode === "steer" && !active) throw new Error(STEER_IDLE);
+  if (mode === "restart" && !active) throw new Error(RESTART_IDLE);
+  if (mode === "restart") assertManagedTurnCanStart(dependencies, target);
+  if (mode === "queue") {
+    if (active || compacting || hasUnheldWaitingQueueItem(dependencies.store, target.id)) {
+      assertManagedQueueRoom(dependencies, target);
+    } else {
+      assertManagedTurnCanStart(dependencies, target);
+    }
+  }
+  if (mode === "auto" && (active || compacting) && shouldAutoQueueInsteadOfSteer(dependencies, target)) {
+    assertManagedQueueRoom(dependencies, target);
+  }
+}
+
+export function managedSendApprovalDetail(
+  store: RuntimeStore,
+  target: Conversation,
+  input: z.infer<typeof sendSchema>,
+  followUpSuffix: string,
+): { title: string; detail: string; permissionRoots: Array<{ path: string; access: "write" }> } {
+  const mode = input.mode ?? "auto";
+  const approval = SEND_APPROVALS[mode];
+  return {
+    title: approval.title,
+    detail: `${approval.effect} · Target ${input.conversationId} · ${input.content.slice(0, 180)}${followUpSuffix}`,
+    permissionRoots: [{ path: store.conversationPath(target.id), access: "write" }],
+  };
+}
+
+/**
+ * Unified managed-send dispatcher implementing N19, P1, N10, `0a159c9fb`, and
+ * `b0b2c4f95`.
+ */
+export async function dispatchManagedSend(
+  dependencies: ManagedDispatchDependencies,
+  source: Pick<Conversation, "id" | "title">,
+  target: Conversation,
+  content: string,
+  mode: SendMode,
+  operationId: string,
+  signal: AbortSignal,
+  restart: TurnOwnerIdentity | null,
+  link?: ManagedFollowUpLink,
+): Promise<ProviderHostToolResult> {
+  if (mode === "restart") {
+    return await restartManagedTurn(dependencies, source, target, content, operationId, signal, restart, link);
+  }
+  const active = dependencies.turns.isActive(target.id);
+  const compacting = dependencies.isCompacting?.(target.id) === true;
+  if (mode === "queue") {
+    // P1: on an idle chat with no unheld waiting items (including a held or
+    // failed chat), start immediately past any held items, which stay held.
+    if (!active && !compacting && !hasUnheldWaitingQueueItem(dependencies.store, target.id)) {
+      return (await startManagedTurn(dependencies, target, content, operationId, signal, { source, link })).result;
+    }
+    return queueManagedMessage(dependencies, target, content, operationId).result;
+  }
+  if (mode === "auto" && (active || compacting)) {
+    if (shouldAutoQueueInsteadOfSteer(dependencies, target)) {
+      return queueManagedMessage(dependencies, target, content, operationId).result;
+    }
+    return await steerManagedTurn(dependencies, target, content, operationId, signal, link, source);
+  }
+  if (active) {
+    return await steerManagedTurn(dependencies, target, content, operationId, signal, link, source);
+  }
+  if (mode === "steer") throw new Error(STEER_ENDED);
+  return (await startManagedTurn(dependencies, target, content, operationId, signal, { source, link })).result;
 }

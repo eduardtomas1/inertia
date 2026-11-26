@@ -73,6 +73,7 @@ import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
 import { watcherAwareTurnHooks } from "./runtime/watcher/watcher-turn-hooks";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
+import { registerRunControlEffectHandlers } from "./runtime/run-control-effect-handlers";
 import { createDelegationRuntime, type DelegationRuntime } from "./runtime/delegation/delegation-runtime";
 import type { ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
@@ -323,6 +324,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const registerCheckpointCaptures = checkpointCaptureExecutor({
     effects: orchestrationEffects, store, artifacts: turnGitArtifacts,
     invalidate: (conversationId) => broadcast({ type: "conversation.detail.invalidated", conversationId }),
+    retryDelegatedBookkeeping: () => { void delegation?.recover(); },
   });
   const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
   const terminals = new TerminalManager({
@@ -778,12 +780,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     workflows: agentWorkflows, providerTerminalResumes,
     providerInfo: () => providerInfo,
     verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
-    prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,
+    prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes, broadcast }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,
     broadcast, broadcastSnapshot, send,
   };
+  registerRunControlEffectHandlers({ effects: orchestrationEffects, store, turns });
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork,
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
+    cancelStaleWatcherNote: (conversationId, itemId) => watchers?.delivery.cancelIfStale(conversationId, itemId) ?? false,
     compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
@@ -947,6 +951,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
     ...privateConnectStoreReads(store),
+    store,
     isConversationActive: (conversationId) =>
       turns.isActive(conversationId) || isolatedRuns.has(conversationId),
     preparePrompt: (conversation) => assertPrivateConnectPromptRunnable({
@@ -958,7 +963,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     privateConnectPromptSafety: (conversation) =>
       privateConnectPromptSafetyForHarness(conversation.modelSelection.harnessId, { watcher: watcherPolicy.privateConnectWatcher(conversation) }),
     watcherParent: (conversationId) => watchers?.watcherParent(conversationId) ?? null,
-    queuePrompt: (conversationId, content, deviceId) => queuePrivateConnectPrompt({
+    queuePrompt: (conversationId, content, deviceId, deliveryId) => queuePrivateConnectPrompt({
       store,
       authority: providerTerminalResumes,
       turns,
@@ -966,12 +971,30 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       compacting: (compactingConversationId) => compactions.isCompacting(compactingConversationId),
       onQueued: (queuedConversationId) => {
         broadcast({
+          type: "conversation.queue.changed",
+          conversationId: queuedConversationId,
+          revision: store.orchestration.queue.revision(queuedConversationId),
+        });
+        broadcast({
           type: "conversation.detail.invalidated",
           conversationId: queuedConversationId,
         });
         broadcastSnapshot();
       },
-    }, conversationId, content, deviceId),
+    }, conversationId, content, deviceId, { deliveryId }),
+    queueHandlers: {
+      send: (conversationId, itemId, _deviceId, requestId) => queuedMessages?.sendNow(conversationId, itemId, requestId),
+      resume: async (conversationId, _deviceId, requestId) => { await queuedMessages?.resume(conversationId, requestId); },
+    },
+    onQueueMutated: (conversationId) => {
+      broadcast({
+        type: "conversation.queue.changed",
+        conversationId,
+        revision: store.orchestration.queue.revision(conversationId),
+      });
+      broadcast({ type: "conversation.detail.invalidated", conversationId });
+      broadcastSnapshot();
+    },
     respondToInput: createPrivateConnectInputResponder(pendingInputs, turns),
     stopRun: (conversationId, runId) => {
       const run = store.findWorkspaceRun(runId);

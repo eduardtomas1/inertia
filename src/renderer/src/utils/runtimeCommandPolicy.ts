@@ -1,4 +1,6 @@
+import type { z } from "zod";
 import type { ClientCommand } from "@shared/contracts";
+import type { phase5QueueCommandSchemas } from "@shared/contracts/client-command/agent";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
@@ -73,6 +75,9 @@ const duoCancellation = {
   timeoutDelivery: "ambiguous",
 } as const satisfies RuntimeCommandPolicy;
 
+type Phase5QueueCommandType = z.infer<(typeof phase5QueueCommandSchemas)[number]>["type"];
+type SupportedClientCommandType = ClientCommand["type"] | Phase5QueueCommandType;
+
 // Keep this total over ClientCommand["type"]. A new protocol command must
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
@@ -100,6 +105,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "message.queue.remove": shortMutation,
   "message.queue.send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "message.queue.edit": shortMutation,
+  "message.queue.resume": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
+  "message.queue.reorder": shortMutation,
   "message.queue.reconfirm": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "message.queue.stop-and-send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "activity.acknowledge": shortMutation,
@@ -347,11 +354,11 @@ export const RUNTIME_COMMAND_POLICIES = {
   "worktree.remove": gitMutation,
   "worktree.prune": gitMutation,
 } as const satisfies Readonly<
-  Record<ClientCommand["type"], RuntimeCommandPolicy>
+  Record<SupportedClientCommandType, RuntimeCommandPolicy>
 >;
 
 export function runtimeCommandPolicy(
-  type: ClientCommand["type"],
+  type: SupportedClientCommandType,
 ): RuntimeCommandPolicy {
   return RUNTIME_COMMAND_POLICIES[type];
 }

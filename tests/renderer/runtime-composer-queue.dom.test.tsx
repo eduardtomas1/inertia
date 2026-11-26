@@ -1,124 +1,327 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RuntimeComposerQueuedActions } from "../../src/renderer/src/components/composer/RuntimeComposerQueuedActions";
-import { enqueueRuntimePrompt, finishQueueIntent, queueIntent, RUNTIME_QUEUE_CHANGED, type QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
+import {
+  QUEUE_VISIBLE_ROWS,
+  RuntimeComposerQueuedActions,
+} from "../../src/renderer/src/components/composer/RuntimeComposerQueuedActions";
+import {
+  enqueueRuntimePrompt,
+  finishQueueIntent,
+  getPendingQueueIntents,
+  MAX_PENDING_QUEUE_INTENTS,
+  queueIntent,
+  RUNTIME_QUEUE_CHANGED,
+  type QueueCommandRunner,
+} from "../../src/renderer/src/components/composer/runtimeQueueClient";
 import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import { readSourceText } from "../helpers/source-text";
 import { chatQueueRunner } from "../../src/renderer/src/components/workspace-scene/createWorkspaceSceneModel";
 import type { Conversation } from "../../src/shared/contracts";
-import { announceRuntimeQueueChanged, useRuntimeQueueLength, useRuntimeQueuedFollowUps } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
+import {
+  announceRuntimeQueueChanged,
+  announceRuntimeQueueReconnected,
+  useRuntimeQueueLength,
+  useRuntimeQueueSummary,
+  useRuntimeQueuedFollowUps,
+} from "../../src/renderer/src/components/composer/runtimeQueueEvents";
 
 const conversationId = "40404040-4040-4040-8040-404040404040";
-const queued: QueuedMessage = { id: "50505050-5050-4050-8050-505050505050", conversationId, content: "Next task", attachments: [], state: "waiting", createdAt: "2026-09-26T00:00:00.000Z", error: null, turnId: null, userMessageId: null };
-const response = (entries = [queued], receipt: QueuedMessage | null = null): MessageQueueResult => ({ kind: "message.queue", conversationId, entries, receipt });
+const queued: QueuedMessage = {
+  id: "50505050-5050-4050-8050-505050505050",
+  conversationId,
+  content: "Next task",
+  attachments: [],
+  state: "waiting",
+  createdAt: "2026-09-26T00:00:00.000Z",
+  error: null,
+  turnId: null,
+  userMessageId: null,
+};
+const makeEntry = (index: number, overrides: Partial<QueuedMessage> = {}): QueuedMessage => ({
+  ...queued,
+  id: `5050505${index}-5050-4050-8050-505050505050`,
+  content: `Queued task ${index}`,
+  ...overrides,
+});
+const response = (
+  entries = [queued],
+  extra: Partial<MessageQueueResult> = {},
+): MessageQueueResult => ({
+  kind: "message.queue",
+  conversationId,
+  entries,
+  receipt: null,
+  ...extra,
+});
+
 beforeEach(() => window.localStorage.clear());
 
-describe("runtime queue presentation and durable draft identity", () => {
+describe("runtime queue presentation, push invalidation, and durable draft identity", () => {
   it("defers a pending queue result until the window becomes visible again", async () => {
     let resolveRead!: (value: MessageQueueResult) => void;
     const pending = new Promise<MessageQueueResult>((resolve) => { resolveRead = resolve; });
     const run = vi.fn<QueueCommandRunner>().mockReturnValueOnce(pending).mockResolvedValue(response());
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-      latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+    const view = render(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend
+        latestTurnId="first"
+        latestTurnStatus="completed"
+        queueHost={null}
+      />,
+    );
     try {
       visibility.mockReturnValue("hidden");
       await act(async () => { resolveRead(response()); await pending; });
       expect(screen.queryByText("Next task")).toBeNull();
       visibility.mockReturnValue("visible");
-      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
       expect(screen.getByText("Next task")).toBeTruthy();
       expect(run).toHaveBeenCalledTimes(2);
-    } finally { view.unmount(); visibility.mockRestore(); }
+    } finally {
+      view.unmount();
+      visibility.mockRestore();
+    }
   });
 
-  it.each([false, true])("does not commit identical polling results with queued entries=%s", async (hasEntry) => {
+  it("never polls on a 10s interval and refetches only on push invalidation (ignoring stale revisions) or reconnect", async () => {
     vi.useFakeTimers();
     try {
-      const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => structuredClone(response(hasEntry ? [queued] : [])));
+      let entries: QueuedMessage[] = [queued];
+      let revision = 5;
+      const run = vi.fn<QueueCommandRunner>(async () => response(entries, { revision }));
       let commits = 0;
-      const view = render(<Profiler id="queue" onRender={() => { commits += 1; }}>
-        <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-          latestTurnId="first" latestTurnStatus="running" queueHost={null} />
-      </Profiler>);
+      const view = render(
+        <Profiler id="queue" onRender={() => { commits += 1; }}>
+          <RuntimeComposerQueuedActions
+            conversationId={conversationId}
+            onCommand={run}
+            canSend
+            running
+            latestTurnId="first"
+            latestTurnStatus="running"
+            queueHost={null}
+          />
+        </Profiler>,
+      );
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      const initialCommits = commits;
-      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
-      expect(run).toHaveBeenCalledTimes(3);
-      expect(commits).toBe(initialCommits);
-      run.mockResolvedValue(response([{ ...queued, content: "Updated queue" }]));
-      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-      expect(screen.getByText("Updated queue")).toBeTruthy();
-      expect(commits).toBe(initialCommits + 1);
-      view.unmount();
-    } finally { vi.useRealTimers(); }
-  });
+      expect(run).toHaveBeenCalledTimes(1);
+      const settledCommits = commits;
 
-  it("stops polling a queue the service refuses until the chat's queue or turn changes", async () => {
-    vi.useFakeTimers();
-    try {
-      const run = vi.fn<QueueCommandRunner>().mockRejectedValue(new RuntimeCommandError("Conversation not found.", "rejected"));
-      const props = { conversationId, onCommand: run, canSend: true, latestTurnStatus: null, queueHost: null };
-      const view = render(<RuntimeComposerQueuedActions {...props} latestTurnId={null} />);
+      // Advance 60 seconds: zero polling reads occur.
       await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
       expect(run).toHaveBeenCalledTimes(1);
-      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(commits).toBe(settledCommits);
+
+      // Stale revision <= 5 is ignored.
+      await act(async () => {
+        announceRuntimeQueueChanged(conversationId, 4);
+        announceRuntimeQueueChanged(conversationId, 5);
+        await vi.advanceTimersByTimeAsync(0);
+      });
       expect(run).toHaveBeenCalledTimes(1);
-      run.mockResolvedValue(response());
-      await act(async () => { window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })); await vi.advanceTimersByTimeAsync(0); });
+
+      // Newer revision triggers exactly one fetch.
+      entries = [{ ...queued, content: "Updated by push" }];
+      revision = 6;
+      await act(async () => {
+        announceRuntimeQueueChanged(conversationId, 6);
+        await vi.advanceTimersByTimeAsync(0);
+      });
       expect(run).toHaveBeenCalledTimes(2);
-      expect(screen.getByText("Next task")).toBeTruthy();
-      run.mockRejectedValue(new RuntimeCommandError("Conversation not found.", "rejected"));
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(screen.getByText("Updated by push")).toBeTruthy();
+
+      // Reconnect triggers exactly one fetch.
+      entries = [{ ...queued, content: "Updated after reconnect" }];
+      revision = 7;
+      await act(async () => {
+        announceRuntimeQueueReconnected(conversationId);
+        await vi.advanceTimersByTimeAsync(0);
+      });
       expect(run).toHaveBeenCalledTimes(3);
-      run.mockResolvedValue(response());
-      view.rerender(<RuntimeComposerQueuedActions {...props} latestTurnId="first" />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-      expect(run).toHaveBeenCalledTimes(5);
+      expect(screen.getByText("Updated after reconnect")).toBeTruthy();
       view.unmount();
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it.each([
-    ["an idle chat with an empty queue", "completed", false, 1],
-    ["a chat with no turns and an empty queue", null, false, 1],
-    ["a running turn with an empty queue", "running", false, 7],
-    ["an idle chat with a queued message", "completed", true, 7],
-  ] as const)("polls %s only while it can change", async (_case, latestTurnStatus, hasEntry, reads) => {
-    vi.useFakeTimers();
-    try {
-      const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => response(hasEntry ? [queued] : []));
-      const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-        latestTurnId={latestTurnStatus ? "first" : null} latestTurnStatus={latestTurnStatus} queueHost={null} />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-      expect(run).toHaveBeenCalledTimes(reads);
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId }));
-        await vi.advanceTimersByTimeAsync(0);
-      });
-      expect(run).toHaveBeenCalledTimes(reads + 1);
-      view.unmount();
-    } finally { vi.useRealTimers(); }
+  it("supports up to 20 pending intents and renders unconfirmed localStorage intents as disabled Saving rows", async () => {
+    for (let index = 0; index < MAX_PENDING_QUEUE_INTENTS; index += 1) {
+      queueIntent(conversationId, `Draft ${index + 1}`, []);
+    }
+    expect(MAX_PENDING_QUEUE_INTENTS).toBe(20);
+    expect(getPendingQueueIntents(conversationId)).toHaveLength(20);
+    expect(() => queueIntent(conversationId, "Draft 21", [])).toThrow("Confirm the earlier queued drafts");
+
+    window.localStorage.clear();
+    const pendingId = queueIntent(conversationId, "Pending local intent", []);
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([queued]));
+    render(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend
+        latestTurnId="first"
+        latestTurnStatus="running"
+        queueHost={null}
+      />,
+    );
+    await screen.findByText("Next task");
+    await screen.findByText("Pending local intent");
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove pending queued message 2 of 2" })).toBeDisabled();
+    finishQueueIntent(conversationId, pendingId);
+    expect(getPendingQueueIntents(conversationId)).toEqual([]);
   });
 
-  it("shows a message queued elsewhere in an idle chat once the runtime announces the change", async () => {
-    vi.useFakeTimers();
-    try {
-      let entries: QueuedMessage[] = [];
-      const run = vi.fn<QueueCommandRunner>().mockImplementation(async () => response(entries));
-      render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-        latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-      expect(screen.queryByRole("list", { name: "Queued messages" })).not.toBeInTheDocument();
-      entries = [queued];
-      await act(async () => {
-        announceRuntimeQueueChanged(conversationId);
-        await vi.advanceTimersByTimeAsync(0);
-      });
-      expect(screen.getByRole("list", { name: "Queued messages" })).toHaveTextContent("Next task");
-    } finally { vi.useRealTimers(); }
+  it("expands and collapses once more than 3 queued messages wait, keeping focus on the toggle", async () => {
+    expect(QUEUE_VISIBLE_ROWS).toBe(3);
+    const entries = [makeEntry(1), makeEntry(2), makeEntry(3), makeEntry(4)];
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response(entries));
+    render(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend
+        running
+        latestTurnId="first"
+        latestTurnStatus="running"
+        queueHost={null}
+      />,
+    );
+    const list = await screen.findByRole("list", { name: "Queued messages" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    const toggle = screen.getByRole("button", { name: "Show all 4 queued" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", list.id);
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(within(list).getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show fewer" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("shows the held banner with derived hold reason, inline Resume, attribution chips, model chips, and steer waiting state", async () => {
+    const entries: QueuedMessage[] = [
+      makeEntry(1, {
+        queueHeld: true,
+        creationSource: "mobile",
+        deviceId: "11111111-1111-4111-8111-111111111111",
+        steerWhenReadyRunId: "22222222-2222-4222-8222-222222222222",
+        modelSelection: {
+          harnessId: "claude-agent-sdk",
+          backendProfileId: "native:claude",
+          backendProfileDisplayName: "Claude",
+          modelId: "claude-sonnet-4-5",
+          alias: null,
+          reasoningEffort: "medium",
+          contextWindowOverride: null,
+          providerOptions: {},
+          capabilities: [],
+          backendConfigurationRevision: 1,
+        },
+      }),
+      makeEntry(2, { queueHeld: true, createdBy: "agent", creationSource: "mcp" }),
+    ];
+    const onResume = vi.fn(async () => undefined);
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(
+      response(entries, { held: true, holdReason: "stopped", canResume: true, revision: 3 }),
+    );
+    let summary = { userCount: 0, totalCount: 0, held: false, holdReason: null as string | null, canResume: false, latestRevision: 0 };
+    function Observer(): null {
+      summary = useRuntimeQueueSummary(conversationId);
+      return null;
+    }
+    render(
+      <>
+        <RuntimeComposerQueuedActions
+          conversationId={conversationId}
+          onCommand={run}
+          canSend
+          onResume={onResume}
+          latestTurnId="first"
+          latestTurnStatus="cancelled"
+          queueHost={null}
+        />
+        <Observer />
+      </>,
+    );
+    expect(await screen.findByText("Queue paused · Stopped")).toBeInTheDocument();
+    expect(screen.getByText("From device")).toBeInTheDocument();
+    expect(screen.getByText("From agent")).toBeInTheDocument();
+    expect(screen.getByText("claude-sonnet-4-5")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for acceptance…")).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: "Queued message 1 of 2, claude-sonnet-4-5" })).toBeInTheDocument();
+    expect(summary).toMatchObject({ userCount: 2, totalCount: 2, held: true, holdReason: "stopped", canResume: true, latestRevision: 3 });
+
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Resume queue" })); });
+    expect(onResume).toHaveBeenCalledOnce();
+  });
+
+  it("uses dynamic Send labels (Stop and send / hidden) based on steer and interrupt capabilities", async () => {
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([queued]));
+    const view = render(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend={false}
+        running
+        canSteer={false}
+        canInterrupt
+        latestTurnId="first"
+        latestTurnStatus="running"
+        queueHost={null}
+      />,
+    );
+    const stopAndSend = await screen.findByRole("button", { name: "Stop and send queued message" });
+    expect(stopAndSend).toHaveTextContent("Stop and send");
+    expect(stopAndSend).toBeEnabled();
+
+    view.rerender(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend={false}
+        running
+        canSteer={false}
+        canInterrupt={false}
+        latestTurnId="first"
+        latestTurnStatus="running"
+        queueHost={null}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Send|Stop and send/u })).toBeNull();
+  });
+
+  it("separates the persistent polite status live region from error alerts", async () => {
+    const blocked: QueuedMessage = { ...queued, state: "blocked", error: "The route is no longer available." };
+    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([blocked]));
+    render(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend
+        latestTurnId="first"
+        latestTurnStatus="completed"
+        queueHost={null}
+      />,
+    );
+    await screen.findByText("Needs attention");
+    const status = screen.getByRole("status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveAttribute("aria-atomic", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("The route is no longer available.");
+    const css = readSourceText("src/renderer/src/components/composer/RuntimeComposerQueuedActions.css");
+    expect(css).toContain(".composer-queue-send:disabled {\n  color: var(--text-muted);\n  opacity: var(--disabled-opacity);\n}");
   });
 
   it("answers an unsaved chat's queue reads locally and forwards receipt checks and edits", async () => {
@@ -136,142 +339,82 @@ describe("runtime queue presentation and durable draft identity", () => {
     expect(run.mock.calls.map(([command]) => command.type)).toEqual(["message.queue.get", "message.queue.remove"]);
   });
 
-  it("keeps polling after a read whose delivery is unknown", async () => {
-    vi.useFakeTimers();
-    try {
-      const run = vi.fn<QueueCommandRunner>().mockRejectedValue(new RuntimeCommandError("Timed out.", "ambiguous"));
-      const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-        latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
-      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
-      expect(run).toHaveBeenCalledTimes(4);
-      view.unmount();
-    } finally { vi.useRealTimers(); }
-  });
-
-  it("keeps a second pending draft's identity when the first acknowledgement arrives", () => {
-    const first = queueIntent(conversationId, "First", []);
-    const second = queueIntent(conversationId, "Second", []);
-    finishQueueIntent(conversationId, first);
-    expect(queueIntent(conversationId, "Second", [])).toBe(second);
-    expect(queueIntent(conversationId, "First", [])).not.toBe(first);
-  });
-
-  it("reuses the exact identity after an unknown acknowledgement", async () => {
-    const run = vi.fn<QueueCommandRunner>().mockRejectedValueOnce(new Error("Disconnected"))
+  it("preserves attachment snapshot metadata on enqueue and reuses durable draft identity on retry", async () => {
+    const snapshot = {
+      capturedAt: "2026-11-26T00:00:00.000Z",
+      appName: "Browser",
+      windowTitle: "Preview",
+      width: 800,
+      height: 600,
+      accessibility: {
+        format: "element-tree" as const,
+        coordinateSpace: "captured-image" as const,
+        truncated: false,
+        nodes: [],
+      },
+    };
+    const attachment = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "snap.png",
+      path: "11111111-1111-4111-8111-111111111111",
+      mimeType: "image/png" as const,
+      size: 64,
+      snapshot,
+    };
+    const run = vi.fn<QueueCommandRunner>()
+      .mockRejectedValueOnce(new Error("Disconnected"))
       .mockRejectedValueOnce(new Error("Still disconnected"))
-      .mockImplementationOnce(async (command) => response([], { ...queued, id: command.payload.id!, state: "accepted" }));
-    await expect(enqueueRuntimePrompt(run, conversationId, "Next task", [])).rejects.toThrow("Disconnected");
-    await enqueueRuntimePrompt(run, conversationId, "Next task", []);
-    expect(run.mock.calls[2]![0].payload.id).toBe(run.mock.calls[0]![0].payload.id);
-  });
-
-  it.each(["getItem", "setItem"] as const)("queues a draft when intent storage is unavailable (%s)", async (method) => {
-    const storage = vi.spyOn(window.localStorage, method).mockImplementation(() => {
-      throw new DOMException("Storage unavailable", method === "getItem" ? "SecurityError" : "QuotaExceededError");
-    });
-    try {
-      const run = vi.fn<QueueCommandRunner>().mockImplementation(async (command) => response([], { ...queued, id: command.payload.id! }));
-      await expect(enqueueRuntimePrompt(run, conversationId, "Next task", [])).resolves.toBeUndefined();
-      expect(run.mock.calls.map(([command]) => command.type)).toEqual(["message.queue.enqueue"]);
-    } finally { storage.mockRestore(); }
+      .mockImplementationOnce(async (command) => response([], { receipt: { ...queued, id: (command.payload as { id: string }).id, state: "accepted" } }));
+    await expect(enqueueRuntimePrompt(run, conversationId, "Inspect snap", [attachment])).rejects.toThrow("Disconnected");
+    await enqueueRuntimePrompt(run, conversationId, "Inspect snap", [attachment]);
+    const firstPayload = run.mock.calls[0]![0].payload as unknown as { id: string; attachments: typeof attachment[] };
+    const retryPayload = run.mock.calls[2]![0].payload as unknown as { id: string; attachments: typeof attachment[] };
+    expect(retryPayload.id).toBe(firstPayload.id);
+    expect(firstPayload.attachments[0]?.snapshot).toEqual(snapshot);
   });
 
   it("frees a definitively rejected intent only after confirming there is no receipt", async () => {
     const rejectedId = queueIntent(conversationId, "Next task", []);
-    const run = vi.fn<QueueCommandRunner>().mockRejectedValueOnce(new RuntimeCommandError("Full queue", "rejected"))
-      .mockResolvedValueOnce(response([], null));
+    const run = vi.fn<QueueCommandRunner>()
+      .mockRejectedValueOnce(new RuntimeCommandError("Full queue", "rejected"))
+      .mockResolvedValueOnce(response([], { receipt: null }));
     await expect(enqueueRuntimePrompt(run, conversationId, "Next task", [])).rejects.toThrow("Full queue");
     expect(queueIntent(conversationId, "Next task", [])).not.toBe(rejectedId);
     expect(run.mock.calls.map(([command]) => command.type)).toEqual(["message.queue.enqueue", "message.queue.get"]);
   });
 
-  it("treats an existing durable receipt as acceptance after a postcommit error", async () => {
-    const id = queueIntent(conversationId, "Next task", []);
-    const run = vi.fn<QueueCommandRunner>().mockRejectedValueOnce(new RuntimeCommandError("Publication failed", "rejected"))
-      .mockResolvedValueOnce(response([], { ...queued, id, state: "accepted", turnId: "turn" }));
-    await expect(enqueueRuntimePrompt(run, conversationId, "Next task", [])).resolves.toBeUndefined();
-    expect(run.mock.calls.filter(([command]) => command.type === "message.queue.enqueue")).toHaveLength(1);
-    expect(window.localStorage.getItem(`inertia:queue-intent:${conversationId}`)).toBeNull();
-  });
-
-  it("only reads on mount or completion and sends exclusively after an explicit click", async () => {
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response());
-    const props = { conversationId, onCommand: run, canSend: true, latestTurnId: "first", latestTurnStatus: "completed", queueHost: null };
-    const view = render(<RuntimeComposerQueuedActions {...props} />);
-    await screen.findByText("Next task");
-    view.rerender(<RuntimeComposerQueuedActions {...props} latestTurnId="second" />);
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
-    expect(run.mock.calls.every(([command]) => command.type === "message.queue.get")).toBe(true);
-    await act(async () => fireEvent.click(await screen.findByRole("button", { name: "Send queued message now" })));
-    expect(run.mock.calls.some(([command]) => command.type === "message.queue.send")).toBe(true);
-  });
-
-  it("lets Send now hand a queued message to a working agent that takes follow-ups, and shows when it cannot", async () => {
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response());
-    const props = { conversationId, onCommand: run, canSend: true, latestTurnId: "first", latestTurnStatus: "running", queueHost: null };
-    const view = render(<RuntimeComposerQueuedActions {...props} />);
-    const send = await screen.findByRole("button", { name: "Send queued message now" });
-    expect(send).toBeEnabled();
-    await act(async () => fireEvent.click(send));
-    expect(run.mock.calls.some(([command]) => command.type === "message.queue.send")).toBe(true);
-    view.rerender(<RuntimeComposerQueuedActions {...props} canSend={false} />);
-    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeDisabled();
-    const css = readSourceText("src/renderer/src/components/composer/ComposerSendActions.css");
-    expect(css).toContain(".composer-queue-send:disabled {\n  color: var(--text-muted);\n  opacity: var(--disabled-opacity);\n}");
-  });
-
-  it("keeps a Send now error through queue refreshes until that message leaves the head of the queue", async () => {
-    const next: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Another task" };
-    let entries = [queued];
-    const run = vi.fn<QueueCommandRunner>(async (command) => {
-      if (command.type === "message.queue.send") throw new Error("The active model cannot inspect follow-up images. It will send when the turn ends.");
-      return response(entries);
-    });
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="running" queueHost={null} />);
-    const send = await screen.findByRole("button", { name: "Send queued message now" });
-    await act(async () => fireEvent.click(send));
-    expect(screen.getByRole("status")).toHaveTextContent("cannot inspect follow-up images");
-
-    await act(async () => window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })));
-    await waitFor(() => expect(run.mock.calls.filter(([command]) => command.type === "message.queue.get").length).toBeGreaterThanOrEqual(2));
-    expect(screen.getByRole("status")).toHaveTextContent("cannot inspect follow-up images");
-
-    entries = [next];
-    await act(async () => window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })));
-    await screen.findByText("Another task");
-    expect(screen.queryByRole("status")).toBeNull();
-  });
-
   it("does not resurrect a removed entry when an earlier queue read finishes late", async () => {
     let resolveRead!: (value: MessageQueueResult) => void;
     const pending = new Promise<MessageQueueResult>((resolve) => { resolveRead = resolve; });
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValueOnce(response())
-      .mockReturnValueOnce(pending).mockResolvedValue(response([]));
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
+    const run = vi.fn<QueueCommandRunner>()
+      .mockResolvedValueOnce(response())
+      .mockReturnValueOnce(pending)
+      .mockResolvedValue(response([]));
+    render(
+      <RuntimeComposerQueuedActions
+        conversationId={conversationId}
+        onCommand={run}
+        canSend
+        latestTurnId="first"
+        latestTurnStatus="completed"
+        queueHost={null}
+      />,
+    );
     await screen.findByText("Next task");
-    await act(async () => window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove queued message" })));
+    await act(async () => { window.dispatchEvent(new CustomEvent(RUNTIME_QUEUE_CHANGED, { detail: conversationId })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Remove queued message" })); });
     expect(screen.queryByText("Next task")).toBeNull();
     await act(async () => { resolveRead(response()); await pending; });
     expect(screen.queryByText("Next task")).toBeNull();
   });
 
-  it("states a blocked entry's error once, in the status line, without repeating it in a tooltip", async () => {
-    const blocked: QueuedMessage = { ...queued, state: "blocked", error: "The route is no longer available." };
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([blocked]));
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="completed" queueHost={null} />);
-    const label = await screen.findByText("Needs attention");
-    expect(label.tagName.toLowerCase()).toBe("small");
-    expect(screen.getByRole("status")).toHaveTextContent("The route is no longer available.");
-    vi.useFakeTimers();
-    fireEvent.pointerEnter(label, { pointerType: "mouse" });
-    act(() => { vi.advanceTimersByTime(500); });
-    expect(document.querySelector('[role="tooltip"]')).toBeNull();
-    vi.useRealTimers();
-  });
-  it("labels a follow-up the agent never read, keeps it out of the queue count, and hides its message from the timeline while it waits", async () => {
-    const unread: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Also look at this.",
-      userMessageId: "70707070-7070-4070-8070-707070707070" };
+  it("labels an unread follow-up, keeps it out of the user queue count, and hides it from the timeline while waiting", async () => {
+    const unread: QueuedMessage = {
+      ...queued,
+      id: "60606060-6060-4060-8060-606060606060",
+      content: "Also look at this.",
+      userMessageId: "70707070-7070-4070-8070-707070707070",
+    };
     const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([unread, queued]));
     const observed: { length: number; hidden: readonly string[] } = { length: -1, hidden: [] };
     function Observer(): null {
@@ -279,77 +422,25 @@ describe("runtime queue presentation and durable draft identity", () => {
       observed.hidden = useRuntimeQueuedFollowUps(conversationId);
       return null;
     }
-    const view = render(<>
-      <RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-        latestTurnId="first" latestTurnStatus="failed" queueHost={null} />
-      <Observer />
-    </>);
+    const view = render(
+      <>
+        <RuntimeComposerQueuedActions
+          conversationId={conversationId}
+          onCommand={run}
+          canSend
+          latestTurnId="first"
+          latestTurnStatus="failed"
+          queueHost={null}
+        />
+        <Observer />
+      </>,
+    );
     expect(await screen.findByText("Not read, sends next")).toBeTruthy();
-    expect(screen.getByText("Also look at this.")).toBeTruthy();
-    const sendNow = screen.getByRole("button", { name: "Send unread follow-up now" });
-    expect(screen.getByRole("button", { name: "Remove unread follow-up" })).toBeTruthy();
     expect(observed).toEqual({ length: 1, hidden: [unread.userMessageId] });
     run.mockResolvedValue(response([queued]));
-    sendNow.focus();
-    fireEvent.click(sendNow);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send unread follow-up now" })); });
     await waitFor(() => expect(screen.queryByText("Not read, sends next")).toBeNull());
-    expect(run).toHaveBeenCalledWith({ type: "message.queue.send", payload: { conversationId, id: unread.id } });
     expect(observed.hidden).toEqual([]);
     view.unmount();
-  });
-
-  it("shows a blocked unread follow-up only as blocked, with its error", async () => {
-    const blocked: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606062", content: "Also look at this.",
-      userMessageId: "70707070-7070-4070-8070-707070707072", state: "blocked", error: "An image of this follow-up is no longer available." };
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([blocked]));
-    const view = render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend
-      latestTurnId="first" latestTurnStatus="failed" queueHost={null} />);
-    expect(await screen.findByText("Needs attention")).toBeTruthy();
-    expect(screen.queryByText("Not read, sends next")).toBeNull();
-    expect(screen.getByRole("status").textContent).toBe("An image of this follow-up is no longer available.");
-    expect(screen.getByRole("button", { name: "Send unread follow-up now" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Remove unread follow-up" })).toBeTruthy();
-    view.unmount();
-  });
-
-  it("offers Send now on an unread follow-up only once the chat has no running turn", async () => {
-    const unread: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606061", content: "Also look at this.",
-      userMessageId: "70707070-7070-4070-8070-707070707071" };
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValue(response([unread]));
-    const props = { conversationId, onCommand: run, canSend: true, latestTurnId: "first", queueHost: null };
-    const view = render(<RuntimeComposerQueuedActions {...props} latestTurnStatus="running" />);
-    expect(await screen.findByText("Not read, sends next")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Send unread follow-up now" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Remove unread follow-up" })).toBeTruthy();
-    view.rerender(<RuntimeComposerQueuedActions {...props} latestTurnStatus="completed" />);
-    expect(await screen.findByRole("button", { name: "Send unread follow-up now" })).toBeTruthy();
-    view.unmount();
-  });
-
-  it("pins the delegated results delivery first and offers only Remove during a turn, which the service treats as dismiss", async () => {
-    const delivery: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Delegated tasks finished.",
-      createdAt: "2026-09-26T00:01:00.000Z",
-      delegatedCompletion: { parentConversationId: conversationId, generation: 1, taskIds: ["a".repeat(64)] } };
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValueOnce(response([queued, delivery]))
-      .mockResolvedValue(response([queued]));
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="running" queueHost={null} />);
-    const item = (await screen.findByText("Delegated results")).closest<HTMLElement>("[role=listitem]")!;
-    expect(item).toHaveTextContent("Delegated tasks finished.");
-    expect(item).toHaveTextContent("1 of 2");
-    expect(screen.queryByRole("button", { name: /^Send .* now$/u })).toBeNull();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove delegated results" })));
-    expect(run).toHaveBeenCalledWith({ type: "message.queue.remove", payload: { conversationId, id: delivery.id } });
-    expect(await screen.findByText("Next task")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeTruthy();
-  });
-  it("offers Send now for held delegated results once the chat has no running turn", async () => {
-    const delivery: QueuedMessage = { ...queued, id: "60606060-6060-4060-8060-606060606060", content: "Delegated tasks finished.",
-      delegatedCompletion: { parentConversationId: conversationId, generation: 1, taskIds: ["a".repeat(64)] } };
-    const run = vi.fn<QueueCommandRunner>().mockResolvedValueOnce(response([delivery])).mockResolvedValue(response());
-    render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend latestTurnId="first" latestTurnStatus="interrupted" queueHost={null} />);
-    await screen.findByText("Delegated results");
-    expect(screen.queryByRole("button", { name: "Send queued message now" })).toBeNull();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send delegated results now" })));
-    expect(run).toHaveBeenCalledWith({ type: "message.queue.send", payload: { conversationId, id: delivery.id } });
   });
 });

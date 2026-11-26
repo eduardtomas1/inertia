@@ -1,5 +1,5 @@
-import type { Detail, Shell } from "../types";
-import { ConversationPane } from "./ConversationPane";
+import type { Shell } from "../types";
+import { ConversationPane, type ConversationDetailWithQueue } from "./ConversationPane";
 import { ProjectList } from "./ProjectList";
 
 export function WorkspaceShell({
@@ -17,10 +17,14 @@ export function WorkspaceShell({
   onSendPrompt,
   onAnswer,
   onStopRun,
+  onSendQueueItem,
+  onEditQueueItem,
+  onRemoveQueueItem,
+  onResumeQueue,
   onSignOut,
 }: {
   shell: Shell | null;
-  detail: Detail | null;
+  detail: ConversationDetailWithQueue | null;
   error: string | null;
   prompt: string;
   busy: boolean;
@@ -33,6 +37,10 @@ export function WorkspaceShell({
   onSendPrompt: () => void;
   onAnswer: (answers: Record<string, string[]>) => void;
   onStopRun: () => void;
+  onSendQueueItem?: (id: string) => Promise<void> | void;
+  onEditQueueItem?: (id: string, expectedRevision: number, content: string) => Promise<boolean | void> | void;
+  onRemoveQueueItem?: (id: string) => Promise<void> | void;
+  onResumeQueue?: () => Promise<void> | void;
   onSignOut: () => void;
 }): React.JSX.Element {
   return (
@@ -68,6 +76,10 @@ export function WorkspaceShell({
           onSendPrompt={onSendPrompt}
           onAnswer={onAnswer}
           onStopRun={onStopRun}
+          onSendQueueItem={onSendQueueItem}
+          onEditQueueItem={onEditQueueItem}
+          onRemoveQueueItem={onRemoveQueueItem}
+          onResumeQueue={onResumeQueue}
         />
       </div>
     </main>

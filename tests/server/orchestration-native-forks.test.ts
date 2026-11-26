@@ -1,8 +1,11 @@
 // @inertia-test-suite portable
 import { join } from "node:path";
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
+import { portableForkHistory } from "../../src/server/orchestration-v2/portable-fork-history";
 import { prepareForkSession } from "../../src/server/runtime/fork-session-service";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
@@ -114,9 +117,12 @@ describe("lazy native fork admission", () => {
       runtime.provider.resolve({ text: "Fork response", sessionId: "fork-native" });
       await flushTurnControllerTestPromises();
       const backing = runtime.store.orchestration.backings.find({ threadId: child.id, providerId: "codex",
-        workspaceKey: runtime.workspace, identity: control.continuationIdentity });
+        workspaceKey: runtime.workspace, identity: control.continuationIdentity })!;
       const inheritedIds = runtime.store.orchestration.forks.history(child.id).parts.filter(({ part }) => part === 0).map(({ id }) => id);
-      expect(backing?.coveredItemIds).toEqual(expect.arrayContaining(inheritedIds));
+      expect(inheritedIds.length).toBeGreaterThan(0);
+      expect(backing.inheritedCoverage).toBe("complete");
+      expect(portableForkHistory((runtime.store as unknown as { database: Database.Database }).database, child.id, backing).items).toEqual([]);
+      expect(isItemCovered(backing, send.message.id, 1)).toBe(true);
       runtime.store.orchestration.events.rebuildProjections();
       expect(runtime.store.orchestration.nativeControls.get(control.id)?.state).toBe("completed");
     } finally { runtime.store.close(); }

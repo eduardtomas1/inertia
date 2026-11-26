@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type Database from "better-sqlite3";
 
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { coveredHistoryOccupancy } from "../../src/server/orchestration-v2/portable-history-occupancy";
+import type { ProviderBacking } from "../../src/shared/orchestration-backings";
 import type { ProviderBackgroundWorkSession } from "../../src/server/provider/contracts";
 import { ContextHandoffBackgroundWorkError } from "../../src/server/runtime/turns/turn-context-handoff";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -52,6 +54,12 @@ function threadEvents(runtime: TurnControllerTestRuntime) {
   return runtime.store.orchestration.events.readEvents({ projectId, threadId: runtime.conversationId, limit: 500 });
 }
 
+function covers(runtime: TurnControllerTestRuntime, backing: ProviderBacking | null | undefined, itemId: string, runId: string): boolean {
+  if (!backing) return false;
+  const run = runtime.store.orchestration.events.projection("run", runId)?.value as { ordinal?: number } | undefined;
+  return isItemCovered(backing, itemId, typeof run?.ordinal === "number" ? run.ordinal : null);
+}
+
 describe("context exhaustion on a resumed native session", () => {
   it("replaces an exhausted session with a fresh one carrying the full history under one handoff record", async () => {
     const { runtime, first, other, lookup, original } = await exhaustedRuntime({ usedTokens: 120_000 });
@@ -88,7 +96,9 @@ describe("context exhaustion on a resumed native session", () => {
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)?.state).toBe("delivered");
       const replacement = runtime.store.orchestration.backings.find({ ...lookup, nativeSessionId: "codex-fresh" })!;
       expect(replacement).toMatchObject({ status: "ready", coverageComplete: true });
-      expect(replacement.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, other.message.id, returned.message.id]));
+      for (const entry of [first, other, returned]) {
+        expect(covers(runtime, replacement, entry.message.id, entry.turn.runId)).toBe(true);
+      }
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("codex-fresh");
     } finally { runtime.store.close(); }
   });
@@ -161,7 +171,7 @@ describe("context exhaustion on a resumed native session", () => {
     const { runtime, original, other } = await exhaustedRuntime({ codexAnswer: prose });
     try {
       const database = (runtime.store as unknown as { database: Database.Database }).database;
-      const occupancy = coveredHistoryOccupancy(database, runtime.conversationId, original.coveredItemIds);
+      const occupancy = coveredHistoryOccupancy(database, runtime.conversationId, original);
       expect(occupancy).toBe(Math.ceil(Buffer.byteLength("Original Codex request") / 4)
         + Math.ceil(Buffer.byteLength(prose) / 4));
       const returned = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Return to Codex" });

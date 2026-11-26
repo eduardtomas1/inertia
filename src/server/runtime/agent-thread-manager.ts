@@ -75,7 +75,7 @@ import { SendToUserHostTool } from "./send-to-user-host-tool";
 import { WORKSPACE_TOOL_NAMES, WorkspaceHostTools, type WorkspaceHostToolDependencies } from "./workspace-host-tools";
 import { SECRET_REQUEST_TOOL_NAME, SECRET_VALUE_EXPOSURE_MESSAGE } from "../../node/agent-secrets";
 import type { AgentSecretHostToolSource } from "./agent-secrets/agent-secret-service";
-import { MANAGED_TURN_GONE_MESSAGE, recordQueuedManagedTurn, stopManagedTurnForAgent } from "./managed-turn-ownership";
+import { recordQueuedManagedTurn, stopManagedTurnForAgent } from "./managed-turn-ownership";
 import {
   AGENT_THREAD_WAIT_TOOL_NAME,
   managedConversationStatus,
@@ -92,20 +92,13 @@ import {
 } from "./delegation/task-tools";
 import { DelegatedWaitAbortedError, delegatedWaitTimeout } from "./delegation/task-wait";
 import {
-  RESTART_IDLE,
-  SEND_APPROVALS,
-  STEER_ENDED,
-  STEER_IDLE,
-  assertManagedQueueRoom,
-  assertManagedTurnCanStart,
-  queueManagedMessage,
-  sendSchema,
-  startManagedTurn,
-  steerManagedTurn,
-  type ManagedFollowUpLink,
-  type ManagedMessageQueue,
-  type SendMode,
+  RESTART_IDLE, agentSenderHiddenInstruction, dispatchManagedSend, managedSendApprovalDetail,
+  preflightManagedSend, sendSchema, type ManagedFollowUpLink, type ManagedMessageQueue, type SendMode,
 } from "./managed-send-modes";
+import {
+  MANAGED_QUEUE_TOOL_NAME, executeManagedQueueMutation, executeManagedQueueRead, isManagedQueueReadAction,
+  managedQueueApprovalDetail, managedQueueInputChars, managedQueueSchema, shouldAutoApproveManagedMutation,
+} from "./managed-queue-tools";
 import {
   ANSWER_QUESTION_TOOL_NAME,
   answerApprovalDetail,
@@ -124,7 +117,7 @@ const MAX_ACTIVE_CHILDREN = 3;
 const MAX_CANCELLED_DELEGATE_WAITS = 64;
 const STORED_CONTENT_TOOLS = new Set([
   HTML_RENDER_TOOL_NAME, SEND_TO_USER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation", "inertia_send_message",
-  ANSWER_QUESTION_TOOL_NAME, DELEGATE_TASK_TOOL, CANCEL_TASK_TOOL,
+  MANAGED_QUEUE_TOOL_NAME, ANSWER_QUESTION_TOOL_NAME, DELEGATE_TASK_TOOL, CANCEL_TASK_TOOL,
 ]);
 const LATEST_RESULT_RUNNING_NEXT = "Still running; wait for it with inertia_wait_for_conversation, then call inertia_get_latest_result again.";
 const TERMINAL_TURN_STATUSES = new Set([
@@ -162,6 +155,7 @@ export interface AgentThreadManagerDependencies {
   pendingApprovals?: ReadonlyMap<string, AgentApprovalRequest>;
   /** Resolved per call: the queue runtime starts after this manager. */
   messageQueue?(): ManagedMessageQueue | undefined;
+  isCompacting?(conversationId: string): boolean;
   conversationAttachments?: Pick<ConversationAttachmentStore, "preview">;
   watcherPolicy?: AgentContextWatcherPolicy;
   agentBrowser?: RuntimeAgentBrowserBroker;
@@ -437,6 +431,18 @@ export class AgentThreadManager {
           return await this.mutate(source, call, call.tool, (operationId, signal) =>
             this.send(source, call.arguments, operationId, signal, restart));
         }
+        case MANAGED_QUEUE_TOOL_NAME: {
+          const input = managedQueueSchema.parse(call.arguments);
+          const target = this.managedTarget(current, input.conversationId);
+          if (isManagedQueueReadAction(input)) return executeManagedQueueRead(this.dependencies, target, input);
+          assertAccessWithinParent(target.accessMode, current.accessMode);
+          return await this.mutate(source, call, "inertia_send_message",
+            (operationId, signal) => executeManagedQueueMutation({ ...this.dependencies, now: this.now },
+              this.assertSource(source), target, input, operationId, signal),
+            undefined, managedQueueApprovalDetail(this.dependencies.store, target, input),
+            { fingerprintToolName: MANAGED_QUEUE_TOOL_NAME, inputChars: managedQueueInputChars(input),
+              autoApproveToolName: MANAGED_QUEUE_TOOL_NAME, skipPreflight: true });
+        }
         case ANSWER_QUESTION_TOOL_NAME: {
           const input = answerQuestionSchema.parse(call.arguments);
           const target = this.managedTarget(current, input.conversationId);
@@ -632,22 +638,28 @@ export class AgentThreadManager {
     ) => Promise<ProviderHostToolResult>,
     target?: { childConversationId: string; targetTurnId: string; targetRunId: string },
     approval?: ApprovalDetail,
+    options?: {
+      fingerprintToolName?: string;
+      inputChars?: number;
+      autoApproveToolName?: string;
+      skipPreflight?: boolean;
+    },
   ): Promise<ProviderHostToolResult> {
-    const requestFingerprint = digest({ toolName, arguments: call.arguments });
+    const requestFingerprint = digest({ toolName: options?.fingerprintToolName ?? toolName, arguments: call.arguments });
     const clientRequestKey = this.clientRequestKey(source, toolName, call.arguments);
     const replay = this.keyedReplay(source, call, toolName);
     if (replay) return replay;
-    await this.preflightMutation(source, toolName, call.arguments);
+    if (!options?.skipPreflight) await this.preflightMutation(source, toolName, call.arguments);
     if (call.signal.aborted) {
       return failure("call_cancelled", "The parent turn ended before approval.");
     }
-    const inputChars = toolName === "inertia_create_conversation"
+    const inputChars = options?.inputChars ?? (toolName === "inertia_create_conversation"
       ? createSchema.parse(call.arguments).prompt.length
       : toolName === "inertia_send_message"
         ? sendSchema.parse(call.arguments).content.length
         : toolName === ANSWER_QUESTION_TOOL_NAME
           ? answerQuestionSchema.parse(call.arguments).answers.reduce((sum, answer) => sum + (answer.text?.length ?? 0), 0)
-          : toolName === DELEGATE_TASK_TOOL ? delegateTaskSchema.parse(call.arguments).task.length : 0;
+          : toolName === DELEGATE_TASK_TOOL ? delegateTaskSchema.parse(call.arguments).task.length : 0);
     const reserved = this.dependencies.store.agentThreadManagement.reserve({
       sourceConversationId: source.conversation.id,
       sourceTurnId: source.turn.id,
@@ -664,36 +676,25 @@ export class AgentThreadManager {
     if (target) this.dependencies.store.agentThreadManagement.transition(
       reserved.operation.id, ["approval-pending"], "approval-pending", target, this.now(),
     );
-    const detail = approval ?? this.approvalDetail(source, toolName, call.arguments);
-    const decision = await call.requestApproval({
-      title: detail.title,
-      detail: detail.detail,
-      reason: "A model requested a top-level Inertia chat lifecycle action.",
-      permissionRoots: detail.permissionRoots,
-    });
-    if (decision !== "approve") {
-      this.dependencies.store.agentThreadManagement.transition(
-        reserved.operation.id,
-        ["approval-pending"],
-        "denied",
-        {
-          failureMessage: decision === "cancel"
-            ? "Cancelled by the user."
+    const liveSource = this.dependencies.store.conversation(source.conversation.id);
+    if (!shouldAutoApproveManagedMutation(liveSource.accessMode, options?.autoApproveToolName ?? toolName)) {
+      const detail = approval ?? this.approvalDetail(source, toolName, call.arguments);
+      const decision = await call.requestApproval({
+        title: detail.title, detail: detail.detail,
+        reason: "A model requested a top-level Inertia chat lifecycle action.",
+        permissionRoots: detail.permissionRoots,
+      });
+      if (decision !== "approve") {
+        this.dependencies.store.agentThreadManagement.transition(reserved.operation.id, ["approval-pending"], "denied", {
+          failureMessage: decision === "cancel" ? "Cancelled by the user."
             : decision === "timeout" ? "The approval timed out." : "Denied by the user.",
-        },
-        this.now(),
-      );
-      return decision === "timeout"
-        ? failure("approval_timed_out", `The user did not answer the approval in time. Ask the user to try again, then call ${toolName} again.`)
-        : failure("user_denied", "The user did not approve this chat action.");
+        }, this.now());
+        return decision === "timeout"
+          ? failure("approval_timed_out", `The user did not answer the approval in time. Ask the user to try again, then call ${toolName} again.`)
+          : failure("user_denied", "The user did not approve this chat action.");
+      }
     }
-    this.dependencies.store.agentThreadManagement.transition(
-      reserved.operation.id,
-      ["approval-pending"],
-      "approved",
-      {},
-      this.now(),
-    );
+    this.dependencies.store.agentThreadManagement.transition(reserved.operation.id, ["approval-pending"], "approved", {}, this.now());
     if (call.signal.aborted) {
       this.dependencies.store.agentThreadManagement.transition(
         reserved.operation.id,
@@ -817,16 +818,8 @@ export class AgentThreadManager {
     if (toolName === "inertia_send_message") {
       const input = sendSchema.parse(args);
       const target = this.managedTarget(current, input.conversationId);
-      const mode = input.mode ?? "auto";
-      if (mode === "steer" && !this.dependencies.turns.isActive(target.id)) throw new Error(STEER_IDLE);
-      if (mode === "restart" && !this.dependencies.turns.isActive(target.id)) throw new Error(RESTART_IDLE);
-      if (mode === "restart") assertManagedTurnCanStart(this.dependencies, target);
-      if (mode === "queue") assertManagedQueueRoom(this.dependencies, target);
-      await this.assertRouteReady(
-        this.dependencies.backendProfileController.validateSelection(
-          target.modelSelection,
-        ),
-      );
+      preflightManagedSend(this.dependencies, target, input.mode ?? "auto");
+      await this.assertRouteReady(this.dependencies.backendProfileController.validateSelection(target.modelSelection));
       return;
     }
     const input = toolName === "inertia_archive_conversation"
@@ -888,17 +881,8 @@ export class AgentThreadManager {
     if (toolName === "inertia_send_message") {
       const input = sendSchema.parse(args);
       const target = this.managedTarget(current, input.conversationId);
-      const mode = input.mode ?? "auto";
-      const approval = SEND_APPROVALS[mode];
-      return {
-        title: approval.title,
-        detail: `${approval.effect} · Target ${input.conversationId} · ${input.content.slice(0, 180)}${
-          this.sendStartsFollowUp(current, target, mode) ? followUpApprovalSuffix(this.automaticWakes()) : ""}`,
-        permissionRoots: [{
-          path: this.dependencies.store.conversationPath(target.id),
-          access: "write",
-        }],
-      };
+      const suffix = this.sendStartsFollowUp(current, target, input.mode ?? "auto") ? followUpApprovalSuffix(this.automaticWakes()) : "";
+      return managedSendApprovalDetail(this.dependencies.store, target, input, suffix);
     }
     const input = toolName === "inertia_archive_conversation"
       ? archiveSchema.parse(args)
@@ -1081,10 +1065,12 @@ export class AgentThreadManager {
         "The parent turn ended after chat creation; the child remains visible but was not dispatched.",
       );
     }
+    const senderInstructions = agentSenderHiddenInstruction(input.prompt, current);
     const queued = this.dependencies.turns.queue({
       conversationId: child.id,
       content: input.prompt,
       activateConversation: false,
+      ...(senderInstructions.length > 0 ? { internalInstructions: senderInstructions } : {}),
     });
     recordQueuedManagedTurn(this.dependencies.store, this.dependencies.turns, operationId, queued.turn, this.now());
     const taskId = delegated ? await this.tasks().create({ operationId, kind: "original", originalTaskId: null,
@@ -1145,29 +1131,19 @@ export class AgentThreadManager {
       ),
     );
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
-    const dispatch = { ...this.dependencies, now: this.now };
-    if (mode === "queue") return queueManagedMessage(dispatch, target, input.content, operationId);
     const link: ManagedFollowUpLink = async (childTurn, via) =>
       await this.linkFollowUp(source, target.id, operationId, childTurn, via);
-    if (mode === "restart") {
-      if (!restart) throw new Error(RESTART_IDLE);
-      assertManagedTurnCanStart(this.dependencies, target);
-      // The same receipted Stop as inertia_stop_conversation, for exactly the
-      // approved turn: it throws without stopping a newer turn, and a turn
-      // that already ended was not stopped, so nothing is restarted.
-      const stopped = await stopManagedTurnForAgent(this.dependencies.store, this.dependencies.turns, target.id, restart, operationId);
-      if (stopped !== "stopped") throw new Error(MANAGED_TURN_GONE_MESSAGE);
-      if (signal.aborted) {
-        throw new Error("The parent turn ended after the managed chat stopped; the new message was not sent.");
-      }
-      return await startManagedTurn(dispatch, target, input.content, operationId, signal,
-        { restarted: { stoppedTurnId: restart.turnId }, link });
-    }
-    if (this.dependencies.turns.isActive(target.id)) {
-      return await steerManagedTurn(dispatch, target, input.content, operationId, signal, link);
-    }
-    if (mode === "steer") throw new Error(STEER_ENDED);
-    return await startManagedTurn(dispatch, target, input.content, operationId, signal, { link });
+    return await dispatchManagedSend(
+      { ...this.dependencies, now: this.now },
+      current,
+      target,
+      input.content,
+      mode,
+      operationId,
+      signal,
+      restart,
+      link,
+    );
   }
 
   private questionDependencies(): ManagedQuestionDependencies {

@@ -91,6 +91,11 @@ export interface ComposerInputZoneProps {
   onSubmit: () => Promise<void>;
   canQueue: boolean;
   onQueue: () => void;
+  editingQueued?: boolean;
+  onSaveEdit?: () => Promise<void>;
+  onCancelEdit?: () => void;
+  canResume?: boolean;
+  onResume?: () => Promise<unknown>;
   running: boolean;
   placeholder: string;
   submissionPending: boolean;
@@ -158,6 +163,11 @@ export function ComposerInputZone({
   onSubmit,
   canQueue,
   onQueue,
+  editingQueued = false,
+  onSaveEdit,
+  onCancelEdit,
+  canResume = false,
+  onResume,
   running,
   placeholder,
   submissionPending,
@@ -200,7 +210,7 @@ export function ComposerInputZone({
   const mentionQueryText = mentionMatch?.[1] ?? "";
   useEffect(() => { onMentionQuery(mentionQueryText); }, [mentionQueryText, onMentionQuery]);
   const runLocked = useWatcherRunLock(conversationId);
-  const modeChangesDisabled = disabled || running || runLocked;
+  const modeChangesDisabled = disabled || runLocked;
   const slashQuery = slashMatch?.[1].toLowerCase();
   const providerCommands = useProviderSlashCommands({
     load: providerCommandSource?.load,
@@ -286,7 +296,7 @@ export function ComposerInputZone({
   const activeMention = mentionOptions.find(({ id }) =>
     id === highlightedMentionId) ?? mentionOptions[0] ?? null;
   const mentionMenuVisible = Boolean(
-    !running
+    (!running || editingQueued)
     && mentionMatch
     && mentionOptions.length > 0
     && dismissedSuggestionValue !== message,
@@ -657,6 +667,18 @@ export function ComposerInputZone({
               }
               return;
             }
+            if (editingQueued) {
+              if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                onCancelEdit?.();
+                return;
+              }
+              if (shouldSubmitComposerKey(event)) {
+                event.preventDefault();
+                void onSaveEdit?.();
+              }
+              return;
+            }
             const historyDirection = composerPromptHistoryDirection(
               event,
               event.currentTarget,
@@ -683,7 +705,11 @@ export function ComposerInputZone({
             }
             if (shouldSubmitComposerKey(event)) {
               event.preventDefault();
-              void onSubmit();
+              if (canResume && !message.trim()) {
+                void onResume?.();
+              } else {
+                void onSubmit();
+              }
             }
           }}
           rows={1}

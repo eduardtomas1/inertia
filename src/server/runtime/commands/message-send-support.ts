@@ -1,6 +1,7 @@
 import type WebSocket from "ws";
 
 import type { ClientCommand, ServerEvent } from "../../../shared/contracts";
+import { queueDispatchCommandId } from "../../../shared/orchestration-queue";
 import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 import {
   MESSAGE_ADMISSION_UNAVAILABLE,
@@ -125,9 +126,17 @@ export function internalDispatchOrigin(dependencies: TurnInteractionCommandDepen
   return null;
 }
 
-export function messageSendSource(command: MessageSendCommand, origin: string | null): CommandSource {
+export function messageSendSource(
+  command: MessageSendCommand,
+  origin: string | null,
+  queuedDispatchOrdinal?: number,
+): CommandSource {
   const payload = JSON.parse(JSON.stringify(command)) as JsonValue;
-  return origin === null
-    ? { actorId: "human", commandId: command.requestId, command: payload }
-    : { actorId: "runtime", commandId: `${origin}:${command.requestId}`, command: payload };
+  if (origin === null) {
+    return { actorId: "human", commandId: command.requestId, command: payload };
+  }
+  const commandId = origin === "queue" && typeof queuedDispatchOrdinal === "number" && queuedDispatchOrdinal > 0
+    ? queueDispatchCommandId(command.requestId, queuedDispatchOrdinal)
+    : `${origin}:${command.requestId}`;
+  return { actorId: "runtime", commandId, command: payload };
 }

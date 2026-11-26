@@ -753,5 +753,45 @@
       }
     },
     "attribution": "Every route measures within 55 bytes of base plus both sides' growth; routes neither side changed measure identically in all four builds."
+  },
+  "phase5QueueAndPolish": {
+    "date": "2026-11-26",
+    "checkpoint": "Orchestrator V2 Phase 5 (Packages 1-5) + Phases 1-4 UI/a11y fixes on origin/main 29fb5e78 (v0.0.85)",
+    "platform": "Linux x64, Node 22.23.2",
+    "measurement": "Full electron-vite + private-connect production build; upgraded deferredComposerQueueJavaScript from single-asset assetBytes to closureBytes excluding initial routes and asserted initial-route exclusion.",
+    "accounting": "entryCss (259,481 / 259,805 bytes) and detachedChatCss (1,448 / 1,612 bytes) stayed under budget with zero growth because queue and edit-banner CSS live strictly inside lazy RuntimeComposerQueuedActions.css.",
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 1002485,
+        "previousLimit": 967601,
+        "limit": 1002997,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 884457,
+        "previousLimit": 849536,
+        "limit": 884969,
+        "headroom": 512
+      },
+      "transcriptJavaScript": {
+        "bytes": 705426,
+        "previousLimit": 705265,
+        "limit": 705938,
+        "headroom": 512
+      },
+      "deferredComposerQueueJavaScript": {
+        "bytes": 20773,
+        "previousLimit": 17720,
+        "limit": 21029,
+        "headroom": 256,
+        "note": "Upgraded from single-asset assetBytes to full closureBytes excluding initial routes (20,773 bytes including direct workspace-route reconfirm) with initial-route exclusion assertion."
+      },
+      "coreJavaScript": {
+        "bytes": 2821249,
+        "previousLimit": 2791719,
+        "limit": 2821761,
+        "headroom": 512
+      }
+    }
   }
 }

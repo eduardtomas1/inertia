@@ -2116,12 +2116,20 @@ setTimeout(() => {
         && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "running"),
     );
 
+    // Decision 4.8: conversation.update is allowed while a run is active without disturbing it;
+    // destructive lifecycle mutations remain blocked until the active review is stopped.
+    const updateRequestId = randomUUID();
+    send(client.socket, {
+      type: "conversation.update",
+      requestId: updateRequestId,
+      payload: { conversationId, providerId: "claude" },
+    });
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === updateRequestId,
+    );
+
     for (const blocked of [
-      {
-        type: "conversation.update",
-        payload: { conversationId, providerId: "claude" },
-        message: "Stop the active run or review before changing its agent configuration.",
-      },
       {
         type: "conversation.archive",
         payload: { conversationId },

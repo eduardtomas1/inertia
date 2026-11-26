@@ -15,8 +15,14 @@ import {
   type DelegationMailbox,
 } from "../../shared/orchestration-delegation";
 import { isAgentTurnTerminalStatus, type AgentTurnStatus } from "../../shared/turn-lifecycle";
+import {
+  QUEUE_ITEM_PROJECTION,
+  queueItemProjectionSchema,
+  type QueueItemProjection,
+} from "../../shared/orchestration-queue";
 import { orchestrationProviderStopReasonSchema } from "../../shared/orchestration-v2";
 import { liveNativeChildCount } from "../persistence/observed-child-repository";
+import { delegatedDeliveryId } from "../persistence/queued-message-repository";
 import { MESSAGE_PROJECTION_COLUMNS } from "../persistence/stream-text-storage";
 import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
 import { DELEGATED_TASK_PROJECTION, DELEGATION_MAILBOX_PROJECTION } from "./delegation-projector";
@@ -104,6 +110,18 @@ export class DelegationReads {
     const row = this.database.prepare("SELECT payload_json FROM orchestration_v2_entities WHERE kind = ? AND id = ?")
       .get(DELEGATION_MAILBOX_PROJECTION, parentConversationId) as { payload_json: string } | undefined;
     return row ? delegationMailboxSchema.parse(JSON.parse(row.payload_json)) : null;
+  }
+
+  queueItem(itemId: string): QueueItemProjection | null {
+    const row = this.database.prepare("SELECT payload_json FROM orchestration_v2_entities WHERE kind = ? AND id = ?")
+      .get(QUEUE_ITEM_PROJECTION, itemId) as { payload_json: string } | undefined;
+    if (!row) return null;
+    try {
+      const parsed = queueItemProjectionSchema.safeParse(JSON.parse(row.payload_json));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   taskIds(where: string, ...parameters: (string | number)[]): string[] {
@@ -300,6 +318,14 @@ export class DelegationReads {
       AND delegated_completion_json IS NOT NULL AND json_extract(delegated_completion_json, '$.generation') = ?
       ORDER BY created_at DESC LIMIT 1`).get(parentConversationId, generation) as { turn_id: string } | undefined;
     if (message) return message.turn_id;
+    const mailbox = this.mailbox(parentConversationId);
+    const deliveryId = mailbox?.generation === generation && mailbox.deliveryId !== null
+      ? mailbox.deliveryId
+      : delegatedDeliveryId(parentConversationId, generation);
+    const queueItem = this.queueItem(deliveryId);
+    if (queueItem?.threadId === parentConversationId && queueItem.delivery?.turnId) {
+      return queueItem.delivery.turnId;
+    }
     return (this.database.prepare(`SELECT turn_id FROM queued_messages WHERE conversation_id = ? AND turn_id IS NOT NULL
       AND delegated_completion_json IS NOT NULL AND json_extract(delegated_completion_json, '$.generation') = ?`)
       .get(parentConversationId, generation) as { turn_id: string } | undefined)?.turn_id ?? null;
@@ -311,6 +337,18 @@ export class DelegationReads {
       WHERE turn.id = ? AND turn.conversation_id = ? AND message.delegated_completion_json IS NOT NULL`)
       .get(turn.id, parentConversationId) as { generation: number } | undefined;
     if (row) return row.generation;
+    const mailbox = this.mailbox(parentConversationId);
+    if (mailbox?.deliveryId) {
+      const queueItem = this.queueItem(mailbox.deliveryId);
+      if (
+        queueItem?.threadId === parentConversationId
+        && queueItem.delivery?.turnId === turn.id
+        && queueItem.attribution
+        && "delegatedCompletion" in queueItem.attribution
+      ) {
+        return queueItem.attribution.delegatedCompletion.generation;
+      }
+    }
     return (this.database.prepare(`SELECT json_extract(delegated_completion_json, '$.generation') AS generation
       FROM queued_messages WHERE conversation_id = ? AND turn_id = ? AND delegated_completion_json IS NOT NULL`)
       .get(parentConversationId, turn.id) as { generation: number } | undefined)?.generation ?? null;

@@ -710,7 +710,7 @@ describe("configuration and queue authority", () => {
     } as unknown as ConversationCommandDependencies);
   }
 
-  it("refuses a configuration change during a run inside the lane, replays the refusal, and still renames", async () => {
+  it("allows configuration changes during a run, refuses them during exclusive conversation work with receipt replay, and still renames (Decision 4.8)", async () => {
     const f = await fixture();
     try {
       const turn = f.startRunning();
@@ -718,15 +718,30 @@ describe("configuration and queue authority", () => {
       const update = (requestId: string, payload: Record<string, unknown>) => handler(null as never, {
         type: "conversation.update", requestId, payload: { conversationId: f.conversationId, ...payload },
       } as ClientCommand);
-      const refused = randomUUID();
-      await expect(update(refused, { modelSelection: selection("gpt-next") })).rejects.toThrow("Stop the active run or review");
+
+      // Decision 4.8: model/selection updates are allowed during an active agent turn.
+      await expect(update(randomUUID(), { modelSelection: selection("gpt-running") })).resolves.toBe("mutation");
+      expect(f.store.conversation(f.conversationId).modelSelection.modelId).toBe("gpt-running");
+      expect(f.threadEvents().filter(({ type }) => type === "thread.configured").at(-1)?.payload)
+        .toMatchObject({ selection: { modelId: "gpt-running" } });
       await expect(update(randomUUID(), { title: "Renamed while running" })).resolves.toBe("mutation");
       expect(f.store.conversation(f.conversationId).title).toBe("Renamed while running");
       f.provider.resolve({ status: "completed" });
       await f.drain();
       expect(f.store.agentTurn(turn.id).status).toBe("completed");
+
+      // Non-turn exclusive work (e.g. restore / isolated review reservation) still refuses configuration changes and replays the refusal.
+      expect(f.store.conversationWork.reserve(f.conversationId)).toBe(true);
+      const refused = randomUUID();
+      try {
+        await expect(update(refused, { modelSelection: selection("gpt-next") })).rejects.toThrow("Stop the active run or review");
+        await expect(update(randomUUID(), { title: "Renamed during reservation" })).resolves.toBe("mutation");
+        expect(f.store.conversation(f.conversationId).title).toBe("Renamed during reservation");
+      } finally {
+        f.store.conversationWork.release(f.conversationId);
+      }
       await expect(update(refused, { modelSelection: selection("gpt-next") })).rejects.toThrow("Stop the active run or review");
-      expect(f.store.conversation(f.conversationId).modelSelection.modelId).toBe("gpt-test");
+      expect(f.store.conversation(f.conversationId).modelSelection.modelId).toBe("gpt-running");
       await expect(update(randomUUID(), { modelSelection: selection("gpt-next") })).resolves.toBe("mutation");
       expect(f.store.conversation(f.conversationId).modelSelection.modelId).toBe("gpt-next");
       expect(f.threadEvents().filter(({ type }) => type === "thread.configured").at(-1)?.payload)

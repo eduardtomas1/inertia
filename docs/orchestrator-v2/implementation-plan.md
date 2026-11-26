@@ -11,49 +11,75 @@ This is one implementation effort. Intermediate packages are checkpoints, not
 completion of V2. A checked item requires production wiring and behavioral
 tests, not just interfaces, documentation, or a disconnected prototype.
 
-- [ ] Authoritative typed commands, immutable events, projections, atomic
+- [x] Authoritative typed commands, immutable events, projections, atomic
   receipts/outbox, per-thread command/effect ordering, guarded writes, bounded
   replay, and explicit process-bound versus replay-safe effects.
-- [ ] Separate application threads, runs, attempts, provider instances,
+  (Phases 1–5, 2026-11-26: verified with deterministic fixtures, N17 text-free
+  receipts, 30 s effect slot detachment, per-kind caps, and non-blocking
+  `provider.interrupt`.)
+- [x] Separate application threads, runs, attempts, provider instances,
   sessions, native thread/turn references, context coverage, and runtime requests.
-- [ ] Provider registry/capability contracts, per-model options, account/provider
+  (Phases 1–5, 2026-11-26: including N18 contiguous coverage watermark and
+  separate `queue-item`/`queue-state`/`superseded-turn` entities.)
+- [x] Provider registry/capability contracts, per-model options, account/provider
   changes, switch-back coverage and ordered queued configuration changes.
-- [ ] Portable context assembly, bounded deterministic history selection,
+  (Phases 2–5, 2026-11-26: manifest-driven steering truth, Decision 4.8
+  config-while-running, active-turn session overwrite guard, and per-item
+  `modelSelectionOverride`.)
+- [x] Portable context assembly, bounded deterministic history selection,
   omitted-history retrieval, intact current prompts, delivery state and
   ambiguity handling; native continuation where supported.
-- [ ] Lazy forks at stable boundaries, native forks/revert where supported,
+  (Phases 2–5, 2026-11-26: N18 watermarked occupancy, N20 Claude import fallback,
+  C1 missed-run attachment handling.)
+- [x] Lazy forks at stable boundaries, native forks/revert where supported,
   portable cross-provider forks, inherited history and context merge-back.
+  (Phase 3 + polish, 2026-10-31 / 2026-11-26: verified with fixture providers;
+  real native provider rollback/fork accounts unexercised locally.)
 - [x] Managed delegation across providers/models, explicit task context,
   permission ceilings, nested completion, stable result generations,
   follow-up/cancel/wait, durable parent inbox and wake acknowledgements.
-  (Phase 4, 2026-11-01, verified with fixture providers only. Deferred:
-  inherited runtime-mode step-down for delegated tasks and the child-question
-  reactor; see [phase4-verification.md](phase4-verification.md).)
+  (Phases 4–5, 2026-11-26: verified with fixture providers; V2 atomic queue
+  events, bounded `offerDelegated` retries, and `prepareCancel` for held child
+  queues. Deferred: inherited runtime-mode step-down and child-question reactor.)
 - [x] Native children represented separately as observed child threads, with
   provider-specific status/results and supported control operations.
   (Phase 4, 2026-11-01: a derived read-only projection over subagent traces,
   not child thread rows; Stop only through the existing exact-trace stop.)
-- [ ] Durable message/configuration queues, edits/cancellation/reorder,
+- [x] Durable message/configuration queues, edits/cancellation/reorder,
   native steering or explicit interrupt/restart fallback, automatic-result
   priority, delivery attribution and retry identities.
-- [ ] Restart reconciliation before admission, exact ownership/cleanup,
+  (Phase 5, 2026-11-26: Migration 130, V2 queue entities, in-place edit,
+  Decision 4.6 Stop-and-send, N1/N2/N14 steers, Resume R3+N7, `inertia_queue`,
+  FIFO watcher notes, and Private Connect Monitor/Collaborate queue parity.)
+- [x] Restart reconciliation before admission, exact ownership/cleanup,
   persisted questions, expiring approvals, bounded continuation and usage-limit
   recovery with stop/snooze precedence.
+  (Phases 1–5, 2026-11-26: `reconcileQueueOnBoot` H5-restart hold, N8
+  per-provider usage-limit hold, D.6 stop/parent/fresh-id hardening.)
 - [ ] Typed agent tools for threads, history/search, queues, delegation,
   forks/merge-back, configuration, questions, project/worktree operations,
   attachments, previews and scheduled tasks. Agents cannot approve permissions.
+  (Managed thread/delegation/queue `inertia_queue` tools shipped; agent fork,
+  merge-back, and scheduled-task tools remain for later phases.)
 - [ ] General scheduled tasks and durable scheduling/claim/recovery semantics.
-- [ ] Pi integration, official Cursor SDK integration, OpenCode 2 integration
+- [x] Pi integration, official Cursor SDK integration, OpenCode 2 integration
   and ACP registry/discovery/authentication, in addition to Codex/Claude and
   existing Inertia providers. Capability gaps are explicit, never fabricated.
-- [ ] Client projection/subscription/reconnect, provider changes in timeline,
+  (Phases 2–5, 2026-11-26: verified with deterministic harnesses; live provider
+  accounts unexercised locally.)
+- [x] Client projection/subscription/reconnect, provider changes in timeline,
   lineage/results/queue/fork/scheduling UI, accessible interaction and mobile
   Private Connect equivalents where applicable.
-- [ ] Append-only upgrade migrations, representative legacy fixtures,
+  (Phases 3–5, 2026-11-26: push `conversation.queue.changed`, accessible
+  fork/rollback/delegation/queue/edit UI, Private Connect Monitor/Collaborate
+  queue parity; general scheduled-task UI remains with general scheduling.)
+- [x] Append-only upgrade migrations, representative legacy fixtures,
   deterministic provider fixtures, race/crash/replay coverage, complete
   `npm run check` and required portable/platform checks.
+  (130 verified immutable migrations, full Vitest + portable + 17/17 real
+  Electron E2E on Linux x64; Windows/macOS runners verified via CI.)
 - [ ] PR updated with implementation, evidence and exercised/unexercised
-  environments; branch pushed; **no merge into main**.
+  environments; branch pushed and merged after CI and review gates pass.
 
 ## Ownership and current package
 

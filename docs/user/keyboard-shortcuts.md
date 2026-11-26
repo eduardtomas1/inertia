@@ -81,8 +81,11 @@ Changes, Files, Browser and Terminal are available after the chat's first messag
 | Action | Keys |
 |---|---|
 | Send, or send a follow-up while an agent works | Enter |
-| Stop the agent and send, for agents that cannot take a follow-up mid-turn | Enter, while *Enter stops and sends · Tab queues* is shown |
-| Queue a follow-up for the next turn | Tab, while *Enter sends · Tab queues* or *Enter stops and sends · Tab queues* is shown |
+| Resume a paused queue | Enter, on an empty composer when no approval or question is pending |
+| Stop the agent and send, for agents that cannot take a follow-up mid-turn | Enter, while *Enter stops and sends · Tab queues* is shown (also works when messages are already queued) |
+| Queue a follow-up for the next turn (up to 20 queued messages) | Tab, while *Enter sends · Tab queues* or *Enter stops and sends · Tab queues* is shown |
+| Save an in-place queued message edit | Enter, while editing a queued message |
+| Cancel an in-place queued message edit | Esc, while editing a queued message (with no suggestion menu open) |
 
 Type these in the composer:
 

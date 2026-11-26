@@ -175,6 +175,40 @@ export class RecoveryRepository {
           markLegacyActivities.run(id);
           markLegacyReasonings.run(id);
         }
+        // Guarantee no assistant message or reasoning remains with uncompacted streaming chunks after crash recovery.
+        this.database.prepare(`
+          UPDATE messages
+          SET content = content || COALESCE((
+            SELECT group_concat(ordered_chunks.content, '')
+            FROM (
+              SELECT content FROM message_content_chunks
+              WHERE message_id = messages.id ORDER BY sequence ASC
+            ) AS ordered_chunks
+          ), '')
+          WHERE conversation_id = ?
+            AND EXISTS (SELECT 1 FROM message_content_chunks WHERE message_id = messages.id)
+        `).run(id);
+        this.database.prepare(`
+          DELETE FROM message_content_chunks
+          WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)
+        `).run(id);
+        this.database.prepare(`
+          UPDATE agent_reasonings
+          SET content = content || COALESCE((
+            SELECT group_concat(ordered_chunks.content, '')
+            FROM (
+              SELECT content FROM reasoning_content_chunks
+              WHERE reasoning_id = agent_reasonings.id ORDER BY sequence ASC
+            ) AS ordered_chunks
+          ), ''),
+          status = CASE WHEN status = 'running' THEN 'failed' ELSE status END
+          WHERE conversation_id = ?
+            AND (status = 'running' OR EXISTS (SELECT 1 FROM reasoning_content_chunks WHERE reasoning_id = agent_reasonings.id))
+        `).run(id);
+        this.database.prepare(`
+          DELETE FROM reasoning_content_chunks
+          WHERE reasoning_id IN (SELECT id FROM agent_reasonings WHERE conversation_id = ?)
+        `).run(id);
         addRecoveryActivity.run(
           randomUUID(),
           id,

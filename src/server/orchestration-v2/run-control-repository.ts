@@ -19,7 +19,7 @@ import {
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import type { CommandTicket } from "./command-authority";
 import type { OrchestrationEffectOutbox } from "./effect-outbox";
-import { ORCHESTRATION_EFFECT_KINDS } from "./effect-runtime";
+import { ORCHESTRATION_EFFECT_KINDS, type OrchestrationEffectRuntime } from "./effect-runtime";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint } from "./json";
 import { RUN_INTERRUPT_PROJECTION, RUN_STEER_PROJECTION } from "./run-control-projector";
@@ -40,14 +40,8 @@ export type SteerRequest =
   | { kind: "closed" }
   | { kind: "requested"; effectId: string };
 
-interface Waiter {
-  settled: Promise<void>;
-  resolve(): void;
-}
-
 export class RunControlRepository {
-  readonly #claims = new Map<string, OrchestrationEffect>();
-  readonly #waiters = new Map<string, Waiter>();
+  private effectRuntime: OrchestrationEffectRuntime | null = null;
 
   constructor(
     private readonly events: OrchestrationEventStore,
@@ -56,6 +50,14 @@ export class RunControlRepository {
     private readonly clock: () => string = () => new Date().toISOString(),
     private readonly database: Database.Database = effects.connection,
   ) {}
+
+  attachEffectRuntime(runtime: OrchestrationEffectRuntime | null): void {
+    this.effectRuntime = runtime;
+  }
+
+  dispatchesViaEffectRuntime(kind: "provider.interrupt" | "provider.steer"): boolean {
+    return this.effectRuntime?.executes(kind) === true;
+  }
 
   target(runId: string): RunControlTarget | null {
     const runRow = this.events.projection("run", runId);
@@ -93,27 +95,43 @@ export class RunControlRepository {
     return this.effects.get(effectId);
   }
 
-  recordInterrupt(ticket: CommandTicket, target: RunControlTarget, expectedTurnId: string | null,
-    cause: RunInterruptCause): string {
+  recordInterrupt(
+    ticket: CommandTicket,
+    target: RunControlTarget,
+    expectedTurnId: string | null,
+    cause: RunInterruptCause,
+    extra?: { events?: readonly OrchestrationDomainEvent[]; afterCommit?: () => void },
+  ): string {
     const effectId = `interrupt:${commandFingerprint({ actorId: ticket.identity.actorId,
       commandId: ticket.identity.commandId, attemptId: target.attemptId })}`;
     const events: OrchestrationDomainEvent[] = [
       { type: "attempt.interrupt-requested", payload: { runId: target.runId, attemptId: target.attemptId } },
       { type: "run-control.interrupt-recorded", payload: { runId: target.runId, attemptId: target.attemptId,
         effectId, requestedAt: this.clock(), expectedTurnId, cause } },
+      ...(extra?.events ?? []),
     ];
     const start = this.startIntent(target.runId);
     ticket.commit({ events, effects: [this.controlEffect(effectId, 1, "provider.interrupt", target)],
       result: { stop: "interrupt", runId: target.runId, attemptId: target.attemptId, effectId } }, () => {
       if (start?.state === "pending") this.effects.retirePending(start.id, "stopped");
+      extra?.afterCommit?.();
     });
-    this.claim(effectId);
+    if (!this.dispatchesViaEffectRuntime("provider.interrupt")) {
+      this.effects.claimControl(effectId);
+    }
     return effectId;
   }
 
-  escalateByRequester(ticket: CommandTicket, target: RunControlTarget, cause: RunInterruptCause): void {
-    ticket.commit({ events: [this.escalation(target, cause)],
-      result: { stop: "escalated", runId: target.runId, attemptId: target.attemptId } });
+  escalateByRequester(
+    ticket: CommandTicket,
+    target: RunControlTarget,
+    cause: RunInterruptCause,
+    extra?: { events?: readonly OrchestrationDomainEvent[]; afterCommit?: () => void },
+  ): void {
+    ticket.commit({
+      events: [this.escalation(target, cause), ...(extra?.events ?? [])],
+      result: { stop: "escalated", runId: target.runId, attemptId: target.attemptId },
+    }, extra?.afterCommit);
   }
 
   escalateAfterGrace(runId: string): boolean {
@@ -141,11 +159,15 @@ export class RunControlRepository {
       expectedRevision: this.events.revision(target.threadId), events: [event], result: null }, () => {
       if (current.effectId) this.settleEffectRow(current.effectId, failureCode);
     });
-    if (current.effectId) this.releaseClaim(current.effectId);
     return true;
   }
 
-  requestSteer(ticket: CommandTicket, runId: string, turnId: string): SteerRequest {
+  requestSteer(
+    ticket: CommandTicket,
+    runId: string,
+    turnId: string,
+    options?: { queuedMessageId?: string },
+  ): SteerRequest {
     const target = this.target(runId);
     if (!target) return { kind: "untracked" };
     if (target.terminal || target.turnId !== turnId || target.interruptRequested) return { kind: "closed" };
@@ -153,9 +175,14 @@ export class RunControlRepository {
       commandId: ticket.identity.commandId, runId })}`;
     const event: OrchestrationDomainEvent = { type: "run-control.steer-requested",
       payload: { runId, attemptId: target.attemptId, effectId, requestedAt: this.clock() } };
-    ticket.commit({ events: [event], effects: [this.controlEffect(effectId, 0, "provider.steer", target)],
-      result: { disposition: "follow-up", effectId } });
-    this.claim(effectId);
+    ticket.commit({
+      events: [event],
+      effects: [this.controlEffect(effectId, 0, "provider.steer", target, options?.queuedMessageId)],
+      result: { disposition: "follow-up", effectId },
+    });
+    if (!this.dispatchesViaEffectRuntime("provider.steer")) {
+      this.effects.claimControl(effectId);
+    }
     return { kind: "requested", effectId };
   }
 
@@ -164,12 +191,12 @@ export class RunControlRepository {
     const steer = this.steer(effectId);
     const failureCode = outcome === "accepted" ? null : `steer-${outcome}`;
     if (!steer || steer.state !== "dispatching") {
-      this.settleClaim(effectId, failureCode);
+      this.settleEffectRow(effectId, failureCode);
       return;
     }
     const target = this.target(steer.runId);
     if (!target) {
-      this.settleClaim(effectId, failureCode);
+      this.settleEffectRow(effectId, failureCode);
       return;
     }
     const event: OrchestrationDomainEvent = { type: "run-control.steer-settled", payload: { runId: steer.runId,
@@ -180,7 +207,6 @@ export class RunControlRepository {
       expectedRevision: this.events.revision(target.threadId), events: [event], result: null }, () => {
       this.settleEffectRow(effectId, failureCode);
     });
-    this.releaseClaim(effectId);
   }
 
   recordSteerRead(input: {
@@ -237,21 +263,56 @@ export class RunControlRepository {
   }
 
   async awaitSettled(effectIds: readonly string[], deadlineAt: number): Promise<boolean> {
-    const waits = effectIds.flatMap((id) => {
-      const waiter = this.#waiters.get(id);
-      return waiter ? [waiter.settled] : [];
-    });
-    if (waits.length === 0) return true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const expired = new Promise<false>((resolve) => {
-      timer = setTimeout(() => resolve(false), Math.max(0, deadlineAt - Date.now()));
-      timer.unref?.();
-    });
-    try {
-      return await Promise.race([Promise.all(waits).then(() => true), expired]);
-    } finally {
-      clearTimeout(timer);
+    if (effectIds.length === 0) return true;
+    const isSettled = (id: string): boolean => {
+      const row = this.effects.get(id);
+      return !row || (row.state !== "pending" && row.state !== "running");
+    };
+    if (effectIds.every(isSettled)) return true;
+    const remainingMs = Math.max(0, deadlineAt - Date.now());
+    if (remainingMs === 0) return false;
+    if (this.effectRuntime?.running) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expired = new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), remainingMs);
+        timer.unref?.();
+      });
+      try {
+        return await Promise.race([
+          Promise.all(effectIds.map((id) => this.effectRuntime!.awaitSettled(id))).then(() => true, () => false),
+          expired,
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    return await new Promise<boolean>((resolve) => {
+      let done = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let poll: ReturnType<typeof setInterval> | undefined;
+      let unsubscribe: (() => void) | undefined;
+      const finish = (settled: boolean): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearInterval(poll);
+        unsubscribe?.();
+        resolve(settled);
+      };
+      const check = (): void => {
+        try {
+          if (effectIds.every(isSettled)) finish(true);
+        } catch {
+          finish(false);
+        }
+      };
+      unsubscribe = this.effects.subscribe(check);
+      poll = setInterval(check, 25);
+      poll.unref?.();
+      timer = setTimeout(() => finish(false), remainingMs);
+      timer.unref?.();
+      check();
+    });
   }
 
   private escalation(target: RunControlTarget, cause: RunInterruptEscalationCause): OrchestrationDomainEvent {
@@ -259,38 +320,34 @@ export class RunControlRepository {
       payload: { runId: target.runId, attemptId: target.attemptId, cause, at: this.clock() } };
   }
 
-  private controlEffect(id: string, eventIndex: number, kind: "provider.interrupt" | "provider.steer", target: RunControlTarget) {
-    return { id, eventIndex, kind, replayPolicy: ORCHESTRATION_EFFECT_KINDS[kind].replayPolicy,
-      payload: { runId: target.runId, attemptId: target.attemptId, turnId: target.turnId } };
-  }
-
-  private claim(effectId: string): void {
-    const claim = this.effects.claimControl(effectId);
-    if (!claim) return;
-    this.#claims.set(effectId, claim);
-    let resolve!: () => void;
-    const settled = new Promise<void>((onResolve) => { resolve = onResolve; });
-    this.#waiters.set(effectId, { settled, resolve });
+  private controlEffect(
+    id: string,
+    eventIndex: number,
+    kind: "provider.interrupt" | "provider.steer",
+    target: RunControlTarget,
+    queuedMessageId?: string,
+  ) {
+    return {
+      id,
+      eventIndex,
+      kind,
+      replayPolicy: ORCHESTRATION_EFFECT_KINDS[kind].replayPolicy,
+      payload: {
+        runId: target.runId,
+        attemptId: target.attemptId,
+        turnId: target.turnId,
+        ...(queuedMessageId !== undefined ? { queuedMessageId } : {}),
+      },
+    };
   }
 
   private settleEffectRow(effectId: string, failureCode: string | null): void {
-    const claim = this.#claims.get(effectId);
-    if (claim) this.effects.settle(claim, failureCode === null ? { kind: "succeeded" } : { kind: "failed", code: failureCode });
-    else this.effects.retirePending(effectId, failureCode ?? "control-settled");
-  }
-
-  private releaseClaim(effectId: string): void {
-    this.#claims.delete(effectId);
-    const waiter = this.#waiters.get(effectId);
-    this.#waiters.delete(effectId);
-    waiter?.resolve();
-  }
-
-  private settleClaim(effectId: string, failureCode: string | null): void {
-    try {
-      this.settleEffectRow(effectId, failureCode);
-    } finally {
-      this.releaseClaim(effectId);
+    const current = this.effects.get(effectId);
+    if (!current) return;
+    if (current.state === "running" && current.claimId !== null) {
+      this.effects.settle(current, failureCode === null ? { kind: "succeeded" } : { kind: "failed", code: failureCode });
+    } else if (current.state === "pending") {
+      this.effects.retirePending(effectId, failureCode ?? "control-settled");
     }
   }
 }

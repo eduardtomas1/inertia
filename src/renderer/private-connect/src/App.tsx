@@ -19,7 +19,9 @@ import { CheckingScreen, OfflineScreen, PairScreen, WaitingScreen } from "./pair
 import { onPrivateConnectConversationNavigation } from "./pwa";
 import { createPrivateConnectPairingNonce } from "../../../shared/private-connect/pairing-link";
 import { WorkspaceShell } from "./workspace/WorkspaceShell";
-import type { Detail, Shell } from "./types";
+import type { ConversationDetailWithQueue } from "./workspace/ConversationPane";
+import { privateConnectQueueProjectionSchema } from "./workspace/QueueSection";
+import type { Shell } from "./types";
 
 type PairState =
   | { kind: "checking" }
@@ -44,7 +46,7 @@ export default function App({
   const [pair, setPair] = useState<PairState>(() => ({ kind: "checking" }));
   const [browserNonce] = useState(createPrivateConnectPairingNonce);
   const [shell, setShell] = useState<Shell | null>(null);
-  const [detail, setDetail] = useState<Detail | null>(null);
+  const [detail, setDetail] = useState<ConversationDetailWithQueue | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, PromptDraft>>({});
   const promptDraft = selectedConversation ? promptDrafts[selectedConversation] : undefined;
@@ -441,6 +443,57 @@ export default function App({
     }
   };
 
+  const refreshSelectedConversation = useCallback(async (conversationId: string, csrf: string): Promise<void> => {
+    conversationValidatorsRef.current.delete(conversationId);
+    const updated = await request({
+      protocolVersion: 1,
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId,
+      ifNoneMatch: null,
+    }, csrf);
+    applyConversationResponse(updated, conversationId);
+  }, [applyConversationResponse, request]);
+
+  const mutateQueue = async (
+    payload: Record<string, unknown>,
+    fallbackError: string,
+  ): Promise<boolean> => {
+    if (hostUnavailable || pair.kind !== "ready" || !selectedConversation || !shell?.capabilities.scopes.includes("private:prompt")) return false;
+    setBusy(true);
+    setPair((current) => current.kind === "ready" ? { ...current, error: null } : current);
+    try {
+      const response = await request({
+        protocolVersion: 1,
+        requestId: crypto.randomUUID(),
+        conversationId: selectedConversation,
+        ...payload,
+      } as Parameters<PrivateConnectSocket["request"]>[0], pair.csrf);
+      if (!response.ok) throw new Error(response.message);
+      await refreshSelectedConversation(selectedConversation, pair.csrf).catch(() => undefined);
+      return true;
+    } catch (error) {
+      setPair((current) => current.kind === "ready"
+        ? { ...current, error: error instanceof Error ? error.message : fallbackError }
+        : current);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendQueueItem = (id: string): Promise<void> =>
+    mutateQueue({ type: "queue.send", id }, "The queued message could not be sent.").then(() => undefined);
+
+  const editQueueItem = (id: string, expectedRevision: number, content: string): Promise<boolean> =>
+    mutateQueue({ type: "queue.edit", id, expectedRevision, content }, "The queued message could not be edited.");
+
+  const removeQueueItem = (id: string): Promise<void> =>
+    mutateQueue({ type: "queue.remove", id }, "The queued message could not be removed.").then(() => undefined);
+
+  const resumeQueue = (): Promise<void> =>
+    mutateQueue({ type: "queue.resume" }, "The queue could not be resumed.").then(() => undefined);
+
   const signOut = async (): Promise<void> => {
     if (pair.kind !== "ready") return;
     try {
@@ -490,6 +543,10 @@ export default function App({
       onSendPrompt={() => void sendPrompt()}
       onAnswer={(answers) => void answerQuestions(answers)}
       onStopRun={() => void stopRun()}
+      onSendQueueItem={sendQueueItem}
+      onEditQueueItem={editQueueItem}
+      onRemoveQueueItem={removeQueueItem}
+      onResumeQueue={resumeQueue}
       onSignOut={() => void signOut()}
     />
   );
@@ -497,8 +554,21 @@ export default function App({
 
 type ProjectionResult =
   | { kind: "state"; validator: string; state: Shell }
-  | { kind: "conversation"; validator: string; detail: Detail }
+  | { kind: "conversation"; validator: string; detail: ConversationDetailWithQueue }
   | { kind: "not-modified"; validator: string };
+
+function parseConversationDetailWithQueue(raw: unknown): ConversationDetailWithQueue | null {
+  const direct = privateConnectConversationDetailSchema.safeParse(raw);
+  if (direct.success) return direct.data as ConversationDetailWithQueue;
+  if (!raw || typeof raw !== "object" || !("queue" in raw)) return null;
+  const { queue, ...rest } = raw as Record<string, unknown>;
+  const base = privateConnectConversationDetailSchema.safeParse(rest);
+  if (!base.success) return null;
+  if (queue === undefined) return base.data;
+  const parsedQueue = privateConnectQueueProjectionSchema.safeParse(queue);
+  if (!parsedQueue.success) return null;
+  return { ...base.data, queue: parsedQueue.data };
+}
 
 function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }>): ProjectionResult | null {
   const result = response.result;
@@ -515,9 +585,9 @@ function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }
       : null;
   }
   if (kind === "conversation" && "detail" in result) {
-    const detail = privateConnectConversationDetailSchema.safeParse(result.detail);
-    return detail.success
-      ? { kind, validator: result.validator, detail: detail.data }
+    const detail = parseConversationDetailWithQueue(result.detail);
+    return detail
+      ? { kind, validator: result.validator, detail }
       : null;
   }
   return kind === "not-modified"

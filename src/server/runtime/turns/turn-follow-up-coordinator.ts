@@ -29,21 +29,94 @@ function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<
   });
 }
 
-/** Lets a provider's report of an unread follow-up (by steer id) find its persisted message. */
-function recordFollowUpMessage(active: ActiveTurn, steerId: string, messageId: string): void {
-  (active.followUpMessagesBySteerId ??= new Map()).set(steerId, messageId);
+const steerEffectByLease = new WeakMap<FollowUpAdmissionLease, string>();
+const steerEffectByTurn = new WeakMap<ActiveTurn, Map<string, string>>();
+
+/** Associates a V2 `provider.steer` effectId with a follow-up admission lease before calling `turns.steer(...)`. */
+export function bindSteerEffectId(lease: FollowUpAdmissionLease, effectId: string): void {
+  steerEffectByLease.set(lease, effectId);
 }
+
+/** Records a durable `run-control.steer-read` mark when the provider starts reading an accepted steer. */
+export function recordActiveTurnSteerRead(
+  store: RuntimeStore,
+  active: ActiveTurn,
+  steerId: string,
+  readAt?: string,
+): boolean {
+  const effectId = steerEffectByTurn.get(active)?.get(steerId);
+  const target = effectId ? store.orchestration.runControl.target(active.turn.runId) : null;
+  if (!effectId || !target) return false;
+  try {
+    return store.orchestration.runControl.recordSteerRead({
+      conversationId: active.conversation.id,
+      projectId: active.conversation.projectId,
+      runId: target.runId,
+      attemptId: target.attemptId,
+      effectId,
+      readAt,
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Lets a provider's report of an unread follow-up (by steer id) find its persisted message and V2 effect. */
+function recordFollowUpMessage(active: ActiveTurn, steerId: string, messageId: string, effectId?: string): void {
+  (active.followUpMessagesBySteerId ??= new Map()).set(steerId, messageId);
+  if (effectId) {
+    let map = steerEffectByTurn.get(active);
+    if (!map) {
+      map = new Map();
+      steerEffectByTurn.set(active, map);
+    }
+    map.set(steerId, effectId);
+  }
+}
+
+export const STEER_DELIVERY_NOT_CONFIRMED_TITLE = "Steer delivery not confirmed";
 
 /**
  * A follow-up the provider accepted but never read is not its run's input:
  * settlement leaves it out of the run's coverage and the queue sends it next.
- * A Stop drops it instead (T3 `requeueUnreadSteers`).
+ * On Stop, unread steers are NOT requeued; instead, a visible N14 notice is
+ * recorded with each steer's text so the user can resend it if needed.
  */
 export function recordUnreadFollowUps(store: RuntimeStore, active: ActiveTurn, result: ProviderRunResult): void {
-  if (result.status === "cancelled" || !result.unreadFollowUps?.length
-    || store.orchestration.runControl.interruptRequested(active.conversation.id)) return;
-  active.unreadFollowUpMessageIds = [...new Set(result.unreadFollowUps
-    .flatMap((steerId) => active.followUpMessagesBySteerId?.get(steerId) ?? []))];
+  const fromResult = (result.unreadFollowUps ?? [])
+    .flatMap((steerId) => active.followUpMessagesBySteerId?.get(steerId) ?? []);
+  const durableUnread = active.turn.providerId === "claude"
+    ? store.orchestration.runControl.listUnreadAcceptedSteers(active.turn.runId)
+        .flatMap((steer) => steer.messageId ? [steer.messageId] : [])
+    : [];
+  const unreadMessageIds = [...new Set([...fromResult, ...durableUnread])];
+  if (unreadMessageIds.length === 0) return;
+
+  const stopped = result.status === "cancelled"
+    || store.orchestration.runControl.interruptRequested(active.conversation.id);
+  if (stopped) {
+    for (const messageId of unreadMessageIds) {
+      let text = "";
+      try {
+        text = store.message(messageId).content.trim();
+      } catch {
+        continue;
+      }
+      if (!text) continue;
+      const snippet = text.length > 500 ? `${text.slice(0, 500)}…` : text;
+      store.addActivity({
+        conversationId: active.conversation.id,
+        runId: active.turn.runId,
+        turnId: active.turn.id,
+        kind: "status",
+        title: STEER_DELIVERY_NOT_CONFIRMED_TITLE,
+        detail: `Steer delivery not confirmed before the run stopped. Resend it if needed: "${snippet}"`,
+        status: "completed",
+      });
+    }
+    return;
+  }
+  active.unreadFollowUpMessageIds = unreadMessageIds;
 }
 
 export const UNKNOWN_FOLLOW_UP_DELIVERY = "The provider did not confirm whether it received this follow-up. Check this chat before retrying.";
@@ -154,6 +227,7 @@ export class TurnFollowUpCoordinator {
     const freshSessionRequest = active.freshSessionRequest;
     active.freshSessionRequest = null;
     const steerId = randomUUID();
+    const effectId = steerEffectByLease.get(lease);
     let accepted: boolean;
     try {
       accepted = await this.options.providers.steer(
@@ -193,7 +267,7 @@ export class TurnFollowUpCoordinator {
         options.queuedMessageId,
         ...messageOptions,
       );
-      recordFollowUpMessage(active, steerId, message.id);
+      recordFollowUpMessage(active, steerId, message.id, effectId);
       return { kind: "accepted", message };
     }
     const boundary = this.options.answerBoundary?.prepare(active);
@@ -208,7 +282,7 @@ export class TurnFollowUpCoordinator {
       ...messageOptions,
     );
     this.options.answerBoundary?.record(active, message.createdAt, boundary?.deferred ?? false);
-    recordFollowUpMessage(active, steerId, message.id);
+    recordFollowUpMessage(active, steerId, message.id, effectId);
     return { kind: "accepted", message };
   }
 

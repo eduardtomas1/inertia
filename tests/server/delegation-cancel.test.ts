@@ -114,7 +114,7 @@ describe("inertia_cancel_task", () => {
     try {
       const view = parsed<DelegatedTaskView>(await f.invoke("inertia_delegate_task", TASK));
       const settling: Promise<void>[] = [];
-      vi.spyOn(f.turns, "cancelOwned").mockImplementation((conversationId, identity) => {
+      vi.spyOn(f.turns, "cancelExact").mockImplementation((conversationId, identity) => {
         if (f.active.get(conversationId)?.turnId !== identity.turnId) return false;
         f.active.delete(conversationId);
         f.turns.stopped.push(identity.turnId);

@@ -20,6 +20,7 @@ import {
   type DelegationMailbox,
 } from "../../shared/orchestration-delegation";
 import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
+import type { QueueEvent, QueueItemDelivery } from "../../shared/orchestration-queue";
 import { QueuedMessageRepository } from "../persistence/queued-message-repository";
 import {
   deliveryContent,
@@ -28,6 +29,7 @@ import {
   planDelegatedDelivery,
   removeFromQueuedDelivery,
   type DelegationPlanContext,
+  type DelegationPlanEvent,
   type DelegationPlanMode,
   type DelegationPlanResult,
 } from "./delegation-delivery-planner";
@@ -80,12 +82,12 @@ export interface FollowUpTarget {
   taskId: string;
 }
 
-function eventTaskIds(events: readonly DelegationEvent[]): string[] {
+function eventTaskIds(events: readonly DelegationPlanEvent[]): string[] {
   const ids = new Set<string>();
   for (const event of events) {
-    if (event.type === "delegation.mailbox-changed") continue;
+    if (!event.type.startsWith("delegation.") || event.type === "delegation.mailbox-changed") continue;
     if ("taskIds" in event.payload) for (const taskId of event.payload.taskIds) ids.add(taskId);
-    else ids.add(event.payload.taskId);
+    else if ("taskId" in event.payload) ids.add(event.payload.taskId);
   }
   return [...ids];
 }
@@ -101,6 +103,8 @@ export class DelegationRepository {
     this.queue = new QueuedMessageRepository(database);
     this.planContext = { database, reads: this.reads, queue: this.queue,
       conversation: (id) => this.access.conversation(id),
+      revision: (parent) => this.events.revision(parent),
+      queueItem: (itemId) => this.reads.queueItem(itemId),
       commit: (parent, commandId, command, events, compatibility) => this.commit(parent, commandId, command, events, compatibility) };
   }
 
@@ -272,10 +276,21 @@ export class DelegationRepository {
     return this.transaction(() => {
       const { mailbox } = effectiveMailbox(this.planContext, parentConversationId);
       if (mailbox.generation !== generation || mailbox.phase !== "queued") return false;
+      const events: DelegationPlanEvent[] = [
+        { type: "delegation.mailbox-changed", payload: { generation, deliveryId: mailbox.deliveryId, taskIds: [...mailbox.taskIds],
+          phase: "dispatched", wakeTurnId, nextGeneration: mailbox.nextGeneration } },
+      ];
+      if (mailbox.deliveryId !== null) {
+        const queueItem = this.reads.queueItem(mailbox.deliveryId);
+        if (queueItem && (queueItem.state === "waiting" || queueItem.state === "dispatching")) {
+          const delivery = this.deliveryForTurn(wakeTurnId, "run");
+          if (delivery) {
+            events.push({ type: "queue.item-delivered", payload: { itemId: mailbox.deliveryId, delivery } });
+          }
+        }
+      }
       return this.commit(parentConversationId, `delegation:dispatched:${parentConversationId}:${generation}:${wakeTurnId}`,
-        { type: "delegation.dispatched", parentConversationId, generation, wakeTurnId },
-        [{ type: "delegation.mailbox-changed", payload: { generation, deliveryId: mailbox.deliveryId, taskIds: [...mailbox.taskIds],
-          phase: "dispatched", wakeTurnId, nextGeneration: mailbox.nextGeneration } }]);
+        { type: "delegation.dispatched", parentConversationId, generation, wakeTurnId }, events);
     });
   }
 
@@ -444,17 +459,23 @@ export class DelegationRepository {
         sequence = rows.at(-1)!.sequence;
       }
       const mailboxes = this.database.prepare(`SELECT id FROM orchestration_v2_entities WHERE kind = ?
-        AND json_extract(payload_json, '$.phase') = 'queued' ORDER BY id LIMIT 4096`).all(DELEGATION_MAILBOX_PROJECTION) as { id: string }[];
-      for (const { id: parentConversationId } of mailboxes) {
-        const effective = effectiveMailbox(this.planContext, parentConversationId);
-        const { mailbox, row } = effective;
-        if (effective.phase !== "queued" || !row) continue;
-        const attribution = { parentConversationId, generation: mailbox.generation, taskIds: [...mailbox.taskIds] };
-        if (JSON.stringify(row.delegatedCompletion) === JSON.stringify(attribution)) continue;
-        if (this.queue.updateDelegatedDelivery(parentConversationId, row.id, deliveryContent(this.planContext, mailbox.taskIds),
-          attribution)) {
-          report.repairedDeliveries.push(row.id);
+        AND id > ? AND json_extract(payload_json, '$.phase') = 'queued' ORDER BY id LIMIT 256`);
+      let afterMailbox = "";
+      while (true) {
+        const rows = mailboxes.all(DELEGATION_MAILBOX_PROJECTION, afterMailbox) as { id: string }[];
+        if (!rows.length) break;
+        for (const { id: parentConversationId } of rows) {
+          const effective = effectiveMailbox(this.planContext, parentConversationId);
+          const { mailbox, row } = effective;
+          if (effective.phase !== "queued" || !row) continue;
+          const attribution = { parentConversationId, generation: mailbox.generation, taskIds: [...mailbox.taskIds] };
+          if (JSON.stringify(row.delegatedCompletion) === JSON.stringify(attribution)) continue;
+          if (this.queue.updateDelegatedDelivery(parentConversationId, row.id, deliveryContent(this.planContext, mailbox.taskIds),
+            attribution)) {
+            report.repairedDeliveries.push(row.id);
+          }
         }
+        afterMailbox = rows.at(-1)!.id;
       }
       return report;
     });
@@ -470,13 +491,57 @@ export class DelegationRepository {
       const task = this.reads.task(taskId);
       return task?.delivery.state === "claimed" && task.delivery.generation === mailbox.generation;
     });
-    const events: DelegationEvent[] = outcome === "requeued" ? deliveryEvent(claimed, "pending", "requeued")
+    const events: DelegationPlanEvent[] = outcome === "requeued" ? deliveryEvent(claimed, "pending", "requeued")
       : deliveryEvent(claimed, "delivered", outcome === "steered" ? "steered" : "delivered", mailbox.generation);
     events.push({ type: "delegation.mailbox-changed", payload: { generation: mailbox.generation, deliveryId: mailbox.deliveryId,
       taskIds: [...mailbox.taskIds], phase: "settled", wakeTurnId, nextGeneration: Math.max(mailbox.nextGeneration, mailbox.generation + 1) } });
+    if (mailbox.deliveryId !== null) {
+      events.push(...this.settleQueueEvents(mailbox.deliveryId, wakeTurnId, outcome));
+    }
     this.commit(parentConversationId, `delegation:delivery-settled:${parentConversationId}:${mailbox.generation}:${wakeTurnId}`,
       { type: "delegation.delivery-settled", parentConversationId, generation: mailbox.generation, wakeTurnId, outcome }, events);
     this.plan(parentConversationId);
+  }
+
+  private settleQueueEvents(
+    deliveryId: string,
+    wakeTurnId: string,
+    outcome: "delivered" | "requeued" | "steered",
+  ): QueueEvent[] {
+    const queueItem = this.reads.queueItem(deliveryId);
+    if (!queueItem || queueItem.state === "delivered" || queueItem.state === "cancelled") return [];
+    if (outcome !== "requeued" && (queueItem.state === "waiting" || queueItem.state === "dispatching")) {
+      const delivery = this.deliveryForTurn(wakeTurnId, outcome === "steered" ? "steer" : "run");
+      if (delivery) {
+        return [{ type: "queue.item-delivered", payload: { itemId: deliveryId, delivery } }];
+      }
+    }
+    if (queueItem.state === "dispatching") {
+      return [
+        { type: "queue.item-released", payload: { itemId: deliveryId, reason: "transient" } },
+        { type: "queue.item-cancelled", payload: { itemId: deliveryId, reason: "withdrawn" } },
+      ];
+    }
+    return [{ type: "queue.item-cancelled", payload: { itemId: deliveryId, reason: "withdrawn" } }];
+  }
+
+  private deliveryForTurn(turnId: string, mode: "run" | "steer"): QueueItemDelivery | null {
+    const turn = this.database.prepare("SELECT id, run_id, user_message_id FROM agent_turns WHERE id = ?")
+      .get(turnId) as { id: string; run_id: string; user_message_id: string | null } | undefined;
+    if (!turn) return null;
+    const runRow = this.database.prepare("SELECT payload_json FROM orchestration_v2_entities WHERE kind = 'run' AND id = ?")
+      .get(turn.run_id) as { payload_json: string } | undefined;
+    if (!runRow) return null;
+    let parsed: { attemptId?: string; messageId?: string };
+    try {
+      parsed = JSON.parse(runRow.payload_json) as { attemptId?: string; messageId?: string };
+    } catch {
+      return null;
+    }
+    const attemptId = typeof parsed.attemptId === "string" ? parsed.attemptId : null;
+    const messageId = turn.user_message_id ?? (typeof parsed.messageId === "string" ? parsed.messageId : null);
+    if (!attemptId || !messageId) return null;
+    return { mode, runId: turn.run_id, attemptId, turnId: turn.id, messageId, deliveredAt: new Date().toISOString() };
   }
 
   private plan(parentConversationId: string, mode: DelegationPlanMode = "automatic"): DelegationPlanResult {
@@ -530,7 +595,7 @@ export class DelegationRepository {
   }
 
   private commit(parentConversationId: string, commandId: string, command: Record<string, unknown>,
-    events: readonly DelegationEvent[], compatibility?: () => void): boolean {
+    events: readonly DelegationPlanEvent[], compatibility?: () => void): boolean {
     const parent = this.access.conversation(parentConversationId);
     ensureOrchestrationThread(this.events, parent, this.access.conversationPath(parent.id));
     const identity = { actorId: "runtime", commandId, projectId: parent.projectId, threadId: parent.id };

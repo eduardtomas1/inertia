@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import {
   portableHistoryBudget, portableHistoryCost, selectPortableHistory, type PortableHistoryItem,
@@ -13,6 +14,7 @@ import {
 } from "../../src/server/runtime/turns/turn-context-handoff";
 import type { AgentTurnUsageSnapshot, ChatAttachment } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import type { ProviderBacking } from "../../src/shared/orchestration-backings";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
   flushTurnControllerTestPromises, turnControllerTestIdentity, type TurnControllerTestRuntime,
@@ -37,6 +39,12 @@ function invalidations(runtime: TurnControllerTestRuntime) {
   const { projectId } = runtime.store.conversation(runtime.conversationId);
   return runtime.store.orchestration.events.readEvents({ projectId, threadId: runtime.conversationId, limit: 500 })
     .filter(({ type }) => type === "provider.backing-invalidated").map(({ payload }) => payload);
+}
+
+function covers(runtime: TurnControllerTestRuntime, backing: ProviderBacking | null | undefined, itemId: string, runId: string): boolean {
+  if (!backing) return false;
+  const run = runtime.store.orchestration.events.projection("run", runId)?.value as { ordinal?: number } | undefined;
+  return isItemCovered(backing, itemId, typeof run?.ordinal === "number" ? run.ordinal : null);
 }
 
 async function handoffRuntime() {
@@ -64,7 +72,7 @@ describe("durable native provider backings and context delivery", () => {
         identity: first.turn.continuationIdentity };
       const original = runtime.store.orchestration.backings.find(lookup)!;
       expect(original.status).toBe("ready");
-      expect(original.coveredItemIds).toContain(first.message.id);
+      expect(covers(runtime, original, first.message.id, first.turn.runId)).toBe(true);
       runtime.store.updateConversation(runtime.conversationId, { providerId: "claude",
         modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "claude-test" }) });
       const other = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Claude follow-up" });
@@ -91,7 +99,7 @@ describe("durable native provider backings and context delivery", () => {
       runtime.provider.resolve({ sessionId: "codex-native", text: "Returned successfully" });
       await flushTurnControllerTestPromises();
       const updated = runtime.store.orchestration.backings.find(lookup)!;
-      expect(updated.coveredItemIds).toContain(other.message.id);
+      expect(covers(runtime, updated, other.message.id, other.turn.runId)).toBe(true);
       expect(updated.status).toBe("ready");
       runtime.store.orchestration.events.rebuildProjections();
       expect(runtime.store.orchestration.backings.find(lookup)).toEqual(updated);
@@ -121,7 +129,7 @@ describe("durable native provider backings and context delivery", () => {
       expect(runtime.store.orchestration.backings.handoff(refused.turn.runId)?.state).toBe("abandoned");
       const kept = runtime.store.orchestration.backings.find(lookup)!;
       expect(kept.status).toBe("ready");
-      expect(kept.coveredItemIds).not.toContain(refused.message.id);
+      expect(covers(runtime, kept, refused.message.id, refused.turn.runId)).toBe(false);
       expect(invalidations(runtime)).toEqual([]);
       // The restore replays exactly: a rebuild reproduces every projection.
       const projectionRows = () => (runtime.store as unknown as { database: import("better-sqlite3").Database }).database
@@ -195,7 +203,7 @@ describe("durable native provider backings and context delivery", () => {
       expect(runtime.provider.input?.prompt.split("Rename the module").length).toBe(3);
       runtime.provider.resolve({ sessionId: "codex-native", text: "Renamed" });
       await flushTurnControllerTestPromises();
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(refused.message.id);
+      expect(covers(runtime, runtime.store.orchestration.backings.find(lookup), refused.message.id, refused.turn.runId)).toBe(true);
 
       runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
       const switched = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Claude, review it" });
@@ -358,7 +366,7 @@ describe("durable native provider backings and context delivery", () => {
       runtime.provider.resolve({ text: "Goal accepted.", sessionId: "goal-native" });
       await flushTurnControllerTestPromises();
       const goalBacking = runtime.store.orchestration.backings.find({ ...lookup, nativeSessionId: "goal-native" })!;
-      expect(goalBacking.coveredItemIds).not.toContain(first.message.id);
+      expect(covers(runtime, goalBacking, first.message.id, first.turn.runId)).toBe(false);
 
       const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Carry on." });
       expect(next.turn.providerSessionBefore).toBe("goal-native");
@@ -372,8 +380,8 @@ describe("durable native provider backings and context delivery", () => {
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Carrying on." });
       runtime.provider.resolve({ sessionId: "goal-native" });
       await flushTurnControllerTestPromises();
-      expect(runtime.store.orchestration.backings.find({ ...lookup, nativeSessionId: "goal-native" })?.coveredItemIds)
-        .toContain(first.message.id);
+      expect(covers(runtime, runtime.store.orchestration.backings.find({ ...lookup, nativeSessionId: "goal-native" }),
+        first.message.id, first.turn.runId)).toBe(true);
 
       const settled = runtime.controller.queue({ conversationId: runtime.conversationId, content: "And again." });
       expect(settled.turn.providerSessionBefore).toBe("goal-native");
@@ -535,7 +543,7 @@ describe("activity items in a returning backing's delta", () => {
       await flushTurnControllerTestPromises();
       const backing = runtime.store.orchestration.backings.find({ threadId: runtime.conversationId, providerId: "codex",
         workspaceKey: runtime.workspace, identity: first.turn.continuationIdentity })!;
-      expect(backing.coveredItemIds).toContain(`activity:${claudeCommand.id}`);
+      expect(covers(runtime, backing, `activity:${claudeCommand.id}`, other.turn.runId)).toBe(true);
     } finally { runtime.store.close(); }
   });
 });
@@ -563,8 +571,10 @@ describe("handoff coverage accounting", () => {
       runtime.provider.resolve({ sessionId: "codex-native" });
       await flushTurnControllerTestPromises();
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)?.state).toBe("delivered");
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds)
-        .toEqual(expect.arrayContaining([...handoff.itemIds, oversized.message.id]));
+      const updatedBacking = runtime.store.orchestration.backings.find(lookup)!;
+      for (const id of [...handoff.itemIds, oversized.message.id]) {
+        expect(covers(runtime, updatedBacking, id, oversized.turn.runId)).toBe(true);
+      }
 
       runtime.store.updateConversation(runtime.conversationId, { providerId: "claude", modelSelection: claudeSelection });
       const later = await completeTurn(runtime, "Second Claude request", "claude-native", "Second Claude answer");
@@ -623,7 +633,7 @@ describe("handoff coverage accounting", () => {
         // The relocation commits with the run, before it starts: coverage and status move with the session.
         const relocated = runtime.store.orchestration.backings.find({ ...lookup, workspaceKey: moved })!;
         expect(relocated).toMatchObject({ nativeSessionId: "codex-native", status: "ready",
-          coveredItemIds: original.coveredItemIds, coverageComplete: true });
+          coveredItemIds: original.coveredItemIds, coveredThroughOrdinal: original.coveredThroughOrdinal, coverageComplete: true });
         expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
         runtime.controller.start(resumed.turn.id);
         expect(runtime.provider.input).toMatchObject({ sessionId: "codex-native", cwd: moved });
@@ -635,7 +645,8 @@ describe("handoff coverage accounting", () => {
         expect(carried).toMatchObject({ nativeSessionId: "codex-native", status: "ready", coverageComplete: true });
         expect(carried.id).toBe(relocated.id);
         expect(carried.id).not.toBe(original.id);
-        expect(carried.coveredItemIds).toEqual(expect.arrayContaining([...original.coveredItemIds, resumed.message.id]));
+        expect(covers(runtime, carried, first.message.id, first.turn.runId)).toBe(true);
+        expect(covers(runtime, carried, resumed.message.id, resumed.turn.runId)).toBe(true);
         expect(runtime.store.orchestration.backings.get(original.id)?.status).toBe("retired");
         expect(invalidations(runtime)).toEqual([]);
 

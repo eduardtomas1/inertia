@@ -100,12 +100,10 @@ describe("the composer queue list", () => {
     expect(screen.queryByRole("button", { name: /Edit queued message/u })).toBeNull();
   });
 
-  it("re-confirms a route-blocked message, asking before it widens access", async () => {
+  it("re-confirms a workspace-route-blocked message directly without an access-widening confirmation ceiling", async () => {
     const blocked = entry(1, { state: "blocked", error: QUEUED_ROUTE_CHANGED_ERROR });
-    const run = queueRunner([blocked], (command, entries) => {
+    const run = queueRunner([blocked], (command) => {
       if (command.type !== "message.queue.reconfirm") return undefined;
-      if (!command.payload.confirmed) return result(entries, { confirmation: { id: blocked.id,
-        queued: { interactionMode: "build", accessMode: "supervised" }, current: { interactionMode: "build", accessMode: "full" } } });
       return result([]);
     });
     render(<RuntimeComposerQueuedActions conversationId={conversationId} onCommand={run} canSend={false}
@@ -113,20 +111,9 @@ describe("the composer queue list", () => {
     const send = await screen.findByRole("button", { name: "Send queued message with current settings" });
     expect(screen.queryByRole("button", { name: "Send queued message now" })).toBeNull();
     await act(async () => fireEvent.click(send));
-    const group = await screen.findByRole("group", { name: "Confirm wider access" });
-    expect(group).toHaveTextContent("Queued with Build · Supervised. Current settings: Build · Full access.");
-    const confirm = within(group).getByRole("button", { name: "Send with Full access" });
-    await waitFor(() => expect(document.activeElement).toBe(confirm));
-
-    fireEvent.keyDown(confirm, { key: "Escape" });
     expect(screen.queryByRole("group", { name: "Confirm wider access" })).toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(send));
-
-    await act(async () => fireEvent.click(send));
-    const confirmAgain = await screen.findByRole("button", { name: "Send with Full access" });
-    await act(async () => fireEvent.click(confirmAgain));
     expect(run).toHaveBeenCalledWith({ type: "message.queue.reconfirm", payload: {
-      conversationId, id: blocked.id, confirmed: { interactionMode: "build", accessMode: "full" },
+      conversationId, id: blocked.id,
     } });
     await waitFor(() => expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull());
   });
@@ -177,22 +164,26 @@ describe("the composer with an editable queue that accepts documents", () => {
     await waitFor(() => expect(input).toHaveValue(""));
   });
 
-  it("pulls a queued message back into the empty draft with fresh attachment copies and focuses the message box", async () => {
+  it("edits a queued message with attachments in place while preserving an existing draft and focuses the message box", async () => {
     const current = conversation("74747474-7474-4474-8474-747474747474");
     const stored = { id: "74747474-7474-4474-8474-747474747475", name: "shot.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
-    const queuedEntry: QueuedMessage = { ...entry(1), conversationId: current.id, content: "Fix the layout", attachments: [stored] };
-    const fresh: ChatAttachment = { id: "74747474-7474-4474-8474-747474747476", name: "shot.png", path: "/private/tmp/fresh.png", mimeType: "image/png", size: 64 };
-    const reattachAttachment = vi.fn(async () => ({ batchId: "74747474-7474-4474-8474-747474747477", attachments: [fresh] }));
-    const commitAttachmentImport = vi.fn(async () => undefined);
+    const queuedEntry: QueuedMessage = {
+      ...entry(1),
+      conversationId: current.id,
+      content: "Fix the layout",
+      attachments: [stored],
+      editRevision: 2,
+    };
+    const reattachAttachment = vi.fn(async () => ({ batchId: "unused", attachments: [] }));
     Object.defineProperty(window, "inertia", { configurable: true, value: {
-      reattachAttachment, commitAttachmentImport, cancelAttachmentImport: vi.fn(async () => undefined),
+      reattachAttachment, commitAttachmentImport: vi.fn(async () => undefined), cancelAttachmentImport: vi.fn(async () => undefined),
     } });
     let entries = [queuedEntry];
     const run = vi.fn<QueueCommandRunner>(async (command) => {
       if (command.type === "message.queue.edit") {
-        const edited = entries[0]!;
-        entries = [];
-        return { kind: "message.queue", conversationId: current.id, entries, receipt: null, edited };
+        const payload = command.payload as { content: string; attachments?: ChatAttachment[] };
+        entries = [{ ...queuedEntry, content: payload.content, attachments: payload.attachments ?? [], editRevision: 3 }];
+        return { kind: "message.queue", conversationId: current.id, entries, receipt: null };
       }
       return { kind: "message.queue", conversationId: current.id, entries, receipt: null };
     });
@@ -200,131 +191,160 @@ describe("the composer with an editable queue that accepts documents", () => {
     const input = screen.getByRole("textbox", { name: "Message" });
     const edit = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
     fireEvent.change(input, { target: { value: "Unsent words" } });
-    await waitFor(() => expect(edit).toHaveAccessibleDescription("Send or clear the current draft first"));
-    fireEvent.change(input, { target: { value: "" } });
-    await waitFor(() => expect(edit).not.toHaveAttribute("aria-disabled"));
+    expect(edit).not.toHaveAttribute("aria-disabled");
 
-    await act(async () => fireEvent.click(edit));
-    await waitFor(() => expect(input).toHaveValue("Fix the layout"));
-    expect(reattachAttachment).toHaveBeenCalledExactlyOnceWith({ conversationId: current.id, attachmentId: stored.id });
+    fireEvent.click(edit);
+    const banner = await screen.findByRole("region", { name: "Editing queued message" });
+    expect(input).toHaveValue("Fix the layout");
     expect(await screen.findByRole("button", { name: "Remove attachment shot.png" })).toBeInTheDocument();
-    expect(commitAttachmentImport).toHaveBeenCalledWith("74747474-7474-4474-8474-747474747477", [fresh.id]);
+    expect(reattachAttachment).not.toHaveBeenCalled();
     await waitFor(() => expect(document.activeElement).toBe(input));
-    expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
+
+    fireEvent.change(input, { target: { value: "Fix the header layout" } });
+    await act(async () => { fireEvent.click(within(banner).getByRole("button", { name: "Save" })); });
+
+    expect(run).toHaveBeenCalledWith(
+      {
+        type: "message.queue.edit",
+        payload: {
+          conversationId: current.id,
+          id: queuedEntry.id,
+          expectedRevision: 2,
+          content: "Fix the header layout",
+          attachments: [stored],
+        },
+      },
+      { handoffAttachmentIds: [] },
+    );
+    expect(screen.queryByRole("region", { name: "Editing queued message" })).toBeNull();
+    expect(input).toHaveValue("Unsent words");
+    expect(await screen.findByText("Fix the header layout")).toBeInTheDocument();
   });
 
-  it("keeps the text and names an attachment that could not be restored", async () => {
+  it("keeps edited text and attachments in the editor when saving fails and surfaces the alert", async () => {
     const current = conversation("75757575-7575-4575-8575-757575757575");
-    const stored = { id: "75757575-7575-4575-8575-757575757576", name: "gone.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
-    Object.defineProperty(window, "inertia", { configurable: true, value: {
-      reattachAttachment: vi.fn(async () => { throw new Error("This file is no longer stored. Attach the original file again."); }),
-      commitAttachmentImport: vi.fn(async () => undefined), cancelAttachmentImport: vi.fn(async () => undefined),
-    } });
-    let entries: QueuedMessage[] = [{ ...entry(1), conversationId: current.id, content: "Retry with the picture", attachments: [stored] }];
+    const stored = { id: "75757575-7575-4575-8575-757575757576", name: "shot.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
+    const queuedEntry: QueuedMessage = {
+      ...entry(1),
+      conversationId: current.id,
+      content: "Retry with the picture",
+      attachments: [stored],
+      editRevision: 1,
+    };
     const run = vi.fn<QueueCommandRunner>(async (command) => {
       if (command.type === "message.queue.edit") {
-        const edited = entries[0]!;
-        entries = [];
-        return { kind: "message.queue", conversationId: current.id, entries, receipt: null, edited };
+        throw new Error("This queued message changed before your edit was saved.");
       }
-      return { kind: "message.queue", conversationId: current.id, entries, receipt: null };
+      return { kind: "message.queue", conversationId: current.id, entries: [queuedEntry], receipt: null };
     });
     render(<Composer {...composerProps(current, { running: true, latestTurn: running, onQueueCommand: run })} />);
     const edit = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
-    await act(async () => fireEvent.click(edit));
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Retry with the picture"));
-    expect(await screen.findByRole("alert")).toHaveTextContent("An attachment could not be restored: gone.png. Attach it again.");
+    fireEvent.click(edit);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "Updated picture instructions" } });
+    const banner = await screen.findByRole("region", { name: "Editing queued message" });
+    await act(async () => { fireEvent.click(within(banner).getByRole("button", { name: "Save" })); });
+
+    expect(await within(banner).findByRole("alert"))
+      .toHaveTextContent("This queued message changed before your edit was saved.");
+    expect(input).toHaveValue("Updated picture instructions");
+    expect(screen.getByRole("button", { name: "Remove attachment shot.png" })).toBeInTheDocument();
   });
 
-  it("routes an async queued edit into the original chat's saved draft when switching chats or unmounting", async () => {
+  it("cleans up an active in-place edit when switching chats, releasing staged uploads without touching originals or chat two", async () => {
     const first = conversation("76767676-7676-4676-8676-767676767671");
     const second = conversation("76767676-7676-4676-8676-767676767672");
     const stored = { id: "76767676-7676-4676-8676-767676767673", name: "spec.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
-    const fresh: ChatAttachment = { id: "76767676-7676-4676-8676-767676767674", name: "spec.png", path: "/private/tmp/spec.png", mimeType: "image/png", size: 64 };
+    const staged: ChatAttachment = { id: "76767676-7676-4676-8676-767676767674", name: "extra.png", path: "/private/tmp/extra.png", mimeType: "image/png", size: 64 };
     const queuedEntry: QueuedMessage = { ...entry(1), conversationId: first.id, content: "Keep this for chat one", attachments: [stored] };
-    const reattachAttachment = vi.fn(async () => ({ batchId: "76767676-7676-4676-8676-767676767675", attachments: [fresh] }));
-    const commitAttachmentImport = vi.fn(async () => undefined);
-    Object.defineProperty(window, "inertia", { configurable: true, value: {
-      reattachAttachment, commitAttachmentImport, cancelAttachmentImport: vi.fn(async () => undefined),
-    } });
-    let resolveEdit: ((result: MessageQueueResult) => void) | null = null;
-    const run = vi.fn<QueueCommandRunner>((command) => {
-      if (command.type === "message.queue.edit") {
-        return new Promise<MessageQueueResult>((resolve) => {
-          resolveEdit = resolve;
-        });
-      }
-      return Promise.resolve({
-        kind: "message.queue",
-        conversationId: command.payload.conversationId,
-        entries: command.payload.conversationId === first.id ? [queuedEntry] : [],
-        receipt: null,
-      });
-    });
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const run = vi.fn<QueueCommandRunner>(async (command) => ({
+      kind: "message.queue",
+      conversationId: command.payload.conversationId,
+      entries: command.payload.conversationId === first.id ? [queuedEntry] : [],
+      receipt: null,
+    }));
 
-    const rendered = render(<Composer {...composerProps(first, { running: true, latestTurn: running, onQueueCommand: run })} />);
+    const rendered = render(<Composer {...composerProps(first, {
+      running: true,
+      latestTurn: running,
+      onQueueCommand: run,
+      onReleaseAttachment,
+      onImportAttachments: async () => lease([staged]),
+    })} />);
+    const firstInput = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(firstInput, { target: { value: "Saved draft for chat one" } });
+
     const edit = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
     fireEvent.click(edit);
-    await waitFor(() => expect(resolveEdit).not.toBeNull());
+    await screen.findByRole("region", { name: "Editing queued message" });
+    fireEvent.paste(firstInput, { clipboardData: { files: [new File(["png"], "extra.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "Remove attachment extra.png" });
 
-    rendered.rerender(<Composer {...composerProps(second, { running: false, latestTurn: null, onQueueCommand: run })} />);
+    rendered.rerender(<Composer {...composerProps(second, {
+      running: false,
+      latestTurn: null,
+      onQueueCommand: run,
+      onReleaseAttachment,
+    })} />);
+    await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledExactlyOnceWith(staged.id));
+    expect(screen.queryByRole("region", { name: "Editing queued message" })).toBeNull();
     const secondInput = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(secondInput, { target: { value: "Draft for chat two" } });
-
-    await act(async () => {
-      resolveEdit!({ kind: "message.queue", conversationId: first.id, entries: [], receipt: null, edited: queuedEntry });
-      await Promise.resolve();
-    });
-
-    await waitFor(() => expect(commitAttachmentImport).toHaveBeenCalledWith("76767676-7676-4676-8676-767676767675", [fresh.id]));
     expect(secondInput).toHaveValue("Draft for chat two");
     expect(secondInput).not.toBeDisabled();
 
-    rendered.rerender(<Composer {...composerProps(first, { running: false, latestTurn: null, onQueueCommand: run })} />);
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Keep this for chat one"));
-    expect(await screen.findByRole("button", { name: "Remove attachment spec.png" })).toBeInTheDocument();
+    rendered.rerender(<Composer {...composerProps(first, {
+      running: false,
+      latestTurn: null,
+      onQueueCommand: run,
+      onReleaseAttachment,
+    })} />);
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("Saved draft for chat one"));
   });
 
-  it("preserves an attachment in the original chat's draft if the user switches chats while reattach is in flight", async () => {
+  it("preserves stashed draft attachments for the original chat when switching chats during an in-place edit", async () => {
     const first = conversation("77777777-7777-4777-8777-777777777771");
     const second = conversation("77777777-7777-4777-8777-777777777772");
-    const stored = { id: "77777777-7777-4777-8777-777777777773", name: "late.png", path: "opaque", mimeType: "image/png" as const, size: 64 };
-    const fresh: ChatAttachment = { id: "77777777-7777-4777-8777-777777777774", name: "late.png", path: "/private/tmp/late.png", mimeType: "image/png", size: 64 };
-    const queuedEntry: QueuedMessage = { ...entry(1), conversationId: first.id, content: "Edit with slow reattach", attachments: [stored] };
-    let resolveReattach: ((value: { batchId: string; attachments: ChatAttachment[] }) => void) | null = null;
-    const reattachAttachment = vi.fn(() => new Promise<{ batchId: string; attachments: ChatAttachment[] }>((resolve) => {
-      resolveReattach = resolve;
+    const draftAttachment: ChatAttachment = { id: "77777777-7777-4777-8777-777777777774", name: "draft.png", path: "/private/tmp/draft.png", mimeType: "image/png", size: 64 };
+    const queuedEntry: QueuedMessage = { ...entry(1), conversationId: first.id, content: "Queued task for chat one", attachments: [] };
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const run = vi.fn<QueueCommandRunner>(async (command) => ({
+      kind: "message.queue",
+      conversationId: command.payload.conversationId,
+      entries: command.payload.conversationId === first.id ? [queuedEntry] : [],
+      receipt: null,
     }));
-    const commitAttachmentImport = vi.fn(async () => undefined);
-    const cancelAttachmentImport = vi.fn(async () => undefined);
-    Object.defineProperty(window, "inertia", { configurable: true, value: {
-      reattachAttachment, commitAttachmentImport, cancelAttachmentImport,
-    } });
-    let entries = [queuedEntry];
-    const run = vi.fn<QueueCommandRunner>(async (command) => {
-      if (command.type === "message.queue.edit") {
-        const edited = entries[0]!;
-        entries = [];
-        return { kind: "message.queue", conversationId: first.id, entries, receipt: null, edited };
-      }
-      return { kind: "message.queue", conversationId: command.payload.conversationId, entries: command.payload.conversationId === first.id ? entries : [], receipt: null };
-    });
 
-    const rendered = render(<Composer {...composerProps(first, { running: true, latestTurn: running, onQueueCommand: run })} />);
+    const rendered = render(<Composer {...composerProps(first, {
+      running: true,
+      latestTurn: running,
+      onQueueCommand: run,
+      onReleaseAttachment,
+      onImportAttachments: async () => lease([draftAttachment]),
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.paste(input, { clipboardData: { files: [new File(["png"], "draft.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "Remove attachment draft.png" });
+
     const edit = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
     fireEvent.click(edit);
-    await waitFor(() => expect(resolveReattach).not.toBeNull());
+    await screen.findByRole("region", { name: "Editing queued message" });
 
-    rendered.rerender(<Composer {...composerProps(second, { running: false, latestTurn: null, onQueueCommand: run })} />);
-    await act(async () => {
-      resolveReattach!({ batchId: "77777777-7777-4777-8777-777777777775", attachments: [fresh] });
-      await Promise.resolve();
-    });
+    rendered.rerender(<Composer {...composerProps(second, {
+      running: false,
+      latestTurn: null,
+      onQueueCommand: run,
+      onReleaseAttachment,
+    })} />);
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(commitAttachmentImport).toHaveBeenCalledWith("77777777-7777-4777-8777-777777777775", [fresh.id]));
-    expect(cancelAttachmentImport).not.toHaveBeenCalled();
-
-    rendered.rerender(<Composer {...composerProps(first, { running: false, latestTurn: null, onQueueCommand: run })} />);
-    expect(await screen.findByRole("button", { name: "Remove attachment late.png" })).toBeInTheDocument();
+    rendered.rerender(<Composer {...composerProps(first, {
+      running: false,
+      latestTurn: null,
+      onQueueCommand: run,
+      onReleaseAttachment,
+    })} />);
+    expect(await screen.findByRole("button", { name: "Remove attachment draft.png" })).toBeInTheDocument();
   });
 });

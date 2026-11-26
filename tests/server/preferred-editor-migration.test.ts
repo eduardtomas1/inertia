@@ -55,7 +55,11 @@ describe("Preferred editor migration", () => {
       migrateRuntimeDatabase(database);
 
       const after = state(database);
-      expect(after).toEqual({ ...before, preferred_editor: "system" });
+      expect(after).toEqual({
+        ...before,
+        preferred_editor: "system",
+        delegation_automatic_wakes: 1,
+      });
       expect(settingsFromState(after).preferredEditor).toBe("system");
       expect(
         database.prepare("SELECT * FROM schema_migrations WHERE version < ? ORDER BY version")

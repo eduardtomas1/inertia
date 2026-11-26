@@ -36,19 +36,29 @@ offline launch contains no workspace data.
 
 ## Access levels
 
-- Monitor can read sanitized projects, conversations, bounded transcripts, and
-  live run state for the projects selected on the desktop.
-- Collaborate adds supervised text prompts, answers to non-secret agent
-  questions, and stopping the exact active run shown in the conversation.
+- Monitor can read sanitized projects, conversations, bounded transcripts,
+  live run state, and a read-only view of each conversation's message queue
+  (bounded text, hold status, and attachment counts only—never attachment
+  filenames, paths, or downloads) for the projects selected on the desktop.
+- Collaborate adds supervised text prompts (starting a turn when idle or
+  queueing onto the conversation's durable queue when busy, with server-side
+  device attribution and normalized line endings), text-only queue management
+  (sending a queued text item now, editing text-only queued items, removing
+  queued items—including items that carry attachments—and resuming a held
+  queue), answers to non-secret agent questions, and stopping the exact active
+  run shown in the conversation.
 
-The transcript shows a recent window. Load earlier pages in the desktop app;
-the mobile client does not offer history paging. If one saved turn exceeds
-the display budget, its transcript is omitted on mobile while current run
-status, authorized stopping, and non-secret questions remain available.
+The transcript and queue projection share the per-response byte budget. Load
+earlier pages in the desktop app; the mobile client does not offer history
+paging. If one saved turn exceeds the display budget, its transcript is omitted
+on mobile while current run status, authorized stopping, and non-secret
+questions remain available.
 
 Neither level can approve actions, answer secret input, access files or
-attachments, open a terminal, mutate Git, change providers, create projects or
-conversations, enable Full Access, or execute arbitrary commands.
+attachments, add or remove attachments, edit queued items that carry
+attachments or automatic queue items, reorder queued items, open a terminal,
+mutate Git, change providers, create projects or conversations, enable Full
+Access, or execute arbitrary commands.
 
 ## Watchers
 

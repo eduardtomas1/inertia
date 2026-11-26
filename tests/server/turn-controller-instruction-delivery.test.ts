@@ -671,6 +671,7 @@ describe("hidden instruction delivery", () => {
 
   it("sends a slash command after a slash command on the resumed session without restored history", async () => {
     const { runtime } = await chatRuntime("cursor");
+    reportCommands(runtime, "advisor");
 
     // A first-turn command withholds the instruction pack, which defers a history delta to the session's next turn.
     const firstCommand = await runTurn(runtime, "/advisor fable");

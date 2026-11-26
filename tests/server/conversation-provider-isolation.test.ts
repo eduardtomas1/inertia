@@ -292,11 +292,18 @@ describe("chat provider handoff", () => {
     store.conversationWork.release(conversation.id);
   });
 
-  it("keeps the in-flight configuration guard for provider changes", async () => {
-    const { store, update, turnInput } = fixture();
+  it("allows provider changes during an active turn while keeping the exclusive conversation-work guard (Decision 4.8)", async () => {
+    const { store, conversation, update, turnInput } = fixture();
     store.beginAgentTurn(turnInput("codex"));
-    vi.spyOn(store, "hasRecordedActiveWorkspaceRunForConversation").mockReturnValue(true);
-    await expect(update("claude")).rejects.toThrow("Stop the active run or review");
+    await expect(update("claude")).resolves.toBe("mutation");
+    expect(store.conversation(conversation.id)).toMatchObject({ providerId: "claude", providerSessionId: null });
+
+    expect(store.conversationWork.reserve(conversation.id)).toBe(true);
+    try {
+      await expect(update("codex")).rejects.toThrow("Stop the active run or review");
+    } finally {
+      store.conversationWork.release(conversation.id);
+    }
   });
 
   it("allows model and reasoning changes with the same provider", async () => {

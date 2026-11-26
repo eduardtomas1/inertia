@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { relocatedBackingId } from "../../src/server/orchestration-v2/backing-projector";
+import { portableForkHistory } from "../../src/server/orchestration-v2/portable-fork-history";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationResult, NativeConversationRequest } from "../../src/server/provider/native-conversation-operations";
@@ -79,12 +81,12 @@ function importChat(runtime: TurnControllerTestRuntime, providerId: "codex" | "c
 }
 
 describe("a session without a backing in a moved checkout", () => {
-  it.each(["claude", "codex"] as const)("resumes an imported %s session in a moved checkout, and fails closed when the provider says it is gone", async (providerId) => {
-    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId, modelId: "provider-default" }) });
+  it("resumes an imported codex session in a moved checkout, and fails closed when the provider says it is gone", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" }) });
     try {
       const { moved, moveTo } = await movable(runtime);
       const sessionId = randomUUID();
-      const chat = importChat(runtime, providerId, sessionId);
+      const chat = importChat(runtime, "codex", sessionId);
       moveTo(chat, moved);
       const send = runtime.controller.queue({ conversationId: chat, content: "Continue in the worktree." });
       expect(send.turn.providerSessionBefore).toBe(sessionId);
@@ -92,17 +94,40 @@ describe("a session without a backing in a moved checkout", () => {
       expect(runtime.provider.input).toMatchObject({ sessionId, cwd: moved });
       expect(runtime.provider.input?.prompt).not.toContain("Earlier imported work");
 
-      // Codex finds threads by id under CODEX_HOME, and a current Claude Code searches its whole home, so a
-      // refusal without a stored copy elsewhere means the session is gone: the import fails closed as in A.
+      // Codex finds threads by id under CODEX_HOME, so a refusal means the session is gone: the import fails closed as in A.
       expect(runtime.provider.freshSession()).toBeNull();
       const gone = "The saved provider session is no longer available.";
       runtime.provider.resolve({ status: "failed", sessionId, error: gone,
         failure: { reason: "provider-error", message: gone, sessionUnavailable: true } });
       await flushTurnControllerTestPromises();
-      const label = providerId === "codex" ? "Codex" : "Claude Code";
       const failures = (runtime.store.conversationDetail(chat)?.activities ?? []).filter(({ kind, turnId }) => kind === "error" && turnId === send.turn.id);
-      expect(failures).toEqual([expect.objectContaining({ title: `The original ${label} session for this imported chat is no longer available.` })]);
+      expect(failures).toEqual([expect.objectContaining({ title: "The original Codex session for this imported chat is no longer available." })]);
       expect(runtime.store.conversation(chat).providerSessionId).toBe(sessionId);
+    } finally { await runtime.controller.dispose(); runtime.store.close(); }
+  });
+
+  it("resumes an imported claude session in a moved checkout, and falls back to a fresh session when the provider says it is gone (N20)", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { modelSelection: providerNativeModelSelection({ providerId: "claude", modelId: "provider-default" }) });
+    try {
+      const { moved, moveTo } = await movable(runtime);
+      const sessionId = randomUUID();
+      const chat = importChat(runtime, "claude", sessionId);
+      moveTo(chat, moved);
+      const send = runtime.controller.queue({ conversationId: chat, content: "Continue in the worktree." });
+      expect(send.turn.providerSessionBefore).toBe(sessionId);
+      runtime.controller.start(send.turn.id);
+      expect(runtime.provider.input).toMatchObject({ sessionId, cwd: moved });
+      expect(runtime.provider.input?.prompt).not.toContain("Earlier imported work");
+
+      // N20 (2c4622efb): imported Claude sessions fall back cleanly to a fresh session with the full portable summary.
+      const replacement = runtime.provider.freshSession();
+      expect(replacement).not.toBeNull();
+      expect(replacement?.prompt).toContain("Earlier imported work");
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), conversationId: chat, type: "session", sessionId: "fresh-in-moved" });
+      runtime.provider.resolve({ status: "completed", sessionId: "fresh-in-moved", text: "Continued fresh in moved" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(send.turn.id)).toMatchObject({ status: "completed", providerSessionAfter: "fresh-in-moved" });
+      expect(runtime.store.conversation(chat).providerSessionId).toBe("fresh-in-moved");
     } finally { await runtime.controller.dispose(); runtime.store.close(); }
   });
 
@@ -261,7 +286,8 @@ describe("a session without a backing in a moved checkout", () => {
           .map(({ id }) => id);
         expect(inherited.length).toBeGreaterThan(0);
         // The native fork already holds its inherited history; the next delta must not send it again.
-        expect(backing.coveredItemIds).toEqual(expect.arrayContaining(inherited));
+        expect(backing.inheritedCoverage).toBe("complete");
+        expect(portableForkHistory((runtime.store as unknown as { database: Database.Database }).database, child.id, backing).items).toEqual([]);
       } finally { runtime.store.close(); }
     }
   });

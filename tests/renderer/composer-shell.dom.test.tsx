@@ -2,7 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
+import type { QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
 import { WatcherContext } from "../../src/renderer/src/components/watcher/watcherContext";
+import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import { readSourceText } from "../helpers/source-text";
 import { composerProps, conversation } from "./composer-fixtures";
 import { WATCHER_ID, link, surfaceModel } from "./watcher-fixtures";
@@ -193,15 +195,34 @@ describe("composer shell", () => {
   });
 
   it("attaches a queued message to the composer as its own row with a visible Send now action", async () => {
-    const current = conversation("queued-chat");
-    window.localStorage.setItem(
-      `inertia:queued-prompts:v2:${current.id}`,
-      JSON.stringify([{ id: "queued-1", content: "Run the release checks", createdAt: "2026-08-21T10:00:00.000Z", attachments: [] }]),
-    );
-    render(<Composer {...composerProps(current, { running: true })} />);
+    const current = conversation("11111111-1111-4111-8111-111111111191");
+    const entry: QueuedMessage = {
+      id: "22222222-2222-4222-8222-222222222291",
+      conversationId: current.id,
+      content: "Run the release checks",
+      createdAt: "2026-08-21T10:00:00.000Z",
+      attachments: [],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (): Promise<MessageQueueResult> => ({
+      kind: "message.queue",
+      conversationId: current.id,
+      entries: [entry],
+      receipt: null,
+    }));
+    const latestTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-running",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    render(<Composer {...composerProps(current, { running: true, latestTurn, onQueueCommand })} />);
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     const composer = screen.getByRole("region", { name: "Message composer" });
-    expect(queue.parentElement).toBe(composer);
+    expect(queue.closest(".composer-queue-slot")?.nextElementSibling).toBe(composer);
     expect(composer.querySelector(".composer-queue-slot")).toBeNull();
     const row = within(queue).getByRole("listitem");
     expect(row.firstElementChild?.tagName.toLowerCase()).toBe("svg");
@@ -212,26 +233,39 @@ describe("composer shell", () => {
   });
 
   it.each([
-    ["codex-app-server", true],
-    ["claude-agent-sdk", true],
-    ["kimi-acp", false],
-  ] as const)("offers Send now on a queued message during a %s turn with an empty composer: %s", async (harnessId, enabled) => {
-    const current = conversation(`queued-${harnessId}`);
-    window.localStorage.setItem(
-      `inertia:queued-prompts:v2:${current.id}`,
-      JSON.stringify([{ id: "queued-1", content: "Look at this too", createdAt: "2026-08-21T10:00:00.000Z", attachments: [] }]),
-    );
+    ["codex-app-server", "Send queued message now", "Send now"],
+    ["claude-agent-sdk", "Send queued message now", "Send now"],
+    ["kimi-acp", "Stop and send queued message", "Stop and send"],
+  ] as const)("offers %s on a queued message during a %s turn with an empty composer", async (harnessId, buttonName, label) => {
+    const current = conversation("11111111-1111-4111-8111-111111111192");
+    const entry: QueuedMessage = {
+      id: "22222222-2222-4222-8222-222222222292",
+      conversationId: current.id,
+      content: "Look at this too",
+      createdAt: "2026-08-21T10:00:00.000Z",
+      attachments: [],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (): Promise<MessageQueueResult> => ({
+      kind: "message.queue",
+      conversationId: current.id,
+      entries: [entry],
+      receipt: null,
+    }));
     const latestTurn = {
       ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
       id: "turn-running",
       status: "running" as const,
       harnessId,
     };
-    render(<Composer {...composerProps(current, { running: true, latestTurn })} />);
+    render(<Composer {...composerProps(current, { running: true, latestTurn, onQueueCommand })} />);
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("");
-    const sendNow = within(queue).getByRole("button", { name: "Send queued message now" });
-    if (enabled) expect(sendNow).toBeEnabled();
-    else expect(sendNow).toBeDisabled();
+    const action = within(queue).getByRole("button", { name: buttonName });
+    expect(action).toHaveTextContent(label);
+    expect(action).toBeEnabled();
   });
 });

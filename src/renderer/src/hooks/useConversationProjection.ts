@@ -24,7 +24,11 @@ import {
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
-import { announceRuntimeQueueChanged, useRuntimeQueuedFollowUps } from "../components/composer/runtimeQueueEvents";
+import {
+  announceRuntimeQueueChanged,
+  announceRuntimeQueueReconnected,
+  useRuntimeQueuedFollowUps,
+} from "../components/composer/runtimeQueueEvents";
 import type { StreamingAgentChannel } from "../utils/responseTimeline";
 import {
   appendStreamingReasoning,
@@ -625,6 +629,18 @@ export function useConversationProjection({
           return !hydration.inputs.has(key)
             || hydration.hydratedInputs.has(key);
         }));
+      }
+      if (projectionEnabled && activeConversation?.id) {
+        announceRuntimeQueueReconnected(activeConversation.id);
+      }
+      return;
+    }
+    if (event.type === "conversation.queue.changed") {
+      if (
+        projectionEnabled
+        && event.conversationId === activeConversation?.id
+      ) {
+        announceRuntimeQueueChanged(event.conversationId, event.revision);
       }
       return;
     }

@@ -124,7 +124,7 @@ export function coveredHistoryOccupancy(
   const actPred = turnCoveredPredicate("activities.turn_id", "activities.conversation_id", "('activity:' || activities.id)", norm);
   const activity = database.prepare(`SELECT COALESCE(SUM(${tokens(`min(length(CAST(title AS BLOB))
       + COALESCE(length(CAST(detail AS BLOB)), 0), ${ACTIVITY_ITEM_BYTES})`)}), 0) AS tokens
-    FROM activities WHERE conversation_id = ? AND ${actPred.sql}`)
+    FROM activities WHERE conversation_id = ? AND kind IN ('command','error') AND status <> 'running' AND ${actPred.sql}`)
     .get(threadId, ...actPred.parameters) as { tokens: number };
 
   const planPred = turnCoveredPredicate("agent_plans.turn_id", "agent_plans.conversation_id", "('plan:' || agent_plans.run_id)", norm);
@@ -135,7 +135,9 @@ export function coveredHistoryOccupancy(
 
   const filesPred = turnCoveredPredicate("turn_git_artifacts.turn_id", "turn_git_artifacts.conversation_id", "('files:' || turn_git_artifacts.id)", norm);
   const files = database.prepare(`SELECT COALESCE(SUM(${tokens("length(CAST(files_json AS BLOB))")}), 0) AS tokens
-    FROM turn_git_artifacts WHERE conversation_id = ? AND ${filesPred.sql}`)
+    FROM turn_git_artifacts WHERE conversation_id = ? AND status IN ('ready','partial')
+      AND (CASE WHEN json_valid(files_json) THEN json_array_length(files_json) ELSE 0 END) > 0
+      AND ${filesPred.sql}`)
     .get(threadId, ...filesPred.parameters) as { tokens: number };
 
   return messages.tokens + inherited.tokens + activity.tokens + plans.tokens + files.tokens;

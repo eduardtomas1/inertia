@@ -9,6 +9,7 @@ import {
 import {
   modelSelectionHasVerifiedProbeCapability,
   modelSelectionSchema,
+  providerIdForHarness,
   providerNativeBackendProfile,
   providerNativeHarnessId,
   providerNativeModelSelection,
@@ -50,6 +51,7 @@ import {
   type OfferedRestoredHistory,
   type TurnContextProbes,
 } from "./turn-context-handoff";
+export { CheckoutMoveBackgroundWorkError, ContextHandoffBackgroundWorkError };
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
 import { carriedMissedRunImages } from "./turn-missed-images";
 import { harnessDeclaresCapability } from "../../provider/capability-manifest";
@@ -84,6 +86,48 @@ import type {
 } from "./turn-controller-types";
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
+
+declare module "./turn-controller-types" {
+  interface QueueTurnRequest {
+    /**
+     * Explicit per-item model selection carried by a queued message (Phase 5 Pkg 3).
+     * Resolved for this turn without mutating the user's live composer selection on
+     * `conversations`.
+     */
+    modelSelectionOverride?: ModelSelection | null;
+  }
+}
+
+/**
+ * Thrown when a queued item's explicit `modelSelectionOverride` targets a provider
+ * or backend profile that is disabled or no longer available. The queue runtime
+ * catches this error to block the item cleanly with reason `"provider-disabled"`
+ * instead of failing a run.
+ */
+export class QueuedSelectionProviderUnavailableError extends RuntimeRequestError {
+  readonly blockedReason = "provider-disabled" as const;
+
+  constructor(
+    message: string,
+    readonly providerId?: ProviderId,
+    options?: { cause?: unknown },
+  ) {
+    super(message, undefined, undefined);
+    this.name = "QueuedSelectionProviderUnavailableError";
+    if (options?.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+function selectionsMatch(left: ModelSelection, right: ModelSelection): boolean {
+  return left.harnessId === right.harnessId
+    && left.backendProfileId === right.backendProfileId
+    && left.backendConfigurationRevision === right.backendConfigurationRevision
+    && left.modelId === right.modelId
+    && (left.reasoningEffort ?? null) === (right.reasoningEffort ?? null)
+    && Boolean(left.providerOptions.fastMode) === Boolean(right.providerOptions.fastMode);
+}
 
 type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
 
@@ -352,24 +396,45 @@ export function resolveTurnRequest(
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
   const providerInfo = dependencies.hooks.providerInfo();
+  const hasSelectionOverride = request.modelSelectionOverride !== undefined
+    && request.modelSelectionOverride !== null;
+  const effectiveSelection = hasSelectionOverride
+    ? request.modelSelectionOverride!
+    : conversation.modelSelection;
+  const effectiveProviderId = providerIdForHarness(effectiveSelection.harnessId)
+    ?? conversation.providerId;
   const selectedProvider = providerInfo.find(
-    ({ id }) => id === conversation.providerId,
+    ({ id }) => id === effectiveProviderId,
   );
   const runId = dependencies.id();
   const turnId = dependencies.id();
-  const requestedModelId = conversation.modelSelection.modelId;
+  const requestedModelId = effectiveSelection.modelId;
   const selectedModel = requestedModelId !== "provider-default"
     ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
     : selectedProvider?.models.find(({ isDefault }) => isDefault)
       ?? selectedProvider?.models[0];
-  const parsedSelection = modelSelectionSchema.parse(conversation.modelSelection);
-  const routeSelection = dependencies.hooks.validateModelSelection?.(
-    parsedSelection,
-  ) ?? parsedSelection;
+  let parsedSelection: ModelSelection;
+  let routeSelection: ModelSelection;
+  let route: ReturnType<TurnProviderRuntime["resolveModelRoute"]>;
+  try {
+    parsedSelection = modelSelectionSchema.parse(effectiveSelection);
+    routeSelection = dependencies.hooks.validateModelSelection?.(
+      parsedSelection,
+    ) ?? parsedSelection;
+    route = dependencies.providers.resolveModelRoute(routeSelection);
+  } catch (error) {
+    if (hasSelectionOverride) {
+      const detail = error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : `The queued message's provider or backend for ${PROVIDER_INFO[effectiveProviderId].name} is disabled or unavailable.`;
+      throw new QueuedSelectionProviderUnavailableError(detail, effectiveProviderId, { cause: error });
+    }
+    throw error;
+  }
   const modelSelection = requestedModelId === "provider-default"
     && selectedModel
     ? providerNativeModelSelection({
-        providerId: conversation.providerId,
+        providerId: route.providerId,
         modelId: selectedModel.id,
         alias: selectedModel.label === selectedModel.id
           ? null
@@ -380,8 +445,17 @@ export function resolveTurnRequest(
         providerOptions: routeSelection.providerOptions,
       })
     : routeSelection;
-  const route = dependencies.providers.resolveModelRoute(routeSelection);
-  dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  if (!hasSelectionOverride) {
+    dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  }
+  const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
+  if (hasSelectionOverride && providerInfo.length > 0 && (!exactProvider || exactProvider.canRun === false)) {
+    throw new QueuedSelectionProviderUnavailableError(
+      exactProvider?.statusMessage
+        ?? `${PROVIDER_INFO[route.providerId].name} is disabled or unavailable for this queued message.`,
+      route.providerId,
+    );
+  }
   const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
   const readOnlyWatcher = watcherTurn?.readOnly;
   const calledAgent = request.context?.calledAgent;
@@ -403,7 +477,6 @@ export function resolveTurnRequest(
       `${providerName} runs ${request.content.trim().split(/\s/u, 1)[0]} on its own. Remove the attached files and context, then send it again.`,
     );
   }
-  const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
   // Read once: the prompt's instructions and the tools attached at provider
   // start must describe the same offer even if project settings change.
@@ -476,9 +549,13 @@ export function resolveTurnRequest(
       `Send a message first so ${PROVIDER_INFO[route.providerId].name} receives this chat's earlier messages.`,
     );
   }
+  const conversationMatchesRouteProvider = conversation.providerId === route.providerId;
+  const conversationSessionForRoute = conversationMatchesRouteProvider
+    ? conversation.providerSessionId
+    : null;
   const latestTurnOwnsProviderSession = latestTurn !== null
-    && conversation.providerSessionId !== null
-    && latestTurn.providerSessionAfter === conversation.providerSessionId;
+    && conversationSessionForRoute !== null
+    && latestTurn.providerSessionAfter === conversationSessionForRoute;
   const checkout = dependencies.store.conversationPath(conversation.id);
   const backingLookup = { threadId: conversation.id, providerId: route.providerId, identity: route.continuationIdentity };
   const localBacking = dependencies.store.orchestration.backings.find({ ...backingLookup, workspaceKey: checkout });
@@ -506,12 +583,12 @@ export function resolveTurnRequest(
       ?? dependencies.store.orchestration.backings.sessionWorkspaceKey(conversation.id, sessionId);
     return known === null || sameCheckoutPath(known, checkout);
   };
-  const resumeSessionId = reusableBacking?.nativeSessionId ?? conversation.providerSessionId;
+  const resumeSessionId = reusableBacking?.nativeSessionId ?? conversationSessionForRoute;
   const previousContinuationIdentity = reusableBacking?.continuationIdentity ?? (candidateBacking ? null : latestTurn
     ? latestTurnOwnsProviderSession
       ? latestTurn.continuationIdentity
       : null
-    : conversation.continuationIdentity ?? null);
+    : conversationMatchesRouteProvider ? conversation.continuationIdentity ?? null : null);
   const previousContinuationModelId = previousContinuationIdentity
     ? routeSelection.modelId === "provider-default"
       ? "provider-default"
@@ -539,7 +616,7 @@ export function resolveTurnRequest(
   });
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
-    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) === null
+    && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) === null
     && dependencies.store.turnLedgerRepository.savedSessionKeepsFailing(
       conversation.id,
       resumeSessionId!,
@@ -556,7 +633,7 @@ export function resolveTurnRequest(
     return replaceRejectedHistorySession(dependencies, request, reusableBacking);
   }
   const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
-    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
+    && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) !== null;
   const canResume = continuation.action === "resume-session";
   const sessionOrigin = canResume
     ? dependencies.store.orchestration.backings.sessionOriginWorkspaceKey(conversation.id, resumeSessionId!) : null;
@@ -626,7 +703,7 @@ export function resolveTurnRequest(
     .ownConversationPacketId(conversation.id, contextPacketIds);
   const unattributedHistoryOnRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
-    const shell = conversation.continuationIdentity;
+    const shell = conversationMatchesRouteProvider ? conversation.continuationIdentity : null;
     const turns = dependencies.store.turnLedgerRepository.historyStayedOnEndpoint(
       conversation.id,
       backendProfileId,
@@ -802,13 +879,15 @@ export function resolveTurnRequest(
     localBacking?.status === "retired" ? localBacking.nativeSessionId : undefined,
     continuation.reasonCode === "stale-provider-session" ? resumeSessionId : undefined,
   ].filter((sessionId): sessionId is string => typeof sessionId === "string"))];
-  const providerSessionInvalidation = !canResume && conversation.providerSessionId
-    ? { expectedSessionId: conversation.providerSessionId }
+  const providerSessionInvalidation = !canResume
+    && conversationSessionForRoute
+    && (!hasSelectionOverride || selectionsMatch(conversation.modelSelection, routeSelection))
+    ? { expectedSessionId: conversationSessionForRoute }
     : undefined;
   const goalContinuationExpected = request.goalStart !== undefined
     || (canResume && dependencies.store.agentGoals(conversation.id).some((goal) =>
       goal.source === "codex-native"
-      && goal.providerSessionId === conversation.providerSessionId
+      && goal.providerSessionId === resumeSessionId
       && goal.status === "active"));
   const maxBudgetUsd = claudeSpendLimitApplies(route)
     ? dependencies.store.project(conversation.projectId).preferences

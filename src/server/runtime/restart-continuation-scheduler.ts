@@ -84,11 +84,62 @@ export class RestartContinuationScheduler {
       if (!turn || conversation.archivedAt !== null || !CONTINUABLE_STATUSES.has(turn.status)) return null;
       const watcher = this.store.watcherLinks.policyForConversation(conversationId);
       if (watcher && watcher.status !== "detached") return null;
-      if (this.dependencies.pendingInteraction(conversationId) || this.store.queuedMessages.list(conversationId).length > 0) return null;
+      if (this.stopBlocksContinuation(conversationId, turn.runId, turn.requestedAt, turn.completedAt)) return null;
+      if (this.dependencies.pendingInteraction(conversationId) || this.hasQueueItems(conversationId).any) return null;
       return { conversationId, interruptedTurnId: turn.id, routeIdentity: queuedRouteIdentity(conversation) };
     } catch {
       return null;
     }
+  }
+
+  private hasQueueItems(conversationId: string): { any: boolean; held: boolean; unheld: boolean } {
+    const v2 = this.store.orchestration.queue.listActive(conversationId);
+    if (v2.length > 0) {
+      const held = v2.some((item) => item.queueHeld);
+      const unheld = v2.some((item) => !item.queueHeld);
+      return { any: true, held, unheld };
+    }
+    const legacy = this.store.queuedMessages.list(conversationId);
+    if (legacy.length === 0) return { any: false, held: false, unheld: false };
+    const held = legacy.some((item) => item.queueHeld === true);
+    return { any: true, held, unheld: legacy.some((item) => item.queueHeld !== true) };
+  }
+
+  /**
+   * A recorded Stop on the interrupted run OR a Stop recorded at or after the
+   * turn completed (even when timestamps tie!) blocks automatic restart
+   * continuation (`ThreadStop.test.ts:1056,1108`).
+   */
+  private stopBlocksContinuation(
+    conversationId: string,
+    runId: string,
+    requestedAt: string,
+    completedAt: string | null,
+  ): boolean {
+    const runControl = this.store.orchestration.runControl;
+    const target = runControl.target(runId);
+    if (target && (target.interruptRequested || runControl.attemptInterrupt(target.attemptId) !== null)) {
+      return true;
+    }
+    const since = completedAt ?? requestedAt;
+    const db = this.store.orchestration.effects.connection;
+    const stopEvent = db.prepare(`
+      SELECT 1 FROM orchestration_v2_events
+      WHERE thread_id = ? AND created_at >= ?
+        AND (
+          type = 'run-control.interrupt-recorded'
+          OR type = 'attempt.interrupt-requested'
+          OR (type = 'queue.items-held' AND json_extract(payload_json, '$.cause') = 'H1-stop')
+        )
+      LIMIT 1
+    `).get(conversationId, since);
+    if (stopEvent) return true;
+    const stopReceipt = db.prepare(`
+      SELECT 1 FROM orchestration_v2_receipts
+      WHERE thread_id = ? AND command_type = 'agent.stop' AND created_at >= ?
+      LIMIT 1
+    `).get(conversationId, since);
+    return stopReceipt !== undefined;
   }
 
   private readiness(plan: RestartContinuationPlan): Readiness {
@@ -105,8 +156,13 @@ export class RestartContinuationScheduler {
     if (turn.status !== "interrupted" || turn.terminalReason !== "app-update") {
       return { kind: "stale", reason: "The interrupted turn ended another way." };
     }
+    if (this.stopBlocksContinuation(plan.conversationId, turn.runId, turn.requestedAt, turn.completedAt)) {
+      return { kind: "stale", reason: "The chat was stopped." };
+    }
     if (queuedRouteIdentity(conversation) !== plan.routeIdentity) return { kind: "stale", reason: "The chat's model or workspace changed." };
-    if (this.store.queuedMessages.list(plan.conversationId).length > 0) return { kind: "stale", reason: "The chat has a queued message." };
+    const queue = this.hasQueueItems(plan.conversationId);
+    if (queue.held) return { kind: "stale", reason: "The chat's queue is held." };
+    if (queue.unheld) return { kind: "stale", reason: "The chat has a queued message." };
     if (this.dependencies.pendingInteraction(plan.conversationId)) return { kind: "stale", reason: "The chat is waiting for an answer." };
     return { kind: "ready" };
   }

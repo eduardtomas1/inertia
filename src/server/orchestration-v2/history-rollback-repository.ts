@@ -18,6 +18,7 @@ import { isAgentTurnTerminalStatus } from "../../shared/turn-lifecycle";
 import type { OrchestrationEventStore } from "./event-store";
 import { commandFingerprint } from "./json";
 import { OrchestrationConflict, type CommandSource } from "./types";
+import type { QueueEvent } from "../../shared/orchestration-queue";
 import { pruneTerminalQueuedMessages } from "../persistence/queued-message-repository";
 
 export class HistoryRollbackError extends Error {}
@@ -233,10 +234,35 @@ export class HistoryRollbackRepository {
     for (const { id } of this.database.prepare(`SELECT 'files:' || id AS id FROM turn_git_artifacts
       WHERE conversation_id = ? AND turn_id IN (SELECT value FROM json_each(?))`)
       .all(threadId, rolledBackJson) as { id: string }[]) removed.add(id);
-    // An unread follow-up of a rolled-back turn is rolled back with it: its queue row never sends.
-    this.database.prepare(`UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL
-      WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked')
-        AND user_message_id IN (SELECT value FROM json_each(?))`).run(threadId, JSON.stringify(removedMessages));
+    // An unread follow-up or requeued prompt of a rolled-back turn is rolled back with it: emit V2 cancellation so rebuilds match.
+    const removedJson = JSON.stringify(removedMessages);
+    if (removedMessages.length > 0) {
+      const activeV2Items = this.database.prepare(`
+        SELECT id FROM orchestration_v2_entities
+        WHERE kind = 'queue-item' AND thread_id = ?
+          AND json_extract(payload_json, '$.state') IN ('waiting', 'dispatching', 'blocked')
+          AND json_extract(payload_json, '$.userMessageId') IN (SELECT value FROM json_each(?))
+        ORDER BY revision ASC, id ASC
+      `).all(threadId, removedJson) as { id: string }[];
+      for (const { id: itemId } of activeV2Items) {
+        this.commit(threadId, projectId, {
+          type: "queue.item-cancelled",
+          payload: { itemId, reason: "stale", detail: "The source turn was rolled back." },
+        });
+      }
+      this.database.prepare(`UPDATE queued_messages
+        SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL, queue_position = NULL, queue_held = 0
+        WHERE conversation_id = ? AND state IN ('waiting','dispatching','blocked')
+          AND user_message_id IN (SELECT value FROM json_each(?))`).run(threadId, removedJson);
+      const queueState = this.events.projection("queue-state", threadId)?.value as { activeItemIds?: string[] } | undefined;
+      if (queueState?.activeItemIds) {
+        const updatePosition = this.database.prepare("UPDATE queued_messages SET queue_position = ? WHERE id = ? AND conversation_id = ?");
+        for (const itemId of queueState.activeItemIds) {
+          const item = this.events.projection("queue-item", itemId)?.value as { queuePosition?: number | null } | undefined;
+          if (item && item.queuePosition !== undefined) updatePosition.run(item.queuePosition, itemId, threadId);
+        }
+      }
+    }
     pruneTerminalQueuedMessages(this.database, threadId);
     const retainedOrdinal = this.retainedOrdinal(threadId, plan.retainedTurnId);
     const rolledBackLegacy = this.database.prepare(`SELECT 1 FROM agent_turns AS turn
@@ -465,7 +491,7 @@ export class HistoryRollbackRepository {
     return this.cursor(run.threadId);
   }
 
-  private commit(threadId: string, projectId: string, event: HistoryEvent | OrchestrationBackingEvent): void {
+  private commit(threadId: string, projectId: string, event: HistoryEvent | OrchestrationBackingEvent | QueueEvent): void {
     const revision = this.events.revision(threadId);
     this.events.commit({ actorId: "runtime", commandId: `history:${commandFingerprint({ threadId, projectId, event, revision })}`,
       threadId, projectId, command: event, expectedRevision: revision, events: [event], result: null });

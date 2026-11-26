@@ -19,7 +19,7 @@ import { providerRouteLabel } from "../../utils/providerHandoff";
 import {
   COMPOSER_ACTION_STALE_FALLBACK_MS,
   composerFollowUpState,
-  supportsActiveParentFollowUp,
+  resolveHarnessSteeringCapabilities,
   composerPrimaryActionState,
 } from "../../utils/composerPrimaryAction";
 import { composerHarnessLabel } from "./config";
@@ -39,7 +39,9 @@ import { ComposerInputZone } from "./ComposerInputZone";
 import { composerPlaceholder } from "./composerPlaceholder";
 import { ComposerToolbar } from "./ComposerToolbar";
 import type { ComposerProps } from "./types";
-import { useRuntimeQueueLength } from "./runtimeQueueEvents";
+import { useRuntimeQueueSummary } from "./runtimeQueueEvents";
+import { resumeRuntimeQueue } from "./runtimeQueueClient";
+import { useQueuedMessageEdit } from "./useQueuedMessageEdit";
 import { useComposerMenus } from "./useComposerMenus";
 import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
@@ -141,7 +143,8 @@ export const Composer = memo(function Composer({
   onResumeConversation,
   onStop,
   onClearPromptContext,
-}: ComposerProps): React.JSX.Element {
+  hasPendingQuestionOrApproval = false,
+}: ComposerProps & { hasPendingQuestionOrApproval?: boolean }): React.JSX.Element {
   const latestKnownTurn = latestTurnSummary ?? latestTurn;
   const [message, setMessage] = useState(
     () => readComposerDraft(conversation.id),
@@ -169,11 +172,15 @@ export const Composer = memo(function Composer({
   const submittingRef = useRef(false);
   const queueingRef = useRef(false);
   const queueOwnedAttachmentIdsRef = useRef(new Set<string>());
-  const [queueEditPending, setQueueEditPending] = useState(false);
+  const editingQueuedRef = useRef(false);
+  const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
+  const [editBannerHost, setEditBannerHost] = useState<HTMLElement | null>(null);
+  const queueSummary = useRuntimeQueueSummary(conversation.id);
   const submissionReleaseTimerRef = useRef<number | null>(null);
-  const { stopping, stopClaimRef, stop } = useComposerStopAction({
-    conversationId: conversation.id, running, onStop,
+  const { stopping, resuming, stopClaimRef, stop, resume } = useComposerStopAction({
+    conversationId: conversation.id, running, held: queueSummary.held, onStop,
     cancelling: latestKnownTurn?.runState?.state === "cancelling",
+    onResume: onQueueCommand ? async () => { await resumeRuntimeQueue(onQueueCommand, conversation.id); } : undefined,
   });
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
@@ -301,12 +308,8 @@ export const Composer = memo(function Composer({
   };
 
   useComposerPrefill({
-    conversationIdRef,
-    draftValueRef,
-    markEditorChanged,
-    persistDraftChange,
-    setMessage,
-    textareaRef,
+    conversationIdRef, draftValueRef, markEditorChanged, persistDraftChange, setMessage, textareaRef,
+    skipDraftPersistenceRef: editingQueuedRef,
   });
 
   releaseAttachmentRef.current = onReleaseAttachment;
@@ -364,7 +367,6 @@ export const Composer = memo(function Composer({
     setConversationUpdatePending(false);
     setConversationUpdateError(null);
     setAttachmentError(null);
-    setQueueEditPending(false);
     dismissMenu("context-change");
     const queueOwned = queueOwnedAttachmentIdsRef.current;
     return () => {
@@ -428,7 +430,7 @@ export const Composer = memo(function Composer({
     const previous = draftValueRef.current;
     if (next === previous) return;
     markEditorChanged(); draftValueRef.current = next;
-    persistDraftChange(conversation.id, previous, next);
+    if (!editingQueuedRef.current) persistDraftChange(conversation.id, previous, next);
     if (compactNotice) clearCompactNotice(); setMessage(next);
   };
 
@@ -441,7 +443,7 @@ export const Composer = memo(function Composer({
   const agentCall = useComposerAgentCall({ conversationId: conversation.id, providerId: conversation.providerId, message, customAgents, replaceMessage: updateMessage, textareaRef, onOpenSettings: onOpenCustomAgentSettings });
 
   const addFileReference = (path: string): void => {
-    if (fileReferences.includes(path)) return;
+    if (editingQueuedRef.current || fileReferences.includes(path)) return;
     markEditorChanged(); setFileReferences([...fileReferences, path]);
   };
 
@@ -475,10 +477,6 @@ export const Composer = memo(function Composer({
     }
     if (stopAndSendTurnId) {
       await queueCurrentMessage(stopAndSendTurnId);
-      return;
-    }
-    if (followUpState === "stop-and-send" && queuedMessageCount > 0) {
-      setAttachmentError("Send or remove the queued message first.");
       return;
     }
     if (documentBlocksFollowUp) {
@@ -714,74 +712,70 @@ export const Composer = memo(function Composer({
   const sendEligible = draftHasContent && !sendBlocked;
   const compaction = shellCompaction ?? conversation.compaction ?? null;
   const shellCompacting = compaction?.state === "compacting";
+  const queuedEdit = useQueuedMessageEdit({
+    conversationId: conversation.id, providers, message, attachments, fileReferences, promptContext,
+    previewContextSelected, contextPacketIds, calledAgentId: agentCall.calledAgentId, attachmentFallback,
+    hasPendingQuestionOrApproval, disabled, submitting, sending, conversationUpdatePending, onQueueCommand,
+    refs: { attachmentsRef, draftValueRef, isEditingRef: editingQueuedRef, queueOwnedAttachmentIdsRef, releaseAttachmentRef, selectedPreviewUrlRef, textareaRef },
+    setMessage, setAttachments, setFileReferences, setPreviewContextSelected, setAttachmentError,
+    flushDraftPersistence, markEditorChanged, visiblePreviewContextUrl,
+  });
+  const handleRemoveAttachment = (attachment: ChatAttachment): void => {
+    if (!queuedEdit.handleRemoveAttachment(attachment)) removeAttachment(attachment);
+  };
+  const resumeEligible = !running && !submitting && !sending && !shellCompacting && !draftHasContent
+    && !queuedEdit.isEditing && !hasPendingQuestionOrApproval && queueSummary.canResume;
   const primaryAction = composerPrimaryActionState({
-    sendEligible,
-    submitting,
-    sending: sending || shellCompacting,
-    running,
-    stopping,
+    sendEligible, submitting, sending: sending || shellCompacting, running, stopping, resuming, resumeEligible,
   });
   const canSend = primaryAction === "send-ready";
   const compactOnReturn = useCompactOnReturn({
-    conversationId: conversation.id,
-    selection: conversation.modelSelection,
-    profile: selectedBackendProfile,
-    provider: selectedProvider,
-    usage,
-    compaction,
-    setting: compactOnReturnSetting,
+    conversationId: conversation.id, selection: conversation.modelSelection, profile: selectedBackendProfile,
+    provider: selectedProvider, usage, compaction, setting: compactOnReturnSetting,
     available: onCompactAndSend !== undefined && Boolean(conversation.providerSessionId),
     providerHandoffPending: Boolean(latestKnownTurn && latestKnownTurn.providerId !== conversation.providerId),
-    latestTurn: latestKnownTurn,
-    message,
-    running,
-    sendable: canSend,
+    latestTurn: latestKnownTurn, message, running, sendable: canSend,
   });
   const attachmentsAreImages = attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
   const { compactNotice, clearCompactNotice, compact, compactUnavailableReason } = useComposerCompaction({
     conversationId: conversation.id, providerId: conversation.providerId, message, canSend, running,
-    blocked: attachments.length > 0
-      || Boolean(promptContext)
-      || previewContextSelected
-      || fileReferences.length > 0
+    blocked: attachments.length > 0 || Boolean(promptContext) || previewContextSelected || fileReferences.length > 0
       || contextPacketIds.length > 0 || conversationContext.referencing,
-    flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
-    editorRevisions: editorRevisionsRef,
+    flushDraftPersistence, conversationIdRef, mountedRef, submittingRef, editorRevisions: editorRevisionsRef,
     draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
   });
+  const activeTurnProvider = providers.find(({ id }) => id === (latestKnownTurn?.providerId ?? conversation.providerId));
+  const steerCapabilities = resolveHarnessSteeringCapabilities(latestKnownTurn?.harnessId ?? null, activeTurnProvider?.capabilityContract);
   const followUpState = composerFollowUpState({
-    running,
-    stopping,
-    harnessId: latestKnownTurn?.harnessId ?? null,
+    running, stopping, harnessId: latestKnownTurn?.harnessId ?? null,
+    capabilityContract: activeTurnProvider?.capabilityContract,
+    hasAttachments: attachments.length > 0, compacting: shellCompacting,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
-    textOnly:
-      attachmentsAreImages
-      && !promptContext && !agentCall.calledAgentId
-      && !previewContextSelected
-      && fileReferences.length === 0
-      && messageFits
-      && !conversationContext.referencing
-      && !disabled,
-    submitting,
-    sending,
+    textOnly: attachmentsAreImages && !promptContext && !agentCall.calledAgentId && !previewContextSelected
+      && fileReferences.length === 0 && messageFits && !conversationContext.referencing && !disabled,
+    submitting, sending,
   });
   const queueAcceptsDocuments = Boolean(onQueueCommand);
   const queueBlocked = (!attachmentsAreImages && !queueAcceptsDocuments) || Boolean(promptContext) || Boolean(agentCall.calledAgentId) || agentCall.invocationPending || previewContextSelected
     || fileReferences.length > 0 || contextPacketIds.length > 0;
-  const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending;
+  const canQueue = running && sendEligible && !queueBlocked && !submitting && !sending && !queuedEdit.isEditing;
   const documentBlocksFollowUp = running && !attachmentsAreImages;
-  const queuedMessageCount = useRuntimeQueueLength(conversation.id);
-  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand && queuedMessageCount === 0 ? latestKnownTurn?.id ?? null : null;
+  const stopAndSendTurnId = followUpState === "stop-and-send" && canQueue && onQueueCommand ? latestKnownTurn?.id ?? null : null;
   const visiblePrimaryAction = primaryAction === "stop-ready" && stopAndSendTurnId ? "stop-and-send" : primaryAction;
   const stopAndKeepFocus = async (): Promise<void> => {
     const origin = document.activeElement;
     if (await stop() && focusWasLost(origin)) textareaRef.current?.focus();
   };
-  const { queueCurrentMessage, restoreQueuedMessage, queueEditBlockedReason } = composerQueueHandoff({
+  const resumeAndKeepFocus = async (): Promise<void> => {
+    const origin = document.activeElement;
+    if (await resume() && focusWasLost(origin)) textareaRef.current?.focus();
+  };
+  const { queueCurrentMessage } = composerQueueHandoff({
     conversationId: conversation.id, message, attachmentFallback, onQueueCommand, canQueue, documentBlocksFollowUp,
-    editBlocked: { draft: draftHasContent || fileReferences.length > 0 || pendingAttachmentIds.size > 0 || attachmentImporting, busy: submitting || sending || queueEditPending || disabled || conversationUpdatePending },
+    editBlocked: { draft: false, busy: false },
     refs: { attachmentsRef, conversationIdRef, draftValueRef, mountedRef, pendingAttachmentIdsRef, queueingRef, queueOwnedAttachmentIdsRef, releaseAttachmentRef, textareaRef },
-    setAttachments, setAttachmentError, setPendingAttachmentIds, setMessage, setQueueEditPending, isReferencing: conversationContext.isReferencing,
+    setAttachments, setAttachmentError, setPendingAttachmentIds, setMessage, setQueueEditPending: () => undefined,
+    isReferencing: conversationContext.isReferencing,
     flushDraftPersistence, markEditorChanged, resetHistory: promptHistoryController.reset, updateMessage, reattachAttachment,
   });
   const runRouteRepair = async (): Promise<void> => {
@@ -1036,6 +1030,7 @@ export const Composer = memo(function Composer({
   </Suspense>;
   return (
     <div className="composer-shell">
+      <div className="composer-queue-slot" ref={setQueueHost} />
       <section
         ref={composerRef}
         className={clsx(
@@ -1043,7 +1038,7 @@ export const Composer = memo(function Composer({
           (menu || slashMatch || commandSurface || agentCall.menuVisible) && "has-open-menu",
         )}
         aria-label="Message composer"
-        aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || conversationUpdatePending}
+        aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || resuming || conversationUpdatePending}
         data-maximum-reasoning={isMaximumReasoning(selectedModel, selectedReasoning) ? "true" : undefined}
         data-primary-action={primaryAction}
         data-disabled={disabled || conversationUpdatePending}
@@ -1052,6 +1047,7 @@ export const Composer = memo(function Composer({
       >
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
+        <div className="composer-edit-banner-slot" ref={setEditBannerHost} />
         {failureRow}
         {limitResetRow}
         {goal && (
@@ -1094,29 +1090,22 @@ export const Composer = memo(function Composer({
               <ComposerConversationContextPreview controller={conversationContext} targetConversationId={conversation.id} onCommand={onConversationContextCommand} />
             </>
           )}</>}
-          routeReadiness={routeReadiness}
-          routeRepairing={routeRepairing}
-          disabled={disabled || conversationUpdatePending || queueEditPending}
-          onRunRouteRepair={runRouteRepair}
-          promptContext={promptContext}
-          onClearPromptContext={clearPromptContext}
-          previewContextUrl={visiblePreviewContextUrl}
-          previewContextSelected={previewContextSelected}
-          onTogglePreviewContext={togglePreviewContext}
-          onDismissPreviewContext={dismissPreviewContext}
-          attachments={attachments} attachmentsDisabled={attachmentImporting || submitting || queueEditPending} pendingAttachmentIds={pendingAttachmentIds}
-          onRemoveAttachment={removeAttachment}
-          textareaRef={textareaRef}
-          message={message}
-          onMessageChange={promptHistoryController.onMessageChange}
-          onNavigatePromptHistory={promptHistoryController.navigate}
-          onImportAttachments={importAttachments}
-          onSubmit={submit}
-          canQueue={canQueue}
+          routeReadiness={routeReadiness} routeRepairing={routeRepairing}
+          disabled={disabled || conversationUpdatePending || queuedEdit.saving}
+          onRunRouteRepair={runRouteRepair} promptContext={promptContext} onClearPromptContext={clearPromptContext}
+          previewContextUrl={visiblePreviewContextUrl} previewContextSelected={previewContextSelected}
+          onTogglePreviewContext={togglePreviewContext} onDismissPreviewContext={dismissPreviewContext}
+          attachments={attachments} attachmentsDisabled={attachmentImporting || submitting || queuedEdit.saving}
+          pendingAttachmentIds={pendingAttachmentIds} onRemoveAttachment={handleRemoveAttachment}
+          textareaRef={textareaRef} message={message}
+          onMessageChange={promptHistoryController.onMessageChange} onNavigatePromptHistory={promptHistoryController.navigate}
+          onImportAttachments={importAttachments} onSubmit={submit} canQueue={canQueue}
           onQueue={() => void queueCurrentMessage()}
+          editingQueued={queuedEdit.isEditing} onSaveEdit={queuedEdit.save} onCancelEdit={queuedEdit.cancel}
+          canResume={primaryAction === "resume-ready"} onResume={resumeAndKeepFocus}
           running={running}
           placeholder={composerPlaceholder({ disabled, running, queueBlocked, hasHistory: hasVisibleHistory || latestKnownTurn !== null, skillsAvailable: Boolean(skillsCapability?.available),
-            stopsBeforeSending: running && Boolean(onQueueCommand) && !supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null) })}
+            stopsBeforeSending: running && Boolean(onQueueCommand) && !steerCapabilities.canSteer && steerCapabilities.canInterrupt })}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
           typedMessageLimit={typedMessageLimit}
@@ -1230,18 +1219,17 @@ export const Composer = memo(function Composer({
           compacting={compactOnReturn.compactingOnReturn}
           promptCache={compactOnReturn.promptCache}
           canSendQueuedNow={!disabled && !sending && !shellCompacting && !attachmentImporting
-            && (!running || (!stopping && !submitting && supportsActiveParentFollowUp(latestKnownTurn?.harnessId ?? null)))}
-          queuedTurnId={latestKnownTurn?.id ?? null}
-          queuedTurnStatus={latestKnownTurn?.status ?? null}
+            && (!running || (!stopping && !submitting && steerCapabilities.canSteer))}
+          canSteer={steerCapabilities.canSteer} canInterrupt={steerCapabilities.canInterrupt}
+          hasPendingQuestionOrApproval={hasPendingQuestionOrApproval}
+          resuming={resuming} onResume={resumeAndKeepFocus} providers={providers}
+          queueHost={queueHost} editBannerHost={editBannerHost}
+          queuedTurnId={latestKnownTurn?.id ?? null} queuedTurnStatus={latestKnownTurn?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
-          onQueueCommand={onQueueCommand}
-          queueEdit={{ blockedReason: queueEditBlockedReason, onEdit: restoreQueuedMessage }}
-          onReleaseAttachment={onReleaseAttachment}
-          onSubmit={submit}
-          onStop={stopAndKeepFocus}
-          onFocusInput={focusInput}
-          awaitingInput={!draftHasContent && !sendBlocked}
+          onQueueCommand={onQueueCommand} queueEdit={queuedEdit.queueEdit}
+          onReleaseAttachment={onReleaseAttachment} onSubmit={submit} onStop={stopAndKeepFocus}
+          onFocusInput={focusInput} awaitingInput={!draftHasContent && !sendBlocked}
         />
       </section>
     </div>

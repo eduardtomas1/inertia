@@ -4,8 +4,11 @@ import type WebSocket from "ws";
 
 import type { Conversation, TurnRequestContext } from "../../../shared/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES, isExtractedDocumentAttachmentMimeType } from "../../../shared/attachments";
-import type { CommandSource, JsonValue } from "../../orchestration-v2/types";
+import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
+import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
+import { hasIncompleteWorktreeSetup } from "../../workspace-path-authority";
 import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
+import { setFollowUpQueueHint } from "../queue-follow-up-hints";
 import { providerImageRequestLimitError } from "../../provider/provider-image-read";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "../conversation-work-authority";
 import {
@@ -45,9 +48,92 @@ import type { TurnInteractionCommandDependencies } from "./turn-interaction-type
 
 type SendRoute =
   | { kind: "replied"; reply: CommandReply }
-  | { kind: "after-turn" }
+  | { kind: "after-turn"; steerWhenReadyRunId?: string }
   | { kind: "follow-up"; admission: FollowUpAdmissionLease }
   | { kind: "new-turn"; handedOff: boolean; contextPacketIds: readonly string[]; resolvedTurnContext: TurnRequestContext | undefined };
+
+const inFlightSendContent = new Map<string, string>();
+
+function verifyMessageSendReplayContent(
+  dependencies: TurnInteractionCommandDependencies,
+  conversationId: string,
+  command: MessageSendCommand,
+  receipt: { result: JsonValue } | null,
+): void {
+  const expectedText = command.payload.content.trim();
+  const inFlightKey = `${conversationId}:${command.requestId}`;
+  if (receipt === null) {
+    const activeText = inFlightSendContent.get(inFlightKey);
+    if (activeText !== undefined && activeText !== expectedText) {
+      throw new OrchestrationConflict("command-conflict");
+    }
+    return;
+  }
+  const recorded = (receipt.result !== null && typeof receipt.result === "object" && !Array.isArray(receipt.result)
+    ? receipt.result : {}) as { readonly [key: string]: JsonValue | undefined };
+  if (typeof recorded.turnId === "string") {
+    try {
+      const turn = dependencies.store.agentTurn(recorded.turnId);
+      const message = dependencies.store.message(turn.userMessageId);
+      if (message.content.trim() !== expectedText) throw new OrchestrationConflict("command-conflict");
+    } catch (error) {
+      if (error instanceof OrchestrationConflict) throw error;
+    }
+    return;
+  }
+  if (recorded.disposition === "queued" && typeof recorded.queuedMessageId === "string") {
+    dependencies.store.orchestration.queue.verifyEnqueueReplay(
+      conversationId,
+      recorded.queuedMessageId,
+      command.payload.content,
+      command.payload.attachments,
+    );
+    return;
+  }
+  if (recorded.disposition === "follow-up" && typeof recorded.effectId === "string") {
+    const steer = dependencies.store.orchestration.runControl.steer(recorded.effectId);
+    if (steer?.messageId) {
+      try {
+        const message = dependencies.store.message(steer.messageId);
+        if (message.content.trim() !== expectedText) throw new OrchestrationConflict("command-conflict");
+      } catch (error) {
+        if (error instanceof OrchestrationConflict) throw error;
+      }
+    } else if (steer?.queuedMessageId) {
+      dependencies.store.orchestration.queue.verifyEnqueueReplay(
+        conversationId,
+        steer.queuedMessageId,
+        command.payload.content,
+        command.payload.attachments,
+      );
+    }
+  }
+}
+
+function queuedWorkspaceMatches(
+  dependencies: TurnInteractionCommandDependencies,
+  conversation: Conversation,
+): boolean {
+  const queued = dependencies.queuedMessage;
+  if (!queued) return true;
+  if (queued.delegatedCompletion || queued.followsThreadSelection) return true;
+  if (dependencies.store.queuedMessages.routeMatches(queued, conversation)) return true;
+  // Decision 4.3: accessMode and interactionMode changes do not block a queued item;
+  // only workspace/project or model-route changes (when item has no explicit selection) block.
+  const v2 = dependencies.store.orchestration.queue.getItem(queued.id);
+  if (!v2?.routeIdentity) return false;
+  try {
+    const parsed: unknown = JSON.parse(v2.routeIdentity);
+    if (!Array.isArray(parsed) || parsed.length < 8) return false;
+    const sameWorkspace = parsed[0] === conversation.projectId && parsed[1] === conversation.worktreePath;
+    if (!sameWorkspace) return false;
+    if (v2.modelSelection !== undefined && v2.modelSelection !== null) return true;
+    return parsed[2] === conversation.providerId
+      && JSON.stringify(parsed[3]) === JSON.stringify(conversation.modelSelection);
+  } catch {
+    return false;
+  }
+}
 
 interface NewTurnInput {
   dependencies: TurnInteractionCommandDependencies;
@@ -55,6 +141,7 @@ interface NewTurnInput {
   conversation: Conversation;
   route: Extract<SendRoute, { kind: "new-turn" }>;
   orchestrationRequest: CommandSource;
+  origin: string | null;
   reply: ReplyChannel;
 }
 
@@ -65,7 +152,7 @@ export async function sendMessageCommand(
 ): Promise<"handled"> {
   if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
   const origin = internalDispatchOrigin(dependencies);
-  const orchestrationRequest = messageSendSource(command, origin);
+  const orchestrationRequest = messageSendSource(command, origin, dependencies.queuedMessage?.dispatchOrdinal);
   let messageSendStage: MessageSendStage = "conversation-state";
   let conversation: Conversation;
   try {
@@ -73,12 +160,18 @@ export async function sendMessageCommand(
   } catch (error) {
     throw classifiedMessageSendError(error, messageSendStage);
   }
+  const inFlightKey = `${conversation.id}:${command.requestId}`;
   const start = await dependencies.store.orchestration.authority.begin<SendRoute>({
     source: orchestrationRequest, threadId: conversation.id, projectId: conversation.projectId,
     commandType: "message.send", rejection: origin === null ? commandRejection : null,
+    verifyReplayContent: origin === null
+      ? (receipt) => verifyMessageSendReplayContent(dependencies, conversation.id, command, receipt)
+      : undefined,
   }, () => {
     try {
-      return routeMessageSend(dependencies, command, conversation, (stage) => { messageSendStage = stage; });
+      const route = routeMessageSend(dependencies, command, conversation, (stage) => { messageSendStage = stage; });
+      if (origin === null) inFlightSendContent.set(inFlightKey, command.payload.content.trim());
+      return route;
     } catch (error) {
       throw classifiedMessageSendError(error, messageSendStage);
     }
@@ -97,15 +190,20 @@ export async function sendMessageCommand(
   try {
     if (route.kind === "replied") reply.send(route.reply);
     else if (route.kind === "after-turn") {
+      if (route.steerWhenReadyRunId) {
+        setFollowUpQueueHint(command.requestId, { steerWhenReadyRunId: route.steerWhenReadyRunId });
+      }
       await deliverFollowUpAfterTurn({ dependencies, command, conversation, ticket, reply });
     } else if (route.kind === "follow-up") {
       await sendActiveFollowUp({ dependencies, command, conversation, ticket, reply }, route.admission);
     } else {
-      await startNewTurn({ dependencies, command, conversation, route, orchestrationRequest, reply });
+      await startNewTurn({ dependencies, command, conversation, route, orchestrationRequest, origin, reply });
     }
   } catch (error) {
     ticket.fail(error);
     throw error;
+  } finally {
+    if (origin === null) inFlightSendContent.delete(inFlightKey);
   }
   ticket.finish(replyJson(reply.sent));
   return "handled";
@@ -124,7 +222,7 @@ function routeMessageSend(
     dependencies.queuedMessage.conversationId !== conversation.id
     || conversation.archivedAt !== null
     || dependencies.turns.isActive(conversation.id)
-    || !dependencies.store.queuedMessages.routeMatches(dependencies.queuedMessage, conversation)
+    || !queuedWorkspaceMatches(dependencies, conversation)
   )) throw new RuntimeRequestError("The chat changed before its queued message could start.");
   const contextPacketIds = command.payload.context?.conversationContextPacketIds ?? [];
   const resolvedTurnContext = command.payload.context;
@@ -161,6 +259,12 @@ function routeMessageSend(
     const stopping = dependencies.store.orchestration.runControl.interruptRequested(conversation.id);
     const admission = stopping ? null : dependencies.turns.acquireFollowUpAdmission(conversation.id);
     if (admission) return { kind: "follow-up", admission };
+    const activeOwner = dependencies.turns.activeIdentity(conversation.id);
+    if (!stopping && activeOwner && dependencies.undeliveredFollowUps
+      && supportsActiveParentFollowUp(conversation.modelSelection.harnessId)
+      && !dependencies.turns.followUpArrivedAfterTurn(conversation.id)) {
+      return { kind: "after-turn", steerWhenReadyRunId: activeOwner.runId };
+    }
     if (!dependencies.undeliveredFollowUps || (!stopping && !dependencies.turns.followUpArrivedAfterTurn(conversation.id))) {
       throw new RuntimeRequestError(FOLLOW_UP_ROUTE_UNAVAILABLE);
     }
@@ -168,6 +272,10 @@ function routeMessageSend(
   }
   if (dependencies.isolatedRuns.has(conversation.id)) {
     throw new RuntimeRequestError("Wait for the current run or read-only review to finish first.");
+  }
+  const db = dependencies.store.orchestration?.effects?.connection;
+  if (db && hasIncompleteWorktreeSetup(db, conversation.id)) {
+    throw new RuntimeRequestError("Retry worktree setup or choose a workspace before sending.");
   }
   return { kind: "new-turn", handedOff, contextPacketIds, resolvedTurnContext };
 }
@@ -229,7 +337,7 @@ function queuedReply(
 }
 
 async function startNewTurn(input: NewTurnInput): Promise<void> {
-  const { dependencies, command, orchestrationRequest, reply } = input;
+  const { dependencies, command, orchestrationRequest, origin, reply } = input;
   const { handedOff, contextPacketIds, resolvedTurnContext } = input.route;
   const scheduledDispatch = dependencies.limitResetDispatch ?? dependencies.restartContinuationDispatch;
   let conversation = input.conversation;
@@ -575,7 +683,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       const current = dependencies.store.conversation(conversation.id);
       const item = dependencies.store.queuedMessages.get(conversation.id, dependencies.queuedMessage.id);
       if (current.archivedAt !== null || item?.state !== "dispatching"
-        || !dependencies.store.queuedMessages.routeMatches(dependencies.queuedMessage, current)) {
+        || !queuedWorkspaceMatches(dependencies, current)) {
         throw new RuntimeRequestError("The chat changed while its queued message was being prepared.");
       }
     }
@@ -681,6 +789,45 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
           type: "request.ok",
         });
     if (queued) {
+      const queue = dependencies.store.orchestration?.queue;
+      if (dependencies.queuedMessage && queue) {
+        const v2Item = queue.getItem(dependencies.queuedMessage.id);
+        if (v2Item && (v2Item.state === "dispatching" || v2Item.state === "waiting")) {
+          const target = dependencies.store.orchestration.runControl.target(queued.turn.runId);
+          queue.deliver({
+            conversationId: conversation.id,
+            itemId: v2Item.id,
+            delivery: {
+              mode: dependencies.queuedMessage.deliveryMode ?? "run",
+              ...(dependencies.queuedMessage.deliveryMode === "after-stop" ? { outcome: "restarted" as const } : {}),
+              runId: queued.turn.runId,
+              attemptId: target?.attemptId ?? queued.turn.runId,
+              turnId: queued.turn.id,
+              messageId: queued.message.id,
+              deliveredAt: queued.turn.requestedAt,
+            },
+          });
+          dependencies.broadcast({
+            type: "conversation.queue.changed",
+            conversationId: conversation.id,
+            revision: queue.revision(conversation.id),
+          });
+        }
+      } else if (origin === null && queue) {
+        const heldItems = queue.listActive(conversation.id)
+          .filter((item) => item.queueHeld);
+        if (heldItems.length > 0) {
+          queue.release({
+            conversationId: conversation.id,
+            cause: "R1-user-send",
+          });
+          dependencies.broadcast({
+            type: "conversation.queue.changed",
+            conversationId: conversation.id,
+            revision: queue.revision(conversation.id),
+          });
+        }
+      }
       dependencies.broadcast({
         type: "conversation.message.persisted",
         message: queued.message,

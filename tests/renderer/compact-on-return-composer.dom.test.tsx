@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import { DuoJudgeNoticeContext } from "../../src/renderer/src/components/DuoJudgeNoticeContext";
 import type { ComposerProps } from "../../src/renderer/src/components/composer/types";
+import type { QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
 import type { DuoJudgeNotices } from "../../src/renderer/src/hooks/useDuoLaunchWatch";
+import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import type {
   ConversationCompactAndSendResult,
   ConversationShell,
@@ -204,35 +206,61 @@ describe("compact on return composer offer", () => {
 
   it("sends a queued message as it is, without the offer", async () => {
     const current = chat();
-    window.localStorage.setItem(
-      `inertia:queued-prompts:v2:${current.id}`,
-      JSON.stringify([{ id: "queued-1", content: "Queued before the break", createdAt: "2026-10-25T09:30:00.000Z", attachments: [] }]),
-    );
-    const onSend = vi.fn(async () => undefined);
+    const queuedEntry: QueuedMessage = {
+      id: "88888888-8888-4888-8888-888888888801",
+      conversationId: current.id,
+      content: "Queued before the break",
+      createdAt: "2026-10-25T09:30:00.000Z",
+      attachments: [],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    let entries: QueuedMessage[] = [queuedEntry];
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.send") entries = [];
+      return { kind: "message.queue", conversationId: current.id, entries, receipt: null };
+    });
     const onCompactAndSend = vi.fn(async () => sent());
-    render(<Composer {...props({ conversation: current, onSend, onCompactAndSend })} />);
+    render(<Composer {...props({ conversation: current, onQueueCommand, onCompactAndSend })} />);
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     expect(screen.queryByRole("button", { name: "Compact and send" })).toBeNull();
     expect(within(queue).queryByText(/compact/iu)).toBeNull();
 
     fireEvent.click(within(queue).getByRole("button", { name: "Send queued message now" }));
-    await waitFor(() => expect(onSend).toHaveBeenCalledWith("Queued before the break", [], undefined));
+    await waitFor(() => expect(onQueueCommand).toHaveBeenCalledWith({
+      type: "message.queue.send",
+      payload: { conversationId: current.id, id: queuedEntry.id },
+    }));
     expect(onCompactAndSend).not.toHaveBeenCalled();
   });
 
   it("holds Send now on a queued message while the chat compacts", async () => {
     const current = chat({ compaction: { state: "compacting", trigger: "manual", startedAt: new Date().toISOString() } });
-    window.localStorage.setItem(
-      `inertia:queued-prompts:v2:${current.id}`,
-      JSON.stringify([{ id: "queued-1", content: "Queued during compaction", createdAt: "2026-10-25T09:30:00.000Z", attachments: [] }]),
-    );
-    const onSend = vi.fn(async () => undefined);
-    render(<Composer {...props({ conversation: current, onSend })} />);
+    const queuedEntry: QueuedMessage = {
+      id: "88888888-8888-4888-8888-888888888802",
+      conversationId: current.id,
+      content: "Queued during compaction",
+      createdAt: "2026-10-25T09:30:00.000Z",
+      attachments: [],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (): Promise<MessageQueueResult> => ({
+      kind: "message.queue",
+      conversationId: current.id,
+      entries: [queuedEntry],
+      receipt: null,
+    }));
+    render(<Composer {...props({ conversation: current, onQueueCommand })} />);
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     const sendNow = within(queue).getByRole("button", { name: "Send queued message now" });
     expect(sendNow).toBeDisabled();
     fireEvent.click(sendNow);
-    expect(onSend).not.toHaveBeenCalled();
+    expect(onQueueCommand.mock.calls.filter(([cmd]) => cmd.type === "message.queue.send")).toHaveLength(0);
   });
 
   it("does not offer while the draft cannot be sent or is a /compact command", async () => {

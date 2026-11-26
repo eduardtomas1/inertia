@@ -49,6 +49,7 @@ export function adaptPrivateConnectRuntimeResponse(
           questions: detail.questions ?? [],
           inputRequestId: detail.inputRequestId ?? null,
           waitingForLocalAction: detail.waitingForLocalAction,
+          ...(detail.queue ? { queue: detail.queue } : {}),
         },
       },
     };

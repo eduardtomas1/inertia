@@ -11,6 +11,7 @@ import { AGENT_THREAD_WAIT_TOOL_DEFINITION } from "./agent-thread-wait";
 import { DELEGATION_TOOL_DEFINITIONS } from "./delegation/task-tools";
 import { FORK_HISTORY_TOOL } from "./fork-history-tool";
 import { ANSWER_QUESTION_TOOL_DEFINITION, ANSWER_QUESTION_TOOL_NAME } from "./managed-child-questions";
+import { MANAGED_QUEUE_TOOL_DEFINITION } from "./managed-queue-tools";
 import { SEND_MESSAGE_TOOL_DEFINITION } from "./managed-send-modes";
 
 const MAX_LIST_LIMIT = 25;
@@ -85,6 +86,7 @@ export const AGENT_THREAD_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[
     readOnly: false,
   },
   SEND_MESSAGE_TOOL_DEFINITION,
+  MANAGED_QUEUE_TOOL_DEFINITION,
   {
     name: "inertia_get_conversation_status",
     description: `Status of a chat this chat created: whether it is running, its latest turn's status and times, and pendingQuestions you can answer with ${ANSWER_QUESTION_TOOL_NAME}.`,

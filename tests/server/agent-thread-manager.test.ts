@@ -77,6 +77,9 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
     reservationHeldDuringStart: () => reservationHeldDuringStart,
   };
   const starts: string[] = [];
+  const queuedRequests: Array<{ conversationId: string; content: string; internalInstructions?: unknown }> = [];
+  const steerRequests: Array<{ turnId: string; input: unknown; options?: unknown }> = [];
+  const compactingConversations = new Set<string>();
   let followUps = 0;
   let followUpAdmission = true;
   const turns = {
@@ -89,7 +92,13 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
       conversationId: string;
       content: string;
       activateConversation: boolean;
+      internalInstructions?: unknown;
     }) => {
+      queuedRequests.push({
+        conversationId: request.conversationId,
+        content: request.content,
+        ...(request.internalInstructions !== undefined ? { internalInstructions: request.internalInstructions } : {}),
+      });
       const conversation = store.conversation(request.conversationId);
       return store.beginAgentTurn({
         id: `child-turn-${starts.length + 1}`,
@@ -141,8 +150,9 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
     setFollowUpAdmission: (accepted: boolean) => {
       followUpAdmission = accepted;
     },
-    steer: async (lease: { turnId: string }, _input: unknown, _attachments: unknown, acknowledged?: () => void) => {
+    steer: async (lease: { turnId: string }, input: unknown, _attachments: unknown, acknowledged?: () => void, _signal?: AbortSignal, options?: unknown) => {
       followUps += 1;
+      steerRequests.push({ turnId: lease.turnId, input, options });
       acknowledged?.();
       return { kind: "accepted", message: { id: `follow-up-${followUps}`, turnId: lease.turnId } };
     },
@@ -178,8 +188,10 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
   const messageQueue = {
     enqueueManagedMessage: vi.fn((input: { conversationId: string; id: string; content: string }) => {
       const conversation = store.conversation(input.conversationId);
-      store.queuedMessages.add({
-        id: input.id, conversation, content: input.content, attachments: [], digest: queuedIntentDigest(input.content, []),
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: input.id,
+        content: input.content,
       });
       return {
         kind: "message.queue" as const,
@@ -188,6 +200,7 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
         receipt: store.queuedMessages.get(conversation.id, input.id),
       };
     }),
+    schedule: vi.fn(),
   };
   const contextRequests = new ConversationContextRequestCoordinator({
     pendingInputs,
@@ -211,6 +224,7 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
     pendingInputs,
     pendingApprovals,
     messageQueue: () => messageQueue,
+    isCompacting: (conversationId: string) => compactingConversations.has(conversationId),
     agentBrowser: agentBrowser as never,
     providerInfo: () => [{
       id: "codex",
@@ -248,6 +262,9 @@ async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }, opt
     contextRequests,
     pendingInputs,
     pendingApprovals,
+    queuedRequests,
+    steerRequests,
+    compactingConversations,
     messageQueue,
     providerTerminalResumes,
     project,
@@ -2213,7 +2230,7 @@ describe("inertia_send_message modes", () => {
     } finally { env.store.close(); }
   });
 
-  it("queues behind the running turn in the chat's own queue, and refuses a fourth message before asking", async () => {
+  it("queues behind the running turn in the chat's own queue, and refuses a 21st message before asking", async () => {
     const env = await runningChild();
     try {
       for (const position of [1, 2, 3]) {
@@ -2234,10 +2251,18 @@ describe("inertia_send_message modes", () => {
           detail: expect.stringMatching(/^Mode queue: runs after the current turn · /u),
         });
       }
-      const full = sendCall({ conversationId: env.conversationId, content: "Queued task 4", mode: "queue" });
+      // Fill remaining 17 slots (total 20) via V2 queue.
+      for (let index = 4; index <= 20; index += 1) {
+        env.store.orchestration.queue.enqueue({
+          conversationId: env.conversationId,
+          itemId: crypto.randomUUID(),
+          content: `Queued task ${index}`,
+        });
+      }
+      const full = sendCall({ conversationId: env.conversationId, content: "Queued task 21", mode: "queue" });
       expect(failureOf(await env.bridge.invoke(full))).toEqual({
         code: "host_tool_failed",
-        message: "The managed chat already has 3 queued messages; wait for one to run, or send with another mode.",
+        message: "The managed chat already has 20 queued messages; wait for one to run, or send with another mode.",
       });
       expect(full.requestApproval).not.toHaveBeenCalled();
       expect(env.starts).toEqual(["child-turn-1"]);
@@ -2245,30 +2270,34 @@ describe("inertia_send_message modes", () => {
     } finally { env.store.close(); }
   });
 
-  it("reports a queue that filled while the approval was open, and one held by an unfinished turn", async () => {
+  it("reports a queue that filled while the approval was open, and starts immediately (P1) on an idle failed chat", async () => {
     const env = await runningChild();
     try {
       const queued = sendCall({ conversationId: env.conversationId, content: "Queued task", mode: "queue" });
       queued.requestApproval = vi.fn(async () => {
-        for (let index = 0; index < 3; index += 1) {
+        for (let index = 0; index < 20; index += 1) {
           env.messageQueue.enqueueManagedMessage({ conversationId: env.conversationId, id: crypto.randomUUID(), content: `User ${index}` });
         }
         return "approve" as const;
       });
       vi.mocked(env.messageQueue.enqueueManagedMessage).mockClear();
       expect(failureOf(await env.bridge.invoke(queued)).message)
-        .toBe("The managed chat already has 3 queued messages; wait for one to run, or send with another mode.");
-      for (const entry of env.store.queuedMessages.list(env.conversationId)) env.store.queuedMessages.cancel(env.conversationId, entry.id);
+        .toBe("The managed chat already has 20 queued messages; wait for one to run, or send with another mode.");
+      for (const item of env.store.orchestration.queue.listActive(env.conversationId)) {
+        env.store.orchestration.queue.cancel({ conversationId: env.conversationId, itemId: item.id, reason: "user" });
+      }
       env.turns.cancel(env.conversationId);
       const { requestedAt } = env.store.agentTurn(env.firstTurnId);
       env.store.updateAgentTurnLifecycle(env.firstTurnId, {
         status: "failed", terminalAssistantMessageId: null, startedAt: requestedAt, completedAt: requestedAt, terminalReason: "provider-failed",
       });
-      const held = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Retry", mode: "queue" }))).text);
-      expect(held).toMatchObject({
-        disposition: "queued",
-        position: 1,
-        next: "Its last turn did not complete, so its queue waits for the user to send this; to start a turn now, send with mode auto.",
+      // P1 (N19 row a): mode queue on an idle failed chat starts immediately as a new turn.
+      const started = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Retry", mode: "queue" }))).text);
+      expect(started).toMatchObject({
+        conversationId: env.conversationId,
+        disposition: "new-turn",
+        turnId: "child-turn-2",
+        accepted: true,
       });
     } finally { env.store.close(); }
   });
@@ -2289,7 +2318,7 @@ describe("inertia_send_message modes", () => {
     } finally { env.store.close(); }
   });
 
-  it("restarts by stopping exactly the running turn and starting a new one with the message", async () => {
+  it("restarts by stopping exactly the running turn via Stop-and-send at position 1 and reporting disposition restarted", async () => {
     const env = await runningChild();
     try {
       const restarted = sendCall({ conversationId: env.conversationId, content: "Start over with the new plan", mode: "restart" });
@@ -2297,7 +2326,8 @@ describe("inertia_send_message modes", () => {
       expect(result).toEqual({
         conversationId: env.conversationId,
         turnId: "child-turn-2",
-        disposition: "new-turn",
+        queuedMessageId: expect.any(String),
+        disposition: "restarted",
         accepted: true,
         stoppedTurnId: env.firstTurnId,
       });
@@ -2333,7 +2363,7 @@ describe("inertia_send_message modes", () => {
     } finally { env.store.close(); }
   });
 
-  it("counts only the child's own queued messages toward the limit, and starts an idle child's turn before an unread follow-up", async () => {
+  it("counts only the child's own queued messages toward the 20-item limit, and starts an idle child's turn before an unread follow-up", async () => {
     const env = await runningChild();
     try {
       // A follow-up the child's provider accepted but never read, queued by reference when its turn settled.
@@ -2348,13 +2378,20 @@ describe("inertia_send_message modes", () => {
         }))).text);
         expect(queued).toMatchObject({ disposition: "queued", position });
       }
-      const full = sendCall({ conversationId: env.conversationId, content: "Queued task 5", mode: "queue" });
+      for (let index = 4; index <= 20; index += 1) {
+        env.store.orchestration.queue.enqueue({
+          conversationId: env.conversationId,
+          itemId: crypto.randomUUID(),
+          content: `Queued task ${index + 1}`,
+        });
+      }
+      const full = sendCall({ conversationId: env.conversationId, content: "Queued task 21", mode: "queue" });
       expect(failureOf(await env.bridge.invoke(full)).message)
-        .toBe("The managed chat already has 3 queued messages; wait for one to run, or send with another mode.");
+        .toBe("The managed chat already has 20 queued messages; wait for one to run, or send with another mode.");
       expect(full.requestApproval).not.toHaveBeenCalled();
 
-      for (const entry of env.store.queuedMessages.list(env.conversationId)) {
-        if (entry.userMessageId === null) env.store.queuedMessages.cancel(env.conversationId, entry.id);
+      for (const item of env.store.orchestration.queue.listActive(env.conversationId)) {
+        env.store.orchestration.queue.cancel({ conversationId: env.conversationId, itemId: item.id, reason: "user" });
       }
       env.turns.cancel(env.conversationId);
       // An agent's new-turn send starts directly; the queue sends the unread follow-up after it.
@@ -2364,6 +2401,73 @@ describe("inertia_send_message modes", () => {
       expect(env.store.queuedMessages.list(env.conversationId)).toEqual([
         expect.objectContaining({ state: "waiting", userMessageId: env.store.agentTurn(env.firstTurnId).userMessageId }),
       ]);
+    } finally { env.store.close(); }
+  });
+
+  it("N15 Full Access skips approval card for create, send, stop, and inertia_queue while keeping ceilings", async () => {
+    const env = await runtime();
+    try {
+      env.store.updateConversation(env.source.id, { accessMode: "full" });
+      const bridge = env.manager.bridgeFor({ conversation: env.store.conversation(env.source.id), turn: env.sourceTurn });
+      const createCall = { ...call("inertia_create_conversation", { title: "Full Child", prompt: "Work in full access" }), toolCallId: `create-${crypto.randomUUID()}` };
+      const createdRes = await bridge.invoke(createCall);
+      expect(createdRes.success).toBe(true);
+      expect(createCall.requestApproval).not.toHaveBeenCalled();
+      const { conversationId: childId } = JSON.parse(createdRes.text) as { conversationId: string };
+      const queueCall = sendCall({ conversationId: childId, content: "Queued without card", mode: "queue" });
+      const queuedRes = await bridge.invoke(queueCall);
+      expect(queuedRes.success).toBe(true);
+      expect(queueCall.requestApproval).not.toHaveBeenCalled();
+      const { queuedMessageId } = JSON.parse(queuedRes.text) as { queuedMessageId: string };
+      const editCall = { ...call("inertia_queue", { conversationId: childId, action: "edit", itemId: queuedMessageId, content: "Edited" }), toolCallId: `qedit-${crypto.randomUUID()}` };
+      expect((await bridge.invoke(editCall)).success).toBe(true);
+      expect(editCall.requestApproval).not.toHaveBeenCalled();
+      const stopCall = { ...call("inertia_stop_conversation", { conversationId: childId }), toolCallId: `stop-${crypto.randomUUID()}` };
+      expect((await bridge.invoke(stopCall)).success).toBe(true);
+      expect(stopCall.requestApproval).not.toHaveBeenCalled();
+      env.store.updateConversation(env.source.id, { accessMode: "auto-edit" });
+      expect(failureOf(await bridge.invoke({ ...call("inertia_create_conversation", { title: "Esc", prompt: "Try full", accessMode: "full" }), toolCallId: `esc-${crypto.randomUUID()}` })).code)
+        .toBe("access_mode_escalation_denied");
+    } finally { env.store.close(); }
+  });
+
+  it("N10, 0a159c9fb, H2, G5 receipt, b0b2c4f95 & D.7 inertia_queue end-to-end", async () => {
+    const env = await runningChild();
+    try {
+      // N10 compacting + 0a159c9fb waiting agent item + preparing + unsteerable harness -> auto queues.
+      env.compactingConversations.add(env.conversationId);
+      const q1 = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Wait for compaction", mode: "auto" }))).text);
+      expect(q1).toMatchObject({ disposition: "queued", accepted: true });
+      env.compactingConversations.delete(env.conversationId);
+      const q2 = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Preserve agent order", mode: "auto" }))).text);
+      expect(q2).toMatchObject({ disposition: "queued", position: 2, accepted: true });
+      for (const item of env.store.orchestration.queue.listActive(env.conversationId)) {
+        env.store.orchestration.queue.cancel({ conversationId: env.conversationId, itemId: item.id, reason: "user" });
+      }
+      env.store.updateAgentTurnLifecycle(env.firstTurnId, { status: "starting" });
+      const q3 = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Preparing", mode: "auto" }))).text);
+      expect(q3).toMatchObject({ disposition: "queued", accepted: true });
+      env.store.orchestration.queue.cancel({ conversationId: env.conversationId, itemId: q3.queuedMessageId, reason: "user" });
+      (env.store as unknown as { database: { prepare(sql: string): { run(...args: unknown[]): unknown } } })
+        .database.prepare("UPDATE agent_turns SET status = 'running', run_state = 'cancelling' WHERE id = ?").run(env.firstTurnId);
+      const q4 = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Stopping", mode: "auto" }))).text);
+      expect(q4).toMatchObject({ disposition: "queued", accepted: true });
+      env.store.orchestration.queue.cancel({ conversationId: env.conversationId, itemId: q4.queuedMessageId, reason: "user" });
+      (env.store as unknown as { database: { prepare(sql: string): { run(...args: unknown[]): unknown } } })
+        .database.prepare("UPDATE agent_turns SET status = 'running', run_state = 'running', harness_id = 'kimi-acp', model_selection_json = json_set(model_selection_json, '$.harnessId', 'kimi-acp') WHERE id = ?").run(env.firstTurnId);
+      const q5 = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Unsteerable", mode: "auto" }))).text);
+      expect(q5).toMatchObject({ disposition: "queued", accepted: true });
+      env.store.orchestration.queue.cancel({ conversationId: env.conversationId, itemId: q5.queuedMessageId, reason: "user" });
+      (env.store as unknown as { database: { prepare(sql: string): { run(...args: unknown[]): unknown } } })
+        .database.prepare("UPDATE agent_turns SET harness_id = 'codex-app-server', model_selection_json = json_set(model_selection_json, '$.harnessId', 'codex-app-server') WHERE id = ?").run(env.firstTurnId);
+
+      // b0b2c4f95 agent-sender note (regular vs slash command) + create hidden instruction.
+      expect(env.queuedRequests[0]?.content).toBe("Delegated work");
+      expect(JSON.stringify(env.queuedRequests[0]?.internalInstructions)).toContain("sent this message, not the user.");
+      expect((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Check logs", mode: "steer" }))).success).toBe(true);
+      expect((env.steerRequests.at(-1)!.options as { providerContent: string }).providerContent).toContain("sent this message, not the user.");
+      expect((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "/compact now", mode: "steer" }))).success).toBe(true);
+      expect((env.steerRequests.at(-1)!.options as { providerContent: string }).providerContent).toBe("/compact now");
     } finally { env.store.close(); }
   });
 

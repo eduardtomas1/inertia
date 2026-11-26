@@ -70,7 +70,7 @@ export function ComposerSettings({
   selectedFastMode,
   conversation,
   disabled,
-  running,
+  running: _running,
   menuController,
   onUpdateReasoningEffort,
   onUpdateFastMode,
@@ -121,7 +121,7 @@ export function ComposerSettings({
             aria-haspopup="menu"
             aria-controls={menuId("reasoning")}
             aria-expanded={menu === "reasoning"}
-            disabled={disabled || running || conversationUpdatePending}
+            disabled={disabled || conversationUpdatePending}
             data-composer-setting="reasoning"
             onClick={() => toggleMenu("reasoning")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("reasoning", event)}
@@ -185,7 +185,7 @@ export function ComposerSettings({
             aria-haspopup="menu"
             aria-controls={menuId("speed")}
             aria-expanded={menu === "speed"}
-            disabled={disabled || running || conversationUpdatePending}
+            disabled={disabled || conversationUpdatePending}
             data-composer-setting="speed"
             onClick={() => toggleMenu("speed")}
             onKeyDown={(event) => handleComposerMenuTriggerKeyDown("speed", event)}
@@ -230,7 +230,7 @@ export function ComposerSettings({
           aria-haspopup="menu"
           aria-controls={menuId("access")}
           aria-expanded={menu === "access"}
-          disabled={disabled || running}
+          disabled={disabled || conversationUpdatePending}
           data-composer-setting="access"
           onClick={() => toggleMenu("access")}
           onKeyDown={(event) =>
@@ -289,7 +289,7 @@ export function ComposerSettings({
           aria-haspopup="menu"
           aria-controls={menuId("mode")}
           aria-expanded={menu === "mode"}
-          disabled={disabled || running || conversationUpdatePending}
+          disabled={disabled || conversationUpdatePending}
           data-composer-setting="mode"
           onClick={() => toggleMenu("mode")}
           onKeyDown={(event) =>

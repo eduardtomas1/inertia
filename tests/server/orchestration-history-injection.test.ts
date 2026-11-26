@@ -8,12 +8,13 @@ import { RuntimeStore } from "../../src/server/database";
 import { ProviderManager } from "../../src/server/providers";
 import { removePortableFixture } from "../helpers/portable-provider-fixture";
 import { captured, fakeAppServer } from "../helpers/codex-app-server-fixture";
+import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
 import { rollbackConversationHistory } from "../../src/server/runtime/history-rollback-service";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type { NativeConversationRequest, NativeConversationResult } from "../../src/server/provider/native-conversation-operations";
 import type { ProviderHistoryInjection } from "../../src/server/provider/contracts";
-import { orchestrationBackingEventSchema } from "../../src/shared/orchestration-backings";
+import { orchestrationBackingEventSchema, type ProviderBacking } from "../../src/shared/orchestration-backings";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime, flushTurnControllerTestPromises,
@@ -63,6 +64,12 @@ function handoffChanges(runtime: TurnControllerTestRuntime, runId: string) {
     && (event.payload as { runId: string }).runId === runId).map(({ payload }) => payload as Record<string, unknown>);
 }
 
+function covers(runtime: TurnControllerTestRuntime, backing: ProviderBacking | null | undefined, itemId: string, runId: string): boolean {
+  if (!backing) return false;
+  const run = runtime.store.orchestration.events.projection("run", runId)?.value as { ordinal?: number } | undefined;
+  return isItemCovered(backing, itemId, typeof run?.ordinal === "number" ? run.ordinal : null);
+}
+
 describe("native history injection: delivery records", () => {
   it("records native delivery before the turn and credits the delta, replaying to the same rows", async () => {
     const runtime = await createTurnControllerTestRuntime();
@@ -97,7 +104,7 @@ describe("native history injection: delivery records", () => {
       runtime.provider.resolve({ sessionId: "codex-native" });
       await flushTurnControllerTestPromises();
       const backing = runtime.store.orchestration.backings.find(lookup)!;
-      expect(backing.coveredItemIds).toEqual(expect.arrayContaining([first.message.id, other.message.id, returned.message.id]));
+      for (const entry of [first, other, returned]) expect(covers(runtime, backing, entry.message.id, entry.turn.runId)).toBe(true);
       expect(handoffChanges(runtime, returned.turn.runId)).toEqual([
         expect.not.objectContaining({ method: expect.anything() }),
         expect.objectContaining({ state: "dispatching", method: "native", attemptId: expect.any(String) }),
@@ -128,9 +135,9 @@ describe("native history injection: delivery records", () => {
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)).toMatchObject({ state: "delivered", method: "native" });
       const backing = runtime.store.orchestration.backings.find(lookup)!;
       expect(backing.status).toBe("ready");
-      expect(backing.coveredItemIds).toContain(other.message.id);
+      expect(covers(runtime, backing, other.message.id, other.turn.runId)).toBe(true);
       // turn/start never ran: the injection reached the thread, the turn's own prompt did not.
-      expect(backing.coveredItemIds).not.toContain(returned.message.id);
+      expect(covers(runtime, backing, returned.message.id, returned.turn.runId)).toBe(false);
       expect(events(runtime).some(({ type }) => type === "provider.backing-invalidated")).toBe(false);
 
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try again" });
@@ -158,8 +165,8 @@ describe("native history injection: delivery records", () => {
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)).toMatchObject({ state: "delivered", method: "native" });
       const backing = runtime.store.orchestration.backings.find(lookup)!;
       expect(backing).toMatchObject({ status: "ready" });
-      expect(backing.coveredItemIds).toContain(other.message.id);
-      expect(backing.coveredItemIds).not.toContain(returned.message.id);
+      expect(covers(runtime, backing, other.message.id, other.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, returned.message.id, returned.turn.runId)).toBe(false);
       const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue" });
       expect(next.turn.providerSessionBefore).toBe("codex-native");
       const handoff = runtime.store.orchestration.backings.handoff(next.turn.runId)!;
@@ -179,7 +186,7 @@ describe("native history injection: delivery records", () => {
       const message = "Codex failed the turn.";
       runtime.provider.resolve({ status: "failed", sessionId: "codex-native", error: message, failure: { reason: "codex-error", message } });
       await flushTurnControllerTestPromises();
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(returned.message.id);
+      expect(covers(runtime, runtime.store.orchestration.backings.find(lookup), returned.message.id, returned.turn.runId)).toBe(true);
       const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue" });
       expect(runtime.store.orchestration.backings.handoff(next.turn.runId)).toBeNull();
     } finally { runtime.store.close(); }
@@ -197,7 +204,7 @@ describe("native history injection: delivery records", () => {
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)).toMatchObject({ state: "delivered", method: "inline" });
       runtime.provider.resolve({ sessionId: "codex-native" });
       await flushTurnControllerTestPromises();
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(other.message.id);
+      expect(covers(runtime, runtime.store.orchestration.backings.find(lookup), other.message.id, other.turn.runId)).toBe(true);
       expect(handoffChanges(runtime, returned.turn.runId).map(({ state, method }) => [state, method ?? null])).toEqual([
         ["dispatching", null], ["dispatching", "native"], ["dispatching", "inline"], ["delivered", null]]);
     } finally { runtime.store.close(); }
@@ -243,7 +250,8 @@ describe("turn acceptance on a harness that reports it (Codex)", () => {
       const backing = runtime.store.orchestration.backings.find(codexLookup(runtime, first.turn.id))!;
       // Not delivered: the backing is as the lost turn's dispatch found it.
       expect(backing).toMatchObject({ status: "ready", lastTurnId: first.turn.id });
-      expect(backing.coveredItemIds).not.toContain(lost.message.id);
+      expect(covers(runtime, backing, first.message.id, first.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, lost.message.id, lost.turn.runId)).toBe(false);
       const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Next request" });
       expect(next.turn.providerSessionBefore).toBe("codex-native");
       expect(runtime.store.orchestration.backings.handoff(next.turn.runId)?.itemIds).toContain(lost.message.id);
@@ -268,7 +276,7 @@ describe("turn acceptance on a harness that reports it (Codex)", () => {
       const first = await completeTurn(runtime, "First Codex request", "codex-native", "First answer");
       const accepted = await failedTurn(runtime, "Accepted Codex request", during, outcome);
       const backing = runtime.store.orchestration.backings.find(codexLookup(runtime, first.turn.id))!;
-      expect(backing.coveredItemIds).toContain(accepted.message.id);
+      expect(covers(runtime, backing, accepted.message.id, accepted.turn.runId)).toBe(true);
       const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Next request" });
       expect(next.turn.providerSessionBefore).toBe("codex-native");
       expect(runtime.store.orchestration.backings.handoff(next.turn.runId)).toBeNull();
@@ -525,7 +533,7 @@ describe("native history injection: uncertain delivery", () => {
       const backing = runtime.store.orchestration.backings.find({ threadId: runtime.conversationId, providerId: "codex",
         workspaceKey: runtime.workspace, identity: returned.turn.continuationIdentity, nativeSessionId: "codex-fresh" })!;
       expect(backing.status).toBe("ready");
-      expect(backing.coveredItemIds).toContain(first.message.id);
+      expect(covers(runtime, backing, first.message.id, first.turn.runId)).toBe(true);
     } finally { runtime.store.close(); }
   });
 });
@@ -617,7 +625,7 @@ describe("native history injection: native rollback (G12)", () => {
     const fourth = await codexTurn(runtime, "fourth");
     const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
       identity: first.turn.continuationIdentity, nativeSessionId: "source-native" };
-    expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(other.message.id);
+    expect(covers(runtime, runtime.store.orchestration.backings.find(lookup), other.message.id, other.turn.runId)).toBe(true);
     return { first, other, third, fourth, lookup };
   }
 
@@ -656,10 +664,11 @@ describe("native history injection: native rollback (G12)", () => {
       expect([...delta.itemIds, ...delta.omittedItemIds ?? []]).toContain(oldest);
       const lookup = { threadId: runtime.conversationId, providerId: "codex", workspaceKey: runtime.workspace,
         identity: first.turn.continuationIdentity, nativeSessionId: "source-native" };
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(oldest);
+      expect(covers(runtime, runtime.store.orchestration.backings.find(lookup), oldest, claude[0]!.turn.runId)).toBe(true);
       await expect(rollbackTo(runtime, first.turn.id, "first")).resolves.toMatchObject({ transfer: "native", rolledBackTurns: 2 });
       // The rewind removed what the third run delivered, including the item older than the kept turn.
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).not.toContain(oldest);
+      const rewound = runtime.store.orchestration.backings.find(lookup)!;
+      expect(covers(runtime, rewound, oldest, claude[0]!.turn.runId)).toBe(false);
     } finally { runtime.store.close(); }
   });
 
@@ -670,9 +679,9 @@ describe("native history injection: native rollback (G12)", () => {
       await expect(rollbackTo(runtime, third.turn.id, "third")).resolves.toMatchObject({ transfer: "native", rolledBackTurns: 1 });
       const backing = runtime.store.orchestration.backings.find(lookup)!;
       expect(backing.status).toBe("ready");
-      expect(backing.coveredItemIds).toContain(other.message.id);
-      expect(backing.coveredItemIds).toContain(third.message.id);
-      expect(backing.coveredItemIds).not.toContain(fourth.message.id);
+      expect(covers(runtime, backing, other.message.id, other.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, third.message.id, third.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, fourth.message.id, fourth.turn.runId)).toBe(false);
     } finally { runtime.store.close(); }
   });
 
@@ -682,9 +691,9 @@ describe("native history injection: native rollback (G12)", () => {
       const { first, other, third, lookup } = await history(runtime);
       await expect(rollbackTo(runtime, first.turn.id, "first")).resolves.toMatchObject({ transfer: "native", rolledBackTurns: 3 });
       const backing = runtime.store.orchestration.backings.find(lookup)!;
-      expect(backing.coveredItemIds).toContain(first.message.id);
-      expect(backing.coveredItemIds).not.toContain(other.message.id);
-      expect(backing.coveredItemIds).not.toContain(third.message.id);
+      expect(covers(runtime, backing, first.message.id, first.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, other.message.id, other.turn.runId)).toBe(false);
+      expect(covers(runtime, backing, third.message.id, third.turn.runId)).toBe(false);
       const before = projectionRows(runtime.store);
       runtime.store.orchestration.events.rebuildProjections();
       expect(projectionRows(runtime.store)).toEqual(before);
@@ -747,7 +756,7 @@ describe("native history injection over the Codex App Server fixture", { concurr
       expect(turn).not.toContain("Claude new answer");
       expect(runtime.store.agentTurn(returned.turn.id).status).toBe("completed");
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)).toMatchObject({ state: "delivered", method: "native" });
-      expect(runtime.store.orchestration.backings.find(lookup)?.coveredItemIds).toContain(other.message.id);
+      expect(covers(runtime, runtime.store.orchestration.backings.find(lookup), other.message.id, other.turn.runId)).toBe(true);
       const before = projectionRows(runtime.store);
       runtime.store.orchestration.events.rebuildProjections();
       expect(projectionRows(runtime.store)).toEqual(before);
@@ -765,8 +774,8 @@ describe("native history injection over the Codex App Server fixture", { concurr
       expect(runtime.store.orchestration.backings.handoff(returned.turn.runId)).toMatchObject({ state: "delivered", method: "native" });
       const backing = runtime.store.orchestration.backings.find(lookup)!;
       expect(backing.status).toBe("ready");
-      expect(backing.coveredItemIds).toContain(other.message.id);
-      expect(backing.coveredItemIds).not.toContain(returned.message.id);
+      expect(covers(runtime, backing, other.message.id, other.turn.runId)).toBe(true);
+      expect(covers(runtime, backing, returned.message.id, returned.turn.runId)).toBe(false);
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try again" });
       expect(retry.turn.providerSessionBefore).toBe("codex-native");
       const handoff = runtime.store.orchestration.backings.handoff(retry.turn.runId)!;

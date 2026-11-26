@@ -144,6 +144,9 @@ export interface ConversationCommandDependencies {
   nativeGoalReads?: Pick<NativeGoalReads, "quiesce">;
   reportIncident?(observation: IncidentObservation): unknown;
   decorateDelegation?(delegation: ConversationDelegation): ConversationDelegation | undefined;
+  queuedMessages?: {
+    schedule(conversationId: string): void | Promise<void>;
+  };
 }
 
 export function createConversationCommandHandler(
@@ -449,6 +452,14 @@ export function createConversationCommandHandler(
       }
       case "conversation.update": {
         const target = dependencies.store.conversation(command.payload.conversationId);
+        const changesRunConfiguration = (
+          command.payload.providerId !== undefined
+          || command.payload.modelSelection !== undefined
+          || command.payload.model !== undefined
+          || command.payload.reasoningEffort !== undefined
+          || command.payload.interactionMode !== undefined
+          || command.payload.accessMode !== undefined
+        );
         const start = await dependencies.store.orchestration.authority.begin({
           source: { actorId: "human", commandId: command.requestId, command: JSON.parse(JSON.stringify(command)) as JsonValue },
           threadId: target.id, projectId: target.projectId, commandType: "conversation.update", rejection: commandRejection,
@@ -549,14 +560,6 @@ export function createConversationCommandHandler(
                 }
               : null;
           }
-          const changesRunConfiguration = (
-            update.providerId !== undefined
-            || update.modelSelection !== undefined
-            || update.model !== undefined
-            || update.reasoningEffort !== undefined
-            || update.interactionMode !== undefined
-            || update.accessMode !== undefined
-          );
           if (changesRunConfiguration) {
             try {
               dependencies.store.assertDuoComparisonTurnAllowed(
@@ -575,13 +578,16 @@ export function createConversationCommandHandler(
               );
             }
           }
+          // Decision 4.8: configuration changes are allowed while an agent turn is running.
+          // Keep all non-turn guards (checkout restore, isolated reviews, exclusive workspace
+          // runs, Duo comparison admission, and workflow reservations held in conversationWork).
           if (
             changesRunConfiguration
             && (
-              dependencies.store.conversationWork.hasConversation(
+              dependencies.store.conversationWork.restoreBlocksConversation(
                 conversationId,
               )
-              || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
+              || dependencies.store.conversationWork.hasConversation(
                 conversationId,
               )
             )
@@ -632,6 +638,11 @@ export function createConversationCommandHandler(
         if (start.kind === "rejected") throw new RuntimeRequestError(start.detail);
         if (start.kind === "joined") await start.result;
         if (start.kind === "lead") start.ticket.finish(null);
+        if (changesRunConfiguration && start.kind !== "replay") {
+          void Promise.resolve(
+            dependencies.queuedMessages?.schedule(command.payload.conversationId),
+          ).catch(() => undefined);
+        }
         return "mutation";
       }
       case "conversation.archive":

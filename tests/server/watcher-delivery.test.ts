@@ -58,11 +58,33 @@ describe("watcher note delivery", () => {
     try {
       const { link, wakeId } = await finding(f);
       await f.startWatchedTurn("Keep going.");
-      await enqueueUserMessage(f, "One");
-      await enqueueUserMessage(f, "Two");
+      for (let index = 0; index < 5; index += 1) {
+        const otherLinkId = randomUUID();
+        f.store.orchestration.queue.enqueue({
+          conversationId: f.watched.id,
+          itemId: randomUUID(),
+          content: `Other watcher finding ${index}`,
+          kind: "watcher-note",
+          createdBy: "system",
+          creationSource: "server",
+          followsThreadSelection: true,
+          attribution: {
+            watcherNote: {
+              linkId: otherLinkId,
+              wakeId: randomUUID(),
+              watcherConversationId: randomUUID(),
+              preset: "reviewer",
+              watcherLabel: `Watcher ${index}`,
+              delivery: "queue",
+            },
+          },
+        });
+      }
       await f.watchers.delivery.deliver(link.id, wakeId, "queue", randomUUID(), true).catch(() => undefined);
       const item = () => f.watchers.coordinator.feed(link.id).items[0]!;
       expect(item().delivery).toMatchObject({ mode: "queue", state: "failed", automatic: true });
+      const firstWaiting = f.store.orchestration.queue.listActive(f.watched.id)[0]!;
+      f.store.orchestration.queue.cancel({ conversationId: f.watched.id, itemId: firstWaiting.id, reason: "user" });
       const reply = await deliver(f, link.id, wakeId, "queue");
       expect(reply).toMatchObject({ result: { delivery: { mode: "queue", state: "queued" } } });
       expect(item().delivery).not.toHaveProperty("automatic");
@@ -229,17 +251,39 @@ describe("watcher note delivery", () => {
     }
   });
 
-  it("reports a full queue, replays a repeated delivery id and refuses a second send", async () => {
+  it("reports a full watcher queue at 5 notes, replays a repeated delivery id and refuses a second send", async () => {
     const f = await createWatcherFixture();
     try {
       const { link, wakeId } = await finding(f);
       await f.startWatchedTurn("Busy");
-      for (const content of ["One", "Two", "Three"]) await enqueueUserMessage(f, content);
-      await expect(deliver(f, link.id, wakeId, "queue")).rejects.toThrow("The main chat's queue is full");
+      const otherIds: string[] = [];
+      for (let index = 0; index < 5; index += 1) {
+        const id = randomUUID();
+        otherIds.push(id);
+        f.store.orchestration.queue.enqueue({
+          conversationId: f.watched.id,
+          itemId: id,
+          content: `Watcher note ${index}`,
+          kind: "watcher-note",
+          createdBy: "system",
+          creationSource: "server",
+          followsThreadSelection: true,
+          attribution: {
+            watcherNote: {
+              linkId: randomUUID(),
+              wakeId: randomUUID(),
+              watcherConversationId: randomUUID(),
+              preset: "reviewer",
+              watcherLabel: `Watcher ${index}`,
+              delivery: "queue",
+            },
+          },
+        });
+      }
+      await expect(deliver(f, link.id, wakeId, "queue")).rejects.toThrow("five queued watcher notes");
       expect(f.watchers.coordinator.feed(link.id).items[0]!.delivery).toMatchObject({ state: "failed" });
 
-      const queued = f.store.queuedMessages.list(f.watched.id);
-      f.store.queuedMessages.cancel(f.watched.id, queued[2]!.id);
+      f.store.orchestration.queue.cancel({ conversationId: f.watched.id, itemId: otherIds[4]!, reason: "user" });
       const deliveryId = randomUUID();
       const first = await deliver(f, link.id, wakeId, "queue", deliveryId);
       const again = await deliver(f, link.id, wakeId, "queue", deliveryId);
@@ -273,23 +317,32 @@ describe("watcher note delivery", () => {
     }
   });
 
-  it("marks a queued note blocked by a route change as not sent and withdraws it before sending again", async () => {
+  it("marks a blocked queued note as not sent and withdraws it on Dismiss", async () => {
     const f = await createWatcherFixture();
     try {
       const { link, wakeId } = await finding(f);
       await f.startWatchedTurn("Busy");
       const deliveryId = randomUUID();
       await deliver(f, link.id, wakeId, "queue", deliveryId);
-      f.store.updateConversation(f.watched.id, { reasoningEffort: "low" });
-      await f.finishTurn(f.watched.id, "Done.");
-      await vi.waitFor(() => {
-        if (f.store.queuedMessages.get(f.watched.id, deliveryId)?.state !== "blocked") throw new Error("not blocked");
+      const blockedReason = "The provider rejected this queued note.";
+      f.store.orchestration.queue.block({
+        conversationId: f.watched.id,
+        itemId: deliveryId,
+        blockedReason: "dispatch-failed",
+        detail: blockedReason,
       });
+      const v2Item = f.store.orchestration.queue.getItem(deliveryId)!;
+      if (v2Item.attribution && "watcherNote" in v2Item.attribution) {
+        f.watchers.delivery.noteUndelivered(v2Item.attribution.watcherNote, blockedReason);
+      }
       const failed = f.watchers.coordinator.feed(link.id).items[0]!.delivery;
-      expect(failed).toMatchObject({ mode: "queue", state: "failed" });
-      expect(failed!.detail).toContain("model, access or workspace changed");
+      expect(failed).toMatchObject({ mode: "queue", state: "failed", detail: blockedReason });
       await expect(f.command("watcher.note.dismiss", { linkId: link.id, wakeId })).resolves.toMatchObject({
         result: { delivery: { state: "dismissed" } },
+      });
+      expect(f.store.orchestration.queue.getItem(deliveryId)).toMatchObject({
+        state: "cancelled",
+        cancelReason: "stale",
       });
     } finally {
       await f.close();
@@ -303,11 +356,17 @@ describe("watcher note delivery", () => {
       await f.startWatchedTurn("Busy");
       const blockedId = randomUUID();
       await deliver(f, link.id, wakeId, "queue", blockedId);
-      f.store.updateConversation(f.watched.id, { reasoningEffort: "low" });
-      await f.finishTurn(f.watched.id, "Done.");
-      await vi.waitFor(() => {
-        if (f.store.queuedMessages.get(f.watched.id, blockedId)?.state !== "blocked") throw new Error("not blocked");
+      f.store.orchestration.queue.block({
+        conversationId: f.watched.id,
+        itemId: blockedId,
+        blockedReason: "dispatch-failed",
+        detail: "The provider rejected this queued note.",
       });
+      const blockedItem = f.store.orchestration.queue.getItem(blockedId)!;
+      if (blockedItem.attribution && "watcherNote" in blockedItem.attribution) {
+        f.watchers.delivery.noteUndelivered(blockedItem.attribution.watcherNote, "The provider rejected this queued note.");
+      }
+      await f.finishTurn(f.watched.id, "Done.");
       await f.command("watcher.resume", { linkId: link.id });
       const nextFinding = async (task: string, text: string) => {
         await f.startWatchedTurn(task);

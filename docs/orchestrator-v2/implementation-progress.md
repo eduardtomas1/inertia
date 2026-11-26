@@ -5860,3 +5860,102 @@ against the 10 spike questions in `phase5-queue-design.md` §2.1:
 - Real Electron Playwright E2E across all 7 fixed specs (`runtime-stranded-profile`,
   `conversation-continuation`, `library`, `limit-reset`, `session-continuity`,
   `transcript-reader-position`, `transcript-turn-anchor`): 9/9 passed.
+
+## Phase 5 completion (Packages 1–5) & Phases 1–4 hardening/polish — 2026-11-26
+
+Completed Phase 5 (Durable V2 Message/Configuration Queue, Effect-Dispatched Run Control,
+Per-Item Selection & Config-While-Running, N8/D.6 Usage-Limit Hardening, Managed `inertia_queue`,
+Watcher/Delegation/Private Connect Integrations, Renderer In-Place Queue Edit & Resume) plus
+audited Phases 1–4 UI/a11y/core/provider hardening on top of `origin/main` `29fb5e78` (`v0.0.85`):
+
+### Production changes
+
+- **Package 1 & Core Hardening (Migration 130, N17, N18, Effects):**
+  - Added append-only Migration 130 (`PersistQueueItemOrderDeliveryAndSelection` in
+    `src/server/persistence/migrations/queue-items.ts`), folding Pkg 1 + Pkg 3 (`selection_json`)
+    columns, backfilling `queue_position` & `creation_digest`, indexing active queue rows,
+    and purging orphan command receipts.
+  - Added V2 queue contracts (`src/shared/orchestration-queue.ts`), projector (`queue-projector.ts`),
+    and repository (`queue-repository.ts`) with separate `queue-item`, `queue-state`, and
+    `superseded-turn` entities, text-free N17 receipts/events, G6 `queueContentMismatches`,
+    and atomic `queue.item-delivered` emission on `run.accepted` (`turn-repository.ts`).
+  - Hardened `effect-outbox.ts` & `effect-runtime.ts` (30 s slot detachment, per-kind running
+    caps, priority non-blocking `provider.interrupt`, malformed JSON guard, `awaitSettled`
+    waiter isolation) and `run-control-repository.ts` (atomic settle, `run-control.steer-read`
+    and `listUnreadAcceptedSteers`).
+  - Implemented N18 contiguous coverage watermark (`coveredThroughOrdinal` + `isItemCovered`)
+    across `backing-projector.ts`, `backing-repository.ts`, `portable-history-source.ts`,
+    `portable-fork-history.ts`, `portable-history-occupancy.ts`, `history-rollback-repository.ts`,
+    and `turn-request-preparation.ts`, removing the 2,048 contiguous-item reuse ceiling while
+    preserving the non-contiguous exception-array cap.
+  - Hardened providers & containment: N9 fail-closed incomplete-worktree guard
+    (`workspace-path-authority.ts`), Codex `handleLine` guard / `completedTurnIds` check /
+    `thread/unarchive` retry / 10 m retry budget (`app-server-run.ts`, `app-server-turn-start.ts`),
+    Pi & Cursor clean steer refusal + Pi `clear_queue` notice, Claude `onSteerRead` + 10 m retry
+    budget, N20 imported Claude session portable-history fallback (`turn-fresh-session-fallback.ts`),
+    15 m silent-retry watchdog (`turn-timeout-coordinator.ts`), D.6 post-capture delegated retry
+    hook, and manifest-driven steering truth (`capability-manifest.ts`, `follow-up-steer.ts`).
+- **Package 2 (Queue Runtime, Effects Stop/Steer, Resume & Boot Reconciliation):**
+  - Rewrote `queued-message-runtime.ts` (+ `queued-message-operations.ts`,
+    `queued-message-runtime-helpers.ts`, `run-control-effect-handlers.ts`,
+    `queue-boot-reconciliation.ts`) onto `store.orchestration.queue` with 20 user/agent +
+    5 watcher-note independent caps, effect-dispatched `provider.interrupt` & `provider.steer`,
+    Decision 4.6 Stop-and-send position-1 atomic hold (`H1-stop` on existing items, unheld
+    `after-stop` item at pos 1), N1/N2/N14 deferred/unread steers, `message.queue.resume` (R3 + N7),
+    `message.queue.reorder` (N13), `adoptUndeliveredPrompt`, `H5-restart` boot reconciliation,
+    wake-up coalescing, and bounded explicit-send retries.
+- **Package 3 (Selection/Config-While-Running, N8/D.6 Limits, N15/N19 Managed Send & `inertia_queue`):**
+  - Decision 4.8: allowed `conversation.update` during active agent turns (`conversation-commands.ts`),
+    guarded `conversations.provider_session_id` against stale mid-turn settlement overwrites
+    (`turn-session-persistence.ts`, `turn-settlement-projection.ts`), and added per-item
+    `modelSelectionOverride` resolution without mutating live conversation selection.
+  - Implemented N8 per-provider usage-limit queue hold & D.6 hardening (`limit-reset-scheduler.ts`).
+  - Implemented #761 N19/N10/N15 Full Access + `inertia_queue` agent tool (`managed-queue-tools.ts`,
+    `managed-send-modes.ts`, `agent-thread-manager.ts`, `agent-thread-tool-definitions.ts`,
+    `tests/fixtures/agent-surface-budget.json`).
+- **Package 4 (Watcher, Delegation & Private Connect Integrations):**
+  - Migrated `watcher-delivery.ts` onto V2 queue events with FIFO ordering, per-watcher coalescing,
+    5-watcher cap, stale-note cancellation, and manifest-driven steering (`docs/user/watcher.md`).
+  - Updated `delegation-delivery-planner.ts`, `delegation-repository.ts`, `delegation-reads.ts`,
+    and `task-service.ts` to emit atomic V2 queue events, paginate `rebuildIndex()`, route
+    cancel through `requestAgentStop`, allow cancelling held child queues, and retry transient
+    `offerDelegated` failures with bounded backoff.
+  - Added Private Connect queue protocol, Monitor read-only projection, Collaborate text-only
+    controls (`queue.send`, `queue.edit`, `queue.remove`, `queue.resume`), busy `prompt.send`
+    queueing with restart-safe G5 receipts, and gateway wiring (`src/server/index.ts`,
+    `docs/PRIVATE_CONNECT.md`).
+- **Package 5 (Renderer Queue, In-Place Edit, Resume, Legacy Migration & Phases 1–4 UI/A11y Fixes):**
+  - Rewrote `RuntimeComposerQueuedActions.tsx` (+ lazy `RuntimeComposerQueuedActions.css`,
+    zero 10 s polling via push `conversation.queue.changed`, held banner with derived reasons,
+    expand/collapse >3, chips, workspace-route reconfirm, focus restoration, separate polite
+    `role="status"` and `role="alert"` regions).
+  - Implemented in-place edit preserving unrelated composer drafts & mentions
+    (`useQueuedMessageEdit.ts`), Resume primary action + shared Stop/Resume latch allowing
+    deliberate Stop re-press after cooldown (`useComposerStopAction.ts`, `composerPrimaryAction.ts`),
+    unlocked running controls (Decision 4.8), read/delete-only legacy local queue migration,
+    and Private Connect `QueueSection.tsx`.
+  - Fixed all 10 audited Phases 1–4 UI/a11y/hook bugs across `fork-history-view.tsx`,
+    `history-actions.tsx`, `fork-surface.tsx`, `delegation-panel.tsx`, `observed-agents-details.tsx`,
+    `delegated-completion-card.tsx`, `observed-child-view.tsx`, `useCursorSdkAccount.ts`, and
+    Private Connect views.
+  - Upgraded `deferredComposerQueueJavaScript` in `scripts/check-renderer-bundle.mjs` to full
+    `closureBytes` excluding initial routes with an initial-route exclusion assertion, and
+    recorded measurements in `docs/pr-evidence/orchestrator-v2/renderer-bundle.json`.
+
+### Verification (Linux x64, Node 22.23.2)
+
+- `npm run check:quality`: passed (workflow-concurrency, 130 verified immutable migrations,
+  2,200 architecture files / 9,610 edges, color-themes, cad-bridges, 0/0 `lint:standard`,
+  0/0 `lint:type-aware`, 5/5 `tsc` projects).
+- `npm run build:bundle`: passed (`electron-vite build`, `build:private-connect`, all 58
+  renderer bundle budgets including `deferredComposerQueueJavaScript` full closure `20,773 / 21,029` B,
+  `entryCss` & `detachedChatCss` unchanged).
+- Full Vitest suite (`1,718` files / `22,854` tests) ran; all `37` suites that surfaced
+  regressions or pre-Phase-5 assertions were diagnosed, fixed, and re-verified (`52/52`
+  targeted/repaired suites, `946/946` tests passing; `0` failures).
+- Real Electron Playwright E2E across 11 specs (`queue-edit`, `composer-stop-and-send`,
+  `delegation-wake` [5], `history-rollback-merge-back`, `session-continuity`,
+  `conversation-continuation`, `limit-reset`, `library` [2], `transcript-reader-position` [2],
+  `transcript-turn-anchor`, `runtime-stranded-profile`): **17/17 passed**.
+- **Unexercised locally:** Windows/macOS runners (covered by PR #686 CI matrix), real
+  Codex/Claude/Pi/Cursor/Kimi/OpenCode live accounts, and packaged installer artifacts.

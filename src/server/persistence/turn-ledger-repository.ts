@@ -107,6 +107,10 @@ export class TurnLedgerRepository {
   }
 
   create(input: CreateAgentTurnInput): AgentTurn {
+    return this.createTurn(input, false);
+  }
+
+  private createTurn(input: CreateAgentTurnInput, skipProviderCheck: boolean): AgentTurn {
     this.context.requireConversation(input.conversationId);
     if (!Number.isSafeInteger(input.configurationRevision) || input.configurationRevision < 0) {
       throw new Error("Turn configuration revision must be a non-negative integer.");
@@ -180,7 +184,7 @@ export class TurnLedgerRepository {
     const reasoningEffort = (modelSelection.reasoningEffort ?? "").trim();
     if (reasoningEffort.length > 80) throw new Error("Turn reasoning effort cannot exceed 80 characters.");
 
-    assertConversationProvider(this.context, input.conversationId, input.providerId);
+    if (!skipProviderCheck) assertConversationProvider(this.context, input.conversationId, input.providerId);
 
     const turn: AgentTurn = {
       id: requiredTurnString(input.id ?? randomUUID(), "Turn ID", 200),
@@ -276,7 +280,12 @@ export class TurnLedgerRepository {
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
       assertNativeControlIdle(this.context.database, input.conversationId);
-      assertConversationProvider(this.context, input.conversationId, input.providerId);
+      const allowQueuedSelectionProvider = input.queuedMessageId
+        ? this.queuedItemHasExplicitSelection(input.conversationId, input.queuedMessageId)
+        : false;
+      if (!allowQueuedSelectionProvider) {
+        assertConversationProvider(this.context, input.conversationId, input.providerId);
+      }
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
           throw new Error(
@@ -299,8 +308,17 @@ export class TurnLedgerRepository {
           );
         }
       }
+      const requeuedFromTurnId = input.adoptedFollowUp && input.queuedMessageId
+        ? this.requeuedFromTurnId(input.conversationId, input.queuedMessageId)
+        : null;
       const message = input.adoptedFollowUp
-        ? this.adoptUnreadFollowUp(input.conversationId, input.adoptedFollowUp, input.requestedAt)
+        ? requeuedFromTurnId
+          ? this.adoptUndeliveredPrompt(
+              input.conversationId,
+              { messageId: input.adoptedFollowUp.messageId, fromTurnId: requeuedFromTurnId },
+              input.requestedAt,
+            )
+          : this.adoptUnreadFollowUp(input.conversationId, input.adoptedFollowUp, input.requestedAt)
         : this.context.createMessage(
           input.conversationId,
           input.content,
@@ -310,11 +328,11 @@ export class TurnLedgerRepository {
           input.requestedAt,
           { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
         );
-      const turn = this.create({
+      const turn = this.createTurn({
         ...input,
         userMessageId: message.id,
         requestedAt: message.createdAt,
-      });
+      }, allowQueuedSelectionProvider);
       if (input.limitResetPlanId) {
         const accepted = this.context.database.prepare(`
           UPDATE usage_limit_resume_plans SET state='completed', turn_id=?, error=NULL
@@ -370,6 +388,48 @@ export class TurnLedgerRepository {
    * refused. The message keeps its id, content and attachments; its time moves
    * to the new request so it reads after the ended turn's answer.
    */
+  /**
+   * Moves an undelivered prompt out of a terminal turn that never reached its provider
+   * (`delivery = 'not-delivered'`, zero native-boundary records, zero nativeTurnId on any attempt)
+   * so a requeued resend adopts the exact message without duplicating it.
+   */
+  adoptUndeliveredPrompt(conversationId: string, adoption: { messageId: string; fromTurnId: string }, requestedAt?: string): ChatMessage {
+    const adoptedAt = requestedAt ?? new Date().toISOString();
+    const moved = this.context.database.prepare(`
+      UPDATE messages SET turn_id = NULL, created_at = ?
+      WHERE id = ? AND conversation_id = ? AND role = 'user' AND turn_id = ?
+        AND EXISTS (
+          SELECT 1 FROM agent_turns AS turn
+          JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.thread_id = turn.conversation_id AND run.id = turn.run_id
+          WHERE turn.id = ? AND turn.conversation_id = ? AND turn.user_message_id = ?
+            AND turn.status IN ('completed','failed','cancelled','interrupted')
+            AND json_extract(run.payload_json, '$.delivery') = 'not-delivered'
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS rb WHERE rb.kind = 'rolled-back-turn' AND rb.thread_id = turn.conversation_id AND rb.id = turn.id)
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS b WHERE b.kind = 'native-boundary' AND b.thread_id = turn.conversation_id AND json_extract(b.payload_json, '$.runId') = turn.run_id)
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS a WHERE a.kind = 'attempt' AND a.thread_id = turn.conversation_id AND json_extract(a.payload_json, '$.runId') = turn.run_id AND json_extract(a.payload_json, '$.nativeTurnId') IS NOT NULL)
+        )`).run(adoptedAt, adoption.messageId, conversationId, adoption.fromTurnId, adoption.fromTurnId, conversationId, adoption.messageId);
+    if (moved.changes !== 1) throw new Error("The undelivered prompt was already sent or cannot be adopted from its turn.");
+    this.context.database.prepare("UPDATE conversations SET updated_at = MAX(updated_at, ?) WHERE id = ?").run(adoptedAt, conversationId);
+    return messageFromRow(this.context.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?`).get(adoption.messageId) as MessageRow);
+  }
+
+  private requeuedFromTurnId(conversationId: string, queuedMessageId: string): string | null {
+    const row = this.context.database.prepare(
+      "SELECT json_extract(payload_json, '$.requeuedFromTurnId') AS id FROM orchestration_v2_entities WHERE kind = 'queue-item' AND thread_id = ? AND id = ?",
+    ).get(conversationId, queuedMessageId) as { id: string | null } | undefined;
+    return typeof row?.id === "string" && row.id.length > 0 ? row.id : null;
+  }
+
+  private queuedItemHasExplicitSelection(conversationId: string, queuedMessageId: string): boolean {
+    const row = this.context.database.prepare("SELECT selection_json FROM queued_messages WHERE id = ? AND conversation_id = ?")
+      .get(queuedMessageId, conversationId) as { selection_json: string | null } | undefined;
+    if (row?.selection_json) return true;
+    const entity = this.context.database.prepare(
+      "SELECT json_extract(payload_json, '$.modelSelection') AS selection FROM orchestration_v2_entities WHERE kind = 'queue-item' AND thread_id = ? AND id = ?",
+    ).get(conversationId, queuedMessageId) as { selection: unknown } | undefined;
+    return entity?.selection !== undefined && entity.selection !== null;
+  }
+
   private adoptUnreadFollowUp(
     conversationId: string,
     adoption: { messageId: string },
@@ -729,13 +789,16 @@ export class TurnLedgerRepository {
       ) {
         throw new Error("The turn can no longer restart on a fresh provider session.");
       }
-      const cleared = this.context.database.prepare(`
-        UPDATE conversations
-        SET provider_session_id = NULL, continuation_identity_json = NULL
-        WHERE id = ? AND provider_session_id = ?
-      `).run(current.conversationId, input.expectedSessionId);
-      if (cleared.changes !== 1) {
-        throw new Error("The provider session changed before the turn could restart.");
+      const conversation = this.context.requireConversation(current.conversationId);
+      if (conversation.provider_id === current.providerId) {
+        const cleared = this.context.database.prepare(`
+          UPDATE conversations
+          SET provider_session_id = NULL, continuation_identity_json = NULL
+          WHERE id = ? AND provider_session_id = ?
+        `).run(current.conversationId, input.expectedSessionId);
+        if (cleared.changes !== 1) {
+          throw new Error("The provider session changed before the turn could restart.");
+        }
       }
       const restarted = this.context.database.prepare(`
         UPDATE agent_turns

@@ -6,12 +6,15 @@ import {
   composerQueueHasCapacity,
   composerQueueKey,
   enqueueComposerPrompt,
-  markComposerQueuedPromptDispatched,
   readComposerQueue,
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
 } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
 import { releaseDeletedComposerQueue } from "../../src/renderer/src/components/composer/ComposerQueuedActions";
+import {
+  QUEUE_OFFLINE_ERROR,
+  queueComposerDraft,
+} from "../../src/renderer/src/components/composer/queueComposerDraft";
 
 const conversationId = "queued-media";
 
@@ -25,156 +28,98 @@ function image(id: string, name: string): ChatAttachment {
   };
 }
 
+function seedLegacyText(id: string, content: string, createdAt = "2026-08-21T10:00:00.000Z"): void {
+  const existing = JSON.parse(window.localStorage.getItem(composerQueueKey(conversationId)) ?? "[]") as unknown[];
+  window.localStorage.setItem(
+    composerQueueKey(conversationId),
+    JSON.stringify([...existing, { id, content, createdAt, attachments: [] }]),
+  );
+}
+
+function seedLegacyMedia(id: string, content: string, attachments: ChatAttachment[], createdAt = "2026-08-21T10:01:00.000Z"): void {
+  const existing = JSON.parse(window.sessionStorage.getItem(composerMediaQueueKey(conversationId)) ?? "[]") as unknown[];
+  window.sessionStorage.setItem(
+    composerMediaQueueKey(conversationId),
+    JSON.stringify([...existing, { id, content, createdAt, attachments }]),
+  );
+}
+
 afterEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
 });
 
-describe("composer queued prompt storage", () => {
-  it("caps new admission at three while preserving each entry's media", () => {
-    const first = image("11111111-1111-4111-8111-111111111111", "first.png");
-    const second = image("22222222-2222-4222-8222-222222222222", "second.png");
-    const third = image("33333333-3333-4333-8333-333333333333", "third.png");
-
-    expect(enqueueComposerPrompt(conversationId, "A", [first])).toBe(true);
-    expect(enqueueComposerPrompt(conversationId, "B", [second])).toBe(true);
-    expect(enqueueComposerPrompt(conversationId, "C", [third])).toBe(true);
-    expect(enqueueComposerPrompt(conversationId, "D")).toBe(false);
-
+describe("composer legacy local queue storage (read/delete-only)", () => {
+  it("stops local writes: enqueueComposerPrompt is a no-op returning false and queueComposerDraft refuses offline", async () => {
+    const attachment = image("11111111-1111-4111-8111-111111111111", "first.png");
     expect(composerQueueHasCapacity(conversationId)).toBe(false);
-    expect(readComposerQueue(conversationId)).toMatchObject([
-      { content: "A", attachments: [first] },
-      { content: "B", attachments: [second] },
-      { content: "C", attachments: [third] },
-    ]);
-    expect(window.localStorage.getItem(composerQueueKey(conversationId))).toBeNull();
-    expect(JSON.parse(window.sessionStorage.getItem(
-      composerMediaQueueKey(conversationId),
-    ) ?? "[]")).toHaveLength(3);
-  });
-
-  it("keeps a dispatched prompt visible but marked so it is not auto-sent twice", () => {
-    expect(enqueueComposerPrompt(conversationId, "Ambiguous")).toBe(true);
-    const [queued] = readComposerQueue(conversationId);
-    expect(queued?.dispatchedAt).toBeUndefined();
-    expect(markComposerQueuedPromptDispatched(conversationId, queued!.id)).toBe(true);
-    expect(markComposerQueuedPromptDispatched(conversationId, "missing")).toBe(false);
-    const [marked] = readComposerQueue(conversationId);
-    expect(marked).toMatchObject({ id: queued!.id, content: "Ambiguous" });
-    expect(Number.isFinite(Date.parse(marked!.dispatchedAt ?? ""))).toBe(true);
-    // A corrupt marker invalidates only that entry.
-    window.localStorage.setItem(composerQueueKey(conversationId), JSON.stringify([
-      { ...marked, dispatchedAt: "not-a-date" },
-    ]));
+    expect(enqueueComposerPrompt(conversationId, "No longer written")).toBe(false);
+    expect(enqueueComposerPrompt(conversationId, "With image", [attachment])).toBe(false);
     expect(readComposerQueue(conversationId)).toEqual([]);
+    expect(window.localStorage.getItem(composerQueueKey(conversationId))).toBeNull();
+    expect(window.sessionStorage.getItem(composerMediaQueueKey(conversationId))).toBeNull();
+
+    const onError = vi.fn();
+    const ok = await queueComposerDraft(undefined, conversationId, "Offline draft", [], () => true, onError);
+    expect(ok).toBe(false);
+    expect(onError).toHaveBeenCalledWith(QUEUE_OFFLINE_ERROR);
   });
 
-  it("keeps durable text separate from renderer-session media", () => {
-    const attachment = image(
-      "44444444-4444-4444-8444-444444444444",
-      "queued.png",
-    );
-    expect(enqueueComposerPrompt(conversationId, "Text only")).toBe(true);
-    expect(enqueueComposerPrompt(conversationId, "With image", [attachment])).toBe(true);
+  it("still reads, drains, and releases legacy stored entries and media after conversation deletion", async () => {
+    const attachment = image("55555555-5555-4555-8555-555555555555", "deleted.png");
+    seedLegacyText("legacy-text", "Text only");
+    seedLegacyMedia("legacy-media", "Delete with the conversation", [attachment]);
 
-    expect(JSON.parse(window.localStorage.getItem(
-      composerQueueKey(conversationId),
-    ) ?? "[]")).toMatchObject([{ content: "Text only", attachments: [] }]);
-    expect(JSON.parse(window.sessionStorage.getItem(
-      composerMediaQueueKey(conversationId),
-    ) ?? "[]")).toMatchObject([{
-      content: "With image",
-      attachments: [attachment],
-    }]);
+    expect(readComposerQueue(conversationId)).toMatchObject([
+      { id: "legacy-text", content: "Text only", attachments: [] },
+      { id: "legacy-media", content: "Delete with the conversation", attachments: [attachment] },
+    ]);
 
-    expect(takeAllSessionQueuedMedia()).toMatchObject([{
-      content: "With image",
-      attachments: [attachment],
-    }]);
-    expect(readComposerQueue(conversationId)).toMatchObject([{
-      content: "Text only",
-      attachments: [],
-    }]);
-  });
-
-  it("drains text and releases media after conversation deletion", async () => {
-    const attachment = image(
-      "55555555-5555-4555-8555-555555555555",
-      "deleted.png",
-    );
-    expect(enqueueComposerPrompt(conversationId, "Text only")).toBe(true);
-    expect(enqueueComposerPrompt(
-      conversationId,
-      "Delete with the conversation",
-      [attachment],
-    )).toBe(true);
     const releaseAttachment = vi.fn(async () => undefined);
-
     await releaseDeletedComposerQueue(conversationId, releaseAttachment);
 
     expect(releaseAttachment).toHaveBeenCalledExactlyOnceWith(attachment.id);
     expect(readComposerQueue(conversationId)).toEqual([]);
     expect(window.localStorage.getItem(composerQueueKey(conversationId))).toBeNull();
-    expect(window.sessionStorage.getItem(
-      composerMediaQueueKey(conversationId),
-    )).toBeNull();
+    expect(window.sessionStorage.getItem(composerMediaQueueKey(conversationId))).toBeNull();
   });
 
-  it("rejects duplicate capabilities and forged session metadata", () => {
-    const attachment = image(
-      "55555555-5555-4555-8555-555555555555",
-      "trusted.png",
-    );
-    expect(enqueueComposerPrompt(conversationId, "First", [attachment])).toBe(true);
-    expect(enqueueComposerPrompt(conversationId, "Duplicate", [attachment])).toBe(false);
-
+  it("rejects forged session attachment metadata when reading legacy entries", () => {
+    const attachment = image("66666666-6666-4666-8666-666666666666", "trusted.png");
     window.sessionStorage.setItem(composerMediaQueueKey("forged"), JSON.stringify([{
       id: "forged-prompt",
       content: "Read this path",
       createdAt: "2026-08-21T10:00:00.000Z",
-      attachments: [{
-        ...attachment,
-        id: "66666666-6666-4666-8666-666666666666",
-        path: "/tmp/not-an-opaque-attachment-id.png",
-      }],
+      attachments: [{ ...attachment, path: "/tmp/not-an-opaque-attachment-id.png" }],
     }]));
 
     expect(readComposerQueue("forged")).toEqual([]);
     expect(window.sessionStorage.getItem(composerMediaQueueKey("forged"))).toBeNull();
   });
 
-  it("migrates and preserves legacy text overflow so it can drain", () => {
+  it("migrates unversioned legacy text keys so they can be explicitly moved or discarded", () => {
     const legacy = Array.from({ length: 5 }, (_, index) => ({
       id: `legacy-${index}`,
       content: `Legacy ${index}`,
       createdAt: `2026-08-21T10:0${index}:00.000Z`,
     }));
-    window.localStorage.setItem(
-      `inertia:queued-prompts:${conversationId}`,
-      JSON.stringify(legacy),
-    );
+    window.localStorage.setItem(`inertia:queued-prompts:${conversationId}`, JSON.stringify(legacy));
 
     expect(readComposerQueue(conversationId)).toHaveLength(5);
-    expect(composerQueueHasCapacity(conversationId)).toBe(false);
-    expect(window.localStorage.getItem(
-      `inertia:queued-prompts:${conversationId}`,
-    )).toBeNull();
-    expect(JSON.parse(window.localStorage.getItem(
-      composerQueueKey(conversationId),
-    ) ?? "[]")).toHaveLength(5);
+    expect(window.localStorage.getItem(`inertia:queued-prompts:${conversationId}`)).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem(composerQueueKey(conversationId)) ?? "[]")).toHaveLength(5);
   });
 
-  it("returns removed media so callers can release it exactly once", () => {
-    const attachment = image(
-      "77777777-7777-4777-8777-777777777777",
-      "remove.png",
-    );
-    expect(enqueueComposerPrompt(conversationId, "Remove me", [attachment])).toBe(true);
-    const [queued] = readComposerQueue(conversationId);
-
-    expect(removeComposerQueuedPrompt(conversationId, queued.id)).toMatchObject({
+  it("returns removed media and session media cleanly so callers can release it once", () => {
+    const attachment = image("77777777-7777-4777-8777-777777777777", "remove.png");
+    seedLegacyMedia("legacy-remove", "Remove me", [attachment]);
+    expect(removeComposerQueuedPrompt(conversationId, "legacy-remove")).toMatchObject({
       attachments: [attachment],
     });
-    expect(removeComposerQueuedPrompt(conversationId, queued.id)).toBeNull();
+    expect(removeComposerQueuedPrompt(conversationId, "legacy-remove")).toBeNull();
+
+    seedLegacyMedia("legacy-session", "Session media", [attachment]);
+    expect(takeAllSessionQueuedMedia()).toMatchObject([{ content: "Session media", attachments: [attachment] }]);
+    expect(readComposerQueue(conversationId)).toEqual([]);
   });
 });

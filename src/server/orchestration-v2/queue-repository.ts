@@ -649,7 +649,7 @@ export class OrchestrationQueueRepository {
         }],
         result: { itemId: input.itemId },
       }, () => {
-        this.database.prepare("UPDATE queued_messages SET state = 'waiting', error = NULL, delivery_mode = NULL WHERE id = ? AND conversation_id = ?")
+        this.database.prepare("UPDATE queued_messages SET state = 'waiting', error = NULL, delivery_mode = CASE WHEN delivery_mode = 'after-stop' THEN 'after-stop' ELSE NULL END WHERE id = ? AND conversation_id = ?")
           .run(input.itemId, conversation.id);
       });
       return { replayed: committed.replayed, value: this.requireItem(input.itemId), events: committed.events };

@@ -358,7 +358,7 @@ describe("delegated task reads and follow-ups", () => {
         }
         const sent = parsed<{ disposition: string; turnId?: string; taskId?: string; stoppedTurnId?: string }>(await f.invoke(
           "inertia_send_message", { conversationId: view.conversationId, content: "Now write the fix.", mode }));
-        expect(sent).toMatchObject({ disposition: "new-turn", turnId: expect.any(String), taskId: expect.any(String),
+        expect(sent).toMatchObject({ disposition: mode === "restart" ? "restarted" : "new-turn", turnId: expect.any(String), taskId: expect.any(String),
           ...(running ? { stoppedTurnId: running } : {}) });
         if (running) expect(f.turns.stopped).toEqual([running]);
         expect(f.active.get(view.conversationId)?.turnId).toBe(sent.turnId);
@@ -383,11 +383,11 @@ describe("delegated task reads and follow-ups", () => {
       f.store.queuedMessages.insertDelegatedDelivery({ id: delegatedDeliveryId(child.id, 1), conversation: child,
         content: "Results of the child's own tasks", attribution: { parentConversationId: child.id, generation: 1,
           taskIds: ["a".repeat(64)] } });
-      for (const index of [1, 2, 3]) f.messageQueue.enqueueManagedMessage({ conversationId: child.id, id: randomUUID(), content: `Queued ${index}` });
+      for (const index of [1, 2, 3]) f.messageQueue.enqueueManagedMessage!({ conversationId: child.id, id: randomUUID(), content: `Queued ${index}` });
       const queued = f.store.queuedMessages.list(child.id).map(({ id, state }) => ({ id, state }));
       expect(queued).toHaveLength(4);
       const restarted = await f.invoke("inertia_send_message", { conversationId: child.id, content: "Start over.", mode: "restart" });
-      expect(parsed(restarted)).toMatchObject({ disposition: "new-turn", stoppedTurnId: view.firstTurnId, accepted: true });
+      expect(parsed(restarted)).toMatchObject({ disposition: "restarted", stoppedTurnId: view.firstTurnId, accepted: true });
       expect(f.turns.stopped).toEqual([view.firstTurnId]);
       expect(f.starts.at(-1)).toBe(f.active.get(child.id)?.turnId);
       expect(f.store.queuedMessages.list(child.id).map(({ id, state }) => ({ id, state }))).toEqual(queued);

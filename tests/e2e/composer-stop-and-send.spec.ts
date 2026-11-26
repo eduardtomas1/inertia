@@ -161,6 +161,10 @@ test("Stop and send stops a Kimi run and sends the draft as the next turn in the
     };
     await capture("running-empty");
 
+    await input.fill("Queued behind stop and send.");
+    await input.press("Tab");
+    await expect(page.getByRole("list", { name: "Queued messages" })).toContainText("Queued behind stop and send.");
+
     await input.fill("Do this instead.");
     await expect(composer.getByRole("button", { name: "Stop and send" })).toBeVisible();
     await capture("running-draft");
@@ -174,15 +178,17 @@ test("Stop and send stops a Kimi run and sends the draft as the next turn in the
     await expect(stopped.locator('[data-turn-status="cancelled"]')).toBeVisible();
     const sent = page.locator("[data-turn-id]").filter({ has: page.getByText("Do this instead.", { exact: true }) });
     await expect(sent.locator('[data-turn-status="completed"]')).toBeVisible();
-    await expect(page.getByRole("list", { name: "Queued messages" })).toHaveCount(0);
-    await expect(composer.getByRole("button", { name: "Send message" })).toBeVisible();
+    await expect(page.getByText("Queue paused · Stopped", { exact: true })).toBeVisible();
+    await expect(page.getByRole("list", { name: "Queued messages" })).toContainText("Queued behind stop and send.");
+    await expect(composer.getByRole("button", { name: "Resume queue" })).toBeVisible();
 
     const events = await wireEvents(wirePath);
     const prompts = events.filter(event => event.method === "session/prompt");
-    expect(prompts.map(event => event.text)).toEqual([
+    expect(prompts.map(event => event.text)).toEqual(expect.arrayContaining([
       expect.stringContaining("Keep working until I interrupt you."),
       expect.stringContaining("Do this instead."),
-    ]);
+    ]));
+    expect(prompts[1]?.text).toContain("Do this instead.");
     expect(events.filter(event => event.method === "session/cancel")).toHaveLength(1);
     expect(prompts[1]?.sessionId).toBe(prompts[0]?.sessionId);
     await expect.poll(() => events.every(event => !executableProcessExists(event.pid))).toBe(true);

@@ -165,8 +165,8 @@ describe("Codex App Server hardening & D.4", () => {
     // End-to-end wire fixture: turn/completed for stale-turn arrives during opening before turn/start echoes it.
     const wireFixture = customCodexServer(roots, `
       if (message.method === "thread/resume") {
-        send({ id: message.id, result: { thread: { id: "thread-1" }, model: "fake", serviceTier: null } });
         send({ method: "turn/completed", params: { threadId: "thread-1", turn: turnShape("stale-turn", "completed") } });
+        send({ id: message.id, result: { thread: { id: "thread-1" }, model: "fake", serviceTier: null } });
         return;
       }
       if (message.method === "turn/start") {

@@ -35,6 +35,7 @@ import { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import { CustomAgentTraceAttribution } from "./turn-custom-agent-traces";
 import { isReadOnlyWriteActivity } from "./turn-read-only-watcher";
 import { reportsReplacedSession } from "./turn-fresh-session-fallback";
+import { persistActiveTurnConversationSession } from "./turn-session-persistence";
 
 export interface TurnProviderEventProjectorOptions {
   store: RuntimeStore;
@@ -164,10 +165,7 @@ export class TurnProviderEventProjector {
           && this.options.store.orchestration.backings.forkSession(active.turn, event.forkedFrom, event.sessionId, observer)) break;
         if (this.options.store.orchestration.backings.observeSession(active.turn, event.sessionId, observer, event.forkedFrom)) break;
         updateActiveTurnProviderSession(active, event.sessionId);
-        this.options.store.updateConversation(active.conversation.id, {
-          providerSessionId: event.sessionId,
-          continuationIdentity: active.turn.continuationIdentity,
-        });
+        persistActiveTurnConversationSession(this.options.store, active, event.sessionId);
         break;
       case "session-title":
         active.providerSessionTitle = event.title;

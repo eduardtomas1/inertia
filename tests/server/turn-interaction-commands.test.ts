@@ -173,7 +173,16 @@ function dependencies(options: {
   } as unknown as ProviderInfo;
   return {
     store: {
-      orchestration: mockCommandOrchestration(),
+      orchestration: {
+        ...mockCommandOrchestration(),
+        queue: {
+          listActive: vi.fn(() => []),
+          getItem: vi.fn(() => null),
+          revision: vi.fn(() => 0),
+          release: vi.fn(),
+          deliver: vi.fn(),
+        },
+      },
       conversationWork: { restoreBlocksConversation: vi.fn(() => false) },
       conversation: vi.fn(() => ({
         id: conversationId,

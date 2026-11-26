@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   advanceThinkingLine,
   createReasoningLinesReader,
+  createReasoningSummaryReader,
   IDLE_THINKING_LINE,
   parseReasoningSummary,
   readableReasoningLine,
@@ -250,5 +251,31 @@ describe("parseReasoningSummary", () => {
       { id: "0", title: "First", body: "Did a thing." },
       { id: "1", title: "Second", body: "Then another." },
     ]);
+  });
+
+  it("matches parseReasoningSummary incrementally for any chunking and replacement", () => {
+    const random = seededRandom(19);
+    const fuzzed = Array.from({ length: 40 }, () => Array.from(
+      { length: 120 },
+      () => FUZZ_PIECES[Math.floor(random() * FUZZ_PIECES.length)],
+    ).join(""));
+    for (const fixture of [...REASONING_FIXTURES, ...fuzzed]) {
+      for (let round = 0; round < 4; round += 1) {
+        const read = createReasoningSummaryReader();
+        let content = "";
+        while (content.length < fixture.length) {
+          const size = 1 + Math.floor(random() * (round % 2 === 0 ? 4 : 20));
+          content = fixture.slice(0, content.length + size);
+          expect(read(content)).toEqual(parseReasoningSummary(content));
+        }
+      }
+    }
+    const read = createReasoningSummaryReader();
+    const first = read("**First**\nAlpha\n**Second**\nBeta");
+    const grown = read("**First**\nAlpha\n**Second**\nBeta gamma");
+    expect(grown[0]).toBe(first[0]);
+    expect(read("**First**\nAlpha\n**Second**\nBeta gamma")).toBe(grown);
+    expect(read("No headings now")).toEqual([]);
+    expect(read("**Fresh**\nReplaced")).toEqual([{ id: "0", title: "Fresh", body: "Replaced" }]);
   });
 });

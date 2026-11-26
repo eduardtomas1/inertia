@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentHarnessRegistry } from "../../src/server/provider/agent-harness-registry";
 import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
 import type { AgentHarnessStartOptions } from "../../src/server/provider/agent-harness";
-import { ProviderRunRefusedError, providerRunTerminal } from "../../src/server/provider/contracts";
+import {
+  ProviderRunRefusedError,
+  ProviderRuntimeError,
+  providerRunTerminal,
+} from "../../src/server/provider/contracts";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import { ProviderRunCoordinator } from "../../src/server/provider/run-coordinator";
 import { ProviderInstallationAdmissionError } from "../../src/server/provider/installation-lease";
@@ -375,5 +379,274 @@ describe("provider admission cleanup proof", () => {
     await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("force-detached");
     expect(coordinator.isRunning(input.conversationId)).toBe(false);
     expect(release).not.toHaveBeenCalled();
+  });
+
+  it("settles cleanly without quarantine or stop stall when harness.start() throws a pre-spawn ProviderRuntimeError refusal", async () => {
+    const start = vi.fn(({ input }: AgentHarnessStartOptions) => ({
+      harnessId: "codex-app-server" as const,
+      providerId: "codex" as const,
+      extension: {
+        kind: "codex-app-server" as const,
+        respondToApproval: () => false,
+        respondToInput: () => false,
+        setGoal: async () => { throw new Error("Goals unavailable in this fixture."); },
+        clearGoal: async () => false,
+      },
+      cancel: vi.fn(),
+      result: Promise.resolve({
+        ...providerRunTerminal(input, "completed"),
+        text: "Done.",
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+        cleanupConfirmed: true,
+      }),
+    }));
+    const release = vi.fn(() => true);
+    const quarantine = vi.fn();
+    const coordinator = new ProviderRunCoordinator({
+      cancelGraceMs: 5_000,
+      forceStopBudgetMs: 5_000,
+      harnessRegistry: new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start }]),
+      metadataCache: new ProviderMetadataCache(),
+      resolveBackendLaunchOptions: (_input, environment) => ({ environment }),
+      commandFor: () => "codex",
+      resolvedCommandFor: () => "codex",
+      rememberResolvedCommand: () => undefined,
+      processEnvironment: () => ({}),
+      capabilityAvailable: () => true,
+      capabilityAdmissible: () => true,
+      acquireInstallationUse: () => ({ release, quarantine }),
+    });
+    const input = nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "pre-spawn-refusal-conversation",
+      cwd: process.cwd(),
+      prompt: "First attempt.",
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    start.mockImplementationOnce(() => {
+      throw new ProviderRuntimeError("invalid_input", "Unsupported option before spawn.");
+    });
+    expect(() => coordinator.run(input)).toThrow("Unsupported option before spawn.");
+    expect(coordinator.isRunning(input.conversationId)).toBe(false);
+    expect(quarantine).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+
+    const startedAt = Date.now();
+    await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("settled");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+
+    const retry = { ...input, runId: "retry-run", turnId: "retry-turn" };
+    await expect(coordinator.run(retry)).resolves.toMatchObject({ status: "completed" });
+    expect(quarantine).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it("detaches immediately in stopOwned without stalling when harness.start() throws an unexpected error", async () => {
+    const start = vi.fn(() => {
+      throw new Error("Unexpected harness crash.");
+    });
+    const quarantine = vi.fn();
+    const coordinator = new ProviderRunCoordinator({
+      cancelGraceMs: 5_000,
+      forceStopBudgetMs: 5_000,
+      harnessRegistry: new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start }]),
+      metadataCache: new ProviderMetadataCache(),
+      resolveBackendLaunchOptions: (_input, environment) => ({ environment }),
+      commandFor: () => "codex",
+      resolvedCommandFor: () => "codex",
+      rememberResolvedCommand: () => undefined,
+      processEnvironment: () => ({}),
+      capabilityAvailable: () => true,
+      capabilityAdmissible: () => true,
+      acquireInstallationUse: () => ({ release: vi.fn(() => true), quarantine }),
+    });
+    const input = nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "unexpected-start-throw-conversation",
+      cwd: process.cwd(),
+      prompt: "Crash on start.",
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    expect(() => coordinator.run(input)).toThrow("Unexpected harness crash.");
+    const startedAt = Date.now();
+    await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("force-detached");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(coordinator.isRunning(input.conversationId)).toBe(false);
+    expect(quarantine).toHaveBeenCalled();
+  });
+
+  it("settles cleanly in stopOwned when unabortable resolveBackendLaunchOptions is cancelled before harness.start()", async () => {
+    const start = vi.fn();
+    const release = vi.fn(() => true);
+    const quarantine = vi.fn();
+    const coordinator = new ProviderRunCoordinator({
+      cancelGraceMs: 5_000,
+      forceStopBudgetMs: 5_000,
+      harnessRegistry: new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start }]),
+      metadataCache: new ProviderMetadataCache(),
+      resolveBackendLaunchOptions: () => new Promise(() => undefined),
+      commandFor: () => "codex",
+      resolvedCommandFor: () => "codex",
+      rememberResolvedCommand: () => undefined,
+      processEnvironment: () => ({}),
+      capabilityAvailable: () => true,
+      capabilityAdmissible: () => true,
+      acquireInstallationUse: () => ({ release, quarantine }),
+    });
+    const input = nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "stalled-launch-resolution",
+      cwd: process.cwd(),
+      prompt: "Stalled launch.",
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    void coordinator.run(input);
+    const startedAt = Date.now();
+    await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("settled");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(start).not.toHaveBeenCalled();
+    expect(quarantine).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+    expect(coordinator.isRunning(input.conversationId)).toBe(false);
+  });
+
+  it("settles a mismatched harness-run owner once its cancelled harness confirms cleanup", async () => {
+    let resolveMismatched!: (value: ReturnType<typeof providerRunTerminal> & {
+      text: string;
+      textTruncated: boolean;
+      exitCode: number | null;
+      signal: NodeJS.Signals | null;
+      cleanupConfirmed: boolean;
+    }) => void;
+    const mismatchedResult = new Promise<Parameters<typeof resolveMismatched>[0]>((resolve) => {
+      resolveMismatched = resolve;
+    });
+    const liftQuarantine = vi.fn();
+    const quarantine = vi.fn();
+    const start = vi.fn(() => ({
+      harnessId: "codex-app-server" as const,
+      providerId: "claude" as const,
+      extension: {
+        kind: "codex-app-server" as const,
+        respondToApproval: () => false,
+        respondToInput: () => false,
+        setGoal: async () => { throw new Error("Goals unavailable in this fixture."); },
+        clearGoal: async () => false,
+      },
+      cancel: vi.fn(),
+      result: mismatchedResult,
+    }));
+    const coordinator = new ProviderRunCoordinator({
+      cancelGraceMs: 5_000,
+      forceStopBudgetMs: 5_000,
+      harnessRegistry: new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start }]),
+      metadataCache: new ProviderMetadataCache(),
+      resolveBackendLaunchOptions: (_input, environment) => ({ environment }),
+      commandFor: () => "codex",
+      resolvedCommandFor: () => "codex",
+      rememberResolvedCommand: () => undefined,
+      processEnvironment: () => ({}),
+      capabilityAvailable: () => true,
+      capabilityAdmissible: () => true,
+      acquireInstallationUse: () => ({ release: vi.fn(() => true), quarantine, liftQuarantine }),
+    });
+    const input = nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "mismatched-owner-cleanup",
+      cwd: process.cwd(),
+      prompt: "Mismatched owner.",
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    expect(() => coordinator.run(input)).toThrow("mismatched run owner");
+    expect(coordinator.isRunning(input.conversationId)).toBe(true);
+    resolveMismatched({
+      ...providerRunTerminal(input, "cancelled"),
+      text: "",
+      textTruncated: false,
+      exitCode: null,
+      signal: "SIGTERM",
+      cleanupConfirmed: true,
+    });
+    await vi.waitFor(() => expect(coordinator.isRunning(input.conversationId)).toBe(false));
+    await expect(coordinator.stopOwned(input.conversationId, input)).resolves.toBe("settled");
+    expect(liftQuarantine).toHaveBeenCalledOnce();
+  });
+
+  it("does not confirm cleanup when a mismatched harness resolves with a foreign run identity", async () => {
+    let resolveMismatched!: (value: ReturnType<typeof providerRunTerminal> & {
+      text: string;
+      textTruncated: boolean;
+      exitCode: number | null;
+      signal: NodeJS.Signals | null;
+      cleanupConfirmed: boolean;
+    }) => void;
+    const mismatchedResult = new Promise<Parameters<typeof resolveMismatched>[0]>((resolve) => {
+      resolveMismatched = resolve;
+    });
+    const release = vi.fn(() => true);
+    const quarantine = vi.fn();
+    const onCleanupUnconfirmed = vi.fn();
+    const onCleanupConfirmedLate = vi.fn();
+    const start = vi.fn(() => ({
+      harnessId: "codex-app-server" as const,
+      providerId: "claude" as const,
+      extension: {
+        kind: "codex-app-server" as const,
+        respondToApproval: () => false,
+        respondToInput: () => false,
+        setGoal: async () => { throw new Error("Goals unavailable in this fixture."); },
+        clearGoal: async () => false,
+      },
+      cancel: vi.fn(),
+      result: mismatchedResult,
+    }));
+    const coordinator = new ProviderRunCoordinator({
+      cancelGraceMs: 5_000,
+      forceStopBudgetMs: 5_000,
+      harnessRegistry: new AgentHarnessRegistry([{ ...createCodexAppServerHarness(), start }]),
+      metadataCache: new ProviderMetadataCache(),
+      resolveBackendLaunchOptions: (_input, environment) => ({ environment }),
+      commandFor: () => "codex",
+      resolvedCommandFor: () => "codex",
+      rememberResolvedCommand: () => undefined,
+      processEnvironment: () => ({}),
+      capabilityAvailable: () => true,
+      capabilityAdmissible: () => true,
+      acquireInstallationUse: () => ({ release, quarantine }),
+      onCleanupUnconfirmed,
+      onCleanupConfirmedLate,
+    });
+    const input = nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "mismatched-foreign-identity",
+      cwd: process.cwd(),
+      prompt: "Mismatched foreign owner.",
+      interactionMode: "build",
+      access: "supervised",
+    });
+
+    expect(() => coordinator.run(input)).toThrow("mismatched run owner");
+    resolveMismatched({
+      ...providerRunTerminal({ ...input, runId: "foreign-run-id" }, "cancelled"),
+      text: "",
+      textTruncated: false,
+      exitCode: null,
+      signal: "SIGTERM",
+      cleanupConfirmed: true,
+    });
+    await vi.waitFor(() => expect(onCleanupUnconfirmed).toHaveBeenCalledOnce());
+    expect(release).not.toHaveBeenCalled();
+    expect(onCleanupConfirmedLate).not.toHaveBeenCalled();
+    expect(quarantine).toHaveBeenCalled();
   });
 });

@@ -1,9 +1,9 @@
 import type Database from "better-sqlite3";
 import { CONVERSATION_ATTACHMENT_GALLERY_LIMIT, isConversationAttachmentGallery,
   type ConversationAttachmentGalleryItem } from "../../shared/conversation-attachment-gallery";
+import { cachedStatement } from "./statement-cache";
 
-export function conversationAttachmentGallery(database: Database.Database, conversationId: string): ConversationAttachmentGalleryItem[] {
-  const rows = database.prepare(`
+const CONVERSATION_ATTACHMENT_GALLERY_SQL = `
       SELECT json_extract(item.value, '$.id') AS id,
         json_extract(item.value, '$.name') AS name,
         json_extract(item.value, '$.mimeType') AS mimeType,
@@ -15,7 +15,10 @@ export function conversationAttachmentGallery(database: Database.Database, conve
         AND length(json_extract(item.value, '$.name')) BETWEEN 1 AND 1024
         AND length(json_extract(item.value, '$.mimeType')) BETWEEN 1 AND 200
       ORDER BY message.created_at DESC, message.id DESC, CAST(item.key AS INTEGER) DESC
-  `).iterate(conversationId);
+  `;
+
+export function conversationAttachmentGallery(database: Database.Database, conversationId: string): ConversationAttachmentGalleryItem[] {
+  const rows = cachedStatement(database, CONVERSATION_ATTACHMENT_GALLERY_SQL).iterate(conversationId);
   const entries: ConversationAttachmentGalleryItem[] = [];
   const ids = new Set<string>();
   for (const row of rows) {

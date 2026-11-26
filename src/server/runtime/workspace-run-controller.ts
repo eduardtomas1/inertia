@@ -508,6 +508,13 @@ export class WorkspaceRunController<Owner> {
     });
   }
 
+  serializeRepositoryMutation<T>(
+    repositoryRoot: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return this.withExclusiveSourceControl(repositoryRoot, operation);
+  }
+
   private async withExclusiveSourceControl<T>(
     serializationRoot: string,
     operation: () => Promise<T>,

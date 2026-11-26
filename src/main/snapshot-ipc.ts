@@ -1,7 +1,13 @@
 import { app, ipcMain, shell, systemPreferences, type BrowserWindow, type IpcMainInvokeEvent } from "electron";
 import { z } from "zod";
+import type { DesktopWindowContext } from "../shared/desktop.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import { attachmentImportDocumentFromEvent, type AttachmentImportDocument, type RendererAttachmentImportCoordinator } from "./attachment-import-ipc.js";
+import {
+  attachmentWindowOwnerForContext,
+  attachmentWindowScopeForRegistry,
+  type AttachmentWindowOwner,
+} from "./attachment-window-scope.js";
 import { SnapshotError, SnapshotService } from "./snapshot-service.js";
 import type { SnapshotDelivery, SnapshotFailureDiagnostic, SnapshotSource } from "../shared/snapshots.js";
 import type { ChatAttachment } from "../shared/contracts.js";
@@ -27,11 +33,17 @@ const UNCONFIRMED_DISABLE = "Snapshot cleanup is unconfirmed, and the disabled s
 export const SNAPSHOT_BUSY = "A snapshot is already being captured. Try again when it finishes.";
 export const SNAPSHOT_QUEUE_FULL = "Snapshot not taken: earlier snapshots are still waiting for a chat. Open a chat to receive them, then try again.";
 
-type SnapshotTarget = { document: AttachmentImportDocument; window: BrowserWindow; conversationId: string };
+type SnapshotTarget = {
+  document: AttachmentImportDocument;
+  window: BrowserWindow;
+  conversationId: string;
+  windowOwner: AttachmentWindowOwner;
+};
 type DeliveryOutcome = "delivered" | "failed" | "cancelled";
 
 export function registerSnapshotIpc(options: {
   owner(event: IpcMainInvokeEvent, count: number): BrowserWindow;
+  assertTrusted?(event: IpcMainInvokeEvent, argumentCount: number, expectedArguments?: number): DesktopWindowContext;
   mainWindow?(): BrowserWindow | null;
   focusMainWindow?(): void;
   registry(): AttachmentRegistry;
@@ -108,6 +120,12 @@ export function registerSnapshotIpc(options: {
         }
       });
       if (!live() || !service.state().enabled) throw new Error("Snapshot destination closed.");
+      if (attachments.length > 0) {
+        attachmentWindowScopeForRegistry(options.registry()).recordAttachments(
+          attachments.map((attachment) => attachment.id),
+          owner.windowOwner,
+        );
+      }
       owner.window.show(); owner.window.focus();
       owner.window.webContents.send(DESKTOP_IPC.snapshotReady, { conversationId: owner.conversationId, selection: { batchId, attachments } });
       return "delivered";
@@ -217,6 +235,13 @@ export function registerSnapshotIpc(options: {
   }).catch(() => undefined);
   ipcMain.handle(DESKTOP_IPC.snapshot, async (event, ...args) => {
     const window = options.owner(event, args.length);
+    const context = options.assertTrusted?.(event, args.length, 1);
+    const resolveWindowOwner = (conversationId: string): AttachmentWindowOwner =>
+      context
+        ? attachmentWindowOwnerForContext(context)
+        : (options.mainWindow && window === options.mainWindow()
+            ? { kind: "main" }
+            : { kind: "detached-chat", conversationId });
     const request = requestSchema.parse(args[0]);
     if (request.type.startsWith("review-")) {
       const document = attachmentImportDocumentFromEvent(event);
@@ -225,7 +250,7 @@ export function registerSnapshotIpc(options: {
       const conversationId = reviewRequest.type === "review-start" ? reviewRequest.conversationId : target?.conversationId;
       if (service.isDisposing() || !target || target.window !== window || !sameDocument(target.document, document)
         || target.conversationId !== conversationId) throw new SnapshotError("Focus the chat you want to attach the screenshot to.");
-      await reviews.request({ document, window, conversationId }, reviewRequest);
+      await reviews.request({ document, window, conversationId, windowOwner: target.windowOwner }, reviewRequest);
       return service.state();
     }
     switch (request.type) {
@@ -277,7 +302,12 @@ export function registerSnapshotIpc(options: {
             || target.document.owner !== document.owner || target.document.processId !== document.processId
             || target.document.frameId !== document.frameId || target.document.frameToken !== document.frameToken) {
             const cancelled = reviews.cancel();
-            target = { document, window, conversationId: request.conversationId };
+            target = {
+              document,
+              window,
+              conversationId: request.conversationId,
+              windowOwner: resolveWindowOwner(request.conversationId),
+            };
             await cancelled;
           }
         }

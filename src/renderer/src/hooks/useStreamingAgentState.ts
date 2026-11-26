@@ -32,20 +32,43 @@ function sameStreamingAgentState(
 
 export function createStreamingAgentStore(): StreamingAgentStore {
   let state = EMPTY_STREAMING_AGENT_STATE;
+  let frame: number | null = null;
   const listeners = new Set<() => void>();
+  const flush = (): void => {
+    frame = null;
+    for (const listener of listeners) listener();
+  };
   return {
     getSnapshot: () => state,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
+        if (listeners.size === 0 && frame !== null && typeof cancelAnimationFrame === "function") {
+          cancelAnimationFrame(frame);
+          frame = null;
+        }
       };
     },
     update: (next) => {
       const resolved = typeof next === "function" ? next(state) : next;
       if (sameStreamingAgentState(state, resolved)) return;
+      const previous = state;
       state = resolved;
-      for (const listener of listeners) listener();
+      if (listeners.size === 0) return;
+      if (
+        previous[2] !== null
+        && previous[2] === resolved[2]
+        && typeof requestAnimationFrame === "function"
+      ) {
+        if (frame === null) frame = requestAnimationFrame(flush);
+        return;
+      }
+      if (frame !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(frame);
+        frame = null;
+      }
+      flush();
     },
   };
 }

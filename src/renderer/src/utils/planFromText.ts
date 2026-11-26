@@ -26,6 +26,11 @@ export interface TextPlanStep {
   source: PlanStepSource;
 }
 
+const PLAN_LINE_PATTERN =
+  /^\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.{3,200})$/u;
+const BOLD_MARK_PATTERN = /\*\*/gu;
+const MAX_TEXT_PLAN_STEPS = 20;
+
 export function planFromText(
   text: string,
   status: Conversation["status"],
@@ -34,23 +39,40 @@ export function planFromText(
   // A running turn owns its plan, even before its first token arrives.
   const streamed = status === "running" && streamingText !== undefined;
   const source: PlanStepSource = streamed ? "streamed" : "derived";
-  const lines = (streamed ? streamingText : text).split("\n");
-  const candidates: TextPlanStep[] = lines.flatMap((line, index) => {
-    const match =
-      /^\s*(?:[-*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.{3,200})$/u.exec(line);
-    if (!match) return [];
-    return [{
-      id: `step-${index}`,
-      title: match[1].replace(/\*\*/g, "").trim(),
-      status: "pending" as const,
-      source,
-    }];
-  }).slice(0, 20);
-  // Derived steps stay pending: a finished reply's list is not progress.
-  if (streamed && candidates[0]) {
-    candidates[0] = { ...candidates[0], status: "in-progress" };
+  const input = streamed ? streamingText : text;
+  const candidates: TextPlanStep[] = [];
+  let lineIndex = 0;
+  for (let start = 0; start <= input.length && candidates.length < MAX_TEXT_PLAN_STEPS;) {
+    const newline = input.indexOf("\n", start);
+    const end = newline < 0 ? input.length : newline;
+    const match = PLAN_LINE_PATTERN.exec(input.slice(start, end));
+    if (match) {
+      // Derived steps stay pending: a finished reply's list is not progress.
+      candidates.push({
+        id: `step-${lineIndex}`,
+        title: match[1]!.replace(BOLD_MARK_PATTERN, "").trim(),
+        status: streamed && candidates.length === 0 ? "in-progress" : "pending",
+        source,
+      });
+    }
+    if (newline < 0) break;
+    start = newline + 1;
+    lineIndex += 1;
   }
   return candidates;
+}
+
+export function runningTurnPlanMode(
+  turns: readonly (Pick<AgentTurn, "id" | "interactionMode"> & { status?: AgentTurn["status"] })[],
+  conversationMode: InteractionMode | null,
+  latestTurnId: string | null = null,
+): boolean {
+  const lastTurn = turns.at(-1);
+  const runningTurn = lastTurn
+    && (lastTurn.status === undefined || !TERMINAL_TURN_STATUSES.has(lastTurn.status) || lastTurn.id === latestTurnId)
+    ? lastTurn
+    : undefined;
+  return (runningTurn?.interactionMode ?? conversationMode) === "plan";
 }
 
 /** Which text-parsed plan sources the Plan tab may show. */
@@ -87,12 +109,10 @@ export function textPlanGate(
       : undefined);
     break;
   }
-  const lastTurn = turns.at(-1);
-  const runningTurn = lastTurn
-    && (lastTurn.status === undefined || !TERMINAL_TURN_STATUSES.has(lastTurn.status) || lastTurn.id === latestTurnId)
-    ? lastTurn
-    : undefined;
-  return { streamed: planMode(runningTurn), derived };
+  return {
+    streamed: runningTurnPlanMode(turns, conversationMode, latestTurnId),
+    derived,
+  };
 }
 
 export function visiblePlanSteps<Step extends { source?: PlanStepSource }>(

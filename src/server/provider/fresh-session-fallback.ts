@@ -37,17 +37,24 @@ export function startHarnessWithFreshSessionFallback(
     withheld = null;
     if (deliver) for (const event of events) forward?.(event);
   };
-  const first = harness.start({
-    ...options,
-    callbacks: {
-      onEvent: (event) => {
-        if (withheld && isTerminalStatus(event)) withheld.push(event);
-        else forward?.(event);
+  let first: AgentHarnessRun;
+  try {
+    first = harness.start({
+      ...options,
+      callbacks: {
+        onEvent: (event) => {
+          if (withheld && isTerminalStatus(event)) withheld.push(event);
+          else forward?.(event);
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    release();
+    throw error;
+  }
   let current = first;
   let cancelled = false;
+  let forcedCancel = false;
   const result = first.result.then((
     outcome,
   ): ProviderRunResult | Promise<ProviderRunResult> => {
@@ -62,6 +69,7 @@ export function startHarnessWithFreshSessionFallback(
       || outcome.failure?.sessionUnavailable !== true
       || !outcome.cleanupConfirmed
     ) return keep();
+    let next: AgentHarnessRun;
     try {
       const replacement = fallback();
       if (!replacement) return keep();
@@ -71,24 +79,29 @@ export function startHarnessWithFreshSessionFallback(
         goalContinuationExpected: _goalContinuationExpected,
         ...input
       } = options.input;
-      const next = harness.start({
-        ...options,
-        environment,
-        input: { ...input, prompt: replacement.prompt },
-        callbacks: {
-          onEvent: (event) => {
-            if (event.type === "status" && event.status === "starting") return;
-            forward?.(event);
+      const fallbackEnvironment = { ...environment };
+      try {
+        next = harness.start({
+          ...options,
+          environment: fallbackEnvironment,
+          input: { ...input, prompt: replacement.prompt },
+          callbacks: {
+            onEvent: (event) => {
+              if (event.type === "status" && event.status === "starting") return;
+              forward?.(event);
+            },
           },
-        },
-      });
-      settleFirstAttempt(false);
-      current = next;
-      if (cancelled) next.cancel(false);
-      return next.result;
+        });
+      } finally {
+        release();
+      }
     } catch {
       return keep();
     }
+    settleFirstAttempt(false);
+    current = next;
+    if (cancelled) next.cancel(forcedCancel);
+    return next.result;
   }, (error: unknown) => {
     release();
     settleFirstAttempt(true);
@@ -100,6 +113,7 @@ export function startHarnessWithFreshSessionFallback(
     result,
     cancel: (force) => {
       cancelled = true;
+      if (force) forcedCancel = true;
       current.cancel(force);
     },
     get extension() {

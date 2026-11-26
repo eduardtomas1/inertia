@@ -28,6 +28,7 @@ import {
 import type { PersistenceContext } from "./context";
 import { RecordNotFoundError } from "./errors";
 import { AgentSecretRequestRepository } from "./agent-secret-request-repository";
+import { cachedStatement } from "./statement-cache";
 import type { MessageRow } from "./rows";
 import {
   appendMessageContentChunks,
@@ -207,9 +208,9 @@ export class TranscriptRepository {
     if (customAgentCall) message.customAgentCall = customAgentCall;
     const persistedAttachments = rendererSafeAttachments(attachments);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json, sent_to_user) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson, @sentToUserFlag)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null, sentToUserFlag: message.sentToUser ? 1 : 0 });
+      cachedStatement(this.context.database, `INSERT INTO messages (id, conversation_id, turn_id, role, content, attachments_json, created_at, compaction_json, html_render_json, private_connect_device_id, watcher_note_json, duo_comparison_json, custom_agent_call_json, secret_request_json, sent_to_user) VALUES (@id, @conversationId, @turnId, @role, @content, @attachmentsJson, @createdAt, @compactionJson, @htmlRenderJson, @privateConnectDeviceId, @watcherNoteJson, @duoComparisonJson, @customAgentCallJson, @secretRequestJson, @sentToUserFlag)`).run({ ...message, attachmentsJson: JSON.stringify(persistedAttachments), compactionJson: options.compaction ? JSON.stringify(options.compaction) : null, htmlRenderJson: message.htmlRender ? JSON.stringify(message.htmlRender) : null, privateConnectDeviceId: options.privateConnectDeviceId ?? null, watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null, duoComparisonJson: duoComparison ? JSON.stringify(duoComparison) : null, customAgentCallJson: customAgentCall ? JSON.stringify(customAgentCall) : null, secretRequestJson: message.secretRequest ? JSON.stringify(message.secretRequest) : null, sentToUserFlag: message.sentToUser ? 1 : 0 });
       if (options.touchConversation !== false) {
-        this.context.database.prepare(`
+        cachedStatement(this.context.database, `
           UPDATE conversations
           SET updated_at = ?, settled_at = NULL,
               last_viewed_at = CASE WHEN ? = 'user' THEN ? ELSE last_viewed_at END
@@ -218,7 +219,7 @@ export class TranscriptRepository {
         this.context.touchProject(conversation.project_id, now);
       }
       if (role === "user" && options.activateConversation !== false) {
-        this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
+        cachedStatement(this.context.database, "UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
           .run(conversation.project_id, conversationId);
       }
     })();
@@ -268,7 +269,7 @@ export class TranscriptRepository {
       ...(watcherNote ? { watcherNote } : {}),
     };
     this.context.database.transaction(() => {
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         INSERT INTO messages (
           id, conversation_id, turn_id, role, content,
           attachments_json, created_at, watcher_note_json
@@ -278,7 +279,7 @@ export class TranscriptRepository {
         attachmentsJson: JSON.stringify(message.attachments),
         watcherNoteJson: watcherNote ? JSON.stringify(watcherNote) : null,
       });
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         UPDATE conversations
         SET updated_at = MAX(updated_at, ?),
           last_viewed_at = MAX(last_viewed_at, ?)
@@ -286,7 +287,7 @@ export class TranscriptRepository {
       `).run(freshnessAt, freshnessAt, conversationId);
       this.context.touchProject(conversation.project_id, freshnessAt);
       if (queuedMessageId) {
-        this.context.database.prepare(`
+        cachedStatement(this.context.database, `
           UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ?, error = NULL,
             content = '', attachments_json = '[]', route_identity = ''
           WHERE id = ? AND conversation_id = ? AND state = 'dispatching'
@@ -315,7 +316,7 @@ export class TranscriptRepository {
     this.context.database.transaction(() => {
       const turn = this.context.requireAgentTurn(turnId);
       if (retainedMessageId) {
-        const retained = this.context.database.prepare(`
+        const retained = cachedStatement(this.context.database, `
           SELECT id, turn_id, role, created_at
           FROM messages
           WHERE id = ?
@@ -341,7 +342,7 @@ export class TranscriptRepository {
           throw new RecordNotFoundError("Message not found.");
         }
       }
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         DELETE FROM messages
         WHERE conversation_id = ? AND turn_id = ?
           AND role = 'assistant'
@@ -360,13 +361,13 @@ export class TranscriptRepository {
 
   attachments(conversationId?: string): ChatAttachment[] {
     const rows = (conversationId === undefined
-      ? this.context.database.prepare(`
+      ? cachedStatement(this.context.database, `
           SELECT messages.attachments_json
           FROM messages
           WHERE messages.attachments_json <> '[]'
           ORDER BY messages.created_at ASC, messages.id ASC
         `).all()
-      : this.context.database.prepare(`
+      : cachedStatement(this.context.database, `
           SELECT messages.attachments_json
           FROM messages
           WHERE messages.conversation_id = ?
@@ -376,7 +377,7 @@ export class TranscriptRepository {
   }
 
   evictableAttachmentIds(conversationIds?: ReadonlySet<string>): string[] {
-    const rows = this.context.database.prepare(`
+    const rows = cachedStatement(this.context.database, `
       SELECT messages.conversation_id, messages.attachments_json, EXISTS (
         SELECT 1 FROM agent_turns
         WHERE agent_turns.conversation_id = messages.conversation_id
@@ -403,7 +404,7 @@ export class TranscriptRepository {
     { includeUnreadable = true }: { includeUnreadable?: boolean } = {},
   ): string[] {
     if (attachmentIds.length === 0) return [];
-    const rows = this.context.database.prepare(`
+    const rows = cachedStatement(this.context.database, `
       SELECT DISTINCT messages.conversation_id
       FROM messages
       WHERE messages.attachments_json <> '[]'
@@ -429,7 +430,7 @@ export class TranscriptRepository {
   referencedAttachmentIds(candidateIds: readonly string[]): Set<string> {
     const candidates = new Set(candidateIds);
     if (candidates.size === 0) return new Set();
-    const rows = this.context.database.prepare(`
+    const rows = cachedStatement(this.context.database, `
       SELECT messages.attachments_json
       FROM messages
       WHERE messages.attachments_json <> '[]'
@@ -454,7 +455,7 @@ export class TranscriptRepository {
   messageSearchTarget(messageId: string): MessageSearchTarget | null {
     // Identity-only lookup: revealing a hit must never reconstruct a transcript
     // on the runtime's main thread. Repeat the search eligibility check here.
-    return this.context.database.prepare(`
+    return cachedStatement(this.context.database, `
       SELECT c.project_id AS projectId, m.conversation_id AS conversationId,
         m.turn_id AS turnId, m.id AS messageId
       FROM messages m JOIN conversations c ON c.id = m.conversation_id
@@ -467,7 +468,7 @@ export class TranscriptRepository {
   }
 
   message(messageId: string): ChatMessage {
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT ${MESSAGE_PROJECTION_COLUMNS}
       FROM messages
       WHERE messages.id = ?

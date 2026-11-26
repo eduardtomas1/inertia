@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { AgentSkillSummary } from "@shared/contracts";
 import {
@@ -14,21 +14,29 @@ export function useComposerSkillCompletion(
   const [selection, setSelection] = useState<{ value: string; start: number; end: number } | null>(null);
   const latestSelection = useRef(selection);
   const [accepted, setAccepted] = useState<{ value: string; caret: number } | null>(null);
+  const hasTrigger = message.includes("$");
   const caret = selection?.value === message ? selection.start : message.length;
   const selectedText = selection?.value === message && selection.start !== selection.end;
   const atAcceptedSkill = accepted?.value === message && accepted.caret === caret;
-  const skillQuery = selectedText || atAcceptedSkill ? null : /(?:^|\s)\$([\w.:-]*)$/u
+  const skillQuery = !hasTrigger || selectedText || atAcceptedSkill ? null : /(?:^|\s)\$([\w.:-]*)$/u
     .exec(message.slice(0, caret))?.[1].toLowerCase() ?? null;
-  const markSkillAccepted = (value: string, acceptedCaret: number): void => {
+  const markSkillAccepted = useCallback((value: string, acceptedCaret: number): void => {
     setAccepted({ value, caret: acceptedCaret });
-  };
-  const onSkillSelectionChange = (editor: HTMLTextAreaElement): void => {
+  }, []);
+  const onSkillSelectionChange = useCallback((editor: HTMLTextAreaElement): void => {
     const { value, selectionStart: start, selectionEnd: end } = editor;
+    if (!value.includes("$")) {
+      if (latestSelection.current !== null) {
+        latestSelection.current = null;
+        setSelection(null);
+      }
+      return;
+    }
     const current = latestSelection.current;
     if (current?.value === value && current.start === start && current.end === end) return;
     latestSelection.current = { value, start, end };
     setSelection(latestSelection.current);
-  };
+  }, []);
   const skillListboxId = `${useId()}-skills`;
   const [highlightedSkillId, setHighlightedSkillId] = useState<string | null>(null);
   const skillMatches = skillQuery === null

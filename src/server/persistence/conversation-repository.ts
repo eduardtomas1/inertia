@@ -18,6 +18,7 @@ import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import type { NewConversationOptions } from "./types";
 import { releaseProviderRecoveryRecords } from "./provider-run-ownership-repository";
+import { cachedStatement } from "./statement-cache";
 import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { QUICK_TITLE_SCANNED_CHARS, quickConversationTitle } from "../runtime/conversation-title";
 
@@ -85,7 +86,7 @@ export class ConversationRepository {
     };
     const modelSelectionJson = JSON.stringify(modelSelection);
     this.context.database.transaction(() => {
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         INSERT INTO conversations (
           id, project_id, title, provider_id, model_selection_json, continuation_identity_json,
           model, reasoning_effort, interaction_mode,
@@ -101,7 +102,7 @@ export class ConversationRepository {
         )
       `).run({ ...conversation, modelSelectionJson });
       if (conversation.worktreePath !== null) {
-        this.context.database.prepare(`
+        cachedStatement(this.context.database, `
           INSERT INTO conversation_worktree_ownership (
             conversation_id, path, branch, owns_worktree, creation_state
           ) VALUES (?, ?, ?, 0, 'external')
@@ -118,7 +119,8 @@ export class ConversationRepository {
       }
       this.context.touchProject(projectId, now);
       if (options.activate !== false) {
-        this.context.database.prepare(
+        cachedStatement(
+          this.context.database,
           "UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1",
         ).run(projectId, conversation.id);
       }
@@ -136,21 +138,21 @@ export class ConversationRepository {
     this.context.database.transaction(() => {
       // This timestamp remains a legacy transcript-visit marker. Canonical
       // run attention is changed only by the explicit attention commands.
-      this.context.database.prepare("UPDATE conversations SET last_viewed_at = ?, marked_unread_at = NULL WHERE id = ?")
+      cachedStatement(this.context.database, "UPDATE conversations SET last_viewed_at = ?, marked_unread_at = NULL WHERE id = ?")
         .run(now, conversationId);
-      this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
+      cachedStatement(this.context.database, "UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1")
         .run(conversation.project_id, conversationId);
     })();
   }
 
   hasMessages(conversationId: string): boolean {
     this.context.requireConversation(conversationId);
-    return this.context.database.prepare("SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1").get(conversationId) !== undefined;
+    return cachedStatement(this.context.database, "SELECT 1 FROM messages WHERE conversation_id = ? LIMIT 1").get(conversationId) !== undefined;
   }
 
   markUnread(conversationId: string): void {
     this.context.requireConversation(conversationId);
-    this.context.database.prepare("UPDATE conversations SET marked_unread_at = ? WHERE id = ?")
+    cachedStatement(this.context.database, "UPDATE conversations SET marked_unread_at = ? WHERE id = ?")
       .run(new Date().toISOString(), conversationId);
   }
 
@@ -160,7 +162,7 @@ export class ConversationRepository {
     if (conversation.status === "running" || conversation.status === "needs-input") {
       throw new Error("Wait for active work to finish before regenerating the title.");
     }
-    const message = this.context.database.prepare(`
+    const message = cachedStatement(this.context.database, `
       SELECT substr(content, 1, ?) AS content FROM messages
       WHERE conversation_id = ? AND role = 'user'
       ORDER BY created_at DESC, id DESC LIMIT 1
@@ -174,18 +176,18 @@ export class ConversationRepository {
 
   lockTitle(conversationId: string): void {
     this.context.requireConversation(conversationId);
-    this.context.database.prepare("INSERT OR IGNORE INTO conversation_title_locks (conversation_id) VALUES (?)")
+    cachedStatement(this.context.database, "INSERT OR IGNORE INTO conversation_title_locks (conversation_id) VALUES (?)")
       .run(conversationId);
   }
 
   titleLocked(conversationId: string): boolean {
-    return this.context.database.prepare("SELECT 1 FROM conversation_title_locks WHERE conversation_id = ?")
+    return cachedStatement(this.context.database, "SELECT 1 FROM conversation_title_locks WHERE conversation_id = ?")
       .get(conversationId) !== undefined;
   }
 
   firstUserMessage(conversationId: string, maxChars: number): { id: string; content: string } | null {
     this.context.requireConversation(conversationId);
-    const message = this.context.database.prepare(`
+    const message = cachedStatement(this.context.database, `
       SELECT id, substr(content, 1, ?) AS content FROM messages
       WHERE conversation_id = ? AND role = 'user'
       ORDER BY created_at ASC, id ASC LIMIT 1
@@ -195,7 +197,8 @@ export class ConversationRepository {
 
   hasTurns(conversationId: string): boolean {
     this.context.requireConversation(conversationId);
-    return this.context.database.prepare(
+    return cachedStatement(
+      this.context.database,
       "SELECT 1 FROM agent_turns WHERE conversation_id = ? LIMIT 1",
     ).get(conversationId) !== undefined;
   }
@@ -304,7 +307,7 @@ export class ConversationRepository {
     const continuationIdentityJson = next.continuationIdentity
       ? JSON.stringify(versionedContinuationIdentitySchema.parse(next.continuationIdentity))
       : null;
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       UPDATE conversations SET
         title = @title, provider_id = @providerId,
         model_selection_json = @modelSelectionJson,
@@ -330,7 +333,7 @@ export class ConversationRepository {
     }
     const now = new Date().toISOString();
     const settledAt = settled ? now : null;
-    this.context.database.prepare("UPDATE conversations SET settled_at = ?, marked_unread_at = CASE WHEN ? THEN NULL ELSE marked_unread_at END, last_viewed_at = CASE WHEN ? THEN ? ELSE last_viewed_at END, updated_at = ? WHERE id = ?")
+    cachedStatement(this.context.database, "UPDATE conversations SET settled_at = ?, marked_unread_at = CASE WHEN ? THEN NULL ELSE marked_unread_at END, last_viewed_at = CASE WHEN ? THEN ? ELSE last_viewed_at END, updated_at = ? WHERE id = ?")
       .run(settledAt, Number(settled), Number(settled), now, now, conversationId);
     this.context.touchProject(current.projectId, now);
     return { ...current, settledAt, markedUnreadAt: settled ? null : current.markedUnreadAt, lastViewedAt: settled ? now : current.lastViewedAt, updatedAt: now };
@@ -339,7 +342,7 @@ export class ConversationRepository {
   archive(conversationId: string, archived: boolean): void {
     const conversation = this.context.requireConversation(conversationId);
     const archivedAt = archived ? new Date().toISOString() : null;
-    this.context.database.prepare("UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?").run(archivedAt, new Date().toISOString(), conversationId);
+    cachedStatement(this.context.database, "UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?").run(archivedAt, new Date().toISOString(), conversationId);
     const state = this.context.state();
     if (archived && state.active_conversation_id === conversationId) {
       this.context.selectProject(conversation.project_id);
@@ -353,8 +356,8 @@ export class ConversationRepository {
     const conversation = this.context.requireConversation(conversationId);
     this.context.database.transaction(() => {
       releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
-      this.context.database.prepare("DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);
-      this.context.database.prepare("DELETE FROM conversations WHERE id = ?").run(conversationId);
+      cachedStatement(this.context.database, "DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);
+      cachedStatement(this.context.database, "DELETE FROM conversations WHERE id = ?").run(conversationId);
     })();
     if (this.context.state().active_conversation_id === null) {
       this.context.selectProject(conversation.project_id);
@@ -368,11 +371,11 @@ export class ConversationRepository {
     }
     const folder = resolve(path);
     this.context.database.transaction(() => {
-      this.context.database.prepare("UPDATE conversations SET worktree_path = ?, branch = NULL WHERE id = ?")
+      cachedStatement(this.context.database, "UPDATE conversations SET worktree_path = ?, branch = NULL WHERE id = ?")
         .run(folder, conversationId);
-      this.context.database.prepare("DELETE FROM conversation_worktree_ownership WHERE conversation_id = ?")
+      cachedStatement(this.context.database, "DELETE FROM conversation_worktree_ownership WHERE conversation_id = ?")
         .run(conversationId);
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         INSERT INTO conversation_worktree_ownership (
           conversation_id, path, branch, owns_worktree, creation_state
         ) VALUES (?, ?, NULL, 0, 'external')

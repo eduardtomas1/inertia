@@ -45,7 +45,7 @@ export type RuntimeReplay =
     };
 
 interface RetainedRuntimeEvent {
-  frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>;
+  serialized: SerializedRuntimeEvent<Extract<RuntimeSequencedFrame, { type: "runtime.event" }>>;
   bytes: number;
 }
 
@@ -160,7 +160,9 @@ export class RuntimeSequencer {
   private latestSequence = 0;
   private replayFloor = 0;
   private retainedBytes = 0;
-  private readonly retained: RetainedRuntimeEvent[] = [];
+  private retained: Array<RetainedRuntimeEvent | undefined> = [];
+  private retainedHead = 0;
+  private retainedCount = 0;
 
   constructor(options: {
     runtimeGeneration?: string;
@@ -218,13 +220,63 @@ export class RuntimeSequencer {
     if (afterSequence < this.replayFloor) {
       return { kind: "refresh", cursor, reason: "cursor-too-old" };
     }
+    const frames: RuntimeSequencedFrame[] = [];
+    const capacity = this.retained.length;
+    if (this.retainedCount > 0 && capacity > 0) {
+      const firstSeq = this.retained[this.retainedHead]!.serialized.event.sync.latestSequence;
+      const startOffset = Math.max(0, afterSequence + 1 - firstSeq);
+      for (let i = startOffset; i < this.retainedCount; i += 1) {
+        const entry = this.retained[(this.retainedHead + i) % capacity];
+        if (!entry) continue;
+        const frame = entry.serialized.event;
+        if (frame.sync.latestSequence > afterSequence) {
+          frames.push(projectRuntimeFrame(frame, subscription));
+        }
+      }
+    }
     return {
       kind: "replay",
       cursor,
-      frames: this.retained
-        .filter(({ frame }) => frame.sync.latestSequence > afterSequence)
-        .map(({ frame }) => projectRuntimeFrame(frame, subscription)),
+      frames,
     };
+  }
+
+  private clearRetained(): void {
+    this.retained = [];
+    this.retainedHead = 0;
+    this.retainedCount = 0;
+    this.retainedBytes = 0;
+  }
+
+  private pushRetained(entry: RetainedRuntimeEvent): void {
+    const capacity = this.retained.length;
+    if (this.retainedCount === capacity) {
+      const nextCapacity = Math.min(
+        this.maxReplayEvents,
+        Math.max(16, capacity * 2),
+      );
+      if (nextCapacity > capacity) {
+        const next = Array.from<RetainedRuntimeEvent | undefined>({ length: nextCapacity });
+        for (let i = 0; i < this.retainedCount; i += 1) {
+          next[i] = this.retained[(this.retainedHead + i) % capacity];
+        }
+        this.retained = next;
+        this.retainedHead = 0;
+      }
+    }
+    const ringCapacity = this.retained.length;
+    const tail = (this.retainedHead + this.retainedCount) % ringCapacity;
+    this.retained[tail] = entry;
+    this.retainedCount += 1;
+  }
+
+  private shiftRetained(): RetainedRuntimeEvent | undefined {
+    if (this.retainedCount === 0) return undefined;
+    const entry = this.retained[this.retainedHead];
+    this.retained[this.retainedHead] = undefined;
+    this.retainedHead = (this.retainedHead + 1) % this.retained.length;
+    this.retainedCount -= 1;
+    return entry;
   }
 
   private retain(
@@ -237,28 +289,26 @@ export class RuntimeSequencer {
       // renderers parse stale states in sequence. Missing one now forces the
       // existing fresh-hydration path instead.
       this.replayFloor = frame.sync.latestSequence;
-      this.retained.length = 0;
-      this.retainedBytes = 0;
+      this.clearRetained();
       return;
     }
     const { bytes } = serialized.encode();
     if (bytes > this.maxReplayBytes) {
       this.replayFloor = frame.sync.latestSequence;
-      this.retained.length = 0;
-      this.retainedBytes = 0;
+      this.clearRetained();
       return;
     }
-    this.retained.push({ frame, bytes });
-    this.retainedBytes += bytes;
     while (
-      this.retained.length > this.maxReplayEvents
-      || this.retainedBytes > this.maxReplayBytes
+      this.retainedCount >= this.maxReplayEvents
+      || (this.retainedCount > 0 && this.retainedBytes + bytes > this.maxReplayBytes)
     ) {
-      const removed = this.retained.shift();
+      const removed = this.shiftRetained();
       if (!removed) break;
       this.retainedBytes -= removed.bytes;
-      this.replayFloor = removed.frame.sync.latestSequence;
+      this.replayFloor = removed.serialized.event.sync.latestSequence;
     }
+    this.pushRetained({ serialized, bytes });
+    this.retainedBytes += bytes;
   }
 }
 

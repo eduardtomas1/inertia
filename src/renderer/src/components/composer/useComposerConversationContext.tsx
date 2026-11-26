@@ -252,8 +252,10 @@ export function useComposerConversationContext(input: {
       ? current
       : packetId ? { ...current, packetId } : null);
   };
+  const recopyRef = useRef(recopy);
+  recopyRef.current = recopy;
   useEffect(() => {
-    if (!enabled || !onCommand || paused || referencing) return;
+    if (!enabled || !onCommand || paused || referencing || draftContextPackets.length === 0) return;
     const stale = draftContextPackets.find((packet) => {
       const completedAt = packet.sourceConversationId === conversationId
         ? latestTurnCompletedAt
@@ -265,8 +267,17 @@ export function useComposerConversationContext(input: {
     });
     if (!stale) return;
     recopying.current.add(stale.id);
-    void recopy(stale);
-  });
+    void recopyRef.current(stale);
+  }, [
+    contextSources,
+    conversationId,
+    draftContextPackets,
+    enabled,
+    latestTurnCompletedAt,
+    onCommand,
+    paused,
+    referencing,
+  ]);
 
   return {
     contextPacketIds,

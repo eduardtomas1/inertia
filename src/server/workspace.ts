@@ -29,15 +29,17 @@ import {
   type SecureFileRootCapability,
 } from "./secure-files";
 import {
-  appendContentMatches,
+  compareContentMatches,
   literalSearchPattern,
-  readSearchableFile,
+  searchCandidateFilesInWaves,
+  WORKSPACE_CONTENT_READ_CONCURRENCY,
+  type SearchableFileCandidate,
 } from "./workspace-content-search";
 import {
   compareWorkspaceEntries,
-  describeStableWorkspaceEntry,
   describeStableWorkspaceEntries,
   openStableWorkspaceDirectory,
+  WORKSPACE_METADATA_BATCH_SIZE,
   workspaceDirentKind,
   type WorkspaceEntry,
   type WorkspaceEntryIdentity,
@@ -332,35 +334,6 @@ async function secureExistingPath(
   }
 }
 
-async function describeEntry(
-  root: string,
-  parentAbsolute: string,
-  parentIdentity: WorkspaceEntryIdentity,
-  absolute: string,
-  name: string,
-  observedKind: WorkspaceEntryKind,
-): Promise<{ entry: WorkspaceEntry; identity: WorkspaceEntryIdentity } | null> {
-  const described = await describeStableWorkspaceEntry(
-    root,
-    parentAbsolute,
-    parentIdentity,
-    absolute,
-    observedKind,
-  );
-  if (!described) return null;
-  return {
-    entry: {
-      name,
-      path: slashPath(relative(root, absolute)),
-      kind: described.kind,
-      size: described.size,
-      modifiedAt: described.modifiedAt,
-      hidden: name.startsWith("."),
-    },
-    identity: described.identity,
-  };
-}
-
 export async function listWorkspaceEntries(
   workspacePath: string,
   directory = "",
@@ -456,6 +429,57 @@ export async function searchWorkspaceEntries(
   let visitedEntries = 0;
   let truncated = false;
 
+  const batchSize = options.afterEntryObserved ? 1 : WORKSPACE_METADATA_BATCH_SIZE;
+  type SearchCandidate = {
+    absolute: string;
+    name: string;
+    kind: WorkspaceEntryKind;
+    projectPath: string;
+    matches: boolean;
+  };
+  const flushSearchBatch = async (
+    directory: SearchQueueEntry,
+    batch: SearchCandidate[],
+  ): Promise<void> => {
+    if (batch.length === 0) return;
+    if (options.afterEntryObserved) {
+      for (const candidate of batch) {
+        await options.afterEntryObserved(candidate.projectPath);
+      }
+    }
+    const described = await describeStableWorkspaceEntries(
+      root,
+      directory.absolute,
+      directory.identity,
+      batch.map(({ absolute, kind }) => ({ absolute, kind })),
+    );
+    for (let index = 0; index < batch.length; index += 1) {
+      const stable = described[index];
+      const candidate = batch[index];
+      if (!stable || !candidate) continue;
+      if (candidate.matches) {
+        if (entries.length >= maxResults) {
+          truncated = true;
+          break;
+        }
+        entries.push({
+          name: candidate.name,
+          path: candidate.projectPath,
+          kind: stable.kind,
+          size: stable.size,
+          modifiedAt: stable.modifiedAt,
+          hidden: candidate.name.startsWith("."),
+        });
+      }
+      if (stable.kind === "directory" && directory.depth < maxDepth && !ignored.has(candidate.name)) {
+        queue.push({ absolute: candidate.absolute, depth: directory.depth + 1, identity: stable.identity });
+      } else if (stable.kind === "directory" && directory.depth >= maxDepth) {
+        truncated = true;
+      }
+    }
+    batch.length = 0;
+  };
+
   try {
     for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
       const directory = queue[queueIndex];
@@ -465,6 +489,8 @@ export async function searchWorkspaceEntries(
         directory.identity,
       );
       if (!directoryHandle) continue;
+      const batch: SearchCandidate[] = [];
+      let pendingMatches = 0;
       for await (const child of directoryHandle) {
         if (visitedEntries >= maxVisited || entries.length >= maxResults) {
           truncated = true;
@@ -479,23 +505,14 @@ export async function searchWorkspaceEntries(
         const matches = projectPath.toLocaleLowerCase().includes(needle);
         const traversable = kind === "directory" && !ignored.has(child.name);
         if (!matches && !traversable) continue;
-        await options.afterEntryObserved?.(projectPath);
-        const described = await describeEntry(
-          root,
-          directory.absolute,
-          directory.identity,
-          absolute,
-          child.name,
-          kind,
-        );
-        if (!described) continue;
-        if (matches) entries.push(described.entry);
-        if (described.entry.kind === "directory" && directory.depth < maxDepth && !ignored.has(child.name)) {
-          queue.push({ absolute, depth: directory.depth + 1, identity: described.identity });
-        } else if (described.entry.kind === "directory" && directory.depth >= maxDepth) {
-          truncated = true;
+        batch.push({ absolute, name: child.name, kind, projectPath, matches });
+        if (matches) pendingMatches += 1;
+        if (batch.length >= batchSize || entries.length + pendingMatches >= maxResults) {
+          await flushSearchBatch(directory, batch);
+          pendingMatches = 0;
         }
       }
+      await flushSearchBatch(directory, batch);
       if (visitedEntries >= maxVisited || entries.length >= maxResults) {
         truncated ||= queueIndex < queue.length - 1;
         break;
@@ -590,6 +607,75 @@ export async function searchWorkspaceContent(
     return !stopped;
   };
 
+  const batchSize = options.afterEntryObserved ? 1 : WORKSPACE_METADATA_BATCH_SIZE;
+  const readConcurrency = options.afterEntryObserved ? 1 : WORKSPACE_CONTENT_READ_CONCURRENCY;
+  type ContentCandidate = {
+    absolute: string;
+    name: string;
+    kind: WorkspaceEntryKind;
+    projectPath: string;
+  };
+  const flushContentBatch = async (
+    directory: SearchQueueEntry,
+    batch: ContentCandidate[],
+  ): Promise<void> => {
+    if (batch.length === 0) return;
+    if (options.afterEntryObserved) {
+      for (const candidate of batch) {
+        await options.afterEntryObserved(candidate.projectPath);
+      }
+    }
+    const described = await describeStableWorkspaceEntries(
+      root,
+      directory.absolute,
+      directory.identity,
+      batch.map(({ absolute, kind }) => ({ absolute, kind })),
+    );
+    const files: SearchableFileCandidate[] = [];
+    for (let index = 0; index < batch.length; index += 1) {
+      const stable = described[index];
+      const candidate = batch[index];
+      if (!stable || !candidate) continue;
+      if (stable.kind === "directory") {
+        if (ignored.has(candidate.name)) continue;
+        if (directory.depth < maxDepth) {
+          queue.push({ absolute: candidate.absolute, depth: directory.depth + 1, identity: stable.identity });
+        } else {
+          truncated = true;
+        }
+        continue;
+      }
+      if (stable.kind !== "file") continue;
+      const estimatedSize = stable.size ?? 0;
+      if (estimatedSize > maxFileBytes) continue;
+      files.push({
+        absolute: candidate.absolute,
+        projectPath: candidate.projectPath,
+        identity: stable.identity,
+        estimatedSize,
+      });
+    }
+    batch.length = 0;
+    if (files.length === 0) return;
+    const outcome = await searchCandidateFilesInWaves(files, {
+      concurrency: readConcurrency,
+      maxFileBytes,
+      maxTotalBytes,
+      bytesRead,
+      pattern,
+      matches,
+      maxResults,
+      deadline,
+      now,
+      signal: options.signal,
+      onCancelled: () => { throw new ContentSearchCancelled(); },
+    });
+    bytesRead = outcome.bytesRead;
+    filesSearched += outcome.filesSearched;
+    if (outcome.truncated) truncated = true;
+    if (outcome.stopped) stopped = true;
+  };
+
   try {
     for (let queueIndex = 0; queueIndex < queue.length && checkContinue(); queueIndex += 1) {
       const directory = queue[queueIndex];
@@ -599,8 +685,20 @@ export async function searchWorkspaceContent(
         directory.identity,
       );
       if (!directoryHandle) continue;
+      const batch: ContentCandidate[] = [];
+      let visitLimitReached = false;
       for await (const child of directoryHandle) {
-        if (!checkContinue()) break;
+        if (options.signal?.aborted) throw new ContentSearchCancelled();
+        if (now() > deadline || matches.length >= maxResults || bytesRead >= maxTotalBytes) {
+          truncated = true;
+          stopped = true;
+          break;
+        }
+        if (visitedEntries >= maxVisited) {
+          truncated = true;
+          visitLimitReached = true;
+          break;
+        }
         visitedEntries += 1;
         if (child.name.startsWith(".") && !options.includeHidden) continue;
         const kind = workspaceDirentKind(child);
@@ -608,49 +706,15 @@ export async function searchWorkspaceContent(
         if (kind !== "file" && !traversable) continue;
         const absolute = resolve(directory.absolute, child.name);
         const projectPath = slashPath(relative(root, absolute));
-        await options.afterEntryObserved?.(projectPath);
-        const described = await describeEntry(
-          root,
-          directory.absolute,
-          directory.identity,
-          absolute,
-          child.name,
-          kind,
-        );
-        if (!described) continue;
-        if (described.entry.kind === "directory") {
-          if (ignored.has(child.name)) continue;
-          if (directory.depth < maxDepth) {
-            queue.push({ absolute, depth: directory.depth + 1, identity: described.identity });
-          } else {
-            truncated = true;
-          }
-          continue;
-        }
-        if (described.entry.kind !== "file") continue;
-        if ((described.entry.size ?? 0) > maxFileBytes) continue;
-        const read = await readSearchableFile(
-          absolute,
-          described.identity,
-          maxFileBytes,
-          maxTotalBytes - bytesRead,
-        );
-        if (read.status === "budget") {
-          truncated = true;
-          stopped = true;
-          break;
-        }
-        bytesRead += read.bytes;
-        if (read.status !== "text") continue;
-        filesSearched += 1;
-        if (appendContentMatches(read.text, projectPath, pattern, matches, maxResults) === "capped") {
-          truncated = true;
-          stopped = true;
-          break;
+        batch.push({ absolute, name: child.name, kind, projectPath });
+        if (batch.length >= batchSize) {
+          await flushContentBatch(directory, batch);
+          if (stopped) break;
         }
       }
+      if (!stopped && batch.length > 0) await flushContentBatch(directory, batch);
       // Leaving `for await` closes the directory handle.
-      if (stopped) break;
+      if (stopped || visitLimitReached) break;
     }
   } catch (error) {
     if (error instanceof ContentSearchCancelled || options.signal?.aborted) {
@@ -662,9 +726,7 @@ export async function searchWorkspaceContent(
   if (options.signal?.aborted) {
     return { matches: [], visitedEntries, filesSearched, bytesRead, truncated: false, cancelled: true };
   }
-  matches.sort((left, right) =>
-    left.projectPath.localeCompare(right.projectPath, "en", { numeric: true })
-    || left.line - right.line);
+  matches.sort(compareContentMatches);
   return { matches, visitedEntries, filesSearched, bytesRead, truncated, cancelled: false };
 }
 

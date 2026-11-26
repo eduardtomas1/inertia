@@ -488,14 +488,14 @@ export function ChatWorkspace({
   } | null>(null);
   const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
-  const ownedTurns = recordsOwnedByConversation(turns, conversationId);
+  const ownedTurns = useMemo(() => recordsOwnedByConversation(turns, conversationId), [conversationId, turns]);
   const queueTurnOwner = latestTurnSummary ?? ownedTurns.at(-1) ?? null;
   const queuedTurnAuthoritative = !queueTurnOwner
     || !terminalProjections?.[turnEventOwner({
       runId: queueTurnOwner.runId,
       turnId: queueTurnOwner.id,
     })];
-  const ownedMessages = recordsOwnedByConversation(messages, conversationId);
+  const ownedMessages = useMemo(() => recordsOwnedByConversation(messages, conversationId), [conversationId, messages]);
   const hasVisibleHistory = ownedMessages.some(({ role }) =>
     role === "user" || role === "assistant");
   const stopTurn = latestTurnSummary
@@ -564,20 +564,14 @@ export function ChatWorkspace({
     const restoreFocus = composerFocusRestorer(document.activeElement);
     void stopWithPromptRestore().then(restoreFocus, () => undefined);
   }, [stopWithPromptRestore]);
-  const ownedActivities = recordsOwnedByConversation(activities, conversationId);
-  const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);
-  const ownedReasonings = recordsOwnedByConversation(reasonings, conversationId);
-  const ownedPlans = recordsOwnedByConversation(plans, conversationId);
-  const ownedCheckpoints = recordsOwnedByConversation(checkpoints, conversationId);
-  const ownedTurnGitArtifacts = recordsOwnedByConversation(
-    turnGitArtifacts,
-    conversationId,
-  );
-  const ownedApprovals = recordsOwnedByConversation(approvals, conversationId);
-  const ownedInputRequests = recordsOwnedByConversation(
-    inputRequests,
-    conversationId,
-  );
+  const ownedActivities = useMemo(() => recordsOwnedByConversation(activities, conversationId), [activities, conversationId]);
+  const ownedSubagents = useMemo(() => recordsOwnedByConversation(subagents, conversationId), [conversationId, subagents]);
+  const ownedReasonings = useMemo(() => recordsOwnedByConversation(reasonings, conversationId), [conversationId, reasonings]);
+  const ownedPlans = useMemo(() => recordsOwnedByConversation(plans, conversationId), [conversationId, plans]);
+  const ownedCheckpoints = useMemo(() => recordsOwnedByConversation(checkpoints, conversationId), [checkpoints, conversationId]);
+  const ownedTurnGitArtifacts = useMemo(() => recordsOwnedByConversation(turnGitArtifacts, conversationId), [conversationId, turnGitArtifacts]);
+  const ownedApprovals = useMemo(() => recordsOwnedByConversation(approvals, conversationId), [approvals, conversationId]);
+  const ownedInputRequests = useMemo(() => recordsOwnedByConversation(inputRequests, conversationId), [conversationId, inputRequests]);
   const agentContextRequest = [...ownedInputRequests].reverse().find(
     (request) => request.conversationContextRequest !== undefined,
   )?.conversationContextRequest ?? null;

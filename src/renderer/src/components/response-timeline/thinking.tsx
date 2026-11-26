@@ -3,8 +3,8 @@ import clsx from "clsx";
 import {
   advanceThinkingLine,
   createReasoningLinesReader,
+  createReasoningSummaryReader,
   IDLE_THINKING_LINE,
-  parseReasoningSummary,
   reasoningLineAt,
   thinkingLineWakeAt,
   type ReasoningLine,
@@ -20,7 +20,11 @@ export function ReasoningSummary({
   content: string;
   streaming?: boolean;
 }): React.JSX.Element {
-  const segments = useMemo(() => parseReasoningSummary(content), [content]);
+  const [readReasoningSummary] = useState(createReasoningSummaryReader);
+  const segments = useMemo(
+    () => readReasoningSummary(content),
+    [content, readReasoningSummary],
+  );
   const indicator = useWorkingIndicator();
   const stepOrb = streaming && usesActivityOrbs(indicator)
     ? resolveOrbMotion(indicator, ACTIVITY_ORB_MOTION.reasoning)

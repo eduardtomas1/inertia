@@ -391,6 +391,7 @@ async function setup(options: {
     programFiles: root,
     systemRoot: join(root, "Windows"),
     documents: async () => options.documents ?? [],
+    workspaceRoot: work,
     run: fake.run,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
@@ -587,6 +588,7 @@ describe("CadExporter", () => {
       platform: "win32",
       programFiles: root,
       documents: async () => [],
+      workspaceRoot: root,
       run: fake.run,
     });
     expect(await exporter.headless()).toBe(true);
@@ -741,6 +743,97 @@ describe("CadExporter", () => {
     const written: CadExportResult = await exporter.export({ source: dxf, format: "dwg" });
     // Its own earlier export is replaced, not stamped.
     expect(await exporter.destinationFor({ source: dxf, format: "dwg" })).toBe(written.path);
+  });
+
+  it("refuses uncontained out-of-workspace CAD sources, templates, and symlinks without invoking AutoCAD or writing outside", async () => {
+    const { root, work, exporter, runs } = await setup();
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    const outsideDwg = join(outside, "secret.dwg");
+    const outsideDxf = join(outside, "other.dxf");
+    writeFileSync(outsideDwg, "AC1032 confidential");
+    writeFileSync(outsideDxf, "0\nEOF");
+
+    const dwgRefusal = await failureOf(exporter.export({ source: outsideDwg, format: "png" }));
+    expect(dwgRefusal.code).toBe("INVALID_REQUEST");
+
+    const dxfRefusal = await failureOf(exporter.export({ source: outsideDxf, format: "pdf" }));
+    expect(dxfRefusal.code).toBe("INVALID_REQUEST");
+
+    const insideDxf = join(work, "inside.dxf");
+    writeFileSync(insideDxf, "0\nEOF");
+    const templateRefusal = await failureOf(exporter.export({ source: insideDxf, format: "dwg", template: outsideDwg }));
+    expect(templateRefusal.code).toBe("INVALID_REQUEST");
+
+    const linkedSource = join(work, "linked.dwg");
+    symlinkSync(outsideDwg, linkedSource);
+    const symlinkRefusal = await failureOf(exporter.export({ source: linkedSource, format: "png" }));
+    expect(symlinkRefusal.code).toBe("INVALID_REQUEST");
+
+    expect(runs).toEqual([]);
+    expect(readdirSync(outside).sort()).toEqual(["other.dxf", "secret.dwg"]);
+  });
+
+  it("delivers approved exports to unchanged, newly created, and stamped destinations across clock ticks while refusing drift", async () => {
+    let clock = Date.UTC(2026, 10, 26, 12, 0, 1);
+    const { work, exporter, file } = await setup({ now: () => clock });
+    const dxf = file("approved.dxf", "0\nEOF");
+
+    // 1. Existing folder: approved destination succeeds unchanged.
+    const existingAuth = await exporter.authorizeExport({ source: dxf, format: "dwg" }, work);
+    expect(existingAuth.target?.path).toBe(join(work, "approved.dwg"));
+    const existingResult = await exporter.export({ source: dxf, format: "dwg" }, undefined, work, existingAuth);
+    expect(existingResult.path).toBe(join(work, "approved.dwg"));
+
+    // 2. Newly created subfolder under an approved ancestor succeeds.
+    const nestedTarget = join(work, "nested", "sheet", "out.dwg");
+    const nestedAuth = await exporter.authorizeExport({ source: dxf, format: "dwg", destination: nestedTarget }, work);
+    expect(nestedAuth.target?.path).toBe(nestedTarget);
+    const nestedResult = await exporter.export(
+      { source: dxf, format: "dwg", destination: nestedTarget },
+      undefined,
+      work,
+      nestedAuth,
+    );
+    expect(nestedResult.path).toBe(nestedTarget);
+
+    // 3. Stamped default destination survives a clock second boundary without recomputing a new stamp.
+    const occupiedDxf = file("occupied.dxf", "0\nEOF");
+    writeFileSync(join(work, "occupied.dwg"), "user owned file");
+    const stampedAuth = await exporter.authorizeExport({ source: occupiedDxf, format: "dwg" }, work);
+    expect(stampedAuth.target?.stamped).toBe(true);
+    clock += 5_000;
+    const stampedResult = await exporter.export({ source: occupiedDxf, format: "dwg" }, undefined, work, stampedAuth);
+    expect(stampedResult.path).toBe(stampedAuth.target?.path);
+
+    // 4. Another file appearing at the approved destination after approval is refused.
+    const driftDxf = file("drift.dxf", "0\nEOF");
+    const authorization = await exporter.authorizeExport({ source: driftDxf, format: "dwg" }, work);
+    expect(authorization.target?.path).toBe(join(work, "drift.dwg"));
+    writeFileSync(join(work, "drift.dwg"), "external file");
+    const drifted = await failureOf(exporter.export({ source: driftDxf, format: "dwg" }, undefined, work, authorization));
+    expect(drifted.code).toBe("DESTINATION_EXISTS");
+    expect(readdirSync(work).filter((name) => name.startsWith("drift (Inertia export"))).toEqual([]);
+    expect(readFileSync(join(work, "drift.dwg"), "utf8")).toBe("external file");
+
+    // 5. Replacing an intermediate subfolder with a symlink after authorization is refused by pinned publication.
+    const outside = join(work, "..", "outside-redirect");
+    mkdirSync(outside, { recursive: true });
+    const symlinkTarget = join(work, "symlink-dir", "escaped.dwg");
+    const symlinkAuth = await exporter.authorizeExport({ source: dxf, format: "dwg", destination: symlinkTarget }, work);
+    symlinkSync(outside, join(work, "symlink-dir"));
+    const escaped = await failureOf(
+      exporter.export({ source: dxf, format: "dwg", destination: symlinkTarget }, undefined, work, symlinkAuth),
+    );
+    expect(escaped.code).toBe("EXPORT_FAILED");
+    expect(readdirSync(outside)).toEqual([]);
+
+    // 6. Replacing an owned earlier export through pinned publication overwrites cleanly without leaving .tmp files.
+    const replaceAuth = await exporter.authorizeExport({ source: dxf, format: "dwg" }, work);
+    expect(replaceAuth.target?.path).toBe(join(work, "approved.dwg"));
+    const replaced = await exporter.export({ source: dxf, format: "dwg" }, undefined, work, replaceAuth);
+    expect(replaced.path).toBe(join(work, "approved.dwg"));
+    expect(readdirSync(work).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 });
 

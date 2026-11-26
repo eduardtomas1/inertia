@@ -13,6 +13,7 @@ import {
   type GitRepositoryStatus,
 } from "./git";
 import {
+  hasDirectGitWorktreeRoot,
   repositoryMetadataMarkerIdentity,
   repositoryRoot,
 } from "./git/paths";
@@ -563,36 +564,40 @@ export async function discoverWorkspaceGitRepositories(
           "The repository folder changed while it was being inspected.",
         );
       }
+      const targetRoot = secureRoot?.root ?? candidate.absolutePath;
       const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
-        secureRoot?.root ?? candidate.absolutePath,
+        targetRoot,
         { deadlineAt },
       );
+      const statusOptions = {
+        deadlineAt,
+        ...(inputLimits.scanAuthorityGeneration
+          ? (() => {
+              const identity = validatedGitScanIdentity(
+                targetRoot,
+                metadataMarkerIdentity,
+              );
+              return {
+                scan: {
+                  authorityGeneration:
+                    inputLimits.scanAuthorityGeneration,
+                  identity,
+                  invalidation:
+                    gitScanCoordinator.currentInvalidation(identity),
+                  scope: "workspace" as const,
+                },
+              };
+            })()
+          : {}),
+      };
+      const directWorktreeRoot = !statusOptions.scan
+        && await hasDirectGitWorktreeRoot(targetRoot, { deadlineAt });
       const status = await getRepositoryStatus(
-        secureRoot?.root ?? candidate.absolutePath,
-        {
-          deadlineAt,
-          ...(inputLimits.scanAuthorityGeneration
-            ? (() => {
-                const identity = validatedGitScanIdentity(
-                  secureRoot?.root ?? candidate.absolutePath,
-                  metadataMarkerIdentity,
-                );
-                return {
-                  scan: {
-                    authorityGeneration:
-                      inputLimits.scanAuthorityGeneration,
-                    identity,
-                    invalidation:
-                      gitScanCoordinator.currentInvalidation(identity),
-                    scope: "workspace" as const,
-                  },
-                };
-              })()
-            : {}),
-        },
+        targetRoot,
+        directWorktreeRoot ? { ...statusOptions, resolvedRoot: targetRoot } : statusOptions,
       );
       const verifiedMetadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
-        secureRoot?.root ?? candidate.absolutePath,
+        targetRoot,
         { deadlineAt },
       );
       if (metadataMarkerIdentity !== verifiedMetadataMarkerIdentity) {
@@ -781,15 +786,20 @@ export async function resolveWorkspaceGitRepositoryIdentity(
       "The repository folder changed while it was being inspected.",
     );
   }
-  const resolvedRepositoryRoot = await repositoryRoot(canonical, { signal });
   if (
-    canonicalIdentity(resolvedRepositoryRoot)
-    !== canonicalIdentity(canonical)
+    normalized !== "."
+    || canonicalIdentity(canonical) !== canonicalIdentity(candidate)
   ) {
-    throw new GitError(
-      "not-repository",
-      "The selected folder is not a distinct Git repository.",
-    );
+    const resolvedRepositoryRoot = await repositoryRoot(canonical, { signal });
+    if (
+      canonicalIdentity(resolvedRepositoryRoot)
+      !== canonicalIdentity(canonical)
+    ) {
+      throw new GitError(
+        "not-repository",
+        "The selected folder is not a distinct Git repository.",
+      );
+    }
   }
   const metadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
     secureRoot?.root ?? canonical,
@@ -815,7 +825,10 @@ export async function resolveWorkspaceGitRepository(
     secureFiles,
     signal,
   );
-  const status = await getRepositoryStatus(repository.root, { signal });
+  const status = await getRepositoryStatus(repository.root, {
+    signal,
+    resolvedRoot: repository.root,
+  });
   const verifiedMetadataMarkerIdentity = await repositoryMetadataMarkerIdentity(
     repository.root,
     { signal },

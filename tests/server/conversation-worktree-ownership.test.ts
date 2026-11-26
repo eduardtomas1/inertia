@@ -22,6 +22,9 @@ import {
   removeOwnedWorktree,
 } from "../../src/server/git";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
+import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
+import { createConversationCommandHandler, type ConversationCommandDependencies } from "../../src/server/runtime/commands/conversation-commands";
+import { WorkspaceRunController } from "../../src/server/runtime/workspace-run-controller";
 import type { ConversationShell, ServerEvent } from "../../src/shared/contracts";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 
@@ -784,5 +787,194 @@ describe("ordinary conversation worktree ownership", () => {
     });
     expect(existsSync(retainedPath)).toBe(false);
     client.socket.close();
+  });
+
+  it("serializes conversation.delete Git mutations behind WorkspaceRunController and enforces an exclusive checkout lock", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-delete-serialized-"));
+    directories.push(root);
+    const data = join(root, "data");
+    const workspace = join(root, "workspace");
+    mkdirSync(data);
+    mkdirSync(workspace);
+    execFileSync("git", ["init", "--initial-branch=main"], { cwd: workspace });
+    execFileSync("git", ["config", "user.email", "runtime@example.invalid"], {
+      cwd: workspace,
+    });
+    execFileSync("git", ["config", "user.name", "Runtime Test"], {
+      cwd: workspace,
+    });
+    writeFileSync(join(workspace, "tracked.txt"), "tracked\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: workspace });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: workspace });
+
+    const store = new RuntimeStore(join(data, "inertia.sqlite"), workspace, {
+      recoverInterruptedRuns: false,
+    });
+    try {
+      const project = store.createProject(
+        "Serialized delete",
+        workspace,
+        await inspectProjectIdentity(workspace),
+      );
+      const createOwnedConversation = async (title: string) => {
+        const conversation = store.createConversation(project.id, title);
+        const worktreePath = join(data, "worktrees", conversation.id);
+        mkdirSync(join(data, "worktrees"), { recursive: true });
+        const branch = `inertia/${conversation.id.slice(0, 8)}`;
+        const created = await createWorktreeWithOwnershipReceipt(
+          workspace,
+          worktreePath,
+          { branch, createBranch: true, startPoint: "main" },
+          {
+            beforeAdd: (ownershipToken) => {
+              store.conversationWorktrees.beginCreation(
+                conversation.id,
+                worktreePath,
+                branch,
+                ownershipToken,
+              );
+            },
+            added: (identity) => {
+              store.conversationWorktrees.recordCreation(
+                conversation.id,
+                worktreePath,
+                branch,
+                identity,
+              );
+            },
+            notAdded: () => {
+              store.conversationWorktrees.rejectCreation(conversation.id);
+            },
+          },
+        );
+        store.updateConversation(conversation.id, {
+          branch: created.branch ?? branch,
+          worktreePath: created.root,
+        });
+        return { conversation, worktreePath: created.root };
+      };
+
+      const workspaceRuns = new WorkspaceRunController<WebSocket>(
+        store,
+        {} as never,
+        () => undefined,
+        () => false,
+        () => undefined,
+      );
+      const providerTerminalResumes = new ProviderTerminalResumeRegistry(
+        store.conversationWork,
+      );
+      const handler = createConversationCommandHandler({
+        store,
+        conversationAttachments: {
+          release: async () => undefined,
+        } as unknown as ConversationCommandDependencies["conversationAttachments"],
+        providers: {} as unknown as ConversationCommandDependencies["providers"],
+        backendProfileController: {} as unknown as ConversationCommandDependencies["backendProfileController"],
+        workspaceRuns,
+        providerTerminalResumes,
+        runtimeSync: {
+          broadcast: () => undefined,
+        } as unknown as ConversationCommandDependencies["runtimeSync"],
+        dataDirectory: data,
+        deletedConversationIds: new Set<string>(),
+        publicError: (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        send: () => undefined,
+        broadcastSnapshot: () => undefined,
+        rememberDeletedConversation: () => undefined,
+        forgetRemoteTranscript: () => undefined,
+      });
+
+      const first = await createOwnedConversation("Serialized chat");
+      // Remove the linked worktree directory so removeOwnedWorktree verifies
+      // it absent once serialized, and seed a checkpoint ref to prove Git
+      // ref mutations wait behind WorkspaceRunController serialization.
+      execFileSync("git", ["worktree", "remove", "--force", "--", first.worktreePath], {
+        cwd: workspace,
+      });
+      const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        cwd: workspace,
+        encoding: "utf8",
+      }).trim();
+      const checkpointRef = `refs/inertia/checkpoints/${first.conversation.id}/${randomUUID()}`;
+      execFileSync("git", ["update-ref", checkpointRef, headSha], { cwd: workspace });
+      const refExists = (ref: string): boolean => {
+        try {
+          execFileSync("git", ["show-ref", "--verify", "--quiet", ref], { cwd: workspace });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      expect(refExists(checkpointRef)).toBe(true);
+
+      let gateEntered!: () => void;
+      const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
+      let releaseGate!: () => void;
+      const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+      const activeSourceControl = workspaceRuns.trackSourceControl(
+        "Hold repository lock",
+        project.id,
+        undefined,
+        workspace,
+        randomUUID(),
+        async () => {
+          gateEntered();
+          await gate;
+        },
+        { serializationRoot: workspace },
+      );
+      await entered;
+
+      let deleteFinished = false;
+      const deleting = handler({} as WebSocket, {
+        type: "conversation.delete",
+        requestId: randomUUID(),
+        payload: { conversationId: first.conversation.id },
+      }).then((outcome) => {
+        deleteFinished = true;
+        return outcome;
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 75));
+      expect(deleteFinished).toBe(false);
+      expect(refExists(checkpointRef)).toBe(true);
+
+      releaseGate();
+      await activeSourceControl;
+      await expect(deleting).resolves.toBe("mutation");
+      expect(refExists(checkpointRef)).toBe(false);
+
+      const second = await createOwnedConversation("Nested checkout active");
+      const nestedFolder = join(second.worktreePath, "nested");
+      mkdirSync(nestedFolder, { recursive: true });
+      const nestedProject = store.createProject("Nested", nestedFolder);
+      expect(store.conversationWork.reserveCheckout(
+        "nested-active-work",
+        nestedProject.id,
+        nestedFolder,
+      )).toBe(true);
+      try {
+        await expect(handler({} as WebSocket, {
+          type: "conversation.delete",
+          requestId: randomUUID(),
+          payload: { conversationId: second.conversation.id },
+        })).rejects.toThrow("Stop active work before deleting this thread.");
+        expect(existsSync(second.worktreePath)).toBe(true);
+      } finally {
+        store.conversationWork.release("nested-active-work");
+      }
+
+      // Once the nested checkout lock is released, deletion acquires the
+      // exclusive checkout lock and proceeds into removeOwnedWorktree.
+      await expect(handler({} as WebSocket, {
+        type: "conversation.delete",
+        requestId: randomUUID(),
+        payload: { conversationId: second.conversation.id },
+      })).rejects.toThrow(/isolated worktree is still registered/iu);
+      expect(store.conversationWork.hasExclusiveCheckout(second.worktreePath)).toBe(false);
+    } finally {
+      store.close();
+    }
   });
 });

@@ -29,6 +29,7 @@ import { useConversationWorkspaceOptions } from "../../hooks/useConversationWork
 import { useDesktopTools } from "../../hooks/useDesktopTools";
 import type { useInertiaConnection } from "../../hooks/useInertiaConnection";
 import { usePlanSteps } from "../../hooks/usePlanSteps";
+import { runningTurnPlanMode } from "../../utils/planFromText";
 import { useStableActions, useStableController } from "../../hooks/useStableController";
 import { useWorkspaceLayout } from "../../hooks/useWorkspaceLayout";
 import { useWorkspaceTools } from "../../hooks/useWorkspaceTools";
@@ -169,6 +170,11 @@ export function useDetachedWorkspaceScene({
     projection.messages,
     conversation?.status ?? "idle",
     projection.streaming,
+    runningTurnPlanMode(
+      projection.turns,
+      conversation?.interactionMode ?? null,
+      projection.latestTurnSummary?.id ?? null,
+    ),
   );
   const turnActions = useMemo(() => createWorkspaceTurnActions({
     conversation,

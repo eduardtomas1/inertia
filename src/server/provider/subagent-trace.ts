@@ -39,19 +39,22 @@ const TERMINAL_SUBAGENT_STATUSES = new Set<SubagentTraceStatus>([
 // deterministic scrubber at this persistence boundary without retaining the
 // raw payload. This is defense in depth; provider adapters should emit concise
 // summaries, not command/environment dumps.
-const SECRET_PATTERNS: readonly (readonly [RegExp, string])[] = [
-  [/-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----(?:[^-]|-(?!----)){0,65536}(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY-----)?/gu, "[redacted]"],
-  [/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]{8,}={0,2}\b/giu, "[redacted]"],
-  [/\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu, "[redacted]"],
-  [/\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gu, "[redacted]"],
-  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/gu, "[redacted]"],
-  [/\bAIza[0-9A-Za-z_-]{30,}/gu, "[redacted]"],
-  [/\b(?:xai-|gsk_)[A-Za-z0-9]{20,}/gu, "[redacted]"],
-  [/\bxox[abeoprs]-[A-Za-z0-9-]{10,255}/gu, "[redacted]"],
-  [/\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|AUTH_TOKEN|aws_secret_access_key|aws_session_token)\s*[:=]\s*[^\s,;]+/giu, "[redacted]"],
-  [/("(?:[A-Za-z0-9_-]{0,40}[_-])?(?:api[_-]?key|token|secret|password|passwd)"\s{0,8}:\s{0,8})"[^"\n]{0,4096}"/giu, "$1\"[redacted]\""],
-  [/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s:@/]{1,256}:)[^\s@/]{1,256}@/giu, "$1[redacted]@"],
-];
+const PRIVATE_KEY_PATTERN =
+  /-----BEGIN [A-Z0-9 ]{0,40}PRIVATE KEY-----(?:[^-]|-(?!----)){0,65536}(?:-----END [A-Z0-9 ]{0,40}PRIVATE KEY-----)?/gu;
+const AUTH_HEADER_PATTERN = /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]{8,}={0,2}\b/giu;
+const PREFIXED_KEY_PATTERN = /\b(?:sk|rk|pk|api|key|token)[-_][A-Za-z0-9_-]{12,}\b/giu;
+const GITHUB_TOKEN_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255})\b/gu;
+const AWS_KEY_PATTERN = /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/gu;
+const GOOGLE_KEY_PATTERN = /\bAIza[0-9A-Za-z_-]{30,}/gu;
+const PROVIDER_KEY_PATTERN = /\b(?:xai-|gsk_)[A-Za-z0-9]{20,}/gu;
+const SLACK_TOKEN_PATTERN = /\bxox[abeoprs]-[A-Za-z0-9-]{10,255}/gu;
+const ENV_KEY_PATTERN =
+  /\b(?:ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|ACCESS_TOKEN|AUTH_TOKEN|aws_secret_access_key|aws_session_token)\s*[:=]\s*[^\s,;]+/giu;
+const JSON_SECRET_PATTERN =
+  /("(?:[A-Za-z0-9_-]{0,40}[_-])?(?:api[_-]?key|token|secret|password|passwd)"\s{0,8}:\s{0,8})"[^"\n]{0,4096}"/giu;
+const URL_CREDENTIALS_PATTERN = /(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s:@/]{1,256}:)[^\s@/]{1,256}@/giu;
+
+const ANY_WHITESPACE_PATTERN = /\s/u;
 
 export function isTerminalSubagentStatus(status: SubagentTraceStatus): boolean {
   return TERMINAL_SUBAGENT_STATUSES.has(status);
@@ -59,8 +62,40 @@ export function isTerminalSubagentStatus(status: SubagentTraceStatus): boolean {
 
 export function scrubSubagentSecrets(value: string): string {
   let text = value;
-  for (const [pattern, replacement] of SECRET_PATTERNS) {
-    text = text.replace(pattern, replacement);
+  if (text.includes("PRIVATE KEY")) {
+    text = text.replace(PRIVATE_KEY_PATTERN, "[redacted]");
+  }
+  if (ANY_WHITESPACE_PATTERN.test(text)) {
+    text = text.replace(AUTH_HEADER_PATTERN, "[redacted]");
+  }
+  const hasDashOrUnderscore = text.includes("-") || text.includes("_");
+  if (hasDashOrUnderscore) {
+    text = text.replace(PREFIXED_KEY_PATTERN, "[redacted]");
+  }
+  if (text.includes("gh") || text.includes("github_pat_")) {
+    text = text.replace(GITHUB_TOKEN_PATTERN, "[redacted]");
+  }
+  if (text.includes("AKIA") || text.includes("ASIA")) {
+    text = text.replace(AWS_KEY_PATTERN, "[redacted]");
+  }
+  if (text.includes("AIza")) {
+    text = text.replace(GOOGLE_KEY_PATTERN, "[redacted]");
+  }
+  if (text.includes("xai-") || text.includes("gsk_")) {
+    text = text.replace(PROVIDER_KEY_PATTERN, "[redacted]");
+  }
+  if (text.includes("xox")) {
+    text = text.replace(SLACK_TOKEN_PATTERN, "[redacted]");
+  }
+  const hasColon = text.includes(":");
+  if (hasColon || text.includes("=")) {
+    text = text.replace(ENV_KEY_PATTERN, "[redacted]");
+  }
+  if (hasColon && text.includes("\"")) {
+    text = text.replace(JSON_SECRET_PATTERN, "$1\"[redacted]\"");
+  }
+  if (text.includes("://") && text.includes("@")) {
+    text = text.replace(URL_CREDENTIALS_PATTERN, "$1[redacted]@");
   }
   return text;
 }

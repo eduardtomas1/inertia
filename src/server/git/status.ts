@@ -163,6 +163,8 @@ export function parseNumstat(
 export interface GitStatusOptions {
   deadlineAt?: number;
   signal?: AbortSignal;
+  /** Pre-verified canonical repository root to avoid a redundant rev-parse spawn. */
+  resolvedRoot?: string;
   scan?: Omit<GitScanRequest, "deadlineAt" | "optionsKey" | "signal">;
 }
 
@@ -203,6 +205,7 @@ export async function getRepositoryStatus(
   options: GitStatusOptions = {},
 ): Promise<GitRepositoryStatus> {
   const root = options.scan?.identity.repositoryRoot
+    ?? options.resolvedRoot
     ?? await repositoryRoot(repositoryPath, options);
   return await resolvedRepositoryStatus(root, options);
 }
@@ -251,36 +254,44 @@ export async function inspectRepositoryStatusAndHead(
   const hasCurrentHead = parsed.oid === null
     ? await hasHead(root, options)
     : parsed.oid !== "(initial)";
+  const hasTrackedChanges = statusResult.truncated
+    || parsed.files.some((file) => file.status !== "untracked");
   const [statsInspection, routingInspection] = await Promise.allSettled([
-    runGitInspection(
-      root,
-      hasCurrentHead
-        ? [
-            "diff",
-            "--numstat",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "HEAD",
-            "--",
-          ]
-        : [
-            "diff",
-            "--numstat",
-            "-z",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--cached",
-            "--",
-          ],
-      {
-        deadlineAt: options.deadlineAt,
-        signal: options.signal,
-        maxOutputBytes: DEFAULT_OUTPUT_BYTES,
-        truncateOutput: true,
-        failureMessage: "Unable to calculate repository change totals.",
-      },
-    ),
+    hasTrackedChanges
+      ? runGitInspection(
+          root,
+          hasCurrentHead
+            ? [
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+                "--",
+              ]
+            : [
+                "diff",
+                "--numstat",
+                "-z",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--cached",
+                "--",
+              ],
+          {
+            deadlineAt: options.deadlineAt,
+            signal: options.signal,
+            maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+            truncateOutput: true,
+            failureMessage: "Unable to calculate repository change totals.",
+          },
+        )
+      : Promise.resolve({
+          stdout: Buffer.alloc(0),
+          stderr: Buffer.alloc(0),
+          truncated: false,
+        }),
     inspectGitRemoteRouting(root, parsed.branch, options),
   ]);
   // Both branches own Git children. Wait for both to settle on cancellation
@@ -349,6 +360,11 @@ export async function repositoryChangeCounts(
     headInspection,
   ]);
   const files = parsePorcelain(statusResult.stdout).files;
+  const hasTrackedChanges = statusResult.truncated
+    || files.some((file) => file.status !== "untracked");
+  if (!hasTrackedChanges) {
+    return { filesChanged: files.length, insertions: 0, deletions: 0 };
+  }
   const stats = parseNumstat((await runGitInspection(
     root,
     [

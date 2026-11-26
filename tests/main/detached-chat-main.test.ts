@@ -1293,4 +1293,68 @@ describe("detached chat terminal handoff", () => {
       await cleanup(value);
     }
   });
+
+  it("preserves draft and terminal handoffs when reopening a closing detached window", async () => {
+    const value = fixture();
+    try {
+      const first = await openFirst(value, TERMINAL_IDS);
+      first.emit("close");
+
+      const reopenedPromise = value.ipc.invoke(
+        DETACHED_CHAT_IPC.open,
+        eventFor(value.main.webContents),
+        {
+          conversationId: FIRST_ID,
+          title: "Reopened chat",
+          draft: "fresh draft after close",
+          terminalIds: NEWER_TERMINAL_IDS,
+        },
+      );
+      await Promise.resolve();
+      expect(value.popups).toHaveLength(1);
+
+      first.destroyed = true;
+      first.webContents.destroyed = true;
+      first.emit("closed");
+
+      await expect(reopenedPromise).resolves.toMatchObject({
+        disposition: "opened",
+        conversationId: FIRST_ID,
+      });
+      expect(value.popups).toHaveLength(2);
+      const second = value.popups[1]!;
+      expect(await value.ipc.invoke(
+        DETACHED_CHAT_IPC.getWindowContext,
+        eventFor(second.webContents),
+      )).toEqual({
+        role: "detached-chat",
+        conversationId: FIRST_ID,
+        alwaysOnTop: false,
+        draft: "fresh draft after close",
+        terminalIds: NEWER_TERMINAL_IDS,
+      });
+    } finally {
+      await cleanup(value);
+    }
+  });
+
+  it("does not invoke onDock when shutdown runs before a scheduled dock closes the window", async () => {
+    const value = fixture();
+    try {
+      const popup = await openFirst(value);
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.dock,
+        eventFor(popup.webContents),
+        "docked draft",
+        NEWER_TERMINAL_IDS,
+      );
+      await value.coordinator.shutdown();
+      await afterIpcReply();
+      await afterIpcReply();
+      expect(popup.destroyed).toBe(true);
+      expect(value.docked).not.toHaveBeenCalled();
+    } finally {
+      await cleanup(value);
+    }
+  });
 });

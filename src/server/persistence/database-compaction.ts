@@ -450,10 +450,14 @@ export class DatabaseCompactionManager {
     }
   }
 
-  async cancelAndWait(): Promise<void> {
+  beginShutdown(): void {
     this.stop();
-    const operation = this.inFlight;
     this.inFlightAbort?.abort();
+  }
+
+  async cancelAndWait(): Promise<void> {
+    const operation = this.inFlight;
+    this.beginShutdown();
     if (!operation) return;
     if (this.state === "vacuuming") {
       console.warn(`Waiting for database compaction to finish before closing. ${DATABASE_VACUUM_UNINTERRUPTIBLE_MESSAGE}`);

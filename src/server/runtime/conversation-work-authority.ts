@@ -146,6 +146,27 @@ export class ConversationWorkAuthority {
     return this.reserveIdentity(reservationId, projectId, checkoutPath, "exclusive");
   }
 
+  /**
+   * Atomically upgrades an already-held reservation (such as a conversation deletion
+   * guard) to an exclusive checkout lock when no other reservation overlaps.
+   */
+  upgradeToExclusiveCheckout(
+    reservationId: string,
+    projectId: string,
+    checkoutPath: string,
+  ): boolean {
+    const existing = this.workspaceByReservation.get(reservationId);
+    const checkoutIdentity = canonicalCheckoutIdentity(checkoutPath);
+    for (const [id, reservation] of this.workspaceByReservation) {
+      if (id === reservationId) continue;
+      if (overlappingCheckout(checkoutIdentity, reservation.checkoutIdentity)) {
+        return false;
+      }
+    }
+    if (existing) this.release(reservationId);
+    return this.reserveIdentity(reservationId, projectId, checkoutPath, "exclusive");
+  }
+
   hasExclusiveCheckout(checkoutPath: string): boolean {
     const identity = canonicalCheckoutIdentity(checkoutPath);
     return [...this.workspaceByReservation.values()].some((reservation) =>

@@ -346,6 +346,11 @@ export class RuntimeStore {
     reconcileRecoveryImportJournal(this.database);
   }
 
+  beginShutdown(): void {
+    this.compactionManager.beginShutdown();
+    this.backupManager.beginShutdown();
+  }
+
   async backupAndClose(): Promise<void> {
     return closeDatabaseAfterBackupCancellation(this.database, this.backupManager, this.compactionManager);
   }

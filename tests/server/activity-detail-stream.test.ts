@@ -1,8 +1,15 @@
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import type { AgentActivity } from "../../src/shared/contracts";
 import { applyActivityDetailPatch } from "../../src/shared/activity-detail";
-import { ACTIVITY_DETAIL_PREVIEW_CHARS, activityDetailPreview } from "../../src/server/persistence/activity-detail-preview";
+import {
+  ACTIVITY_DETAIL_PREVIEW_CHARS,
+  activityDetailPreview,
+  activityPreviewFromProjectedRow,
+  buildActivityPreviewQuery,
+  type ProjectedActivityRow,
+} from "../../src/server/persistence/activity-detail-preview";
 import { activityDetailPatch } from "../../src/server/runtime/turns/activity-detail-patch";
 import { materializeActivityEvent, withFullActivityDetail } from "../../src/renderer/src/utils/activityDetailStream";
 
@@ -48,6 +55,64 @@ describe("history previews", () => {
     expect(preview.detail).toMatch(/… \[\d+ or more characters omitted\] …/u);
     const status = activityDetailPreview(activity(`${"s".repeat(5_000)}\nError:\nlate`, { kind: "status" }));
     expect(status.detail).toBe("s".repeat(ACTIVITY_DETAIL_PREVIEW_CHARS));
+  });
+
+  it("matches JavaScript activityDetailPreview identically via SQLite preview projection", () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE activities (
+          id TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          turn_id TEXT,
+          kind TEXT NOT NULL,
+          title TEXT NOT NULL,
+          detail TEXT,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+      `);
+      const cases: Array<{ id: string; kind: AgentActivity["kind"]; detail: string | null }> = [
+        { id: "null", kind: "command", detail: null },
+        { id: "short", kind: "command", detail: "short output" },
+        { id: "exact-boundary", kind: "command", detail: "a".repeat(ACTIVITY_DETAIL_PREVIEW_CHARS) },
+        { id: "plain-long", kind: "command", detail: "x".repeat(12_000) },
+        { id: "leading-error-short", kind: "command", detail: `Error:\n${"e".repeat(2_500)}` },
+        { id: "leading-error-long", kind: "command", detail: `Error:\n${"e".repeat(10_000)}` },
+        { id: "early-error", kind: "tool", detail: `${"a".repeat(500)}\nError:\n${"b".repeat(8_000)}` },
+        { id: "boundary-error", kind: "file", detail: `${"a".repeat(2_048)}\nError:\n${"c".repeat(6_000)}` },
+        { id: "late-error", kind: "command", detail: `${"a".repeat(9_000)}\nError:\nboom\n${"d".repeat(6_000)}` },
+        { id: "status-long", kind: "status", detail: `${"s".repeat(5_000)}\nError:\nignored` },
+        { id: "error-kind", kind: "error", detail: "e".repeat(9_000) },
+        { id: "non-ascii", kind: "command", detail: `${"é".repeat(1_500)}😀${"z".repeat(4_000)}\nError:\nutf8` },
+        { id: "surrogate-cut", kind: "command", detail: `${"a".repeat(ACTIVITY_DETAIL_PREVIEW_CHARS - 1)}😀${"b".repeat(3_000)}` },
+        { id: "nul-before-error", kind: "command", detail: `${"a".repeat(3_000)}\0\nError:\nkept after nul` },
+      ];
+      const insert = db.prepare(`
+        INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at)
+        VALUES (?, 'conv', 'run', 'turn', ?, 'cmd', ?, 'completed', '2030-01-01T00:00:00.000Z')
+      `);
+      for (const c of cases) insert.run(c.id, c.kind, c.detail);
+
+      const rows = db.prepare(
+        buildActivityPreviewQuery("1 = 1", "created_at ASC, id ASC"),
+      ).all() as ProjectedActivityRow[];
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      for (const c of cases) {
+        const projected = byId.get(c.id)!;
+        expect(activityPreviewFromProjectedRow(projected)).toEqual(
+          activityDetailPreview({ kind: c.kind, detail: c.detail }),
+        );
+      }
+      // Verify long non-error-excerpt rows are projected inside SQLite while command/non-ASCII rows stay exact.
+      expect(byId.get("status-long")!.detail_projected).toBe(1);
+      expect(byId.get("status-long")!.detail!.length).toBe(ACTIVITY_DETAIL_PREVIEW_CHARS);
+      expect(byId.get("non-ascii")!.detail_projected).toBe(0);
+      expect(activityPreviewFromProjectedRow(byId.get("nul-before-error")!).detail).toContain("kept after nul");
+    } finally {
+      db.close();
+    }
   });
 });
 

@@ -8,6 +8,19 @@ import {
 } from "../shared/contracts/workspace";
 import type { WorkspaceEntryIdentity } from "./workspace-traversal";
 
+export const WORKSPACE_CONTENT_READ_CONCURRENCY = 8;
+
+const utf8Decoder = new TextDecoder("utf-8");
+const contentMatchPathCollator = new Intl.Collator("en", { numeric: true });
+
+export function compareContentMatches(
+  left: WorkspaceContentMatch,
+  right: WorkspaceContentMatch,
+): number {
+  return contentMatchPathCollator.compare(left.projectPath, right.projectPath)
+    || left.line - right.line;
+}
+
 function sameIdentity(
   left: WorkspaceEntryIdentity,
   right: WorkspaceEntryIdentity,
@@ -15,10 +28,17 @@ function sameIdentity(
   return left.dev === right.dev && left.ino === right.ino;
 }
 
-type SearchableFileRead =
+export type SearchableFileRead =
   | { status: "text"; text: string; bytes: number }
   | { status: "skipped"; bytes: number }
   | { status: "budget" };
+
+export interface SearchableFileCandidate {
+  absolute: string;
+  projectPath: string;
+  identity: WorkspaceEntryIdentity;
+  estimatedSize: number;
+}
 
 export function literalSearchPattern(query: string): RegExp {
   // The user's text is always a literal: every RegExp syntax character is
@@ -49,10 +69,12 @@ export async function readSearchableFile(
   identity: WorkspaceEntryIdentity,
   maxFileBytes: number,
   remainingBytes: number,
+  openFile: typeof open = open,
 ): Promise<SearchableFileRead> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let offset = 0;
   try {
-    handle = await open(absolute, fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
+    handle = await openFile(absolute, fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW);
     const info = await handle.stat();
     // The opened inode must be the entry described inside its stable,
     // contained parent; a swapped link or replaced file is skipped.
@@ -62,8 +84,11 @@ export async function readSearchableFile(
     if (info.size > maxFileBytes) return { status: "skipped", bytes: 0 };
     if (info.size > remainingBytes) return { status: "budget" };
     const sniffBytes = WORKSPACE_CONTENT_SEARCH_LIMITS.binarySniffBytes;
-    const buffer = Buffer.alloc(Math.min(info.size, maxFileBytes) + 1);
-    let offset = 0;
+    const boundedSize = Math.min(info.size, maxFileBytes);
+    // Cap the allocation at remainingBytes so the +1 growth probe never reads
+    // past the physical I/O budget; when no probe byte fits, re-stat after read.
+    const bufferLength = Math.min(boundedSize + 1, remainingBytes);
+    const buffer = Buffer.allocUnsafe(bufferLength);
     let sniffed = false;
     while (offset < buffer.length) {
       const { bytesRead } = await handle.read(
@@ -86,19 +111,26 @@ export async function readSearchableFile(
     if (offset > maxFileBytes || offset > info.size) {
       return { status: "skipped", bytes: offset };
     }
+    if (bufferLength === info.size && offset === info.size) {
+      const after = await handle.stat();
+      if (!after.isFile() || !sameIdentity(identity, after) || after.size > info.size) {
+        return { status: "skipped", bytes: offset };
+      }
+    }
     const bytes = buffer.subarray(0, offset);
     if (!sniffed && bytes.subarray(0, sniffBytes).includes(0)) {
       return { status: "skipped", bytes: offset };
     }
     return {
       status: "text",
-      text: new TextDecoder("utf-8").decode(bytes),
+      text: utf8Decoder.decode(bytes),
       bytes: offset,
     };
   } catch {
     // Unreadable, vanished, or link-replaced files are skipped; a content
-    // search never fails the whole project because of one entry.
-    return { status: "skipped", bytes: 0 };
+    // search never fails the whole project because of one entry. Preserve any
+    // physical bytes already read before the failure so budget accounting stays exact.
+    return { status: "skipped", bytes: offset };
   } finally {
     await handle?.close().catch(() => undefined);
   }
@@ -147,4 +179,105 @@ export function appendContentMatches(
     // One result per line: continue on the next line.
     pattern.lastIndex = newline + 1;
   }
+}
+
+/**
+ * Reads described candidate files in bounded concurrent waves and commits
+ * byte accounting and matches strictly in deterministic candidate order.
+ */
+export async function searchCandidateFilesInWaves(
+  candidates: readonly SearchableFileCandidate[],
+  options: {
+    concurrency: number;
+    maxFileBytes: number;
+    maxTotalBytes: number;
+    bytesRead: number;
+    pattern: RegExp;
+    matches: WorkspaceContentMatch[];
+    maxResults: number;
+    deadline: number;
+    now: () => number;
+    signal?: AbortSignal;
+    onCancelled: () => never;
+    openFile?: typeof open;
+  },
+): Promise<{
+  bytesRead: number;
+  filesSearched: number;
+  truncated: boolean;
+  stopped: boolean;
+}> {
+  const openFile = options.openFile ?? open;
+  let physicalBytesRead = options.bytesRead;
+  let filesSearched = 0;
+  let index = 0;
+
+  while (index < candidates.length) {
+    if (options.signal?.aborted) options.onCancelled();
+    if (options.now() > options.deadline || options.matches.length >= options.maxResults) {
+      return { bytesRead: physicalBytesRead, filesSearched, truncated: true, stopped: true };
+    }
+    const remaining = options.maxTotalBytes - physicalBytesRead;
+    const wave: Array<{ candidate: SearchableFileCandidate; hardLimit: number }> = [];
+    let reserved = 0;
+    while (index < candidates.length && wave.length < options.concurrency) {
+      const candidate = candidates[index]!;
+      const required = candidate.estimatedSize;
+      if (wave.length > 0 && reserved + required > remaining) break;
+      const hardLimit = Math.max(0, Math.min(required, remaining - reserved));
+      wave.push({ candidate, hardLimit });
+      reserved += hardLimit;
+      index += 1;
+    }
+    const reads = wave.length === 1
+      ? [await readSearchableFile(wave[0]!.candidate.absolute, wave[0]!.candidate.identity, options.maxFileBytes, Math.max(0, remaining), openFile)]
+      : await Promise.all(wave.map(({ candidate, hardLimit }) =>
+          readSearchableFile(candidate.absolute, candidate.identity, options.maxFileBytes, hardLimit, openFile)));
+    for (const read of reads) {
+      if (read.status !== "budget") physicalBytesRead += read.bytes;
+    }
+    for (let i = 0; i < reads.length; i += 1) {
+      if (options.signal?.aborted) options.onCancelled();
+      if (options.now() > options.deadline) {
+        return { bytesRead: physicalBytesRead, filesSearched, truncated: true, stopped: true };
+      }
+      let read = reads[i]!;
+      const { candidate, hardLimit } = wave[i]!;
+      const retryBudget = options.maxTotalBytes - physicalBytesRead;
+      if (
+        wave.length > 1
+        && read.status === "budget"
+        && retryBudget > hardLimit
+      ) {
+        // The file grew past its pre-reserved slice; retry sequentially with the
+        // remaining physical I/O budget so concurrent reads already completed in
+        // this wave are counted and total physical reads never exceed maxTotalBytes.
+        read = await readSearchableFile(
+          candidate.absolute,
+          candidate.identity,
+          options.maxFileBytes,
+          retryBudget,
+          openFile,
+        );
+        if (read.status !== "budget") physicalBytesRead += read.bytes;
+      }
+      if (read.status === "budget") {
+        return { bytesRead: physicalBytesRead, filesSearched, truncated: true, stopped: true };
+      }
+      if (read.status !== "text") continue;
+      filesSearched += 1;
+      if (
+        appendContentMatches(
+          read.text,
+          candidate.projectPath,
+          options.pattern,
+          options.matches,
+          options.maxResults,
+        ) === "capped"
+      ) {
+        return { bytesRead: physicalBytesRead, filesSearched, truncated: true, stopped: true };
+      }
+    }
+  }
+  return { bytesRead: physicalBytesRead, filesSearched, truncated: false, stopped: false };
 }

@@ -94,6 +94,7 @@ export class AcpSecretRedactor {
 function isCredentialEnvironmentKey(key: string): boolean {
   const normalizedKey = key.toUpperCase();
   return normalizedKey !== "GOOGLE_APPLICATION_CREDENTIALS"
+    && normalizedKey !== "AGY_ADC_AUTH"
     && normalizedKey !== "AGENT_CLI_CREDENTIAL_STORE"
     && normalizedKey !== "OLDPWD"
     && normalizedKey !== "PWD"

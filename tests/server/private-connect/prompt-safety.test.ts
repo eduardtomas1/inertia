@@ -10,6 +10,15 @@ import {
 describe("Private Connect prompt safety", () => {
   it("advertises only known harness contracts", () => {
     expect(privateConnectPromptSafetyForHarness("codex-app-server").supported).toBe(true);
+    expect(privateConnectPromptSafetyForHarness("antigravity-acp")).toMatchObject({
+      supported: true,
+      writesRequireLocalApproval: true,
+      commandsRequireLocalApproval: true,
+      permissionModel: "provider-reported",
+    });
+    expect(privateConnectPromptSafetyIsUsable(
+      privateConnectPromptSafetyForHarness("antigravity-acp"),
+    )).toBe(true);
     expect(privateConnectPromptSafetyForHarness("antigravity-cli")).toMatchObject({
       supported: false,
       permissionModel: "provider-controlled",

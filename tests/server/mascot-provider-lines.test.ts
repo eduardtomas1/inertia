@@ -16,7 +16,6 @@ import { CappedProviderBuffer } from "../../src/server/provider/io";
 import { acpPermissionDetail } from "../../src/server/provider/acp-permission-detail";
 import { createOpenCodeEventState, emitOpenCodeNextActivity, handleOpenCodePart } from "../../src/server/provider/opencode-event-projection";
 import { openCodeApprovalDisplay } from "../../src/server/provider/opencode-sdk-support";
-import { antigravityResultFailure, parseAntigravityLine } from "../../src/server/provider/antigravity-stream";
 import { mascotPublisher, mascotShell } from "../helpers/mascot-fixture";
 
 const owner = { conversationId: "chat", runId: "chat-run", turnId: "chat-turn" };
@@ -183,9 +182,10 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
   });
 
   it.each([
-    ["cursor", "Run command", "Edit file", "Cursor requested permission"],
-    ["kimi", "Run checks", "Edit", "Kimi Code requested permission"],
-  ] as const)("%s: ACP tool calls name the command and edited file, and permission JSON names the command", (providerId, commandTitle, editTitle, permissionTitle) => {
+    ["cursor", "Run command", "Edit file", "Cursor requested permission", "Cursor tool", "Cursor"],
+    ["kimi", "Run checks", "Edit", "Kimi Code requested permission", "Kimi Code tool", "Kimi Code"],
+    ["antigravity", "Run command", "Edit file", "Antigravity requested permission", "Tool", "Antigravity"],
+  ] as const)("%s: ACP tool calls name the command and edited file, and permission JSON names the command", (providerId, commandTitle, editTitle, permissionTitle, genericToolTitle, productName) => {
     const turn = mascotTurn(providerId);
     turn.emitter.activity("command", "started", commandTitle, { activityId: "tool-1", detail: providerActivityDetailSections({ command: "npm run check" }) ?? undefined });
     expect(turn.line()).toBe("Running npm run check");
@@ -195,13 +195,13 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
       output: [{ type: "diff", path: `${WORKSPACE}/src/renderer/src/mascot/Mascot.ts`, oldText: "a", newText: "b" }],
     }) ?? undefined });
     expect(turn.line()).toBe("Edited Mascot.ts");
-    turn.emitter.activity("tool", "started", providerId === "cursor" ? "Cursor tool" : "Kimi Code tool", { activityId: "tool-3" });
+    turn.emitter.activity("tool", "started", genericToolTitle, { activityId: "tool-3" });
     expect(turn.line()).toBe("Edited Mascot.ts");
     turn.approve({ requestId: "permission", kind: "command", title: permissionTitle,
       detail: acpPermissionDetail({ toolCall: { toolCallId: "tool-4", title: commandTitle, rawInput: { command: "git push origin feature" } } } as never, permissionTitle) });
     expect(turn.line()).toBe("Run git push origin feature?");
     turn.resume();
-    turn.fail(`${providerId === "cursor" ? "Cursor" : "Kimi Code"}: model quota exceeded for this workspace`);
+    turn.fail(`${productName}: model quota exceeded for this workspace`);
     expect(turn.line()).toMatch(/quota exceeded/u);
     turn.expectNoBareLabel();
   });
@@ -271,30 +271,21 @@ describe("mascot bubble lines for each provider's real event shapes", () => {
     expect(kimi.line()).toBe("Updating the plan");
 
     const antigravity = mascotTurn("antigravity");
-    for (const event of parseAntigravityLine(JSON.stringify({ event: "step_update", step_update: { tool_name: "write_todos", step_index: 1, state: "RUNNING" } })) ?? []) {
-      if (event.kind === "tool") antigravity.emitter.activity("tool", event.phase, event.label, { activityId: `antigravity:chat-run:${event.id}` });
-    }
+    antigravity.emitter.activity("tool", "started", "write_todos", { activityId: "antigravity-todo" });
     expect(antigravity.line()).toBe("Updating the plan");
   });
 
-  it("Antigravity: raw step tool names become plain words and the real error is kept", () => {
+  it("Antigravity: raw tool names become plain words and the real error is kept", () => {
     const turn = mascotTurn("antigravity");
-    const step = (value: Record<string, unknown>): void => {
-      for (const event of parseAntigravityLine(JSON.stringify({ event: "step_update", step_update: value })) ?? []) {
-        if (event.kind !== "tool") continue;
-        turn.emitter.activity("tool", event.phase, event.label, { activityId: `antigravity:chat-run:${event.id}`, ...(event.detail ? { detail: event.detail } : {}) });
-      }
-    };
-    step({ tool_name: "view_file", step_index: 1, state: "RUNNING" });
+    turn.emitter.activity("tool", "started", "view_file", { activityId: "antigravity:chat-run:1" });
     expect(turn.line()).toBe("Reading files");
-    step({ tool_name: "replace_file_content", step_index: 2, state: "RUNNING" });
+    turn.emitter.activity("tool", "started", "replace_file_content", { activityId: "antigravity:chat-run:2" });
     expect(turn.line()).toBe("Editing files");
-    step({ tool_name: "run_command", step_index: 3, state: "RUNNING" });
+    turn.emitter.activity("tool", "started", "run_command", { activityId: "antigravity:chat-run:3" });
     expect(turn.line()).toBe("Running a command");
-    step({ tool_name: "run_command", step_index: 4, tool_info: { error: { type: "CommandFailed", message: "exit status 1" } } });
+    turn.emitter.activity("tool", "failed", "run_command", { activityId: "antigravity:chat-run:4", detail: "exit status 1" });
     expect(turn.line()).toBe("A command failed");
-    const failure = antigravityResultFailure({ status: "ERROR", conversationId: null, response: "", error: "Gemini API returned 429: resource exhausted", usage: null }, WORKSPACE)!;
-    turn.fail(failure.message);
+    turn.fail("Antigravity: Gemini API returned 429: resource exhausted");
     expect(turn.line()).toMatch(/429/u);
     turn.expectNoBareLabel();
   });

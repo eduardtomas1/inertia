@@ -82,7 +82,7 @@ describe("provider compatibility status", () => {
       label: "Antigravity",
       command: "agy",
       available: true,
-      version: "1.2.2",
+      version: "1.5.18",
       executable: "/opt/bin/agy",
       installState: "installed",
       authState: "unknown",
@@ -97,9 +97,9 @@ describe("provider compatibility status", () => {
 
     const outdated: ProviderInfo = {
       ...ready,
-      version: "1.1.0",
+      version: "1.5.16",
       canRun: false,
-      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh.",
+      statusMessage: "Antigravity 1.5.16 is installed, but Inertia needs 1.5.17 or newer. Run 'agy update' and refresh.",
     };
     expect(providerStateLabel(outdated)).toBe("Update required");
     expect(providerSetupAction(outdated)).toBe("refresh");
@@ -167,7 +167,7 @@ describe("provider compatibility status", () => {
   it("prefixes exactly one v whether or not the CLI printed one", () => {
     expect(providerVersionLabel("26.5.0")).toBe("v26.5.0");
     expect(providerVersionLabel("v26.5.0")).toBe("v26.5.0");
-    expect(providerVersionLabel("V1.2.2")).toBe("v1.2.2");
+    expect(providerVersionLabel("V1.5.18")).toBe("v1.5.18");
     expect(providerVersionLabel("2025.09.12-abc")).toBe("v2025.09.12-abc");
     expect(providerVersionLabel("vnext")).toBe("vvnext");
   });

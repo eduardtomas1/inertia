@@ -570,7 +570,7 @@ describe("watcher link repository", () => {
     expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, accessMode: "full" })).toThrow(WatcherPolicyError);
     expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, interactionMode: "build" })).toThrow(WATCHER_READ_ONLY_REFUSAL);
     expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, harnessId: "codex-cli" })).toThrow("This agent can't run as a watcher.");
-    for (const harnessId of ["cursor-acp", "kimi-acp", "antigravity-cli", "claude-agent-sdk", "opencode-sdk"]) {
+    for (const harnessId of ["cursor-acp", "kimi-acp", "antigravity-acp", "claude-agent-sdk", "opencode-sdk"]) {
       expect(() => links.assertRunConfigurationAllowed(conversation.id, { ...allowed, harnessId })).not.toThrow();
     }
     expect(() => links.assertRunConfigurationAllowed(watched.id, { ...allowed, accessMode: "full" })).not.toThrow();

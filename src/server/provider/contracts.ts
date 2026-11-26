@@ -81,6 +81,7 @@ export interface ProviderDetection {
 export interface ProviderDetectionOptions {
   command?: string;
   cwd?: string;
+  dataDirectory?: string;
   timeoutMs?: number;
   refreshEnvironment?: boolean;
   /** Installation/protocol readiness only; never probes or forwards credentials. */
@@ -759,6 +760,7 @@ export interface ProviderManagerOptions {
   /** Durable maintenance recovery blocks every launch for this provider. */
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;
+  dataDirectory?: string;
   cancelGraceMs?: number;
   forceStopBudgetMs?: number;
   /** Runtime-owned cancellation authority shared by passive provider operations. */

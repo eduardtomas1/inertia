@@ -18,6 +18,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "kimi-acp": "Kimi Code",
   "opencode-sdk": "OpenCode",
   "opencode-cli": "OpenCode",
+  "antigravity-acp": "Antigravity",
   "antigravity-cli": "Antigravity",
   "grok-acp": "Grok",
 };

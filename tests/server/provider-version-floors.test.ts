@@ -49,7 +49,7 @@ describe("provider version floors", { concurrent: false }, () => {
     });
     expect(PROVIDER_VERSION_FLOORS.antigravity).toMatchObject({
       product: "Antigravity",
-      minimumVersion: "1.2.2",
+      minimumVersion: "1.5.17",
     });
     expect(OPENCODE_VERSION_CEILING.firstUnsupportedMajor).toBe(2);
     for (const floor of Object.values(PROVIDER_VERSION_FLOORS)) {
@@ -76,6 +76,10 @@ describe("provider version floors", { concurrent: false }, () => {
     ["1.19.3", "1.18.22", false],
     ["1.9.30", "1.18.22", true],
     ["0.0.0", "1.18.22", true],
+    ["1.5.16", "1.5.17", true],
+    ["1.5.17", "1.5.17", false],
+    ["1.5.18", "1.5.17", false],
+    ["1.5.17-beta.1", "1.5.17", true],
   ] as const)("treats %s against the %s floor as below it: %s", (version, minimumVersion, below) => {
     expect(providerVersionBelowFloor(version, minimumVersion)).toBe(below);
   });
@@ -313,21 +317,26 @@ describe("provider version floors", { concurrent: false }, () => {
 
   it("reports the Antigravity floor through the same update requirement", async () => {
     const command = executable("agy");
+    const calls: string[][] = [];
     const detection = await detectProvider("antigravity", { command }, {
       executableCandidates: async () => [command],
-      probeProcess: async () => ({
-        started: true,
-        timedOut: false,
-        cleanupConfirmed: true,
-        exitCode: 0,
-        output: "1.1.0",
-      }),
+      probeProcess: async (_candidate, args) => {
+        calls.push([...args]);
+        return {
+          started: true,
+          timedOut: false,
+          cleanupConfirmed: true,
+          exitCode: 0,
+          output: "1.1.0",
+        };
+      },
     });
     expect(detection).toMatchObject({
       canRun: false,
-      updateRequired: { installedVersion: "1.1.0", minimumVersion: "1.2.2" },
-      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh.",
+      updateRequired: { installedVersion: "1.1.0", minimumVersion: "1.5.17" },
+      statusMessage: "Antigravity 1.1.0 is installed, but Inertia needs 1.5.17 or newer. Run 'agy update' and refresh.",
     });
+    expect(calls).toEqual([["--version"]]);
   });
 
   it("reports the Antigravity floor for the newest identified install", async () => {
@@ -340,15 +349,87 @@ describe("provider version floors", { concurrent: false }, () => {
         timedOut: false,
         cleanupConfirmed: true,
         exitCode: 0,
-        output: candidate === older ? "1.1.0" : "1.2.1",
+        output: candidate === older ? "1.1.0" : "1.5.16",
       }),
     });
     expect(detection).toMatchObject({
       executable: newer,
-      version: "1.2.1",
-      updateRequired: { installedVersion: "1.2.1", minimumVersion: "1.2.2" },
-      statusMessage: "Antigravity 1.2.1 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh.",
+      version: "1.5.16",
+      updateRequired: { installedVersion: "1.5.16", minimumVersion: "1.5.17" },
+      statusMessage: "Antigravity 1.5.16 is installed, but Inertia needs 1.5.17 or newer. Run 'agy update' and refresh.",
     });
+  });
+
+  it.each(["1.5.17-beta.1", "0.0.0", "0.0.0-dev", "unknown"])(
+    "blocks Antigravity prerelease-of-floor, zero, or unknown version %s",
+    async (output) => {
+      const command = executable("agy");
+      const calls: string[][] = [];
+      const detection = await detectProvider("antigravity", { command }, {
+        executableCandidates: async () => [command],
+        probeProcess: async (_candidate, args) => {
+          calls.push([...args]);
+          return {
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+            exitCode: 0,
+            output,
+            stdout: `${output}\n`,
+          };
+        },
+      });
+      expect(detection).toMatchObject({
+        available: true,
+        installState: "installed",
+        canRun: false,
+        statusMessage: expect.stringContaining("Inertia needs 1.5.17 or newer"),
+      });
+      expect(calls).toEqual([["--version"]]);
+    },
+  );
+
+  it("reads the Antigravity version from its own line, not from a warning printed before it", async () => {
+    const command = executable("agy");
+    const detection = await detectProvider("antigravity", { command }, {
+      executableCandidates: async () => [command],
+      probeProcess: async () => ({
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+        exitCode: 0,
+        output: "Warning: Node v22.1.0 is deprecated\nagy 1.5.16\n",
+        stdout: "Warning: Node v22.1.0 is deprecated\nagy 1.5.16\n",
+      }),
+    });
+    expect(detection).toMatchObject({
+      version: "1.5.16",
+      canRun: false,
+      updateRequired: { installedVersion: "1.5.16", minimumVersion: "1.5.17" },
+    });
+  });
+
+  it("reports ACP unavailable when Antigravity meets the floor but lacks the acp subcommand", async () => {
+    const command = executable("agy");
+    const detection = await detectProvider("antigravity", { command }, {
+      executableCandidates: async () => [command],
+      probeProcess: async (_candidate, args) => ({
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+        exitCode: args[0] === "--version" ? 0 : 2,
+        output: args[0] === "--version" ? "1.5.18" : "unknown command acp",
+      }),
+    });
+    expect(detection).toMatchObject({
+      available: true,
+      executable: command,
+      version: "1.5.18",
+      installState: "installed",
+      canRun: false,
+      statusMessage: "Antigravity CLI found, but ACP is unavailable",
+    });
+    expect(detection).not.toHaveProperty("updateRequired");
   });
 
   it("states every remedy as a full sentence", () => {

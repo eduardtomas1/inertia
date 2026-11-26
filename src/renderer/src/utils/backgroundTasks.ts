@@ -22,6 +22,7 @@ const PROVIDERS_WITHOUT_TASK_TOKENS: Readonly<Record<string, string>> = {
   "cursor-acp": "Cursor",
   "kimi-acp": "Kimi Code",
   "grok-acp": "Grok",
+  "antigravity-acp": "Antigravity",
   "antigravity-cli": "Antigravity",
 };
 

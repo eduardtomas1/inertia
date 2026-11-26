@@ -886,6 +886,11 @@
       "version": 122,
       "name": "IndexMessageSearchText",
       "digest": "f7c3bdf3d66499d34ccc41f0a4dd8f6bfd8a9e1ddc4242f035fcd74f87c41777"
+    },
+    {
+      "version": 123,
+      "name": "SupportNativeAntigravityAcpHarness",
+      "digest": "02ae67f465b3f873a80a8c23101818074ea493c425c7cb30f4fb5d833f0ea875"
     }
   ]
 }

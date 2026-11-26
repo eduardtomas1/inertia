@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../../src/shared/backend-presets", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../src/shared/backend-presets")>();
   const gemini = {
-    harnessId: "antigravity-cli",
+    harnessId: "antigravity-acp",
     protocol: "antigravity-managed",
     authenticationMode: "api-key",
     baseUrl: "https://generativelanguage.googleapis.com",
@@ -43,7 +43,7 @@ describe("Antigravity with a Gemini API key", () => {
       onDelete={vi.fn(async () => undefined)}
     />);
     const card = screen.getByRole("region", { name: "Antigravity" });
-    expect(within(card).getByText("Google says wrapping agy in another app isn't supported on consumer plans. Use a Gemini API key.")).toBeInTheDocument();
+    expect(within(card).getByText("Official agy acp. Use a Gemini API key or Enterprise ADC.")).toBeInTheDocument();
     expect(within(card).getByText("No API keys yet. Add a Gemini API key to use your API credits.")).toBeInTheDocument();
     await user.click(within(card).getByRole("button", { name: "Add API key for Antigravity" }));
     expect(screen.getByRole("dialog", { name: "Add Gemini API key" })).toBeInTheDocument();

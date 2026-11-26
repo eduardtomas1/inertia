@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as ownedProcesses from "../../src/node/runtime-owned-processes";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import { parseAntigravityModels, readAntigravityModels } from "../../src/server/provider/antigravity-models";
-import { antigravityArguments } from "../../src/server/provider/antigravity-stream";
 import { ProviderMetadataCache, readProviderMetadata } from "../../src/server/provider/metadata";
 import { providerSnapshot } from "../../src/server/runtime-snapshots";
 import { detectProvider } from "../../src/server/providers";
@@ -83,7 +82,8 @@ describe("Antigravity catalog", () => {
     const executable = writeNodeFlagExecutable(root, "agy", `
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-if (args[0] === "--version") { console.log("1.2.7"); process.exit(0); }
+if (args[0] === "--version") { console.log("1.5.18"); process.exit(0); }
+if (args[0] === "acp" && args[1] === "--help") { console.log("Antigravity Agent Client Protocol (ACP)"); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args, home: process.env.HOME, injected: process.env.NODE_OPTIONS, unrelatedSecret: process.env.OPENAI_API_KEY, noColor: process.env.NO_COLOR }));
 process.stdin.resume();
 process.stdin.once("end", () => { process.stderr.write("Fetching available models...\\n"); process.stdout.write(${JSON.stringify(CATALOG)}); });
@@ -105,9 +105,7 @@ process.stdin.once("end", () => { process.stderr.write("Fetching available model
     expect(routes.map(({ modelId }) => modelId)).toEqual(["provider-default", "gemini-test-high", "claude-test-thinking"]);
     const selected = routes[1]!;
     expect(selected).toMatchObject({ selectable: true, providerReady: true, reasoningOptions: [] });
-    expect(selected.selection).toMatchObject({ harnessId: "antigravity-cli", backendProfileId: "builtin:antigravity", contextWindowOverride: null, capabilities: [], reasoningEffort: null });
-    expect(antigravityArguments({ modelSelection: selected.selection, interactionMode: "build", access: "supervised" }))
-      .toEqual(["--input-format", "stream-json", "--output-format", "stream-json", "--model", "gemini-test-high", "--mode", "accept-edits"]);
+    expect(selected.selection).toMatchObject({ harnessId: "antigravity-acp", backendProfileId: "builtin:antigravity", contextWindowOverride: null, capabilities: [], reasoningEffort: null });
   });
 
   it.each([

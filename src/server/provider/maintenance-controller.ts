@@ -35,6 +35,7 @@ import {
   type ProviderMaintenanceRunProgress,
   type ProviderMaintenanceRunResult,
 } from "./maintenance-runner";
+import { runManagedAntigravityUpdate } from "./antigravity-managed-install";
 import {
   ProviderInstallationAdmissionError,
   ProviderInstallationLeaseCoordinator,
@@ -113,6 +114,8 @@ export interface ProviderMaintenanceControllerOptions {
   maintenanceJournal: ProviderMaintenanceJournalAuthority;
   /** Prior-runtime records remain durable without claiming a live child here. */
   startupRecoveryOperationIds?: ReadonlySet<string>;
+  /** Local runtime data directory for Inertia-managed binary updates. */
+  dataDirectory?: string;
 }
 
 interface ActiveProviderMaintenanceOperation {
@@ -123,6 +126,7 @@ interface ActiveProviderMaintenanceOperation {
   installationLease: ProviderInstallationMaintenanceLease | null;
   verificationAuthority: ProviderInstallationVerificationAuthority | null;
   verifiedIdentity: ProviderInstallationIdentity | null;
+  approvedMinimumVersion: string | null;
   journalQuarantined: boolean;
   journalRetired: boolean;
 }
@@ -420,6 +424,7 @@ export class ProviderMaintenanceController {
         installationLease: null,
         verificationAuthority: null,
         verifiedIdentity: null,
+        approvedMinimumVersion: operation.targetVersion,
         journalQuarantined: false,
         journalRetired: false,
       };
@@ -502,6 +507,8 @@ export class ProviderMaintenanceController {
       ? await this.latestVersions.homebrew(capabilities.homebrew, force)
       : registryPackage && target.installed
       ? await this.latestVersions.latest(registryPackage.name, registryPackage.range, force, signal)
+      : providerId === "antigravity" && target.installed
+      ? await this.latestVersions.antigravity(force, signal)
       : {
           version: null,
           heldVersion: null,
@@ -1110,10 +1117,15 @@ export class ProviderMaintenanceController {
   private async capabilities(
     target: ProviderMaintenanceTarget,
   ): Promise<ProviderMaintenanceCapabilities> {
-    return await (
-      this.options.resolveCapabilities
-      ?? resolveProviderMaintenanceCapabilities
-    )(target);
+    if (this.options.resolveCapabilities) {
+      return await this.options.resolveCapabilities(target);
+    }
+    return await resolveProviderMaintenanceCapabilities(
+      target,
+      this.options.dataDirectory
+        ? { dataDirectory: this.options.dataDirectory }
+        : {},
+    );
   }
 
   private async runAction(
@@ -1125,6 +1137,34 @@ export class ProviderMaintenanceController {
     };
     if (this.options.runAction) {
       return await this.options.runAction(action, {
+        signal: active.abort.signal,
+        onProgress,
+      });
+    }
+    if (action.managedAction === "antigravity-managed-release") {
+      if (!this.options.dataDirectory) {
+        return {
+          status: "failed",
+          exitCode: null,
+          signal: null,
+          message: "Managed Antigravity updates require a configured data directory.",
+          output: null,
+          outputTruncated: false,
+          cleanupConfirmed: true,
+        };
+      }
+      const approvedMinimum = active.approvedMinimumVersion;
+      const targetVersion = active.operation.targetVersion;
+      const minimumVersion = approvedMinimum && targetVersion
+        ? (compareProviderVersions(approvedMinimum, targetVersion) ?? 0) >= 0
+          ? approvedMinimum
+          : targetVersion
+        : approvedMinimum ?? targetVersion;
+      return await runManagedAntigravityUpdate({
+        dataDirectory: this.options.dataDirectory,
+        expectedExecutable: action.executable,
+        beforeVersion: active.operation.beforeVersion,
+        minimumVersion,
         signal: active.abort.signal,
         onProgress,
       });

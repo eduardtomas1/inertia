@@ -1058,7 +1058,7 @@ describe("provider manager installation ownership", () => {
 
   it.each([
     ["kimi", "Kimi Code CLI", "kimi", "Kimi Code CLI found, but ACP is unavailable"],
-    ["antigravity", "Antigravity", "agy", "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh."],
+    ["antigravity", "Antigravity", "agy", "Antigravity 1.1.0 is installed, but Inertia needs 1.5.17 or newer. Run 'agy update' and refresh."],
     ["codex", "Codex", "codex", "Codex App Server is unsupported; update the selected CLI"],
     ["claude", "Claude", "claude", "Claude Code 1.1.0 is installed. Inertia needs 2.1.309 or newer because older versions ignore the restrictions Inertia sets and can write outside the project. Update Claude Code and refresh."],
     ["opencode", "OpenCode", "opencode", "OpenCode 1.1.0 is installed. Inertia needs 1.18.22 or newer because older versions let a website install packages through OpenCode's local server. Update OpenCode and refresh."],

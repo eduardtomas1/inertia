@@ -211,7 +211,7 @@ describe("composer route readiness", () => {
 
   it("asks for an Antigravity update and never gates a runnable install on sign-in", () => {
     const selection = customSelection({
-      harnessId: "antigravity-cli",
+      harnessId: "antigravity-acp",
       backendProfileId: "builtin:antigravity",
       backendProfileDisplayName: "Google Antigravity",
       modelId: "provider-default",
@@ -221,7 +221,7 @@ describe("composer route readiness", () => {
       id: "antigravity" as const,
       label: "Antigravity",
       command: "agy",
-      version: "1.2.2",
+      version: "1.5.18",
       executable: "/opt/bin/agy",
       installState: "installed" as const,
       authState: "unknown" as const,
@@ -234,7 +234,7 @@ describe("composer route readiness", () => {
     expect(composerRouteReadiness({
       provider: provider({
         ...installed,
-        version: "1.1.0",
+        version: "1.5.16",
         canRun: false,
         statusMessage: undefined,
       }),

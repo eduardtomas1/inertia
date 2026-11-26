@@ -14,6 +14,7 @@ import type {
   ProviderMaintenanceInstallMethod,
   ProviderMaintenanceProviderId,
 } from "../../shared/provider-maintenance";
+import { resolveManagedAntigravityExecutable } from "./antigravity-managed-install";
 import { cursorAgentCommandArgs } from "./cursor-command";
 
 const MAX_SCRIPT_BYTES = 16 * 1024;
@@ -54,6 +55,7 @@ export interface ProviderInstallUpdateAction {
   label: string;
   versionPin?: ProviderMaintenanceVersionPin;
   registryPackage?: ProviderRegistryPackage;
+  managedAction?: "antigravity-managed-release";
 }
 
 export interface HomebrewLatestSource {
@@ -84,7 +86,9 @@ interface FileInfo {
 
 export interface ProviderInstallSourceDependencies {
   platform?: NodeJS.Platform;
+  arch?: string;
   home?: string;
+  dataDirectory?: string;
   access?: (path: string, mode: number) => Promise<void>;
   realpath?: (path: string) => Promise<string>;
   lstat?: (path: string) => Promise<FileInfo>;
@@ -450,10 +454,22 @@ function nativeSource(context: InstallSourceContext): ProviderInstallSource | nu
   }
   if (providerId === "antigravity") {
     const local = context.env("LOCALAPPDATA");
-    const binary = platform === "win32"
-      ? local ? context.join(local, "agy", "bin", "agy.exe") : null
-      : context.join(home, ".local", "bin", "agy");
-    if (!binary || !context.same(real, binary)) return null;
+    if (platform === "win32") {
+      if (
+        !local
+        || (
+          !context.same(real, context.join(local, "agy", "bin", "agy.exe"))
+          && !context.under(real, context.join(local, "agy"))
+        )
+      ) return null;
+      return native(["update"], "agy update");
+    }
+    const binary = context.join(home, ".local", "bin", "agy");
+    if (
+      !context.same(real, binary)
+      && !context.under(real, context.join(home, ".local", "share", "agy"))
+      && !context.under(real, context.join(home, ".local", "share", "antigravity"))
+    ) return null;
     return native(["update"], "agy update");
   }
   return null;
@@ -850,12 +866,39 @@ function systemSource(context: InstallSourceContext): ProviderInstallSource | nu
     : null;
 }
 
+async function managedAntigravitySource(
+  context: InstallSourceContext,
+): Promise<ProviderInstallSource | null> {
+  if (context.input.providerId !== "antigravity") return null;
+  const dataDirectory = context.dependencies.dataDirectory;
+  if (!dataDirectory) return null;
+  const active = await resolveManagedAntigravityExecutable(
+    dataDirectory,
+    context.platform,
+    context.dependencies.arch ?? process.arch,
+  );
+  if (!active) return null;
+  const activeReal = await context.resolved(active.executablePath) ?? active.executablePath;
+  const matches = context.platform === "win32"
+    ? context.same(context.real, activeReal)
+    : context.real === activeReal;
+  if (!matches) return null;
+  return update(context, "provider-managed", {
+    executable: context.hit,
+    args: [],
+    lockKey: `native:antigravity-managed:${context.key(dataDirectory)}`,
+    managedAction: "antigravity-managed-release",
+  }, null, null);
+}
+
 export async function classifyProviderInstallSource(
   input: ProviderInstallSourceInput,
   dependencies: ProviderInstallSourceDependencies = {},
 ): Promise<ProviderInstallSource> {
   const context = new InstallSourceContext(input, dependencies);
   await context.resolvePathHit();
+  const managedAntigravity = await managedAntigravitySource(context);
+  if (managedAntigravity) return managedAntigravity;
   const native = nativeSource(context);
   if (native) return native;
   const packageName = context.definition.packageName;

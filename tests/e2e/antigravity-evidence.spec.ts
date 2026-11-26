@@ -23,51 +23,153 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
 `;
 
 const SYNTHETIC_CONVERSATION = "5c4a2d1e-7b3f-4e8a-9c6d-2f1e0b9a8c7d";
-const RUNNING_TEXT = "Reading the stream parser and its tests.";
-const FINAL_TEXT = "The parser accepts nested and flat step updates, and every non-success result fails the turn.";
+const RUNNING_TEXT = "Reading the ACP session adapter and its tests.";
+const FINAL_TEXT = "The ACP adapter streams thoughts, tools, usage, and images with interactive approvals.";
 
 function antigravitySource(wirePath: string, gatePath: string): string {
   return `
 const fs = require("node:fs");
+const readline = require("node:readline");
 const args = process.argv.slice(2);
 const record = (event) => fs.appendFileSync(${JSON.stringify(wirePath)}, JSON.stringify({ pid: process.pid, executable: process.argv[1], args, ...event }) + "\\n");
 record({ kind: "launch" });
-if (args[0] === "--version") { console.log("1.2.2"); process.exit(0); }
-const streamJson = args[0] === "--input-format" && args[1] === "stream-json"
-  && args[2] === "--output-format" && args[3] === "stream-json";
-if (!streamJson || args.some(arg => arg === "-p" || arg === "--print" || arg === "--prompt")) {
+if (args[0] === "--version") { console.log("1.5.18"); process.exit(0); }
+if (args[0] === "acp" && args[1] === "--help") {
+  console.log("Usage: agy acp [options]\\n\\nStart the Agent Client Protocol (ACP) stdio server");
+  process.exit(0);
+}
+if (args[0] !== "acp" || args.some(arg => arg === "-p" || arg === "--print" || arg === "--prompt" || arg === "--input-format")) {
   process.stderr.write("Unexpected synthetic Antigravity invocation.\\n");
   process.exit(2);
 }
-const conversation = ${JSON.stringify(SYNTHETIC_CONVERSATION)};
-const emit = value => process.stdout.write(JSON.stringify(value) + "\\n");
-const step = (index, fields) => emit({ event: "step_update", step_update: { conversation_id: conversation, step_index: index, ...fields } });
-process.stdin.resume();
-process.stdin.on("end", () => {
-  emit({ event: "init", init: { conversation_id: conversation } });
-  step(0, { state: "ACTIVE", tool_name: "view_file" });
-  step(0, { state: "DONE", tool_name: "view_file" });
-  step(1, { state: "ACTIVE", tool_name: "grep_search" });
-  step(2, { state: "ACTIVE", text_delta: ${JSON.stringify(`${RUNNING_TEXT} `)} });
-  const release = setInterval(() => {
-    if (!fs.existsSync(${JSON.stringify(gatePath)})) return;
-    clearInterval(release);
-    record({ kind: "released" });
-    step(1, { state: "DONE", tool_name: "grep_search" });
-    step(3, { state: "DONE", text_delta: ${JSON.stringify(FINAL_TEXT)} });
-    emit({ event: "result", result: {
-      conversation_id: conversation, status: "SUCCESS", response: "", error: "",
-      duration_seconds: 4, num_turns: 1,
-      usage: { input_tokens: 1840, output_tokens: 212, thinking_tokens: 96, cache_read_tokens: 512, total_tokens: 2660 },
-    } });
-    process.stdout.write("", () => { record({ kind: "exiting" }); process.exit(0); });
-  }, 50);
+const sessionId = ${JSON.stringify(SYNTHETIC_CONVERSATION)};
+let currentModeId = "default";
+let currentModel = "gemini-4-neon";
+let currentEffort = "medium";
+let activeTimer = null;
+const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", ...message }) + "\\n");
+const notify = (update) => send({ method: "session/update", params: { sessionId, update } });
+const availableModes = [
+  { id: "default", name: "Default", description: "Ask before edits and commands, per your permission settings." },
+  { id: "accept-edits", name: "Accept edits", description: "Approve file edits in the workspace without asking." },
+  { id: "plan", name: "Plan", description: "Plan carefully before executing a task." },
+];
+const configOptions = () => [
+  {
+    id: "mode", name: "Mode", category: "mode", type: "select", currentValue: currentModeId,
+    options: availableModes.map(({ id, name, description }) => ({ value: id, name, description })),
+  },
+  {
+    id: "model", name: "Model", category: "model", type: "select", currentValue: currentModel,
+    options: [
+      { value: "gemini-4-neon", name: "Gemini 4 Neon", description: "Default Antigravity model" },
+      { value: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen", description: "Fast Antigravity model" },
+    ],
+  },
+  {
+    id: "thinking_level", name: "Thinking level", category: "thought_level", type: "select", currentValue: currentEffort,
+    options: [
+      { value: "low", name: "Low", description: "Fast reasoning" },
+      { value: "medium", name: "Medium", description: "Balanced reasoning" },
+      { value: "high", name: "High", description: "Deep reasoning" },
+      { value: "xhigh", name: "Extra high", description: "Deepest reasoning" },
+    ],
+  },
+];
+const sessionPayload = () => ({
+  sessionId,
+  modes: { currentModeId, availableModes },
+  configOptions: configOptions(),
+});
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  if (!line.trim()) return;
+  const message = JSON.parse(line);
+  record({ kind: "rpc", method: message.method ?? "response" });
+  if (message.method === "initialize") {
+    const authMethods = [
+      { id: "oauth-personal", name: "Log in with Google", description: "Log in with your Google account" },
+      { id: "oauth-business", name: "Log in with Gemini Enterprise", description: "Log in with your Gemini Enterprise account" },
+      { id: "gemini-api-key", name: "Gemini API key", description: "Use an API key with Gemini Developer API" },
+      { id: "agent-platform", name: "Gemini Enterprise Agent Platform", description: "Use Application Default Credentials" },
+    ];
+    if (message.params?.clientCapabilities?.auth?.terminal === true) {
+      authMethods.push({ id: "terminal-login", name: "Log in from the terminal", description: "Paste an auth code", type: "terminal", args: ["--login"] });
+    }
+    return send({
+      id: message.id,
+      result: {
+        protocolVersion: 1,
+        agentInfo: { name: "Antigravity ACP Server", version: "1.5.18" },
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { image: true, audio: false, embeddedContext: true },
+          mcpCapabilities: { http: true },
+          sessionCapabilities: { resume: {}, close: {}, load: {}, list: {}, additionalDirectories: {} },
+          auth: { logout: {} },
+          _meta: { antigravity: { tier: true, systemPrompt: { append: true } } },
+        },
+        authMethods,
+      },
+    });
+  }
+  if (message.method === "session/new" || message.method === "session/resume" || message.method === "session/load") {
+    return send({ id: message.id, result: sessionPayload() });
+  }
+  if (message.method === "session/set_mode") {
+    if (typeof message.params?.modeId === "string") currentModeId = message.params.modeId;
+    return send({ id: message.id, result: {} });
+  }
+  if (message.method === "session/set_config_option") {
+    const { configId, value } = message.params ?? {};
+    if (configId === "mode" && typeof value === "string") currentModeId = value;
+    if (configId === "model" && typeof value === "string") currentModel = value;
+    if ((configId === "thinking_level" || configId === "thought_level") && typeof value === "string") currentEffort = value;
+    return send({ id: message.id, result: { configOptions: configOptions() } });
+  }
+  if (message.method === "session/prompt") {
+    notify({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking the ACP adapter and tests." } });
+    notify({ sessionUpdate: "tool_call", toolCallId: "call-1", title: "view_file", kind: "read", status: "in_progress" });
+    notify({ sessionUpdate: "tool_call_update", toolCallId: "call-1", status: "completed" });
+    notify({ sessionUpdate: "tool_call", toolCallId: "call-2", title: "grep_search", kind: "search", status: "in_progress" });
+    notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: ${JSON.stringify(`${RUNNING_TEXT} `)} } });
+    activeTimer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(gatePath)})) return;
+      clearInterval(activeTimer);
+      activeTimer = null;
+      record({ kind: "released" });
+      notify({ sessionUpdate: "tool_call_update", toolCallId: "call-2", status: "completed" });
+      notify({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: ${JSON.stringify(FINAL_TEXT)} } });
+      notify({ sessionUpdate: "usage_update", used: 2660, size: 1000000 });
+      send({
+        id: message.id,
+        result: {
+          stopReason: "end_turn",
+          usage: { inputTokens: 1840, outputTokens: 212, thoughtTokens: 96, cachedReadTokens: 512, totalTokens: 2660 },
+        },
+      });
+    }, 50);
+    return;
+  }
+  if (message.method === "session/cancel") {
+    if (activeTimer) { clearInterval(activeTimer); activeTimer = null; }
+    if (message.id !== undefined) send({ id: message.id, result: {} });
+    return;
+  }
+  if (message.method === "session/close") {
+    record({ kind: "exiting" });
+    if (message.id !== undefined) send({ id: message.id, result: {} });
+    return;
+  }
+  if (message.id !== undefined) {
+    send({ id: message.id, result: {} });
+  }
 });
 `;
 }
 
 interface WireEntry {
-  kind: "launch" | "released" | "exiting";
+  kind: "launch" | "rpc" | "released" | "exiting";
+  method?: string;
   pid: number;
   executable: string;
   args: string[];
@@ -134,6 +236,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
         conversationId = conversation.id;
         store.updateConversation(conversationId, {
           providerId: "antigravity",
+          accessMode: "supervised",
           modelSelection: providerNativeModelSelection({ providerId: "antigravity" }),
         });
       } finally { store.close(); }
@@ -155,7 +258,6 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
       .toContainText("Antigravity checks your sign-in when a turn starts", { timeout: 20_000 });
     await expect(page.getByRole("button", { name: /^Configure Gemini/u })).toHaveCount(0);
     await expect(page.locator(".provider-settings-shell")).not.toContainText(/\bvv\d/u);
-    await expect(page.locator(".provider-settings-shell")).not.toContainText(/gemini/iu);
     const executable = page.getByRole("textbox", { name: "Antigravity executable path" });
     await expect(executable).not.toHaveValue("");
     expect(realpathSync.native(await executable.inputValue())).toBe(realpathSync.native(fakeAgy));
@@ -164,7 +266,7 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await captureElement(antigravity, testInfo, `antigravity-mark-settings-${theme.toLowerCase()}`);
   };
 
-  const chooseAntigravityModel = async (name: string, placeholder: RegExp): Promise<void> => {
+  const chooseAntigravityModel = async (name: string, placeholder: RegExp, expectReasoningLevels: boolean): Promise<void> => {
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     const composer = page.getByRole("region", { name: "Message composer" });
     const chip = composer.getByRole("button", { name: /^Choose model\./u });
@@ -174,9 +276,28 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
     await expect(composer.getByRole("textbox", { name: "Message" }))
       .toHaveAttribute("placeholder", placeholder);
     await expect(composer.getByRole("button", {
-      name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
+      name: "Attach images, documents, or spreadsheets",
     })).toBeEnabled();
-    await expect(composer.getByRole("button", { name: /^Snapshots(?:\.|$)/u })).toHaveCount(0);
+    if (process.platform === "linux") {
+      await expect(composer.getByRole("button", { name: "Take reviewed screenshot" })).toBeEnabled();
+    }
+    const accessChip = composer.getByRole("button", { name: "Choose project access. Current access: Supervised." });
+    await accessChip.click();
+    const accessMenu = page.getByRole("menu", { name: "Project access" });
+    const supervisedOption = accessMenu.getByRole("menuitemradio", { name: /Supervised/u });
+    await expect(supervisedOption).toBeEnabled();
+    await expect(supervisedOption).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await expect(accessMenu).toBeHidden();
+    if (expectReasoningLevels) {
+      const reasoningChip = composer.getByRole("button", { name: /^Choose reasoning level\./u });
+      await expect(reasoningChip).toBeVisible();
+      await reasoningChip.click();
+      const reasoningMenu = page.getByRole("menu", { name: "Reasoning level" });
+      await expect(reasoningMenu.getByRole("menuitemradio", { name: /Extra high/u })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(reasoningMenu).toBeHidden();
+    }
     await page.getByRole("button", { name: /^Choose model\./u }).click();
     const chooser = page.getByRole("dialog", { name: "Choose model" });
     const source = chooser.getByRole("button", { name: /^Antigravity, \d+ models?$/u });
@@ -212,26 +333,25 @@ test("shows Antigravity readiness, model choice, and a streamed turn from a fake
   await app.resizeWindow(1440, 920);
   await openAntigravitySettings("Light");
   await capture(page, testInfo, "provider-readiness-light");
-  await chooseAntigravityModel("model-chooser-light", /^Ask anything\. @ files, (?:\$ skills, )?\/ commands$/u);
-  await streamTurn("Check how the stream parser handles step updates.", "light");
+  await chooseAntigravityModel("model-chooser-light", /^Ask anything\. @ files, (?:\$ skills, )?\/ commands$/u, false);
+  await streamTurn("Check how the ACP adapter handles session updates.", "light");
 
   await openAntigravitySettings("Dark");
   await capture(page, testInfo, "provider-readiness-dark");
-  await chooseAntigravityModel("model-chooser-dark", /^Follow up\. @ files, (?:\$ skills, )?\/ commands$/u);
-  await streamTurn("Confirm non-success results fail the turn.", "dark");
+  await chooseAntigravityModel("model-chooser-dark", /^Follow up\. @ files, (?:\$ skills, )?\/ commands$/u, true);
+  await streamTurn("Confirm usage and reasoning effort stay intact across turns.", "dark");
 
-  const entries = wire().filter(({ kind }) => kind === "launch");
+  const wireEntries = wire();
+  const entries = wireEntries.filter(({ kind }) => kind === "launch");
   expect(entries.length).toBeGreaterThan(0);
   const fakeEntryPoints = [fakeAgy, join(dirname(fakeAgy), "agy-fixture.cjs")].map((path) => realpathSync.native(path));
   for (const entry of entries) {
     expect(fakeEntryPoints).toContain(realpathSync.native(entry.executable));
-    expect(entry.args.some((arg) => arg === "-p" || arg === "--print" || arg === "--prompt")).toBe(false);
+    expect(entry.args.some((arg) => arg === "-p" || arg === "--print" || arg === "--prompt" || arg === "--input-format")).toBe(false);
   }
-  const turns = entries.filter(({ args }) => args[0] === "--input-format");
-  expect(turns.map(({ args }) => args)).toEqual([
-    ["--input-format", "stream-json", "--output-format", "stream-json", "--mode", "accept-edits"],
-    ["--input-format", "stream-json", "--output-format", "stream-json", "--conversation", SYNTHETIC_CONVERSATION, "--mode", "accept-edits"],
-  ]);
+  const acpLaunches = entries.filter(({ args }) => args[0] === "acp" && args.includes("--stdio") && args.includes("--process-per-session"));
+  expect(acpLaunches.length).toBeGreaterThanOrEqual(2);
+  expect(wireEntries.filter(({ kind, method }) => kind === "rpc" && method === "session/prompt")).toHaveLength(2);
   expect(conversationId).not.toBe("");
   expect(app.rendererErrors).toEqual([]);
 });

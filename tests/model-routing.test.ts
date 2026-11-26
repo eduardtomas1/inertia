@@ -13,7 +13,17 @@ import {
   withModelSelectionFastMode,
   type ModelBackendProfile,
 } from "../src/shared/model-routing";
-import type { ProviderId } from "../src/shared/provider";
+import {
+  ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+  ANTIGRAVITY_IMAGE_INPUT_UNAVAILABLE_REASON,
+  harnessImageInputUnavailableReason,
+  type ProviderId,
+} from "../src/shared/provider";
+import {
+  accessModeUnavailableReason,
+  effectiveAccessMode,
+  providerCanSuperviseAccess,
+} from "../src/shared/access-modes";
 
 describe("model routing contracts", () => {
   it("keeps every current provider route internally consistent", () => {
@@ -23,7 +33,7 @@ describe("model routing contracts", () => {
       ["cursor", "cursor-acp", "builtin:cursor"],
       ["kimi", "kimi-acp", "builtin:kimi"],
       ["opencode", "opencode-sdk", "builtin:opencode"],
-      ["antigravity", "antigravity-cli", "builtin:antigravity"],
+      ["antigravity", "antigravity-acp", "builtin:antigravity"],
       ["grok", "grok-acp", "builtin:grok"],
     ];
 
@@ -36,6 +46,7 @@ describe("model routing contracts", () => {
         backendProfileId,
       });
     }
+    expect(providerIdForHarness("antigravity-cli")).toBe("antigravity");
   });
 
   it("keeps harness, backend profile, and exact model as separate identities", () => {
@@ -157,5 +168,16 @@ describe("model routing contracts", () => {
     const selection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
     expect(continuationIdentityForSelection(selection, "0123456789abcdef").endpointIdentity)
       .toBe("0123456789abcdef");
+  });
+
+  it("enables Antigravity ACP supervision and image input while keeping legacy CLI image limits", () => {
+    expect(providerCanSuperviseAccess("antigravity")).toBe(true);
+    expect(effectiveAccessMode("antigravity", "supervised")).toBe("supervised");
+    expect(accessModeUnavailableReason("antigravity", "supervised")).toBeNull();
+    expect(harnessImageInputUnavailableReason("antigravity-acp")).toBeNull();
+    expect(harnessImageInputUnavailableReason("antigravity-cli")).toBe(ANTIGRAVITY_IMAGE_INPUT_UNAVAILABLE_REASON);
+    expect(ANTIGRAVITY_EXPLICIT_COMPACTION_UNAVAILABLE_REASON).toBe(
+      "Antigravity does not expose explicit context compaction.",
+    );
   });
 });

@@ -110,7 +110,7 @@ describe("secret request routes", () => {
       cursor: "acp-mcp",
       kimi: "acp-mcp",
       opencode: "remote-mcp",
-      antigravity: "prompt-fallback",
+      antigravity: "acp-mcp",
       grok: "acp-mcp",
     });
     expect(Object.isFrozen(SECRET_REQUEST_ROUTES)).toBe(true);

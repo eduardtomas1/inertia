@@ -125,7 +125,7 @@ type ProductionHarnessId =
   | "cursor-acp"
   | "kimi-acp"
   | "opencode-sdk"
-  | "antigravity-cli"
+  | "antigravity-acp"
   | "grok-acp";
 
 interface ManifestDefinition {
@@ -237,7 +237,7 @@ const CONTRACT_TESTS: Readonly<Record<ProductionHarnessId, string>> = {
   "cursor-acp": "tests/server/cursor-acp-harness.test.ts",
   "kimi-acp": "tests/server/kimi-acp-harness.test.ts",
   "opencode-sdk": "tests/server/opencode-sdk-harness.test.ts",
-  "antigravity-cli": "tests/server/antigravity-cli-harness.test.ts",
+  "antigravity-acp": "tests/server/antigravity-acp-harness.test.ts",
   "grok-acp": "tests/server/grok-acp-harness.test.ts",
 };
 
@@ -351,23 +351,18 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
   },
   {
     providerId: "antigravity",
-    harnessId: "antigravity-cli",
-    implementationRevision: 2,
-    protocolRevision: "headless-stream-json/agy-1.2.2",
-    bundledSdkVersion: null,
+    harnessId: "antigravity-acp",
+    implementationRevision: 1,
+    protocolRevision: "acp-v1/sdk-2.8.0/antigravity",
+    bundledSdkVersion: "2.8.0",
     support: {
-      "text-streaming": "native",
-      "tool-activity": "native",
-      "file-changes": "native",
-      plans: "native",
-      "session-resume": "native",
-      "usage-tokens": "native",
-      "provider-native-tools": "native",
+      ...CORE_NATIVE,
+      images: "negotiated",
+      "session-resume": "negotiated",
+      compaction: "unavailable",
+      "auth-state-discovery": "unavailable",
+      "usage-tokens": "negotiated",
       "model-discovery": "native",
-      cancellation: "native",
-      "native-session-id": "native",
-      "process-cleanup": "host-exact-turn",
-      "maintenance-update": "negotiated",
     },
   },
   {

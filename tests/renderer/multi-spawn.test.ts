@@ -594,8 +594,8 @@ describe("Duo draft issues", () => {
   });
 });
 
-describe("multi-spawn access for providers that cannot ask for approval", () => {
-  it("launches an Antigravity side left at Supervised as Auto-accept edits and keeps Supervised elsewhere", () => {
+describe("multi-spawn access for providers that can ask for approval", () => {
+  it("keeps Supervised on Antigravity and Claude sides", () => {
     const side = (providerId: "antigravity" | "claude") => ({
       projectId: "project-1",
       title: `${providerId} side`,
@@ -603,7 +603,7 @@ describe("multi-spawn access for providers that cannot ask for approval", () => 
       accessMode: "supervised" as const,
       interactionMode: "build" as const,
     });
-    expect(multiSpawnConversationPayload(side("antigravity"), defaultSettings)).toMatchObject({ providerId: "antigravity", accessMode: "auto-edit" });
+    expect(multiSpawnConversationPayload(side("antigravity"), defaultSettings)).toMatchObject({ providerId: "antigravity", accessMode: "supervised" });
     expect(multiSpawnConversationPayload(side("claude"), defaultSettings)).toMatchObject({ providerId: "claude", accessMode: "supervised" });
   });
 });

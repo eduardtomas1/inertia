@@ -251,7 +251,7 @@ receives only the package-manager home it needs (`PNPM_HOME`, `BUN_INSTALL`,
 An installation too old for its protocol check can still update. Discovery
 returns the executable and version of an identified CLI that answered
 `--version` but lacks ACP (Cursor, Kimi), plugin-free serve (OpenCode 1.x),
-the App Server (Codex), the headless release (Antigravity below 1.2.2) or a
+the App Server (Codex), the built-in ACP floor (Antigravity below 1.5.17) or a
 security floor (Claude Code below 2.1.309, OpenCode below 1.18.22); an
 unidentified executable and an OpenCode 2 install are not returned. The
 capability authority records such an installation as identified (version

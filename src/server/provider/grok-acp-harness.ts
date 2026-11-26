@@ -1,6 +1,7 @@
 import { AcpSecretRedactor } from "./acp-redaction";
 import { acpPermissionDetail } from "./acp-permission-detail";
 import { acpAttachmentReadAllowed } from "./attachment-read-grant";
+import { acpHostMcpAllowOption, isInertiaHostMcpPermissionRequest } from "./acp-host-tool-permission";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
@@ -255,6 +256,7 @@ function startGrokRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
+  let hostMcpToolNames: ReadonlySet<string> = new Set();
   const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(value);
   let sessionId = options.input.sessionId;
   let cancelRequested = false;
@@ -323,6 +325,7 @@ function startGrokRun(
           options,
           emitter.rich,
           approvals,
+          hostMcpToolNames,
         );
       },
     )
@@ -536,6 +539,9 @@ function startGrokRun(
             hostMcpProxyRuntime,
           )
         : [];
+      if (hostMcpServers.length > 0 && hostToolRuntime) {
+        hostMcpToolNames = new Set(hostToolRuntime.definitions().map(({ name }) => name));
+      }
       const turnPrompt = acpPromptForHostMcp(
         options.input.prompt,
         options.hostTools,
@@ -824,7 +830,12 @@ async function grokPermission(
   options: AgentHarnessStartOptions,
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   approvals: Map<string, PendingApproval>,
+  hostMcpToolNames: ReadonlySet<string>,
 ): Promise<RequestPermissionResponse> {
+  if (isInertiaHostMcpPermissionRequest(params, hostMcpToolNames)) {
+    const hostAllow = acpHostMcpAllowOption(params.options);
+    if (hostAllow) return { outcome: { outcome: "selected", optionId: hostAllow.optionId } };
+  }
   const allow = oneShotPermissionOption(params.options, true);
   if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
     return { outcome: { outcome: "selected", optionId: allow.optionId } };

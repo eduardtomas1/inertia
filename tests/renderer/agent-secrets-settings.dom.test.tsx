@@ -155,11 +155,72 @@ describe("Settings → Data → Agent secrets", () => {
 
   it("does not revoke while settings are disabled", async () => {
     const request = server([entry(1)]);
-    render(<AgentSecretsSettings disabled request={request} />);
+    const { rerender } = render(<AgentSecretsSettings disabled={false} request={request} />);
     const revoke = await screen.findByRole("button", { name: "Revoke Tailscale auth key 1" });
+    rerender(<AgentSecretsSettings disabled request={request} />);
     expect(revoke).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(revoke);
     expect(request.mock.calls.some(([command]) => command.type === "secret-request.revoke")).toBe(false);
+  });
+
+  it("gates initial, interval and focus refresh while disabled and auto-refreshes on reconnect", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const request = server([entry(1)]);
+    const { rerender } = render(<AgentSecretsSettings disabled request={request} />);
+    expect(request).not.toHaveBeenCalled();
+
+    fireEvent.focus(window);
+    await act(async () => { vi.advanceTimersByTime(AGENT_SECRETS_REFRESH_MS); });
+    expect(request).not.toHaveBeenCalled();
+
+    rerender(<AgentSecretsSettings disabled={false} request={request} />);
+    expect(await screen.findByText("Tailscale auth key 1")).toBeInTheDocument();
+    expect(request).toHaveBeenCalledTimes(1);
+
+    await act(async () => { fireEvent.focus(window); });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a stale in-flight list response after revoke and after unmount", async () => {
+    let resolveFirstList!: (event: ServerEvent) => void;
+    let listCalls = 0;
+    const request = vi.fn((command: CommandWithoutId): Promise<ServerEvent> => {
+      if (command.type === "secret-request.list") {
+        listCalls += 1;
+        if (listCalls === 1) return Promise.resolve(listResult([entry(1)]));
+        if (listCalls === 2) return new Promise<ServerEvent>((resolve) => { resolveFirstList = resolve; });
+        return Promise.resolve(listResult([]));
+      }
+      return Promise.resolve({ type: "request.result", requestId: "revoke", result: { kind: "secret-request.revoke", status: "revoked" } } as ServerEvent);
+    });
+    const { unmount } = render(<AgentSecretsSettings disabled={false} request={request} />);
+    const revoke = await screen.findByRole("button", { name: "Revoke Tailscale auth key 1" });
+
+    // Start a focus refresh that stays in-flight with stale data.
+    fireEvent.focus(window);
+    expect(listCalls).toBe(2);
+
+    // Revoke succeeds and triggers a newer list refresh returning [].
+    await act(async () => { fireEvent.click(revoke); });
+    expect(await screen.findByText("No agent secrets are active.")).toBeVisible();
+
+    // Now the stale list resolves with [entry(1)] — it must be ignored.
+    await act(async () => { resolveFirstList(listResult([entry(1)])); });
+    expect(screen.getByText("No agent secrets are active.")).toBeVisible();
+    expect(screen.queryByText("Tailscale auth key 1")).toBeNull();
+
+    // Unmount while a new refresh is pending should not throw.
+    unmount();
+  });
+
+  it("reports an info notice when opening an archived or unavailable chat", async () => {
+    const request = server([entry(1)]);
+    const open = vi.fn(() => false);
+    render(<AgentSecretsSettings disabled={false} request={request} onOpenConversation={open} />);
+    const chatButton = await screen.findByRole("button", { name: "Open chat CI tailnet 1" });
+    fireEvent.click(chatButton);
+    expect(open).toHaveBeenCalledWith(entry(1).conversationId);
+    expect(screen.getByText("This chat is archived or unavailable.")).toBeInTheDocument();
   });
 
   it("reports an unreadable list and retries on request and on the refresh interval", async () => {

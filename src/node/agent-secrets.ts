@@ -24,6 +24,7 @@ export const SECRET_REQUEST_MAX_FILE_NAME_LENGTH = 64;
 export const SECRET_REQUEST_DEFAULT_TTL_HOURS = 24;
 export const SECRET_REQUEST_DEFAULT_FILE_NAME = "secret";
 export const SECRET_REQUEST_FILE_NAME_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$";
+const SECRET_REQUEST_OPTIONAL_FILE_NAME_PATTERN = "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$";
 export const SECRET_REQUEST_MAX_PENDING_PER_CONVERSATION = 1;
 export const SECRET_REQUEST_MAX_PER_TURN = 3;
 export const SECRET_REQUEST_DEFAULT_WAIT_MS = 10 * 60_000;
@@ -70,6 +71,7 @@ export function isSecretRequestProviderId(value: unknown): value is ProviderId {
 const TITLE_CONTROLS = /[\u0000-\u001f\u007f-\u009f]/gu;
 const DESCRIPTION_CONTROLS = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/gu;
 const FILE_NAME = new RegExp(SECRET_REQUEST_FILE_NAME_PATTERN, "u");
+const OPTIONAL_FILE_NAME = new RegExp(SECRET_REQUEST_OPTIONAL_FILE_NAME_PATTERN, "u");
 const WINDOWS_RESERVED_STEM = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/iu;
 
 export function isSecretRequestFileName(value: unknown): value is string {
@@ -105,12 +107,12 @@ export const SECRET_REQUEST_TOOL_INPUT_SCHEMA = {
       description: "Plain text, no Markdown: what it is for, where the user creates it, which options to choose.",
     },
     fileName: {
-      type: "string",
-      pattern: SECRET_REQUEST_FILE_NAME_PATTERN,
+      type: ["string", "null"],
+      pattern: SECRET_REQUEST_OPTIONAL_FILE_NAME_PATTERN,
       description: "Optional file name hint, e.g. tailscale-authkey.",
     },
     ttlHours: {
-      type: "integer",
+      type: ["integer", "null"],
       minimum: SECRET_REQUEST_MIN_TTL_HOURS,
       maximum: SECRET_REQUEST_MAX_TTL_HOURS,
       default: SECRET_REQUEST_DEFAULT_TTL_HOURS,
@@ -129,9 +131,11 @@ function boundedText(max: number) {
 export const secretRequestToolInputSchema = z.strictObject({
   title: boundedText(SECRET_REQUEST_MAX_TITLE_LENGTH),
   description: boundedText(SECRET_REQUEST_MAX_DESCRIPTION_LENGTH),
-  fileName: z.string().regex(FILE_NAME).optional(),
+  fileName: z.string().regex(OPTIONAL_FILE_NAME).nullable().optional(),
   ttlHours: z.number().int().min(SECRET_REQUEST_MIN_TTL_HOURS).max(SECRET_REQUEST_MAX_TTL_HOURS)
-    .default(SECRET_REQUEST_DEFAULT_TTL_HOURS),
+    .nullable()
+    .optional()
+    .transform((value) => value ?? SECRET_REQUEST_DEFAULT_TTL_HOURS),
 });
 
 export interface NormalizedSecretRequestInput {
@@ -154,13 +158,16 @@ export function sanitizeSecretRequestDescription(value: string): string {
     .trim();
 }
 
-export function sanitizeSecretRequestFileName(value: string | undefined): string {
-  if (value === undefined || !FILE_NAME.test(value)) return SECRET_REQUEST_DEFAULT_FILE_NAME;
+export function sanitizeSecretRequestFileName(value: string | null | undefined): string {
+  if (typeof value !== "string" || !FILE_NAME.test(value)) return SECRET_REQUEST_DEFAULT_FILE_NAME;
   const name = value.replace(/\.+$/u, "");
   const dot = name.indexOf(".");
   const stem = dot === -1 ? name : name.slice(0, dot);
   if (!WINDOWS_RESERVED_STEM.test(stem)) return name;
-  return `${stem}-secret${name.slice(stem.length)}`.slice(0, SECRET_REQUEST_MAX_FILE_NAME_LENGTH);
+  const truncated = `${stem}-secret${name.slice(stem.length)}`
+    .slice(0, SECRET_REQUEST_MAX_FILE_NAME_LENGTH)
+    .replace(/\.+$/u, "");
+  return truncated.length > 0 ? truncated : SECRET_REQUEST_DEFAULT_FILE_NAME;
 }
 
 export function normalizeSecretRequestToolInput(value: unknown): NormalizedSecretRequestInput | null {

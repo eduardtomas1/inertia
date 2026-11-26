@@ -480,6 +480,10 @@ export class HarnessCapabilityRegistry {
     return this.#manifest;
   }
 
+  packDigest(packId: string): string | undefined {
+    return this.#packDigests.get(packId);
+  }
+
   /**
    * The exact-turn bridge for the packs this turn is offered. A withheld pack's
    * tools are not advertised. They stay accepted like retired tools, because a

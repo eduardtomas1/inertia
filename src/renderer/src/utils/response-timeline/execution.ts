@@ -106,6 +106,12 @@ export type TurnExecutionStreamEntry =
       message: SentToUserMessage;
     }
   | {
+      kind: "secret-request";
+      id: string;
+      createdAt: string;
+      message: SecretRequestMessage;
+    }
+  | {
       kind: "activity-group";
       id: string;
       createdAt: string;
@@ -125,12 +131,6 @@ export type TurnWorkStreamEntry =
       id: string;
       createdAt: string;
       message: ChatMessage;
-    }
-  | {
-      kind: "secret-request";
-      id: string;
-      createdAt: string;
-      message: SecretRequestMessage;
     }
   | SubagentCallEntry
   | SubagentGroupEntry;
@@ -178,19 +178,6 @@ export function withHtmlRenders(
   return mergeChronologically(stream, renders.map((message) => ({
     kind: "html-render" as const,
     id: `html-render:${message.id}`,
-    createdAt: message.createdAt,
-    message,
-  })));
-}
-
-export function withSecretRequests(
-  stream: TurnWorkStreamEntry[],
-  requests: readonly SecretRequestMessage[],
-): TurnWorkStreamEntry[] {
-  if (requests.length === 0) return stream;
-  return mergeChronologically(stream, requests.map((message) => ({
-    kind: "secret-request" as const,
-    id: `secret-request:${message.secretRequest.requestId}`,
     createdAt: message.createdAt,
     message,
   })));
@@ -258,7 +245,7 @@ export function buildTurnExecutionStream(
   turn: Pick<
     ResponseTurn,
     "id" | "agentTurn" | "followUpMessages" | "commentaryMessages" | "activities"
-  > & Partial<Pick<ResponseTurn, "sentMessages">>,
+  > & Partial<Pick<ResponseTurn, "sentMessages" | "secretRequests">>,
   options: BuildTurnExecutionStreamOptions = {},
 ): TurnExecutionStreamEntry[] {
   const includeImportant = options.includeImportantActivities ?? true;
@@ -286,6 +273,13 @@ export function buildTurnExecutionStream(
         id: string;
         createdAt: string;
         message: SentToUserMessage;
+        order: number;
+      }
+    | {
+        kind: "secret-request";
+        id: string;
+        createdAt: string;
+        message: SecretRequestMessage;
         order: number;
       }
     | {
@@ -325,6 +319,15 @@ export function buildTurnExecutionStream(
     items.push({
       kind: "sent-message",
       id: `sent-message:${message.id}`,
+      createdAt: message.createdAt,
+      message,
+      order: 3,
+    });
+  }
+  for (const message of turn.secretRequests ?? []) {
+    items.push({
+      kind: "secret-request",
+      id: `secret-request:${message.secretRequest.requestId}`,
       createdAt: message.createdAt,
       message,
       order: 3,
@@ -371,7 +374,12 @@ export function buildTurnExecutionStream(
   const stream: TurnExecutionStreamEntry[] = [];
   let streamEpisode = 0;
   for (const item of items) {
-    if (item.kind === "commentary" || item.kind === "follow-up" || item.kind === "sent-message") {
+    if (
+      item.kind === "commentary"
+      || item.kind === "follow-up"
+      || item.kind === "sent-message"
+      || item.kind === "secret-request"
+    ) {
       stream.push(item);
       continue;
     }

@@ -18,6 +18,7 @@ const HARNESS_PROFILES: Readonly<Record<string, WatcherHarnessProfile>> = Object
   "opencode-sdk": Object.freeze({ systemInstruction: true, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: false }),
   "cursor-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
   "kimi-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
+  "grok-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
   "antigravity-cli": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: false }),
 });
 

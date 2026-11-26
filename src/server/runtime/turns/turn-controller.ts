@@ -209,7 +209,7 @@ export class TurnController {
         active,
         "failed",
         "stream-persistence-failed",
-        publicTurnError(error),
+        this.secretRequests.text(publicTurnError(error)),
       );
     };
     this.activities = new TurnActivityProjection({
@@ -252,7 +252,7 @@ export class TurnController {
       settlement: this.settlement,
       providerRunOwnershipBarriers: this.providerRunOwnershipBarriers,
       now: () => this.now(),
-      activity: (active) => this.timeouts.activity(active),
+      activity: (active) => this.timeouts.activity(active), cancelSecrets: (active, reason) => this.secretRequests.cancelForTurn(active, reason),
       release: (active) => this.releaseTurnAttachmentsWithRetry(active),
       track: (value) => this.track(value),
     });
@@ -554,7 +554,7 @@ export class TurnController {
           active,
           "failed",
           "stream-persistence-failed",
-          publicTurnError(error),
+          this.secretRequests.text(publicTurnError(error)),
         );
       }
     }
@@ -654,7 +654,7 @@ export class TurnController {
         active,
         "failed",
         "turn-adoption-failed",
-        message,
+        this.secretRequests.text(message),
       ),
       failQueued: (queued, checkpointId) =>
         this.failQueuedAdoption(queued, checkpointId),
@@ -666,7 +666,7 @@ export class TurnController {
   private failPairedAdoption(queued: QueuedTurn, checkpointId: string | null, error: unknown): void {
     const active = this.activeByTurn.get(queued.turn.id);
     if (!active) return this.failQueuedAdoption(queued, checkpointId);
-    this.settle(active, "failed", "turn-adoption-failed", publicTurnError(error));
+    this.settle(active, "failed", "turn-adoption-failed", this.secretRequests.text(publicTurnError(error)));
   }
 
   private failQueuedAdoption(queued: QueuedTurn, checkpointId: string | null): void {
@@ -883,12 +883,12 @@ export class TurnController {
             this.handleProviderResult(active, this.secretRequests.result(active, providerResult));
           } catch (error) {
             requestProviderCancellation(this.providers, active.conversation.id);
-            this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
+            this.settle(active, "failed", "stream-persistence-failed", this.secretRequests.text(publicTurnError(error)));
           }
         },
         (error: unknown) => {
           acknowledge(false);
-          const failure = providerPromiseFailure(active, error);
+          const failure = this.secretRequests.failure(providerPromiseFailure(active, error));
           this.settle(
             active,
             "failed",
@@ -927,7 +927,7 @@ export class TurnController {
       } else if (!isProviderRunRefusal(error, owner)) {
         requestProviderCancellation(this.providers, active.conversation.id);
       }
-      this.settle(active, "failed", "turn-start-failed", publicTurnError(error));
+      this.settle(active, "failed", "turn-start-failed", this.secretRequests.text(publicTurnError(error)));
       return { accepted: false, started };
     }
     return { accepted: true, started };
@@ -1103,12 +1103,11 @@ export class TurnController {
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
-      for (const projected of this.secretRequests.events(event)) this.providerEvents.project(active, projected);
-      this.nativeGoals.handleEvent(active, event);
+      for (const projected of this.secretRequests.events(event)) { this.providerEvents.project(active, projected); this.nativeGoals.handleEvent(active, projected); }
       return true;
     } catch (error) {
       requestProviderCancellation(this.providers, active.conversation.id);
-      this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
+      this.settle(active, "failed", "stream-persistence-failed", this.secretRequests.text(publicTurnError(error)));
       return false;
     }
   }
@@ -1156,7 +1155,7 @@ export class TurnController {
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {
-      const failure = normalizedProviderRunFailure(active, result, importedSessionUnavailableMessage(this.store, active, result));
+      const failure = this.secretRequests.failure(normalizedProviderRunFailure(active, result, importedSessionUnavailableMessage(this.store, active, result)));
       this.settle(active, "failed", providerFailureCause(result), failure.message, failure);
     }
   }

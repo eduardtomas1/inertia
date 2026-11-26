@@ -31,9 +31,12 @@ import {
 } from "../shared/backend-credentials.js";
 
 const VAULT_SCHEMA_VERSION = 2;
-export const MAX_CREDENTIAL_VAULT_BYTES = 1_048_576;
+export const MAX_CREDENTIAL_VAULT_BYTES = 2 * 1_048_576;
 const MAX_VAULT_ENTRIES = 256;
 const MAX_CIPHERTEXT_BASE64_LENGTH = 65_536;
+const WIN32_RENAME_MAX_ATTEMPTS = 5;
+const WIN32_RENAME_RETRY_DELAYS_MS = [25, 50, 75, 100] as const;
+const WIN32_TRANSIENT_RENAME_ERRORS = new Set(["EPERM", "EBUSY", "EACCES"]);
 const AGENT_SECRET_REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export type AgentSecretVaultWrite = "stored" | "exists" | "unavailable";
@@ -87,6 +90,8 @@ export interface FileCredentialVaultPersistenceOptions {
   platform?: NodeJS.Platform;
   temporaryPrefix?: `.${string}-`;
   validateStage?: (value: string) => boolean | Promise<boolean>;
+  renameFile?: (oldPath: string, newPath: string) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface PersistedCredentialEntry {
@@ -157,13 +162,14 @@ export class ElectronSafeStorageBackend implements CredentialEncryptionBackend {
 
   async availability(): Promise<BackendCredentialStorageState> {
     try {
+      const asyncAvailable = await this.storage.isAsyncEncryptionAvailable();
       if (this.platform === "linux") {
         const selected = this.storage.getSelectedStorageBackend();
         if (selected === "basic_text" || selected === "unknown") {
           return { ...publicStorageState(false, "unavailable"), message: NO_KEYRING_MESSAGE };
         }
       }
-      if (!await this.storage.isAsyncEncryptionAvailable()) {
+      if (!asyncAvailable) {
         return publicStorageState(false, "unavailable");
       }
       return publicStorageState(
@@ -199,6 +205,8 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
   private readonly platform: NodeJS.Platform;
   private readonly temporaryPrefix: string;
   private readonly validateStage: (value: string) => boolean | Promise<boolean>;
+  private readonly renameFile: (oldPath: string, newPath: string) => Promise<void>;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(
     private readonly path: string,
@@ -207,6 +215,8 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
     this.platform = options.platform ?? process.platform;
     this.temporaryPrefix = options.temporaryPrefix ?? ".credential-vault-";
     this.validateStage = options.validateStage ?? credentialVaultPayloadIsValid;
+    this.renameFile = options.renameFile ?? rename;
+    this.sleep = options.sleep ?? defaultSleep;
     const name = basename(this.path);
     if (
       !/^\.[a-z0-9-]{1,48}-$/u.test(this.temporaryPrefix)
@@ -318,26 +328,30 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       await temporary.close();
       temporary = null;
       if (this.platform === "win32" && await exists(paths.target)) {
-        await rename(paths.target, backupPath);
+        await this.renameWithRetry(paths.target, backupPath);
         try {
-          await rename(temporaryPath, paths.target);
+          await this.renameWithRetry(temporaryPath, paths.target);
         } catch (error) {
-          await rename(backupPath, paths.target).catch(() => undefined);
+          await this.renameWithRetry(backupPath, paths.target).catch(() => undefined);
           throw error;
         }
         await unlink(backupPath).catch(() => undefined);
       } else {
-        await rename(temporaryPath, paths.target);
+        await this.renameWithRetry(temporaryPath, paths.target);
       }
       await chmod(paths.target, 0o600).catch(() => undefined);
       await syncDirectory(paths.directory);
     } catch (error) {
       await temporary?.close().catch(() => undefined);
       await unlink(temporaryPath).catch(() => undefined);
-      if (!await exists(paths.target)) {
-        await rename(backupPath, paths.target).catch(() => undefined);
+      let targetExists = await exists(paths.target);
+      if (!targetExists) {
+        await this.renameWithRetry(backupPath, paths.target).catch(() => undefined);
+        targetExists = await exists(paths.target);
       }
-      await unlink(backupPath).catch(() => undefined);
+      if (targetExists) {
+        await unlink(backupPath).catch(() => undefined);
+      }
       if (error instanceof CredentialVaultError) throw error;
       throw new CredentialVaultError(
         "persistence-failed",
@@ -462,12 +476,12 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       return;
     }
     if (transaction.stage && await this.completeStage(transaction.stage)) {
-      await rename(transaction.stage, target);
+      await this.renameWithRetry(transaction.stage, target);
       await unlinkSafeTemporary(transaction.backup);
       return;
     }
     if (transaction.backup && await regularFile(transaction.backup)) {
-      await rename(transaction.backup, target);
+      await this.renameWithRetry(transaction.backup, target);
       await unlinkSafeTemporary(transaction.stage);
       return;
     }
@@ -489,6 +503,35 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       await file?.close().catch(() => undefined);
     }
   }
+  private async renameWithRetry(oldPath: string, newPath: string): Promise<void> {
+    if (this.platform !== "win32") {
+      await this.renameFile(oldPath, newPath);
+      return;
+    }
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.renameFile(oldPath, newPath);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (
+          attempt >= WIN32_RENAME_MAX_ATTEMPTS
+          || typeof code !== "string"
+          || !WIN32_TRANSIENT_RENAME_ERRORS.has(code)
+        ) {
+          throw error;
+        }
+        const delay = WIN32_RENAME_RETRY_DELAYS_MS[
+          Math.min(attempt - 1, WIN32_RENAME_RETRY_DELAYS_MS.length - 1)
+        ]!;
+        await this.sleep(delay);
+      }
+    }
+  }
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function exists(path: string): Promise<boolean> {

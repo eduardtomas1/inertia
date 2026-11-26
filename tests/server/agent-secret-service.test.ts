@@ -11,12 +11,26 @@ import { ProviderTerminalResumeRegistry } from "../../src/server/provider/termin
 import { createConversationCommandHandler } from "../../src/server/runtime/commands/conversation-commands";
 import type { ProviderHostToolCall, ProviderHostToolResult } from "../../src/server/provider/contracts";
 import { AgentSecretService } from "../../src/server/runtime/agent-secrets/agent-secret-service";
-import { agentSecretRoot, removeAgentSecretDirectory, writeAgentSecretFile } from "../../src/server/runtime/agent-secrets/secret-files";
+import {
+  SECRET_REQUEST_DECLINED_MESSAGE,
+  SECRET_REQUEST_ENDED_MESSAGE,
+} from "../../src/server/runtime/agent-secrets/secret-request-host-tool";
+import {
+  agentSecretRoot,
+  ensureAgentSecretRoot,
+  ensureAgentSecretRootAsync,
+  removeAgentSecretDirectory,
+  writeAgentSecretFile,
+  type AgentSecretExecFileAsync,
+  type AgentSecretExecFileSync,
+  type WindowsDaclCache,
+} from "../../src/server/runtime/agent-secrets/secret-files";
 import { agentSecretReference, SECRET_REQUEST_TOOL_NAME } from "../../src/node/agent-secrets";
 import type { RuntimeMutationEvent } from "../../src/shared/contracts";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const SECRET = "fake-token-kQ9xZ2mB7vN4pL1sR8tW";
+const WIN32_TEST_ENV: NodeJS.ProcessEnv = { SystemRoot: "C:\\Windows", TEMP: "C:\\Temp" };
 const POSIX = process.platform !== "win32";
 const directories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -48,6 +62,10 @@ async function openHarness(options: {
   resolve?: (reference: string) => Promise<string | null>;
   forget?: (reference: string) => Promise<boolean>;
   writeFile?: typeof writeAgentSecretFile;
+  removeDirectory?: (root: string, token: string) => void;
+  removeDirectoryAsync?: (root: string, token: string) => Promise<void>;
+  ensureRoot?: typeof ensureAgentSecretRoot;
+  ensureRootAsync?: typeof ensureAgentSecretRootAsync;
   sweepIntervalMs?: number;
   platform?: NodeJS.Platform;
 } = {}): Promise<Harness> {
@@ -75,12 +93,15 @@ async function openHarness(options: {
         return true;
       },
     },
-    removeDirectory: (root, token) => {
+    removeDirectory: options.removeDirectory ?? ((root, token) => {
       if (locked.has(token)) throw Object.assign(new Error("EBUSY: resource busy or locked"), { code: "EBUSY" });
       removeAgentSecretDirectory(root, token);
-    },
+    }),
+    ...(options.removeDirectoryAsync ? { removeDirectoryAsync: options.removeDirectoryAsync } : {}),
     ...(options.sweepIntervalMs ? { sweepIntervalMs: options.sweepIntervalMs } : {}),
     ...(options.writeFile ? { writeFile: options.writeFile } : {}),
+    ...(options.ensureRoot ? { ensureRoot: options.ensureRoot } : {}),
+    ...(options.ensureRootAsync ? { ensureRootAsync: options.ensureRootAsync } : {}),
     broadcast: (event) => events.push(event),
     credentials: {
       resolve: resolveVault,
@@ -242,7 +263,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     expect(secretFileUseExample("/home/o'neil/Application Support/x/secret", "darwin"))
       .toBe("KEY=\"$(cat '/home/o'\\''neil/Application Support/x/secret')\"");
     expect(secretFileUseExample("C:\\Users\\o'neil\\secret", "win32"))
-      .toBe("$key = Get-Content -Raw 'C:\\Users\\o''neil\\secret'");
+      .toBe("PowerShell: $key = Get-Content -Raw 'C:\\Users\\o''neil\\secret' | Git Bash: KEY=\"$(cat 'C:\\Users\\o'\\''neil\\secret')\"");
   });
 
   it("declines, forgets any vault copy, and refuses a late delivery", async () => {
@@ -256,7 +277,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     const outcome = await result;
     expect(parsed(outcome)).toEqual({
       status: "declined",
-      message: "The user declined. Continue without it, or explain in chat why you need it.",
+      message: SECRET_REQUEST_DECLINED_MESSAGE,
     });
     expect(harness.forgotten).toContain(agentSecretReference(requestId));
     expect(await harness.service.deliver({ conversationId: conversation.id, requestId, secret: SECRET, vaulted: true }))
@@ -273,7 +294,7 @@ describe("agent secret service: pending request, private file and turn wait", ()
     const abortedId = pendingId(harness.store);
     controller.abort();
     expect(parsed(await aborted)).toEqual({
-      status: "ended", reason: "cancelled", message: "No answer arrived. Ask again only if still needed.",
+      status: "ended", reason: "cancelled", message: SECRET_REQUEST_ENDED_MESSAGE,
     });
     expect(harness.store.transcriptRepository.secretRequests.find(abortedId)?.status).toBe("ended");
     expect(harness.forgotten).toContain(agentSecretReference(abortedId));
@@ -964,5 +985,1193 @@ describe("agent secret service: in-flight saves and keychain reconciliation", ()
     harness.service.sweep();
     await settle();
     expect(harness.forgotten).toEqual([reference, reference, reference]);
+  });
+
+  it("cancels pending requests for a specific turn via cancelForTurn without disturbing other turns", async () => {
+    const harness = await openHarness();
+    const first = chat(harness.store, "First");
+    const second = chat(harness.store, "Second");
+    const firstResult = harness.service.invoke(first, call(VALID));
+    const firstId = pendingId(harness.store);
+    const secondResult = harness.service.invoke(second, call(VALID));
+    const secondId = harness.store.transcriptRepository.secretRequests.pendingAll()
+      .find(({ id }) => id !== firstId)!.id;
+
+    expect(harness.service.pendingCount()).toBe(2);
+    expect(harness.service.hasPending(first.conversation.id)).toBe(true);
+    expect(harness.service.pendingConversationIds()).toEqual(new Set([first.conversation.id, second.conversation.id]));
+
+    harness.service.cancelForTurn(first.conversation.id, first.turn.id);
+    expect(parsed(await firstResult)).toMatchObject({ status: "ended", reason: "stopped" });
+    expect(harness.store.transcriptRepository.secretRequests.find(firstId)?.status).toBe("ended");
+    expect(harness.service.pendingCount()).toBe(1);
+    expect(harness.service.hasPending(first.conversation.id)).toBe(false);
+    expect(harness.service.hasPending(second.conversation.id)).toBe(true);
+
+    harness.service.cancelForTurn(second.conversation.id, second.turn.id, "cancelled");
+    expect(parsed(await secondResult)).toMatchObject({ status: "ended", reason: "cancelled" });
+    expect(harness.store.transcriptRepository.secretRequests.find(secondId)?.status).toBe("ended");
+    expect(harness.service.pendingCount()).toBe(0);
+    expect(harness.service.pendingConversationIds().size).toBe(0);
+  });
+
+  it("revokeForConversation ends pending requests, drains queued restoring records, and forgets vault copies without broadcasting", async () => {
+    const first = await openHarness();
+    const restoredChat = chat(first.store, "Restoring");
+    const restoredInvoke = first.service.invoke(restoredChat, call(VALID));
+    const restoredId = pendingId(first.store);
+    await first.service.deliver({
+      conversationId: restoredChat.conversation.id,
+      requestId: restoredId,
+      secret: SECRET,
+      vaulted: true,
+    });
+    await restoredInvoke;
+    first.service.shutdown();
+    services.splice(services.indexOf(first.service), 1);
+
+    const second = await openHarness({
+      directory: first.directory,
+      vault: { [agentSecretReference(restoredId)]: SECRET },
+    });
+    const pendingInvoke = second.service.invoke(restoredChat, call(VALID));
+    const pendingReqId = pendingId(second.store);
+    const eventsBefore = second.events.length;
+
+    second.service.revokeForConversation(restoredChat.conversation.id);
+
+    expect(parsed(await pendingInvoke)).toMatchObject({ status: "ended", reason: "cancelled" });
+    expect(second.store.transcriptRepository.secretRequests.find(pendingReqId)?.status).toBe("ended");
+    expect(second.store.transcriptRepository.secretRequests.find(restoredId)?.status).toBe("revoked");
+    expect(second.forgotten).toEqual(expect.arrayContaining([
+      agentSecretReference(pendingReqId),
+      agentSecretReference(restoredId),
+    ]));
+    expect(second.events.slice(eventsBefore)).toEqual([]);
+    await second.service.restore();
+    expect(second.resolveVault).not.toHaveBeenCalled();
+  });
+
+  it("treats saved unvaulted secrets as orphaned in orphanedVaultRequests even while active", async () => {
+    const harness = await openHarness();
+    const memoryChat = chat(harness.store, "MemoryOnly");
+    const memoryResult = harness.service.invoke(memoryChat, call(VALID));
+    const memoryId = pendingId(harness.store);
+    await harness.service.deliver({
+      conversationId: memoryChat.conversation.id,
+      requestId: memoryId,
+      secret: SECRET,
+      vaulted: false,
+    });
+    await memoryResult;
+    const vaultedChat = chat(harness.store, "Vaulted");
+    const vaultedResult = harness.service.invoke(vaultedChat, call(VALID));
+    const vaultedId = pendingId(harness.store);
+    await harness.service.deliver({
+      conversationId: vaultedChat.conversation.id,
+      requestId: vaultedId,
+      secret: "ghp_vaultedValue12345",
+      vaulted: true,
+    });
+    await vaultedResult;
+
+    expect(harness.service.orphanedVaultRequests([memoryId, vaultedId])).toEqual([memoryId]);
+  });
+
+  it("handles transient keychain errors during restore without retiring or forgetting, preserves retained files, and retries on sweep", async () => {
+    const first = await openHarness();
+    const source = chat(first.store, "Transient");
+    const invoke = first.service.invoke(source, call(VALID));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    // Simulate a crash: do NOT call first.service.shutdown(), leaving the file on disk.
+    services.splice(services.indexOf(first.service), 1);
+
+    let failCount = 1;
+    const second = await openHarness({
+      directory: first.directory,
+      start: false,
+      platform: process.platform,
+      resolve: async (reference) => {
+        if (reference === agentSecretReference(requestId) && failCount-- > 0) {
+          throw new Error("Keychain temporarily locked");
+        }
+        return reference === agentSecretReference(requestId) ? SECRET : null;
+      },
+    });
+    second.service.start();
+    // Retained directory for restoring token is preserved and redacted before restore finishes.
+    expect(existsSync(file)).toBe(true);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+
+    await second.service.restore();
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("saved");
+    expect(second.forgotten).not.toContain(agentSecretReference(requestId));
+    expect(existsSync(file)).toBe(true);
+
+    // Retry triggered by sweep succeeds.
+    second.service.sweep();
+    await vi.waitFor(() => expect(second.service.filePath(requestId)).toBe(file));
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+    first.service.shutdown();
+  });
+
+  it("defers win32 DACL hardening for empty roots on startup, hardens before retaining surviving crash files, and removes them if hardening fails", async () => {
+    const emptyCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const emptyExec = vi.fn<AgentSecretExecFileSync>(() => "");
+    await openHarness({
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: emptyExec,
+        windowsDaclCache: emptyCache,
+      }),
+    });
+    expect(emptyExec).not.toHaveBeenCalled();
+
+    // Crash with an unexpired vaulted secret file still on disk.
+    const first = await openHarness();
+    const source = chat(first.store, "WinCrash");
+    const invoke = first.service.invoke(source, call(VALID));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    services.splice(services.indexOf(first.service), 1);
+
+    // Restart with a fresh process cache and locked keychain: startup must harden before retaining the file.
+    const restartCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const restartExec = vi.fn<AgentSecretExecFileSync>(() => "");
+    const second = await openHarness({
+      directory: first.directory,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: restartExec,
+        windowsDaclCache: restartCache,
+      }),
+      resolve: async () => {
+        throw new Error("Keychain temporarily locked");
+      },
+    });
+    expect(restartExec).toHaveBeenCalledTimes(1);
+    expect(existsSync(file)).toBe(true);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+
+    // If hardening fails on restart, do not retain plaintext under a potentially permissive ACL.
+    const failCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const failExec = vi.fn<AgentSecretExecFileSync>(() => {
+      throw new Error("SetAccessControl failed");
+    });
+    const third = await openHarness({
+      directory: first.directory,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: failExec,
+        windowsDaclCache: failCache,
+      }),
+      resolve: async () => {
+        throw new Error("Keychain temporarily locked");
+      },
+    });
+    expect(failExec).toHaveBeenCalledTimes(1);
+    expect(existsSync(file)).toBe(false);
+    expect(third.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("saved");
+    first.service.shutdown();
+  });
+
+  it("attempts startup DACL hardening at most once across multiple crash files and retries hardening or deletion on sweep independently of vault restore", async () => {
+    const first = await openHarness();
+    const firstChat = chat(first.store, "CrashOne");
+    const firstInvoke = first.service.invoke(firstChat, call({ ...VALID, fileName: "token-one" }));
+    const firstId = pendingId(first.store);
+    await first.service.deliver({
+      conversationId: firstChat.conversation.id,
+      requestId: firstId,
+      secret: "ghp_crashSecretOne111",
+      vaulted: true,
+    });
+    const firstFile = parsed(await firstInvoke).file as string;
+    const firstToken = first.store.transcriptRepository.secretRequests.find(firstId)!.fileToken!;
+
+    const secondChat = chat(first.store, "CrashTwo");
+    const secondInvoke = first.service.invoke(secondChat, call({ ...VALID, fileName: "token-two" }));
+    const secondId = pendingId(first.store);
+    await first.service.deliver({
+      conversationId: secondChat.conversation.id,
+      requestId: secondId,
+      secret: "ghp_crashSecretTwo222",
+      vaulted: true,
+    });
+    const secondFile = parsed(await secondInvoke).file as string;
+    services.splice(services.indexOf(first.service), 1);
+
+    // Restart with both files surviving, DACL hardening failing, and firstToken temporarily locked.
+    const cache: WindowsDaclCache = { hardenedRoots: new Map() };
+    let shouldFailHardening = true;
+    const execFile = vi.fn<AgentSecretExecFileSync>(() => {
+      if (shouldFailHardening) throw new Error("SetAccessControl timed out");
+      return "";
+    });
+    const stalledHardening: { release?: () => void } = {};
+    const execFileAsync = vi.fn<AgentSecretExecFileAsync>(() => new Promise<string>((resolvePromise, rejectPromise) => {
+      stalledHardening.release = () => {
+        if (shouldFailHardening) rejectPromise(new Error("SetAccessControl timed out"));
+        else resolvePromise("");
+      };
+    }));
+    const recovered = await openHarness({
+      directory: first.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile,
+        windowsDaclCache: cache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync,
+        windowsDaclCache: cache,
+      }),
+      resolve: async () => {
+        throw new Error("Keychain still locked");
+      },
+    });
+    recovered.locked.add(firstToken);
+    recovered.service.start();
+
+    // S13: hardening was attempted only ONCE across both retained tokens.
+    expect(execFile).toHaveBeenCalledTimes(1);
+    // Unlocked secondFile was removed immediately; locked firstFile stays redacted while locked.
+    expect(existsSync(secondFile)).toBe(false);
+    expect(existsSync(firstFile)).toBe(true);
+    expect(recovered.service.output.text("leaked ghp_crashSecretOne111")).toBe("leaked [redacted]");
+
+    // S14: sweep retries hardening asynchronously (never calling sync execFile) and keeps only
+    // one async hardening attempt in flight across repeated sweeps while the file stays locked.
+    recovered.service.sweep();
+    recovered.service.sweep();
+    await vi.waitFor(() => expect(execFileAsync).toHaveBeenCalledTimes(1));
+    expect(execFile).toHaveBeenCalledTimes(1);
+    expect(existsSync(firstFile)).toBe(true);
+
+    // S12 + S14: even while the async hardening attempt is still stalled in flight, clearing the
+    // file lock lets the next sweep delete the unhardened file asynchronously without blocking.
+    recovered.locked.delete(firstToken);
+    recovered.service.sweep();
+    await vi.waitFor(() => expect(existsSync(firstFile)).toBe(false));
+    expect(execFileAsync).toHaveBeenCalledTimes(1);
+    expect(recovered.service.output.text("leaked ghp_crashSecretOne111")).toBe("leaked ghp_crashSecretOne111");
+    stalledHardening.release?.();
+    await Promise.resolve();
+
+    // Also verify recovery when async hardening succeeds on sweep while the file remains locked.
+    const third = await openHarness();
+    const thirdChat = chat(third.store, "CrashThree");
+    const thirdInvoke = third.service.invoke(thirdChat, call({ ...VALID, fileName: "token-three" }));
+    const thirdId = pendingId(third.store);
+    await third.service.deliver({
+      conversationId: thirdChat.conversation.id,
+      requestId: thirdId,
+      secret: "ghp_crashSecretThree333",
+      vaulted: true,
+    });
+    const thirdFile = parsed(await thirdInvoke).file as string;
+    const thirdToken = third.store.transcriptRepository.secretRequests.find(thirdId)!.fileToken!;
+    services.splice(services.indexOf(third.service), 1);
+
+    const recoverCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    shouldFailHardening = true;
+    const recoverExec = vi.fn<AgentSecretExecFileSync>(() => {
+      if (shouldFailHardening) throw new Error("SetAccessControl failed");
+      return "";
+    });
+    const recoverExecAsync = vi.fn<AgentSecretExecFileAsync>(async () => {
+      if (shouldFailHardening) throw new Error("SetAccessControl failed");
+      return "";
+    });
+    const fourth = await openHarness({
+      directory: third.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: recoverExec,
+        windowsDaclCache: recoverCache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: recoverExecAsync,
+        windowsDaclCache: recoverCache,
+      }),
+      resolve: async () => {
+        throw new Error("Keychain still locked");
+      },
+    });
+    fourth.locked.add(thirdToken);
+    fourth.service.start();
+    expect(recoverExec).toHaveBeenCalledTimes(1);
+    expect(existsSync(thirdFile)).toBe(true);
+
+    // Async hardening recovers on the next sweep: root is hardened and subsequent sweeps do not re-run it.
+    shouldFailHardening = false;
+    fourth.service.sweep();
+    await vi.waitFor(() => expect(recoverExecAsync).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(recoverCache.hardenedRoots.size).toBe(1));
+    expect(existsSync(thirdFile)).toBe(true);
+    fourth.service.sweep();
+    await Promise.resolve();
+    expect(recoverExec).toHaveBeenCalledTimes(1);
+    expect(recoverExecAsync).toHaveBeenCalledTimes(1);
+    first.service.shutdown();
+    third.service.shutdown();
+  });
+
+  it("preserves DACL retry across a failed restore with a concurrent sweep (S15) and performs one async deletion per unhardened stray token per sweep (S16)", async () => {
+    // S15: concurrent sweep while restore's writeFile is awaiting must NOT drop the unhardened marker.
+    const first = await openHarness();
+    const source = chat(first.store, "RestoreRace");
+    const invoke = first.service.invoke(source, call(VALID));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    const token = first.store.transcriptRepository.secretRequests.find(requestId)!.fileToken!;
+    services.splice(services.indexOf(first.service), 1);
+
+    const writeGate: { reject?: (error: Error) => void; started?: () => void } = {};
+    const writeStarted = new Promise<void>((resolvePromise) => {
+      writeGate.started = resolvePromise;
+    });
+    const cache: WindowsDaclCache = { hardenedRoots: new Map() };
+    let failHardening = true;
+    const syncHardening = vi.fn<AgentSecretExecFileSync>(() => {
+      if (failHardening) throw new Error("SetAccessControl failed");
+      return "";
+    });
+    const asyncHardening = vi.fn<AgentSecretExecFileAsync>(async () => {
+      if (failHardening) throw new Error("SetAccessControl failed");
+      return "";
+    });
+    const second = await openHarness({
+      directory: first.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: syncHardening,
+        windowsDaclCache: cache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: asyncHardening,
+        windowsDaclCache: cache,
+      }),
+      resolve: async (reference) => (reference === agentSecretReference(requestId) ? SECRET : null),
+      writeFile: () => new Promise<string>((_resolve, reject) => {
+        writeGate.reject = reject;
+        writeGate.started?.();
+      }),
+    });
+    second.locked.add(token);
+    second.service.start();
+    expect(syncHardening).toHaveBeenCalledTimes(1);
+
+    const restorePromise = second.service.restore();
+    await writeStarted;
+    // Concurrent sweep while restore has marked the token active before writeFile finishes.
+    second.service.sweep();
+    await Promise.resolve();
+    // Now restore's write fails (e.g. DACL hardening failure) while the file remains locked.
+    writeGate.reject?.(new Error("Could not harden Windows permissions"));
+    await restorePromise;
+    expect(existsSync(file)).toBe(true);
+
+    // Next sweep must still retry DACL hardening because the unhardened marker was preserved!
+    failHardening = false;
+    second.service.sweep();
+    await vi.waitFor(() => expect(asyncHardening).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(cache.hardenedRoots.size).toBe(1));
+    first.service.shutdown();
+
+    // S16: locked unhardened stray token outside restore uses strictly one async deletion per sweep (zero sync calls).
+    const strayBase = await openHarness({ start: false });
+    const strayToken = "abcdef0123456789abcdef0123456789";
+    await writeAgentSecretFile(agentSecretRoot(strayBase.directory), strayToken, "stray-key", SECRET);
+    let syncRemoveCalls = 0;
+    let asyncRemoveCalls = 0;
+    let lockStray = true;
+    const strayCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const strayExecSync = vi.fn<AgentSecretExecFileSync>(() => {
+      throw new Error("SetAccessControl failed");
+    });
+    const strayExecAsync = vi.fn<AgentSecretExecFileAsync>(async () => {
+      throw new Error("SetAccessControl failed");
+    });
+    const strayHarness = await openHarness({
+      directory: strayBase.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: strayExecSync,
+        windowsDaclCache: strayCache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: strayExecAsync,
+        windowsDaclCache: strayCache,
+      }),
+      removeDirectory: (root, targetToken) => {
+        syncRemoveCalls += 1;
+        if (lockStray) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+      removeDirectoryAsync: async (root, targetToken) => {
+        asyncRemoveCalls += 1;
+        if (lockStray) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+    });
+    strayHarness.service.start();
+    // Startup tried sync deletion once and hardening once.
+    expect(syncRemoveCalls).toBe(1);
+    expect(strayExecSync).toHaveBeenCalledTimes(1);
+
+    // Sweep must NOT call sync removeDirectory at all — only ONE async deletion attempt per sweep.
+    strayHarness.service.sweep();
+    await vi.waitFor(() => expect(strayExecAsync).toHaveBeenCalledTimes(1));
+    expect(syncRemoveCalls).toBe(1);
+    expect(asyncRemoveCalls).toBe(1);
+
+    // Once unlocked, next sweep removes it via one async call with zero sync calls.
+    lockStray = false;
+    strayHarness.service.sweep();
+    await vi.waitFor(() => expect(asyncRemoveCalls).toBe(2));
+    expect(syncRemoveCalls).toBe(1);
+    expect(readdirSync(agentSecretRoot(strayBase.directory))).toEqual([]);
+  });
+
+  it("serializes in-flight async removal with restore writes for the same token (S17) and routes expired unhardened cleanup strictly through async reconciliation (S18)", async () => {
+    // S17: sweep starts async removal and then restore runs for the same token;
+    // restore must wait for the in-flight removal to finish before writing the replacement file.
+    const first = await openHarness();
+    const firstChat = chat(first.store, "SerializeRestore");
+    const firstInvoke = first.service.invoke(firstChat, call(VALID));
+    const firstId = pendingId(first.store);
+    await first.service.deliver({ conversationId: firstChat.conversation.id, requestId: firstId, secret: SECRET, vaulted: true });
+    const firstFile = parsed(await firstInvoke).file as string;
+    const firstToken = first.store.transcriptRepository.secretRequests.find(firstId)!.fileToken!;
+    services.splice(services.indexOf(first.service), 1);
+
+    const eventsOrder: string[] = [];
+    const deleteGate: { release?: () => void; started?: () => void } = {};
+    const deleteStarted = new Promise<void>((resolvePromise) => {
+      deleteGate.started = resolvePromise;
+    });
+    const cache: WindowsDaclCache = { hardenedRoots: new Map() };
+    let failHardening = true;
+    const second = await openHarness({
+      directory: first.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: () => {
+          if (failHardening) throw new Error("SetAccessControl failed");
+          return "";
+        },
+        windowsDaclCache: cache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: async () => "",
+        windowsDaclCache: cache,
+      }),
+      removeDirectoryAsync: async (root, targetToken) => {
+        eventsOrder.push("delete-start");
+        deleteGate.started?.();
+        await new Promise<void>((resolvePromise) => {
+          deleteGate.release = resolvePromise;
+        });
+        removeAgentSecretDirectory(root, targetToken);
+        eventsOrder.push("delete-end");
+      },
+      writeFile: async (root, targetToken, fileName, value) => {
+        eventsOrder.push("write-start");
+        const written = await writeAgentSecretFile(root, targetToken, fileName, value, {
+          platform: "win32",
+          env: WIN32_TEST_ENV,
+          execFileAsync: async () => "",
+          windowsDaclCache: cache,
+        });
+        eventsOrder.push("write-end");
+        return written;
+      },
+      resolve: async (reference) => (reference === agentSecretReference(firstId) ? SECRET : null),
+    });
+    second.locked.add(firstToken);
+    second.service.start();
+    // Sweep starts async deletion AND kicks off restore for the same token.
+    failHardening = false;
+    second.service.sweep();
+    await deleteStarted;
+    // Allow vault resolve microtasks to run: writeFile MUST NOT start while async deletion is in flight.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(eventsOrder).toEqual(["delete-start"]);
+
+    deleteGate.release?.();
+    await vi.waitFor(() => expect(eventsOrder).toEqual(["delete-start", "delete-end", "write-start", "write-end"]));
+    expect(readFileSync(firstFile, "utf8")).toBe(SECRET);
+    expect(second.service.filePath(firstId)).toBe(firstFile);
+    first.service.shutdown();
+
+    // S18: expiring a saved unhardened token on sweep performs zero sync removal and strictly one async removal.
+    const third = await openHarness();
+    const thirdChat = chat(third.store, "ExpireUnhardened");
+    const thirdInvoke = third.service.invoke(thirdChat, call({ ...VALID, ttlHours: 1 }));
+    const thirdId = pendingId(third.store);
+    await third.service.deliver({ conversationId: thirdChat.conversation.id, requestId: thirdId, secret: SECRET, vaulted: true });
+    const thirdFile = parsed(await thirdInvoke).file as string;
+    services.splice(services.indexOf(third.service), 1);
+
+    let syncRemoves = 0;
+    let asyncRemoves = 0;
+    let keepLocked = true;
+    const expireCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const expireAsyncHardening = vi.fn<AgentSecretExecFileAsync>(async () => {
+      throw new Error("SetAccessControl failed");
+    });
+    const fourth = await openHarness({
+      directory: third.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: () => {
+          throw new Error("SetAccessControl failed");
+        },
+        windowsDaclCache: expireCache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: expireAsyncHardening,
+        windowsDaclCache: expireCache,
+      }),
+      removeDirectory: (root, targetToken) => {
+        syncRemoves += 1;
+        if (keepLocked) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+      removeDirectoryAsync: async (root, targetToken) => {
+        asyncRemoves += 1;
+        if (keepLocked) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+      resolve: async () => {
+        throw new Error("Keychain locked");
+      },
+    });
+    fourth.service.start();
+    // Startup tried sync deletion once when hardening failed.
+    expect(syncRemoves).toBe(1);
+    expect(existsSync(thirdFile)).toBe(true);
+
+    // Advance past TTL and sweep: expiration must NOT try sync removal and must try async removal exactly once.
+    fourth.clock.now += 2 * 60 * 60_000;
+    fourth.service.sweep();
+    await vi.waitFor(() => expect(expireAsyncHardening).toHaveBeenCalledTimes(1));
+    expect(fourth.store.transcriptRepository.secretRequests.find(thirdId)?.status).toBe("expired");
+    expect(syncRemoves).toBe(1);
+    expect(asyncRemoves).toBe(1);
+
+    // Once unlocked, next sweep removes the expired unhardened file via async removal with zero sync calls.
+    keepLocked = false;
+    fourth.service.sweep();
+    await vi.waitFor(() => expect(existsSync(thirdFile)).toBe(false));
+    expect(syncRemoves).toBe(1);
+    expect(asyncRemoves).toBe(2);
+    third.service.shutdown();
+
+    // S19: late keychain resolution after sweep expires an unhardened token while async removal is
+    // in flight must route through discardRetainedFile (zero sync removal).
+    const fifth = await openHarness();
+    const fifthChat = chat(fifth.store, "LateResolveUnhardened");
+    const fifthInvoke = fifth.service.invoke(fifthChat, call({ ...VALID, ttlHours: 1 }));
+    const fifthId = pendingId(fifth.store);
+    await fifth.service.deliver({ conversationId: fifthChat.conversation.id, requestId: fifthId, secret: SECRET, vaulted: true });
+    const fifthFile = parsed(await fifthInvoke).file as string;
+    services.splice(services.indexOf(fifth.service), 1);
+
+    let lateSyncRemoves = 0;
+    let lateAsyncRemoves = 0;
+    const lateResolveGate: { resolve?: (value: string | null) => void; started?: () => void } = {};
+    const lateResolveStarted = new Promise<void>((resolvePromise) => {
+      lateResolveGate.started = resolvePromise;
+    });
+    const lateDeleteGate: { release?: () => void; started?: () => void } = {};
+    const lateDeleteStarted = new Promise<void>((resolvePromise) => {
+      lateDeleteGate.started = resolvePromise;
+    });
+    const lateCache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const sixth = await openHarness({
+      directory: fifth.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: () => {
+          throw new Error("SetAccessControl failed");
+        },
+        windowsDaclCache: lateCache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: async () => {
+          throw new Error("SetAccessControl failed");
+        },
+        windowsDaclCache: lateCache,
+      }),
+      removeDirectory: (root, targetToken) => {
+        lateSyncRemoves += 1;
+        if (lateSyncRemoves === 1) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+      removeDirectoryAsync: async (root, targetToken) => {
+        lateAsyncRemoves += 1;
+        lateDeleteGate.started?.();
+        await new Promise<void>((resolvePromise) => {
+          lateDeleteGate.release = resolvePromise;
+        });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+      resolve: () => new Promise<string | null>((resolvePromise) => {
+        lateResolveGate.resolve = resolvePromise;
+        lateResolveGate.started?.();
+      }),
+    });
+    sixth.service.start();
+    expect(lateSyncRemoves).toBe(1);
+
+    const lateRestorePromise = sixth.service.restore();
+    await lateResolveStarted;
+    // Expire via sweep while keychain lookup is pending: starts async deletion (held at gate).
+    sixth.clock.now += 2 * 60 * 60_000;
+    sixth.service.sweep();
+    await lateDeleteStarted;
+    expect(lateSyncRemoves).toBe(1);
+    expect(lateAsyncRemoves).toBe(1);
+
+    // Late keychain lookup resolves while async removal is still in flight: must NOT call sync removeDirectory.
+    lateResolveGate.resolve?.(SECRET);
+    await lateRestorePromise;
+    expect(lateSyncRemoves).toBe(1);
+    expect(lateAsyncRemoves).toBe(1);
+
+    lateDeleteGate.release?.();
+    await vi.waitFor(() => expect(existsSync(fifthFile)).toBe(false));
+    expect(lateSyncRemoves).toBe(1);
+    fifth.service.shutdown();
+  });
+
+  it("coordinates revoke() with an in-flight sweep deletion and serializes it against restore (S20)", async () => {
+    const first = await openHarness();
+    const firstChat = chat(first.store, "RevokeDuringSweepDelete");
+    const firstInvoke = first.service.invoke(firstChat, call(VALID));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: firstChat.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await firstInvoke).file as string;
+    services.splice(services.indexOf(first.service), 1);
+
+    let syncRemoves = 0;
+    let asyncRemoves = 0;
+    const writeCalls: string[] = [];
+    const deleteGate: { release?: () => void; started?: () => void } = {};
+    const deleteStarted = new Promise<void>((resolvePromise) => {
+      deleteGate.started = resolvePromise;
+    });
+    const cache: WindowsDaclCache = { hardenedRoots: new Map() };
+    const second = await openHarness({
+      directory: first.directory,
+      start: false,
+      platform: "win32",
+      ensureRoot: (root, opts) => ensureAgentSecretRoot(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFile: () => {
+          throw new Error("SetAccessControl failed");
+        },
+        windowsDaclCache: cache,
+      }),
+      ensureRootAsync: (root, opts) => ensureAgentSecretRootAsync(root, {
+        ...opts,
+        env: WIN32_TEST_ENV,
+        execFileAsync: async () => {
+          throw new Error("SetAccessControl failed");
+        },
+        windowsDaclCache: cache,
+      }),
+      removeDirectory: () => {
+        syncRemoves += 1;
+        throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+      },
+      removeDirectoryAsync: async (root, targetToken) => {
+        asyncRemoves += 1;
+        deleteGate.started?.();
+        await new Promise<void>((resolvePromise) => {
+          deleteGate.release = resolvePromise;
+        });
+        removeAgentSecretDirectory(root, targetToken);
+      },
+      writeFile: async (root, targetToken, fileName, value) => {
+        writeCalls.push(targetToken);
+        return await writeAgentSecretFile(root, targetToken, fileName, value);
+      },
+      resolve: async (reference) => (reference === agentSecretReference(requestId) ? SECRET : null),
+    });
+    second.service.start();
+    expect(syncRemoves).toBe(1);
+
+    // Sweep starts async deletion AND restore for the same token.
+    second.service.sweep();
+    await deleteStarted;
+    expect(asyncRemoves).toBe(1);
+
+    // Revoke joins the in-flight async deletion (no sync remove call!) and blocks restore from rewriting.
+    const revokePromise = second.service.revoke(requestId);
+    expect(syncRemoves).toBe(1);
+    expect(asyncRemoves).toBe(1);
+
+    deleteGate.release?.();
+    await expect(revokePromise).resolves.toBe("revoked");
+    expect(syncRemoves).toBe(1);
+    expect(asyncRemoves).toBe(1);
+    expect(writeCalls).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("revoked");
+    first.service.shutdown();
+  });
+
+  it("serializes revoke() with an already-started restore write before deciding revoked vs in-use (S21)", async () => {
+    const first = await openHarness();
+    const source = chat(first.store, "RevokeDuringRestoreWrite");
+    const invoke = first.service.invoke(source, call(VALID));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    const token = first.store.transcriptRepository.secretRequests.find(requestId)!.fileToken!;
+    first.service.shutdown();
+
+    const writeGate: { release?: () => void; started?: () => void } = {};
+    const writeStarted = new Promise<void>((resolvePromise) => {
+      writeGate.started = resolvePromise;
+    });
+    const second = await openHarness({
+      directory: first.directory,
+      resolve: async (reference) => (reference === agentSecretReference(requestId) ? SECRET : null),
+      writeFile: async (root, targetToken, fileName, value) => {
+        writeGate.started?.();
+        await new Promise<void>((resolvePromise) => {
+          writeGate.release = resolvePromise;
+        });
+        return await writeAgentSecretFile(root, targetToken, fileName, value);
+      },
+    });
+
+    const restorePromise = second.service.restore();
+    await writeStarted;
+
+    // Lock the token so cleanup fails once the restore writer creates the file.
+    second.locked.add(token);
+    let revokeSettled = false;
+    const revokePromise = second.service.revoke(requestId).then((outcome) => {
+      revokeSettled = true;
+      return outcome;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    // Revoke must wait for the in-flight restore write instead of returning "revoked" early.
+    expect(revokeSettled).toBe(false);
+
+    // Resume the restore writer: it writes the file, then revoke attempts deletion, hits EBUSY,
+    // and reports "in-use" while keeping the secret saved and redacted.
+    writeGate.release?.();
+    await restorePromise;
+    await expect(revokePromise).resolves.toBe("in-use");
+    expect(existsSync(file)).toBe(true);
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("saved");
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+
+    // Once the lock clears, revoke deletes the file and transitions to "revoked".
+    second.locked.delete(token);
+    await expect(second.service.revoke(requestId)).resolves.toBe("revoked");
+    expect(existsSync(file)).toBe(false);
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("revoked");
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe(`leaked ${SECRET}`);
+  });
+
+  it("cleans up or keeps redacting a recreated restore file when TTL expiry retires the request during revoke (S22)", async () => {
+    const first = await openHarness();
+    const source = chat(first.store, "ExpiryDuringRevoke");
+    const invoke = first.service.invoke(source, call({ ...VALID, ttlHours: 1 }));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    const token = first.store.transcriptRepository.secretRequests.find(requestId)!.fileToken!;
+    first.service.shutdown();
+
+    const writeGate: { release?: () => void; started?: () => void } = {};
+    const writeStarted = new Promise<void>((resolvePromise) => {
+      writeGate.started = resolvePromise;
+    });
+    const second = await openHarness({
+      directory: first.directory,
+      resolve: async (reference) => (reference === agentSecretReference(requestId) ? SECRET : null),
+      writeFile: async (root, targetToken, fileName, value) => {
+        writeGate.started?.();
+        await new Promise<void>((resolvePromise) => {
+          writeGate.release = resolvePromise;
+        });
+        return await writeAgentSecretFile(root, targetToken, fileName, value);
+      },
+    });
+
+    const restorePromise = second.service.restore();
+    await writeStarted;
+
+    // Start revoke (waits on in-flight restore write), then expire via TTL sweep before writer resumes.
+    const revokePromise = second.service.revoke(requestId);
+    await Promise.resolve();
+    second.clock.now += 2 * 60 * 60_000;
+    second.service.sweep();
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+
+    // Lock the token before the writer recreates the file so cleanup hits EBUSY and must keep redacting.
+    second.locked.add(token);
+    writeGate.release?.();
+    await restorePromise;
+    await expect(revokePromise).resolves.toBe("not-active");
+    expect(existsSync(file)).toBe(true);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+
+    // Once unlocked, sweep removes the leftover recreated file and clears redaction.
+    second.locked.delete(token);
+    second.service.sweep();
+    expect(existsSync(file)).toBe(false);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe(`leaked ${SECRET}`);
+  });
+
+  it("keeps redaction active after TTL expiry while a restore write has published the file and has not yet settled (S23)", async () => {
+    const first = await openHarness();
+    const source = chat(first.store, "ExpiryMidPublish");
+    const invoke = first.service.invoke(source, call({ ...VALID, ttlHours: 1 }));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    first.service.shutdown();
+
+    const prePublishGate: { release?: () => void; started?: () => void } = {};
+    const prePublishStarted = new Promise<void>((resolvePromise) => {
+      prePublishGate.started = resolvePromise;
+    });
+    const postPublishGate: { release?: () => void; published?: () => void } = {};
+    const postPublishReached = new Promise<void>((resolvePromise) => {
+      postPublishGate.published = resolvePromise;
+    });
+    const second = await openHarness({
+      directory: first.directory,
+      resolve: async (reference) => (reference === agentSecretReference(requestId) ? SECRET : null),
+      writeFile: async (root, targetToken, fileName, value) => {
+        prePublishGate.started?.();
+        await new Promise<void>((resolvePromise) => {
+          prePublishGate.release = resolvePromise;
+        });
+        // Publish the file to disk, then pause before writeFile settles (simulating post-rename chmod/sync).
+        const written = await writeAgentSecretFile(root, targetToken, fileName, value);
+        postPublishGate.published?.();
+        await new Promise<void>((resolvePromise) => {
+          postPublishGate.release = resolvePromise;
+        });
+        return written;
+      },
+    });
+
+    const restorePromise = second.service.restore();
+    await prePublishStarted;
+
+    // Expire via TTL sweep while the file does not exist yet (deletion succeeds on absent directory).
+    second.clock.now += 2 * 60 * 60_000;
+    second.service.sweep();
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+
+    // Now the writer publishes the file to disk and pauses before writeFile settles:
+    // the file exists with the secret AND redaction must STILL be active!
+    prePublishGate.release?.();
+    await postPublishReached;
+    expect(readFileSync(file, "utf8")).toBe(SECRET);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
+
+    // Once writeFile settles, restore cleans up the retired file and drops redaction.
+    postPublishGate.release?.();
+    await restorePromise;
+    expect(existsSync(file)).toBe(false);
+    expect(second.service.output.text(`leaked ${SECRET}`)).toBe(`leaked ${SECRET}`);
+  });
+
+  it("expires queued and in-flight restores past TTL on sweep, removes retained files, discards late resolve results, and bounds whenRestored", async () => {
+    const first = await openHarness();
+    const source = chat(first.store, "SlowRestore");
+    const invoke = first.service.invoke(source, call({ ...VALID, ttlHours: 1 }));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    // Leave file on disk as after a crash.
+    services.splice(services.indexOf(first.service), 1);
+
+    let release!: (value: string | null) => void;
+    const second = await openHarness({
+      directory: first.directory,
+      resolve: () => new Promise<string | null>((resolve) => {
+        release = resolve;
+      }),
+    });
+    const restoring = second.service.restore();
+    await vi.waitFor(() => expect(second.resolveVault).toHaveBeenCalledWith(agentSecretReference(requestId)));
+
+    // whenRestored respects its bounded timeout when the keychain hangs.
+    const startedAt = Date.now();
+    await second.service.whenRestored(25);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+
+    // Advance past expiry while resolve() is still in flight; sweep must expire it immediately
+    // and delete the retained file instead of keeping it alive under a locked/hanging keychain.
+    second.clock.now = first.clock.now + 2 * 60 * 60_000;
+    second.service.sweep();
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+    expect(existsSync(file)).toBe(false);
+
+    // Late resolve result must be discarded without resurrecting the file or DB row.
+    release(SECRET);
+    await restoring;
+    expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+    expect(existsSync(file)).toBe(false);
+    first.service.shutdown();
+  });
+
+  it("expires a stalled in-flight restore via the expiry timer without calling sweep()", async () => {
+    const first = await openHarness();
+    const source = chat(first.store, "StalledTimerRestore");
+    const invoke = first.service.invoke(source, call({ ...VALID, ttlHours: 1 }));
+    const requestId = pendingId(first.store);
+    await first.service.deliver({ conversationId: source.conversation.id, requestId, secret: SECRET, vaulted: true });
+    const file = parsed(await invoke).file as string;
+    services.splice(services.indexOf(first.service), 1);
+
+    vi.useFakeTimers();
+    try {
+      let release!: (value: string | null) => void;
+      const second = await openHarness({
+        directory: first.directory,
+        sweepIntervalMs: 24 * 60 * 60_000,
+        resolve: () => new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+      });
+      const restoring = second.service.restore();
+      await Promise.resolve();
+      expect(second.resolveVault).toHaveBeenCalledWith(agentSecretReference(requestId));
+
+      // Advance clock and fake timers past the 1-hour TTL without calling sweep().
+      second.clock.now = first.clock.now + 60 * 60_000 + 1_000;
+      await vi.advanceTimersByTimeAsync(60 * 60_000 + 1_000);
+      expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+      expect(existsSync(file)).toBe(false);
+
+      release(SECRET);
+      await restoring;
+      expect(second.store.transcriptRepository.secretRequests.find(requestId)?.status).toBe("expired");
+      expect(existsSync(file)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      first.service.shutdown();
+    }
+  });
+
+  it("keeps a transiently failed restore's expiry timer active while a later restore stalls", async () => {
+    const first = await openHarness();
+    const firstChat = chat(first.store, "RetryShortTtl");
+    const firstInvoke = first.service.invoke(firstChat, call({ ...VALID, ttlHours: 1 }));
+    const firstId = pendingId(first.store);
+    await first.service.deliver({ conversationId: firstChat.conversation.id, requestId: firstId, secret: SECRET, vaulted: true });
+    const firstFile = parsed(await firstInvoke).file as string;
+
+    const secondChat = chat(first.store, "StalledLongTtl");
+    const secondInvoke = first.service.invoke(secondChat, call({ ...VALID, ttlHours: 4 }));
+    const secondId = first.store.transcriptRepository.secretRequests.pendingAll().find(({ id }) => id !== firstId)!.id;
+    await first.service.deliver({
+      conversationId: secondChat.conversation.id,
+      requestId: secondId,
+      secret: "ghp_secondLongTtlSecret99",
+      vaulted: true,
+    });
+    const secondFile = parsed(await secondInvoke).file as string;
+    services.splice(services.indexOf(first.service), 1);
+
+    vi.useFakeTimers();
+    try {
+      let releaseSecond!: (value: string | null) => void;
+      const second = await openHarness({
+        directory: first.directory,
+        sweepIntervalMs: 24 * 60 * 60_000,
+        resolve: async (reference) => {
+          if (reference === agentSecretReference(firstId)) {
+            throw new Error("Keychain temporarily locked");
+          }
+          return await new Promise<string | null>((resolve) => {
+            releaseSecond = resolve;
+          });
+        },
+      });
+      const restoring = second.service.restore();
+      await vi.waitFor(() => expect(second.resolveVault).toHaveBeenCalledWith(agentSecretReference(secondId)));
+
+      // First request is sitting in runRestore()'s local retry list while second stalls.
+      // Advancing past the first request's 1h TTL without calling sweep() must expire it
+      // and delete its retained file while leaving the longer-lived second request untouched.
+      second.clock.now = first.clock.now + 60 * 60_000 + 1_000;
+      await vi.advanceTimersByTimeAsync(60 * 60_000 + 1_000);
+      expect(second.store.transcriptRepository.secretRequests.find(firstId)?.status).toBe("expired");
+      expect(existsSync(firstFile)).toBe(false);
+      expect(second.store.transcriptRepository.secretRequests.find(secondId)?.status).toBe("saved");
+      expect(existsSync(secondFile)).toBe(true);
+
+      releaseSecond("ghp_secondLongTtlSecret99");
+      await restoring;
+      expect(second.store.transcriptRepository.secretRequests.find(firstId)?.status).toBe("expired");
+      expect(second.store.transcriptRepository.secretRequests.find(secondId)?.status).toBe("saved");
+    } finally {
+      vi.useRealTimers();
+      first.service.shutdown();
+    }
+  });
+
+  it("removes retained files on revoke and revokeForConversation during startup restore and returns in-use when locked", async () => {
+    const first = await openHarness();
+    const c1 = chat(first.store, "RevokeDuringRestore");
+    const inv1 = first.service.invoke(c1, call(VALID));
+    const req1 = pendingId(first.store);
+    await first.service.deliver({ conversationId: c1.conversation.id, requestId: req1, secret: SECRET, vaulted: true });
+    const file1 = parsed(await inv1).file as string;
+
+    const c2 = chat(first.store, "DeleteChatDuringRestore");
+    const inv2 = first.service.invoke(c2, call(VALID));
+    const req2 = pendingId(first.store);
+    await first.service.deliver({ conversationId: c2.conversation.id, requestId: req2, secret: "ghp_secondSecret99999", vaulted: true });
+    const file2 = parsed(await inv2).file as string;
+    // Simulate crash leaving retained files on disk before restart.
+    services.splice(services.indexOf(first.service), 1);
+
+    const token1 = first.store.transcriptRepository.secretRequests.find(req1)!.fileToken!;
+    const second = await openHarness({
+      directory: first.directory,
+      vault: { [agentSecretReference(req1)]: SECRET, [agentSecretReference(req2)]: "ghp_secondSecret99999" },
+    });
+    expect(existsSync(file1)).toBe(true);
+    expect(existsSync(file2)).toBe(true);
+
+    // Direct revoke while file is locked returns in-use and keeps status saved.
+    second.locked.add(token1);
+    await expect(second.service.revoke(req1)).resolves.toBe("in-use");
+    expect(second.store.transcriptRepository.secretRequests.find(req1)?.status).toBe("saved");
+    expect(existsSync(file1)).toBe(true);
+
+    // Once unlocked, direct revoke deletes the retained file and retires the record.
+    second.locked.delete(token1);
+    await expect(second.service.revoke(req1)).resolves.toBe("revoked");
+    expect(second.store.transcriptRepository.secretRequests.find(req1)?.status).toBe("revoked");
+    expect(existsSync(file1)).toBe(false);
+
+    // revokeForConversation also removes the retained file before restore runs.
+    second.service.revokeForConversation(c2.conversation.id);
+    expect(second.store.transcriptRepository.secretRequests.find(req2)?.status).toBe("revoked");
+    expect(existsSync(file2)).toBe(false);
+    first.service.shutdown();
+  });
+
+  it("treats retrying deliver with the exact committed secret as idempotent while rejecting a different secret", async () => {
+    const harness = await openHarness();
+    const source = chat(harness.store, "IdempotentDeliver");
+    const invoke = harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    const firstOutcome = await harness.service.deliver({
+      conversationId: source.conversation.id,
+      requestId,
+      secret: SECRET,
+      vaulted: true,
+    });
+    await invoke;
+    expect(firstOutcome).toMatchObject({ status: "delivered", storage: "keychain" });
+
+    // Retrying with the exact same secret returns the committed outcome idempotently.
+    await expect(harness.service.deliver({
+      conversationId: source.conversation.id,
+      requestId,
+      secret: SECRET,
+      vaulted: true,
+    })).resolves.toEqual(firstOutcome);
+
+    // Retrying with a different secret rejects as not-pending.
+    await expect(harness.service.deliver({
+      conversationId: source.conversation.id,
+      requestId,
+      secret: "different-secret-value-1234",
+      vaulted: false,
+    })).resolves.toEqual({ status: "rejected", reason: "not-pending" });
+  });
+
+  it("abandons an in-flight delivery immediately after writeFile when shutdown raced without touching DB or lingering", async () => {
+    const writer = gatedWriter();
+    const harness = await openHarness({ writeFile: writer.writeFile });
+    const source = chat(harness.store);
+    const invoke = harness.service.invoke(source, call(VALID));
+    const requestId = pendingId(harness.store);
+    const delivery = harness.service.deliver({
+      conversationId: source.conversation.id,
+      requestId,
+      secret: SECRET,
+      vaulted: true,
+    });
+    await writer.written;
+    const transitionSpy = vi.spyOn(harness.store.transcriptRepository.secretRequests, "transition");
+    harness.service.shutdown();
+    transitionSpy.mockClear();
+    writer.release();
+
+    await expect(delivery).resolves.toEqual({ status: "rejected", reason: "ended" });
+    await invoke;
+    expect(transitionSpy).not.toHaveBeenCalled();
+    expect(harness.service.output.values()).toEqual([]);
+    expect(readdirSync(agentSecretRoot(harness.directory))).toEqual([]);
   });
 });

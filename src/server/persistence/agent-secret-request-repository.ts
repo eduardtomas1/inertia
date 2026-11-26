@@ -216,10 +216,10 @@ export class AgentSecretRequestRepository {
       const turn = this.store.assertAgentTurnIdentity(input.conversationId, input.runId, input.turnId);
       if (isAgentTurnTerminalStatus(turn.status)) throw new AgentSecretRequestError("turn-inactive");
       const { pending, inTurn } = this.database.prepare(`SELECT
-          COALESCE(SUM(conversation_id = ? AND status = 'pending'), 0) AS pending,
+          COALESCE(SUM(status = 'pending'), 0) AS pending,
           COALESCE(SUM(turn_id = ?), 0) AS inTurn
-        FROM agent_secret_requests WHERE conversation_id = ? OR turn_id = ?`)
-        .get(input.conversationId, input.turnId, input.conversationId, input.turnId) as { pending: number; inTurn: number };
+        FROM agent_secret_requests WHERE conversation_id = ?`)
+        .get(input.turnId, input.conversationId) as { pending: number; inTurn: number };
       if (pending >= SECRET_REQUEST_MAX_PENDING_PER_CONVERSATION) throw new AgentSecretRequestError("conversation-pending-limit");
       if (inTurn >= SECRET_REQUEST_MAX_PER_TURN) throw new AgentSecretRequestError("turn-limit");
       const id = randomUUID();

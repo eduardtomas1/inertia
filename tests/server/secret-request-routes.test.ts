@@ -12,7 +12,24 @@ import { RuntimeStore } from "../../src/server/database";
 import { PrivateConnectRuntimeGateway } from "../../src/server/private-connect/runtime-gateway";
 import { privateConnectStoreReads } from "../../src/server/private-connect/store-detail";
 import { OPENCODE_SECRET_MCP_TIMEOUT_MS, openCodeHostMcpConfig } from "../../src/server/provider/host-tool-mcp-config";
-import { createInertiaHarnessCapabilities } from "../../src/server/runtime/inertia-harness-capabilities";
+import { watcherHarnessProfile } from "../../src/server/provider/watcher-harness-profile";
+import {
+  createInertiaHarnessCapabilities,
+  INERTIA_SECRETS_PACK_DIGEST,
+  INERTIA_SECRETS_PACK_ID,
+  SECRET_REQUEST_INSTRUCTION,
+} from "../../src/server/runtime/inertia-harness-capabilities";
+import {
+  codexResumedThreadWithheldInstructions,
+  recordCodexThreadRegistration,
+} from "../../src/server/codex/app-server-thread-tools";
+import { CachedThreadToolRegistrations } from "../../src/server/runtime/thread-tool-registrations";
+import {
+  SECRET_REQUEST_DECLINED_MESSAGE,
+  SECRET_REQUEST_ENDED_MESSAGE,
+  secretFileUseExample,
+} from "../../src/server/runtime/agent-secrets/secret-request-host-tool";
+import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
 import {
   SECRET_REQUEST_DEFAULT_WAIT_MS,
   SECRET_REQUEST_FALLBACK_INSTRUCTION,
@@ -24,6 +41,7 @@ import {
 import { hostToolActivityTitle } from "../../src/shared/activity-display";
 import { PROVIDER_IDS } from "../../src/server/runtime/backends/backend-profile-model";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import { resolveNativeModelRoute } from "./model-route-fixture";
 import { privateConnectRuntimeGrantsFromProjectIds } from "../../src/shared/private-connect/runtime-grants";
 import {
   claudeAdvertisedSurface,
@@ -49,18 +67,39 @@ afterEach(async () => {
 });
 
 describe("inertia_request_secret registration and routes", () => {
-  it("registers one instruction-free inertia.secrets pack whose only tool carries the inertia_ prefix", () => {
+  it("registers one inertia.secrets pack with concise triggering guidance whose only tool carries the inertia_ prefix", () => {
     const registry = createInertiaHarnessCapabilities({
       orchestrationTools: [], browserEnabled: false, secretsEnabled: true, invoke: async () => ({ success: true, text: "" }),
     });
-    const pack = registry.manifest().packs.find(({ id }) => id === "inertia.secrets");
-    expect(pack).toMatchObject({ revision: 1, toolNames: [SECRET_REQUEST_TOOL_NAME] });
+    const pack = registry.manifest().packs.find(({ id }) => id === INERTIA_SECRETS_PACK_ID);
+    expect(pack).toMatchObject({ revision: 2, toolNames: [SECRET_REQUEST_TOOL_NAME] });
     expect(SECRET_REQUEST_TOOL_NAME).toMatch(/^inertia_[a-z0-9_]+$/u);
-    expect(registry.instructions().map(({ label }) => label)).not.toContain("inertia-secrets");
+    expect(registry.instructions().map(({ label }) => label)).toContain("inertia-secrets");
+    const instructionBytes = Buffer.byteLength(SECRET_REQUEST_INSTRUCTION.text, "utf8");
+    expect(instructionBytes).toBeGreaterThanOrEqual(220);
+    expect(instructionBytes).toBeLessThanOrEqual(320);
+    expect(SECRET_REQUEST_INSTRUCTION.text).toContain("inertia_request_secret");
+    expect(SECRET_REQUEST_INSTRUCTION.text).toContain("sudo -S -p ''");
+    expect(SECRET_REQUEST_DECLINED_MESSAGE).toBe(
+      "The user declined. Don't ask for it in chat or another way; say what's blocked and continue without it.",
+    );
+    expect(SECRET_REQUEST_ENDED_MESSAGE).toBe(
+      "No answer arrived. Don't ask in chat; call inertia_request_secret again only if still needed.",
+    );
+    expect(secretFileUseExample("C:\\Users\\o'neil\\secret", "win32")).toBe(
+      "PowerShell: $key = Get-Content -Raw 'C:\\Users\\o''neil\\secret' | Git Bash: KEY=\"$(cat 'C:\\Users\\o'\\''neil\\secret')\"",
+    );
+    expect(watcherHarnessProfile("grok-acp")).toEqual({
+      systemInstruction: false,
+      sessionInstruction: false,
+      sessionInstructionRecordedAtCompaction: false,
+      editsGatedBeforeStart: true,
+    });
     const without = createInertiaHarnessCapabilities({
       orchestrationTools: [], browserEnabled: false, invoke: async () => ({ success: true, text: "" }),
     });
-    expect(without.manifest().packs.map(({ id }) => id)).not.toContain("inertia.secrets");
+    expect(without.manifest().packs.map(({ id }) => id)).not.toContain(INERTIA_SECRETS_PACK_ID);
+    expect(without.instructions().map(({ label }) => label)).not.toContain("inertia-secrets");
   });
 
   it("advertises the tool on Claude's in-process MCP, Codex dynamic tools, the Cursor/Kimi HTTP MCP and OpenCode's remote MCP", async () => {
@@ -164,6 +203,127 @@ describe("chats without the tool", () => {
     } finally {
       await attested.close();
     }
+  });
+
+  it("withholds inertia-secrets and injects the fallback instruction when resuming a Codex thread without the current inertia.secrets digest", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-codex-pre85-"));
+    const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory, { recoverInterruptedRuns: false });
+    fixtures.push({ directory, store });
+    const project = store.createProject("Codex", directory);
+    const modelSelection = providerNativeModelSelection({ providerId: "codex", modelId: "provider-default" });
+    const oldSessionId = "codex-pre-v0-0-85-thread";
+    const rev1SessionId = "codex-rev1-secrets-thread";
+    const newSessionId = "codex-post-v0-0-85-thread";
+    const oldChat = store.createConversation(project.id, "Legacy Codex", { modelSelection });
+    const rev1Chat = store.createConversation(project.id, "Rev1 Codex", { modelSelection });
+    const newChat = store.createConversation(project.id, "Current Codex", { modelSelection });
+    const route = resolveNativeModelRoute(modelSelection);
+    store.updateConversation(oldChat.id, {
+      providerSessionId: oldSessionId,
+      continuationIdentity: route.continuationIdentity,
+    });
+    store.updateConversation(rev1Chat.id, {
+      providerSessionId: rev1SessionId,
+      continuationIdentity: route.continuationIdentity,
+    });
+    store.updateConversation(newChat.id, {
+      providerSessionId: newSessionId,
+      continuationIdentity: route.continuationIdentity,
+    });
+    store.codexThreadToolPacks.record(oldSessionId, new Map([["inertia.workspace", "a".repeat(64)]]));
+    store.codexThreadToolPacks.record(rev1SessionId, new Map([
+      ["inertia.workspace", "a".repeat(64)],
+      [INERTIA_SECRETS_PACK_ID, "1".repeat(64)],
+    ]));
+    store.codexThreadToolPacks.record(newSessionId, new Map([
+      ["inertia.workspace", "a".repeat(64)],
+      [INERTIA_SECRETS_PACK_ID, INERTIA_SECRETS_PACK_DIGEST],
+    ]));
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: false,
+      secretsEnabled: true,
+      invoke: async () => ({ success: true, text: "" }),
+      threadRegistrations: store.codexThreadToolPacks,
+    });
+    const codexInfo = WATCHER_TEST_PROVIDERS.find(({ id }) => id === "codex")!;
+    const deps = {
+      store,
+      providers: {
+        resolveModelRoute: () => route,
+        harnessIdFor: () => "codex-app-server",
+      } as never,
+      hooks: {
+        providerInfo: () => [codexInfo],
+        capabilityOfferForTurn: () => ({
+          instructions: registry.instructions(),
+          offer: { withheldPacks: new Map() },
+        }),
+      } as never,
+      id: () => randomUUID(),
+      now: () => "2026-10-29T12:00:00.000Z",
+      clock: () => new Date("2026-10-29T12:00:00.000Z"),
+    };
+
+    const prepare = (conversationId: string) => {
+      const resolved = resolveTurnRequest(deps, { conversationId, content: "Deploy now" });
+      const queued = store.beginAgentTurn(resolved.input);
+      return resolved.adopt(queued).active;
+    };
+
+    for (const [chatId, sessionId] of [[oldChat.id, oldSessionId], [rev1Chat.id, rev1SessionId]] as const) {
+      const active = prepare(chatId);
+      const input = active.providerInput;
+      expect(input.sessionId).toBe(sessionId);
+      const text = `${input.prompt}\n${input.sessionInstruction ?? ""}`;
+      expect(text).not.toContain("[inertia-secrets]");
+      expect(text).toContain("[inertia-secrets-fallback]");
+      expect(text).toContain(SECRET_REQUEST_FALLBACK_INSTRUCTION);
+      const bridge = registry.bridgeFor({ conversation: active.conversation, turn: active.turn });
+      expect(codexResumedThreadWithheldInstructions(sessionId, bridge).map(({ label }) => label))
+        .toContain(SECRET_REQUEST_INSTRUCTION.label);
+    }
+
+    const currentActive = prepare(newChat.id);
+    const currentInput = currentActive.providerInput;
+    expect(currentInput.sessionId).toBe(newSessionId);
+    const currentText = `${currentInput.prompt}\n${currentInput.sessionInstruction ?? ""}`;
+    expect(currentText).toContain("[inertia-secrets]");
+    expect(currentText).not.toContain("[inertia-secrets-fallback]");
+    const currentBridge = registry.bridgeFor({ conversation: currentActive.conversation, turn: currentActive.turn });
+    expect(codexResumedThreadWithheldInstructions(newSessionId, currentBridge).map(({ label }) => label))
+      .not.toContain(SECRET_REQUEST_INSTRUCTION.label);
+
+    // When durable SQLite writes fail, both turn preparation and resume filtering
+    // must read the same CachedThreadToolRegistrations instance.
+    const cachedSessionId = "codex-cached-only-thread";
+    const cachedChat = store.createConversation(project.id, "Cached Codex", { modelSelection });
+    store.updateConversation(cachedChat.id, {
+      providerSessionId: cachedSessionId,
+      continuationIdentity: route.continuationIdentity,
+    });
+    const recordSpy = vi.spyOn(store.codexThreadToolPacks, "record").mockImplementation(() => {
+      throw new Error("SQLITE_BUSY");
+    });
+    const cachedRegistry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: false,
+      secretsEnabled: true,
+      invoke: async () => ({ success: true, text: "" }),
+      threadRegistrations: new CachedThreadToolRegistrations(store.codexThreadToolPacks),
+    });
+    const cachedActive = prepare(cachedChat.id);
+    const cachedBridge = cachedRegistry.bridgeFor({ conversation: cachedActive.conversation, turn: cachedActive.turn });
+    recordCodexThreadRegistration(cachedSessionId, cachedBridge);
+    expect(recordSpy).toHaveBeenCalledOnce();
+    expect(store.codexThreadToolPacks.read(cachedSessionId)).toBeNull();
+
+    const resumedCachedActive = prepare(cachedChat.id);
+    const resumedCachedText = `${resumedCachedActive.providerInput.prompt}\n${resumedCachedActive.providerInput.sessionInstruction ?? ""}`;
+    expect(resumedCachedText).toContain("[inertia-secrets]");
+    expect(resumedCachedText).not.toContain("[inertia-secrets-fallback]");
+    expect(codexResumedThreadWithheldInstructions(cachedSessionId, cachedBridge).map(({ label }) => label))
+      .not.toContain(SECRET_REQUEST_INSTRUCTION.label);
   });
 });
 

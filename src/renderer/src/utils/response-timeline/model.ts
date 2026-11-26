@@ -82,19 +82,25 @@ export function answerTailCommentary(
     | "activities"
     | "approvals"
     | "inputRequests"
+    | "secretRequests"
     | "commentaryMessages"
     | "followUpMessages"
   >,
 ): ChatMessage[] | null {
   const lastRender = layeredHtmlRenders(turn).at(-1);
   if (!turn.isActive || !lastRender) return null;
-  if (turn.approvals.length > 0 || turn.inputRequests.length > 0) return null;
+  if (
+    turn.approvals.length > 0
+    || turn.inputRequests.length > 0
+    || turn.secretRequests.some(({ secretRequest }) => secretRequest.status === "pending")
+  ) return null;
   const afterRender = ({ createdAt }: { createdAt: string }): boolean =>
     compareTimestamps(createdAt, lastRender.createdAt) > 0;
   const workFollows = turn.activities.some((activity) =>
     (activity.kind === "tool" || activity.kind === "command" || activity.kind === "file")
     && afterRender(activity))
-    || turn.followUpMessages.some(afterRender);
+    || turn.followUpMessages.some(afterRender)
+    || turn.secretRequests.some(afterRender);
   return workFollows ? null : turn.commentaryMessages.filter(afterRender);
 }
 

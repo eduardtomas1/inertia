@@ -8,6 +8,7 @@ import {
   registeredOnThreadStart,
 } from "../runtime/harness-capabilities";
 import {
+  cachedThreadToolRegistrationsFor,
   CachedThreadToolRegistrations,
   type ThreadToolRegistrations,
 } from "../runtime/thread-tool-registrations";
@@ -53,6 +54,28 @@ export function recordCodexThreadRegistration(
 ): void {
   const packs = (bridge ? harnessCapabilityPacksOf(bridge) ?? [] : []).filter(registeredOnThreadStart);
   registrationsOf(bridge).record(threadId, new Map(packs.map(({ id, digest }) => [id, digest])));
+}
+
+/**
+ * Whether a Codex thread's recorded registration matches `packId` at
+ * `expectedDigest` (checked in the durable store when provided, falling back to
+ * this runtime's unscoped memory cache). Uses the same exact-digest rule as
+ * `codexResumedThreadWithheldInstructions`.
+ */
+export function codexThreadRegisteredPack(
+  threadId: string,
+  packId: string,
+  expectedDigest: string,
+  registrations?: ThreadToolRegistrations,
+): boolean {
+  let registered = null;
+  try {
+    registered = (registrations ? cachedThreadToolRegistrationsFor(registrations) : undefined)?.read(threadId) ?? null;
+  } catch {
+    registered = null;
+  }
+  registered ??= unscopedRegistrations.read(threadId);
+  return registered?.get(packId) === expectedDigest;
 }
 
 /**

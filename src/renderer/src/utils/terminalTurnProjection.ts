@@ -10,6 +10,7 @@ import type {
   SubagentTrace,
   ThreadUsageSnapshot,
 } from "@shared/contracts";
+import type { SecretRequestReference, SecretRequestStatus } from "@shared/agent-secrets";
 import type { StreamingAgentChannel } from "./responseTimeline";
 
 export type StreamingAgentState = [string, string, StreamingAgentChannel];
@@ -75,6 +76,37 @@ export function interactionKey(
   value: { conversationId: string; id: string },
 ): string {
   return `${value.conversationId}\0${value.id}`;
+}
+
+function secretRequestRank(status: SecretRequestStatus): number {
+  return status === "pending" ? 0 : status === "saved" ? 1 : 2;
+}
+
+function sameSecretRequestReference(
+  left: SecretRequestReference,
+  right: SecretRequestReference,
+): boolean {
+  return left.requestId === right.requestId
+    && left.title === right.title
+    && left.description === right.description
+    && left.ttlHours === right.ttlHours
+    && left.status === right.status
+    && left.answeredAt === right.answeredAt
+    && left.expiresAt === right.expiresAt
+    && left.storage === right.storage;
+}
+
+export function storedMessageSupersedesLive(
+  stored: ChatMessage,
+  live: ChatMessage,
+): boolean {
+  if (stored.content !== live.content) return false;
+  if (!live.secretRequest) return true;
+  if (!stored.secretRequest) return false;
+  const storedRank = secretRequestRank(stored.secretRequest.status);
+  const liveRank = secretRequestRank(live.secretRequest.status);
+  return storedRank > liveRank
+    || sameSecretRequestReference(stored.secretRequest, live.secretRequest);
 }
 
 export function withoutHydratedBaseline<T extends { id: string }>(

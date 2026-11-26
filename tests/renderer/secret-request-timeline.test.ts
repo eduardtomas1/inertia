@@ -3,16 +3,17 @@ import { describe, expect, it } from "vitest";
 import { AGENT_SECRET_SAVE_ERRORS } from "../../src/shared/agent-secret-save-errors";
 import { AGENT_SECRET_REVOKE_ERRORS } from "../../src/shared/agent-secret-revoke-errors";
 import type { SecretRequestReference } from "../../src/shared/agent-secrets";
-import type { AgentTurn, ChatMessage } from "../../src/shared/contracts";
+import type { AgentActivity, AgentTurn, ChatMessage } from "../../src/shared/contracts";
 import {
+  answerTailCommentary,
   buildResponseTimeline,
+  buildTurnExecutionStream,
   estimateTimelineRowSize,
   isQuietSettledTurn,
   stabilizeResponseTimeline,
   type ResponseTimelineItem,
   type ResponseTurn,
 } from "../../src/renderer/src/utils/responseTimeline";
-import { withSecretRequests, type TurnWorkStreamEntry } from "../../src/renderer/src/utils/response-timeline/execution";
 import {
   estimateSecretRequestHeight,
   isSecretRequestMessage,
@@ -24,7 +25,12 @@ import {
   secretRevokeFailure,
   type SecretRequestMessage,
 } from "../../src/renderer/src/utils/response-timeline/secretRequests";
-import { secretRequestFootnote, secretSaveFailureMessage } from "../../src/renderer/src/utils/response-timeline/secretRequestForm";
+import {
+  secretDeclineFailureMessage,
+  secretRequestFootnote,
+  secretSaveFailureMessage,
+  secretValueIssue,
+} from "../../src/renderer/src/utils/response-timeline/secretRequestForm";
 
 const conversationId = "15151515-1515-4151-8151-151515151515";
 const turnId = "turn-secret-model";
@@ -167,14 +173,76 @@ describe("secret requests in the response timeline model", () => {
     expect(onlyTurn(changed).secretRequests[0]!.secretRequest.status).toBe("saved");
   });
 
-  it("places the card at its chronological position in the work stream", () => {
-    const lead: TurnWorkStreamEntry = { kind: "commentary", id: "lead", createdAt: at(4), message: null, content: "Next I need the key.", streaming: false };
-    const after: TurnWorkStreamEntry = { kind: "activity-group", id: "build", createdAt: at(7), activities: [] };
+  it("places the card at its chronological position in the work stream and splits activity groups", () => {
     const card = secret(5) as SecretRequestMessage;
-    const stream = withSecretRequests([lead, after], [card]);
-    expect(stream.map(({ id }) => id)).toEqual(["lead", `secret-request:${requestId}`, "build"]);
-    const empty = [lead];
-    expect(withSecretRequests(empty, [])).toBe(empty);
+    const lead = message("lead", "assistant", "Next I need the key.", 4);
+    const makeActivity = (id: string, seconds: number): AgentActivity => ({
+      id,
+      conversationId,
+      runId: "run-secret-model",
+      turnId,
+      kind: "tool",
+      title: `Step ${id}`,
+      detail: null,
+      status: "completed",
+      createdAt: at(seconds),
+    });
+    const [turnItem] = buildResponseTimeline({
+      turns: [turns.running],
+      messages: [request, lead, card],
+      activities: [makeActivity("before", 4), makeActivity("after", 6)],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const responseTurn = onlyTurn([turnItem!]);
+    expect(buildTurnExecutionStream(responseTurn).map((entry) => entry.kind === "activity-group"
+      ? `group:${entry.activities.map(({ id }) => id).join(",")}`
+      : entry.id)).toEqual([
+      "lead",
+      "group:before",
+      `secret-request:${requestId}`,
+      "group:after",
+    ]);
+  });
+
+  it("skips secret requests when estimating expanded settled work height", () => {
+    const activity: AgentActivity = {
+      id: "act-1",
+      conversationId,
+      runId: "run-secret-model",
+      turnId,
+      kind: "tool",
+      title: "Run check",
+      detail: null,
+      status: "completed",
+      createdAt: at(4),
+    };
+    const [item] = buildResponseTimeline({
+      turns: [turns.completed],
+      messages: [request, secret(5, saved), answer],
+      activities: [activity],
+      reasonings: [],
+      checkpoints: [],
+    });
+    const collapsed = estimateTimelineRowSize(item!, { availableWidth: 900, turnFoldExpanded: false, workDetailsExpanded: false });
+    const expanded = estimateTimelineRowSize(item!, { availableWidth: 900, turnFoldExpanded: true, workDetailsExpanded: true });
+    expect(expanded).toBeGreaterThan(collapsed);
+  });
+
+  it("excludes answerTailCommentary when a secret request is pending or follows the render", () => {
+    const htmlRender: ChatMessage = message("render-1", "system", "Rendered page: Metrics", 5, {
+      htmlRender: { renderId: "0b9c8d7e-6f5a-4b3c-9d2e-1f0a9b8c7d6e", title: "Metrics", height: 320 },
+    });
+    const tail = message("tail", "assistant", "Metrics look healthy.", 7);
+
+    const pendingBefore = onlyTurn(timeline([secret(4), htmlRender, tail], "running"));
+    expect(answerTailCommentary(pendingBefore)).toBeNull();
+
+    const settledAfter = onlyTurn(timeline([htmlRender, secret(6, saved), tail], "running"));
+    expect(answerTailCommentary(settledAfter)).toBeNull();
+
+    const settledBefore = onlyTurn(timeline([secret(4, saved), htmlRender, tail], "running"));
+    expect(answerTailCommentary(settledBefore)).toEqual([tail]);
   });
 
   it("reserves a pending card's height and a single 36 px row once settled", () => {
@@ -250,5 +318,15 @@ describe("secret request copy", () => {
     expect(["pending", "saved", "declined", "ended", "expired", "revoked"].map((status) =>
       secretRequestAnnouncement(status as SecretRequestReference["status"])))
       .toEqual(["", "Secret saved", "Declined", "Request ended", "Secret expired", "Secret revoked"]);
+  });
+
+  it("validates shared min/max secret lengths and fixed decline failure copy", () => {
+    expect(secretValueIssue("1234567")).toBe("The secret must be at least 8 characters long.");
+    expect(secretValueIssue("12345678")).toBeNull();
+    expect(secretValueIssue("x".repeat(16_384))).toBeNull();
+    expect(secretValueIssue("x".repeat(16_385))).toBe("The secret is longer than 16,384 characters.");
+    expect(secretDeclineFailureMessage(new Error(`Error: ${AGENT_SECRET_SAVE_ERRORS.notPending}`)))
+      .toBe(AGENT_SECRET_SAVE_ERRORS.notPending);
+    expect(secretDeclineFailureMessage(new Error("raw stack detail"))).toBe("Couldn't decline. Try again.");
   });
 });

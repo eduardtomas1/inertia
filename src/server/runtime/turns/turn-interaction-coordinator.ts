@@ -30,6 +30,15 @@ import {
   readOnlyViolationDetail,
 } from "./turn-read-only-watcher";
 
+function maxIsoTimestamp(values: readonly (string | null | undefined)[]): string | null {
+  return values.reduce<string | null>((current, value) => {
+    if (!value) return current;
+    const parsed = Date.parse(value);
+    if (!Number.isFinite(parsed)) return current;
+    return !current || parsed > Date.parse(current) ? value : current;
+  }, null);
+}
+
 function interactionOwner(active: ActiveTurn): PendingInteractionOwner {
   return {
     providerId: active.turn.providerId,
@@ -370,11 +379,32 @@ export class TurnInteractionCoordinator {
   closeForSecretRequest(active: ActiveTurn): string | null {
     this.options.streams.closeAssistantSegment(active);
     this.options.streams.flush(active, "reasoning");
-    const latest = active.latestAssistantMessageId;
-    return latest ? this.options.store.message(latest).createdAt : null;
+    let userCreatedAt: string | null = null;
+    try {
+      userCreatedAt = active.turn.userMessageId
+        ? this.options.store.message(active.turn.userMessageId).createdAt
+        : null;
+    } catch {
+      userCreatedAt = null;
+    }
+    const latestAssistantCreatedAt = active.latestAssistantMessageId
+      ? this.options.store.message(active.latestAssistantMessageId).createdAt
+      : null;
+    return maxIsoTimestamp([
+      userCreatedAt,
+      active.followUpBoundary?.at,
+      latestAssistantCreatedAt,
+      active.latestSecretCardAt,
+    ]);
   }
 
-  secretWait(active: ActiveTurn | undefined, turnId: string, requestId: string, title: string | null): boolean {
+  secretWait(
+    active: ActiveTurn | undefined,
+    turnId: string,
+    requestId: string,
+    title: string | null,
+    cardCreatedAt?: string,
+  ): boolean {
     if (!active || active.turn.id !== turnId || !active.runState.acceptsProviderEvents()) return false;
     const waits = this.secretWaits.get(active) ?? new Map<string, string>();
     this.secretWaits.set(active, waits);
@@ -384,11 +414,27 @@ export class TurnInteractionCoordinator {
     } else {
       this.options.streams.closeAssistantSegment(active);
       this.options.streams.flush(active, "reasoning");
+      active.latestSecretCardAt = maxIsoTimestamp([
+        active.latestSecretCardAt,
+        cardCreatedAt ?? this.options.now(),
+      ]);
       waits.set(requestId, title);
       active.inputIds.add(requestId);
     }
     this.refreshWaitingState(active);
     return true;
+  }
+
+  clearSecretWaits(active: ActiveTurn): void {
+    const waits = this.secretWaits.get(active);
+    if (!waits) return;
+    for (const requestId of waits.keys()) active.inputIds.delete(requestId);
+    waits.clear();
+    this.secretWaits.delete(active);
+  }
+
+  hasSecretWait(active: ActiveTurn | undefined): boolean {
+    return Boolean(active && (this.secretWaits.get(active)?.size ?? 0) > 0);
   }
 
   resolveInput(active: ActiveTurn, requestId: string): void {

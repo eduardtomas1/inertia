@@ -4,6 +4,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
 import { createStreamingAgentStore } from "../../src/renderer/src/hooks/useStreamingAgentState";
+import {
+  createPendingRequestRevealer,
+  REVEAL_PENDING_REQUEST_MAX_FRAMES,
+  revealSecretRequest,
+} from "../../src/renderer/src/utils/agentInputNavigation";
 import type { SecretRequestReference } from "../../src/shared/agent-secrets";
 import type {
   AgentTurn,
@@ -16,8 +21,10 @@ import type {
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { SecretRequestCommandRunner } from "../../src/renderer/src/utils/response-timeline/secretRequests";
 
+const nativePreviewSuspension = vi.fn();
+
 vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
-  useNativePreviewSuspension: () => undefined,
+  useNativePreviewSuspension: (suspended: boolean) => nativePreviewSuspension(suspended),
 }));
 
 vi.mock("../../src/renderer/src/components/Composer", () => ({
@@ -278,6 +285,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  nativePreviewSuspension.mockClear();
   saveAgentSecret = vi.fn(async () => ({ status: "saved", expiresAt: "2026-10-30T12:00:00.000Z", storage: "keychain" }));
   onSecretRequestCommand = vi.fn<SecretRequestCommandRunner>(async () => ({ type: "request.ok", requestId: "ok" }) as ServerEvent);
   Object.defineProperty(window, "inertia", {
@@ -397,5 +405,110 @@ describe("secret requests in the chat workspace", () => {
     expect(screen.getByLabelText("Tailscale auth key", { selector: "input" })).toBe(field);
     expect(field).toHaveValue("fixture-par");
     expect(field).toHaveFocus();
+  });
+
+  it("suspends native browser preview while a secret request is pending and resumes when settled", async () => {
+    const { view, runningTurn, props } = renderWorkspace((agentTurn) => [secretMessage(agentTurn)]);
+    await screen.findByRole("region", { name: "Tailscale auth key" }, { timeout: 5_000 });
+    expect(nativePreviewSuspension).toHaveBeenLastCalledWith(true);
+
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={[requestMessage(runningTurn), secretMessage(runningTurn, { status: "declined", answeredAt: runningTurn.requestedAt })]}
+        onSecretRequestCommand={onSecretRequestCommand}
+      />,
+    );
+    await waitFor(() => expect(nativePreviewSuspension).toHaveBeenLastCalledWith(false));
+  });
+
+  it("reveals an already-mounted card without calling scrollToLatest to fight scrollIntoView", async () => {
+    renderWorkspace((agentTurn) => [secretMessage(agentTurn)]);
+    const field = await screen.findByLabelText("Tailscale auth key", { selector: "input" }, { timeout: 5_000 });
+    const scrollTo = HTMLElement.prototype.scrollTo as ReturnType<typeof vi.fn>;
+    scrollTo.mockClear();
+
+    screen.getByLabelText("Message").focus();
+    fireEvent.click(screen.getByRole("button", { name: "Enter secret" }));
+    expect(field).toHaveFocus();
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("reflects read-only notice and focuses the card container when the window cannot answer", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      writable: true,
+      value: { getPlatform: () => "linux" },
+    });
+    renderWorkspace((agentTurn) => [secretMessage(agentTurn)]);
+    const card = await screen.findByRole("region", { name: "Asking for a secret: Tailscale auth key" }, { timeout: 5_000 });
+    const notice = screen.getByText("Agent is asking for a secret").closest(".pending-input-notice")!;
+    expect(notice).toHaveAttribute("data-secret-request-mode", "read-only");
+    expect(notice).toHaveTextContent("Waiting for your answer in the main window");
+    const viewButton = screen.getByRole("button", { name: "View request" });
+    fireEvent.click(viewButton);
+    expect(card).toHaveFocus();
+    expect(revealSecretRequest(REQUEST_ID)).toBe(true);
+  });
+
+  it("retries virtualized reveals up to 12 frames in one loop and cancels on re-click or cleanup", () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextId = 0;
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+      nextId += 1;
+      frames.set(nextId, cb);
+      return nextId;
+    });
+    const caf = vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+      frames.delete(id);
+    });
+    const flushFrame = (): void => {
+      const first = frames.entries().next().value;
+      if (!first) return;
+      frames.delete(first[0]);
+      first[1](0);
+    };
+
+    const revealer = createPendingRequestRevealer();
+    const onScrollToLatest = vi.fn();
+    const onRevealed = vi.fn();
+
+    // Mounts on frame 6 (within the 12-frame cap)
+    let calls = 0;
+    revealer.reveal(() => {
+      calls += 1;
+      return calls === 7; // 1 sync + 6 rAF retries
+    }, { onScrollToLatest, onRevealed });
+
+    expect(onScrollToLatest).toHaveBeenCalledOnce();
+    expect(onRevealed).not.toHaveBeenCalled();
+    expect(frames.size).toBe(1);
+    for (let i = 0; i < 6; i += 1) flushFrame();
+    expect(onRevealed).toHaveBeenCalledOnce();
+    expect(frames.size).toBe(0);
+
+    // Exhausts cleanly at REVEAL_PENDING_REQUEST_MAX_FRAMES (12)
+    onScrollToLatest.mockClear();
+    onRevealed.mockClear();
+    const neverFound = vi.fn(() => false);
+    revealer.reveal(neverFound, { onScrollToLatest, onRevealed });
+    expect(onScrollToLatest).toHaveBeenCalledOnce();
+    for (let i = 0; i < REVEAL_PENDING_REQUEST_MAX_FRAMES + 5; i += 1) flushFrame();
+    expect(neverFound).toHaveBeenCalledTimes(1 + REVEAL_PENDING_REQUEST_MAX_FRAMES);
+    expect(onRevealed).not.toHaveBeenCalled();
+    expect(frames.size).toBe(0);
+
+    // Re-click cancels prior loop; cancel() clears active frame
+    revealer.reveal(() => false, { onScrollToLatest, onRevealed });
+    const firstFrameId = [...frames.keys()][0]!;
+    revealer.reveal(() => false, { onScrollToLatest, onRevealed });
+    expect(caf).toHaveBeenCalledWith(firstFrameId);
+    expect(frames.size).toBe(1);
+    revealer.cancel();
+    expect(frames.size).toBe(0);
+    expect(raf).toHaveBeenCalled();
   });
 });

@@ -255,6 +255,13 @@ function startOpenCodeRun(
       armEventInactivityDeadline();
       emitter.rich({ type: "approval-resolved", requestId, decision });
     },
+    onCallStarted: () => {
+      if (eventInactivityTimer) {
+        clearTimeout(eventInactivityTimer);
+        eventInactivityTimer = undefined;
+      }
+    },
+    onCallsSettled: () => armEventInactivityDeadline(),
   });
   const ownership = new OpenCodeRunOwnership(promptLifecycle.messageId);
   const pendingFollowUps = new Set<Promise<boolean>>();
@@ -322,8 +329,13 @@ function startOpenCodeRun(
   const armEventInactivityDeadline = (): void => {
     if (cancelRequested || terminalError) return;
     if (eventInactivityTimer) clearTimeout(eventInactivityTimer);
+    if (hostTools?.hasPendingCalls()) {
+      eventInactivityTimer = undefined;
+      return;
+    }
     eventInactivityTimer = setTimeout(() => {
       if (pendingHostApprovals.size > 0
+        || hostTools?.hasPendingCalls()
         || [...approvals.values()].some((pending) => !pending.settled)
         || [...inputs.values()].some((pending) => !pending.settled)) {
         armEventInactivityDeadline();

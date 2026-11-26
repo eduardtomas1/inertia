@@ -7,6 +7,7 @@ import {
   turnRequestContextSchema,
 } from "./common";
 import { AGENT_GOAL_STATUSES } from "../agent-workflows";
+import { queuedAccessSchema } from "../../queued-messages";
 
 export const MAX_AGENT_INPUT_QUESTIONS = 4;
 
@@ -37,6 +38,10 @@ export const agentCommandSchemas = [
   }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.remove"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.send"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("message.queue.edit"), payload: z.strictObject({ conversationId: z.uuid(), id: z.uuid() }) }),
+  z.strictObject({ ...requestBase, type: z.literal("message.queue.reconfirm"), payload: z.strictObject({
+    conversationId: z.uuid(), id: z.uuid(), confirmed: queuedAccessSchema.optional(),
+  }) }),
   z.strictObject({ ...requestBase, type: z.literal("message.queue.stop-and-send"), payload: z.strictObject({
     conversationId: z.uuid(), id: z.uuid(), turnId: z.uuid(), content: z.string().trim().min(1).max(20_000), attachments: attachmentsSchema,
   }) }),

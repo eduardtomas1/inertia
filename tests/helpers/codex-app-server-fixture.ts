@@ -309,7 +309,14 @@ if (message.method === "thread/inject_items") {
   const inject = process.env.INERTIA_APP_SERVER_INJECT ?? "ok";
   if (inject === "hold") return;
   if (inject === "slow") return setTimeout(() => send({ id: message.id, result: {} }), 150);
-  if (inject === "close") return process.stdout.end();
+  if (inject === "close") {
+    const stdoutFd = process.stdout.fd;
+    const realStdoutDestroy = Object.getPrototypeOf(process.stdout)._destroy;
+    if (typeof realStdoutDestroy === "function") process.stdout._destroy = realStdoutDestroy;
+    process.stdout.destroy();
+    if (typeof stdoutFd === "number") { try { fs.closeSync(stdoutFd); } catch {} }
+    return;
+  }
   if (inject === "unknown-method") return send({ id: message.id, error: { code: -32601, message: "Method not found" } });
   // What App Server 0.169.0 answers for a method it does not know.
   if (inject === "unknown-variant") return send({ id: message.id, error: { code: -32600, message: "Invalid request: unknown variant \`thread/inject_items\`, expected one of \`initialize\`, \`thread/start\`" } });

@@ -1,5 +1,6 @@
 import { readAttachment } from "../node/read-attachment.js";
 import { snapshotSourceSchema, type SnapshotSource } from "../shared/snapshots.js";
+import { previewAnnotationSchema, type PreviewAnnotation } from "../shared/preview-annotation.js";
 import { randomUUID } from "node:crypto";
 import { constants, type BigIntStats } from "node:fs";
 import {
@@ -20,7 +21,11 @@ import {
 import {
   FILE_OPEN_NO_FOLLOW,
 } from "../node/platform-file-open-flags.js";
-import { MAX_ATTACHMENT_COUNT, MAX_ATTACHMENT_TOTAL_BYTES } from "../shared/attachments.js";
+import {
+  MAX_ATTACHMENT_COUNT,
+  MAX_ATTACHMENT_TOTAL_BYTES,
+  isExtractedDocumentAttachmentMimeType,
+} from "../shared/attachments.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments.js";
 import {
@@ -90,11 +95,14 @@ export interface ValidatedAttachmentPreview {
   readonly bytes: Buffer;
   readonly mimeType: ChatAttachment["mimeType"];
   readonly size: number;
+  readonly truncated?: boolean;
 }
 
 interface ValidatedAttachmentRead {
   readonly attachment: TrustedRuntimeAttachment;
   readonly bytes: Buffer;
+  readonly extractedText?: string;
+  readonly extractedTruncated?: boolean;
 }
 
 export interface AttachmentRegistryLimits {
@@ -293,7 +301,31 @@ export class AttachmentRegistry {
     const record = this.records.get(id);
     if (!record || record.mimeType !== "image/png") throw new Error("Snapshot attachment is unavailable.");
     record.snapshot = snapshot;
-    return { id: record.id, name: record.name, path: record.id, mimeType: record.mimeType, size: record.size, snapshot };
+    return {
+      id: record.id,
+      name: record.name,
+      path: record.id,
+      mimeType: record.mimeType,
+      size: record.size,
+      snapshot,
+      ...(record.previewAnnotation ? { previewAnnotation: record.previewAnnotation } : {}),
+    };
+  }
+
+  setPreviewAnnotation(id: string, annotation: PreviewAnnotation): ChatAttachment {
+    const parsed = previewAnnotationSchema.parse(annotation);
+    const record = this.records.get(id);
+    if (!record || record.mimeType !== "image/png") throw new Error("Page annotation attachment is unavailable.");
+    record.previewAnnotation = parsed;
+    return {
+      id: record.id,
+      name: record.name,
+      path: record.id,
+      mimeType: record.mimeType,
+      size: record.size,
+      previewAnnotation: parsed,
+      ...(record.snapshot ? { snapshot: record.snapshot } : {}),
+    };
   }
 
   async import(
@@ -479,14 +511,23 @@ export class AttachmentRegistry {
     const record = this.records.get(id);
     const limit = record ? attachmentPreviewLimit(record.mimeType, record.size) : 0;
     if (limit === null) return null;
-    const validated = await this.readValidated(id, signal, limit);
-    return validated
-      ? {
-          bytes: validated.bytes,
-          mimeType: validated.attachment.mimeType,
-          size: validated.attachment.size,
-        }
-      : null;
+    const extractText = record !== undefined && isExtractedDocumentAttachmentMimeType(record.mimeType);
+    const validated = await this.readValidated(id, signal, extractText ? 0 : limit, extractText);
+    if (!validated) return null;
+    if (extractText) {
+      if (validated.extractedText === undefined) return null;
+      return {
+        bytes: Buffer.from(validated.extractedText, "utf8"),
+        mimeType: validated.attachment.mimeType,
+        size: validated.attachment.size,
+        truncated: validated.extractedTruncated === true,
+      };
+    }
+    return {
+      bytes: validated.bytes,
+      mimeType: validated.attachment.mimeType,
+      size: validated.attachment.size,
+    };
   }
 
   async resolve(
@@ -514,6 +555,7 @@ export class AttachmentRegistry {
     id: string,
     signal?: AbortSignal,
     captureBytes = 0,
+    extractText = false,
   ): Promise<ValidatedAttachmentRead | null> {
     assertNotAborted(signal);
     if (
@@ -537,6 +579,7 @@ export class AttachmentRegistry {
         },
         operationSignal,
         false,
+        extractText,
       );
     } catch {
       assertNotAborted(operationSignal);
@@ -608,8 +651,15 @@ export class AttachmentRegistry {
           size: record.size,
           digest: record.digest,
           ...(record.snapshot ? { snapshot: record.snapshot } : {}),
+          ...(record.previewAnnotation ? { previewAnnotation: record.previewAnnotation } : {}),
         },
         bytes,
+        ...(receipt.extractedText !== undefined
+          ? {
+              extractedText: receipt.extractedText,
+              extractedTruncated: receipt.extractedTruncated === true,
+            }
+          : {}),
       };
     } finally {
       await file.close();
@@ -917,6 +967,7 @@ export class AttachmentRegistry {
     attachment: PreparedAttachmentMetadata,
     signal: AbortSignal,
     initialImport: boolean,
+    extractText = false,
   ): Promise<AttachmentImportValidationReceipt> {
     signal.throwIfAborted();
     const root = await this.verifiedDirectory();
@@ -946,6 +997,7 @@ export class AttachmentRegistry {
       mimeType: attachment.mimeType,
       size: attachment.size,
       normalizeImage: initialImport && attachment.mimeType.startsWith("image/"),
+      ...(extractText ? { extractText: true } : {}),
       stallBeforeValidationMs: initialImport
         ? this.validationDelayMs
         : 0,

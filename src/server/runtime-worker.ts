@@ -400,6 +400,28 @@ parentPort.on("message", (messageEvent) => {
     );
     return;
   }
+  if (command.type === "runtime.editor-context") {
+    if (!runtime || stopping || updatePreparation) {
+      post({
+        type: "runtime.editor-context-rejected",
+        requestId: command.requestId,
+        message: "The local runtime is not ready.",
+      });
+      return;
+    }
+    void runtime.editorContext(command.filePath, command.conversationId).then(
+      (result) => post({ type: "runtime.editor-context-resolved", requestId: command.requestId, ...result }),
+      (error: unknown) => {
+        const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 1_000) : "";
+        post({
+          type: "runtime.editor-context-rejected",
+          requestId: command.requestId,
+          message: detail || "The editor context could not be resolved.",
+        });
+      },
+    );
+    return;
+  }
   if (command.type === "runtime.read-html-render") {
     post(answerRuntimeHtmlRenderRead(stopping ? null : runtime, command));
     return;
@@ -492,18 +514,27 @@ parentPort.on("message", (messageEvent) => {
         if (runtime !== currentRuntime || stopping) {
           throw new Error("The local runtime is not ready.");
         }
-        return command.operation === "export"
-          ? currentRuntime.exportRecoveryData(command.path, signal).then(() => null)
-          : currentRuntime.importRecoveryData(
-              command.path,
-              command.targetDirectory!,
-              signal,
-              command.operationId,
-            );
+        if (command.operation === "export") {
+          const exportSummary = await currentRuntime.exportRecoveryData(
+            command.path,
+            signal,
+            command.includeAttachments !== undefined
+              ? { includeAttachments: command.includeAttachments }
+              : undefined,
+          );
+          return { summary: null, exportSummary };
+        }
+        const summary = await currentRuntime.importRecoveryData(
+          command.path,
+          command.targetDirectory!,
+          signal,
+          command.operationId,
+        );
+        return { summary };
       },
     );
     void operation.then(
-      (summary) => {
+      (outcome) => {
         if (stopping) return;
         activeDatabaseRecoveryOperations.delete(key);
         postDatabaseRecoveryResult({
@@ -512,7 +543,8 @@ parentPort.on("message", (messageEvent) => {
           generation: command.generation,
           operation: command.operation,
           ok: true,
-          summary,
+          summary: outcome.summary,
+          ...(outcome.exportSummary ? { exportSummary: outcome.exportSummary } : {}),
         });
       },
       (error: unknown) => {

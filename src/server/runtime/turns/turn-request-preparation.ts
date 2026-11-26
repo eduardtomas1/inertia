@@ -1,4 +1,4 @@
-import type { AgentActivity, Conversation, ProviderInfo } from "../../../shared/contracts";
+import type { AgentActivity, Conversation, ProviderId, ProviderInfo } from "../../../shared/contracts";
 import { providerInstanceId } from "../../orchestration-v2/provider-instance";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
@@ -10,6 +10,7 @@ import {
   modelSelectionHasVerifiedProbeCapability,
   modelSelectionSchema,
   providerNativeBackendProfile,
+  providerNativeHarnessId,
   providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
   type ModelBackendProfile,
@@ -136,6 +137,21 @@ export function prepareTurnRequest(
   }
 }
 
+function reportsProviderCommand(
+  dependencies: PrepareTurnRequestDependencies,
+  conversationId: string,
+  route: { providerId: ProviderId; harnessId: string },
+  content: string,
+): boolean {
+  if (!isProviderCommandText(content) || route.harnessId !== providerNativeHarnessId(route.providerId)) return false;
+  const name = content.trim().slice(1).split(/\s/u, 1)[0]!.toLowerCase();
+  return dependencies.providers.reportedProviderCommands?.({
+    providerId: route.providerId,
+    cwd: dependencies.store.conversationPath(conversationId),
+    conversationId,
+  })?.some((command) => command.name.toLowerCase() === name) ?? false;
+}
+
 interface WatcherTurnPolicy {
   wakeId: string | null;
   readOnly?: ReadOnlyWatcherTurn;
@@ -185,7 +201,7 @@ function providerCommandCarriesContext(
 ): boolean {
   const context = request.context;
   return attachments.some((attachment) =>
-    attachment.snapshot !== undefined || chatAttachmentKind(attachment.mimeType) !== "image")
+    attachment.snapshot !== undefined || attachment.previewAnnotation !== undefined || chatAttachmentKind(attachment.mimeType) !== "image")
     || (request.documentContexts?.length ?? 0) > 0
     || [
       context?.fileReferences,
@@ -379,7 +395,7 @@ export function resolveTurnRequest(
     && request.systemInstructions === undefined
     && (request.internalInstructions?.length ?? 0) === 0
     && SLASH_COMMAND_PROVIDERS.includes(route.providerId)
-    && isProviderCommandText(request.content);
+    && reportsProviderCommand(dependencies, conversation.id, route, request.content);
   const providerName = PROVIDER_INFO[route.providerId].name;
   if (providerCommand && providerCommandCarriesContext(request, attachments)) {
     throw new RuntimeRequestError(

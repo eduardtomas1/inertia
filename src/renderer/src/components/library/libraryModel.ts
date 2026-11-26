@@ -1,4 +1,5 @@
-import type { ConversationShell, Project } from "@shared/contracts";
+import type { Project } from "@shared/contracts";
+import type { ConversationReference } from "../../utils/conversationReferences";
 import type { LibraryCategory, LibraryPage, LibrarySnapshot, SavedAnswer } from "@shared/library";
 import type { MessageSearchTarget } from "@shared/message-search";
 
@@ -6,7 +7,7 @@ export type LibraryFilter = { kind: "all" } | { kind: "unsorted" } | { kind: "ca
 
 export interface SavedAnswerEntry {
   answer: SavedAnswer;
-  conversation: ConversationShell;
+  conversation: ConversationReference;
   projectName: string | null;
   category: LibraryCategory | null;
 }
@@ -19,7 +20,7 @@ export interface LibraryCounts {
 
 export function savedAnswerEntries(
   library: LibrarySnapshot | null | undefined,
-  conversations: readonly ConversationShell[],
+  conversations: readonly ConversationReference[],
   projects: readonly Pick<Project, "id" | "name">[],
 ): SavedAnswerEntry[] {
   if (!library) return [];

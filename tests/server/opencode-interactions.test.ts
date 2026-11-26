@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 
-import { openCodeQuestionPayload } from "../../src/server/provider/opencode-boundary";
+import { openCodeQuestionPayload, openCodeQuestions } from "../../src/server/provider/opencode-boundary";
 import { openCodeExternalApprovalDecision } from "../../src/server/provider/opencode-sdk-events";
 
 function question(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -74,6 +74,24 @@ describe("OpenCode interaction boundaries", () => {
     for (const unsafe of unsafeQuestions) {
       expect(() => openCodeQuestionPayload([unsafe])).toThrow(/OpenCode sent invalid/u);
     }
+  });
+
+  it("leaves its plan-mode exit to the user, since answering it lets the build agent edit files", () => {
+    const planExit = question({
+      header: "Build Agent",
+      question: "Plan at .opencode/plans/plan.md is complete. Would you like to switch to the build agent and start implementing?",
+      custom: false,
+      options: [
+        { label: "Yes", description: "Switch to build agent and start implementing the plan" },
+        { label: "No", description: "Stay with plan agent to continue refining the plan" },
+      ],
+    });
+    expect(openCodeQuestions("plan", openCodeQuestionPayload([planExit]))).toMatchObject({ grantsPermission: true });
+    expect(openCodeQuestions("renamed", openCodeQuestionPayload([{ ...planExit, header: "Implement" }])))
+      .toMatchObject({ grantsPermission: true });
+    expect(openCodeQuestions("mixed", openCodeQuestionPayload([question(), planExit])))
+      .toMatchObject({ grantsPermission: true });
+    expect("grantsPermission" in openCodeQuestions("scope", openCodeQuestionPayload([question()]))).toBe(false);
   });
 
   it("rejects normalized duplicate prompts and option labels", () => {

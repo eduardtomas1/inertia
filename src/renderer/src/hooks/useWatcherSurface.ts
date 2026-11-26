@@ -9,6 +9,7 @@ import type { WatcherLinkIndex } from "../utils/watcherLinks";
 import { cancelWatcherDockFocus, setWatcherDockOpen } from "./useWatcherDock";
 import { useStableActions } from "./useStableController";
 import { useWatcherLinks } from "./useWatcherLinks";
+import { archivedConversationRefsById } from "../utils/conversationReferences";
 
 export interface WatcherAttachTarget {
   watchedId: string;
@@ -72,6 +73,11 @@ export function useWatcherSurfaceController({
   const links = useWatcherLinks(snapshot);
   const conversations = snapshot?.conversations ?? NO_CONVERSATIONS;
   const linkedConversations = useLinkedConversations(conversations, links);
+  const archivedRefs = snapshot?.archivedConversationRefs;
+  const archivedConversations = useMemo(
+    () => archivedConversationRefsById({ archivedConversationRefs: archivedRefs }),
+    [archivedRefs],
+  );
   const [target, setTarget] = useState<WatcherAttachTarget | null>(null);
   const main = kind === "main";
   const actions = useStableActions({
@@ -114,6 +120,7 @@ export function useWatcherSurfaceController({
     surface: kind,
     links,
     conversations: linkedConversations,
+    archivedConversations,
     projects,
     providers: providerInfo,
     backendProfiles: backendProfiles ?? [],
@@ -126,7 +133,7 @@ export function useWatcherSurfaceController({
     showWatcher: actions.reveal,
     openWatcherChat: canOpenWatcherChat ? actions.openWatcherChat : null,
   }), [
-    actions, backendProfiles, canOpenWatcherChat, detachedConversationIds, kind,
+    actions, archivedConversations, backendProfiles, canOpenWatcherChat, detachedConversationIds, kind,
     linkedConversations, links, main, online, primaryConversationId, projects, providerInfo, providerLabels, request,
   ]);
   return useMemo(() => ({ surface, attach: { target, close, attached } }), [attached, close, surface, target]);

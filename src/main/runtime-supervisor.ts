@@ -314,8 +314,10 @@ export class RuntimeSupervisor {
     return Boolean(record?.ready && this.post(record.child, { type: "runtime.record-system-suspend", interval }));
   }
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> { return this.queries.resolveProjectPath(request); }
+  editorContext(filePath?: string, conversationId?: string) { return this.queries.editorContext(filePath, conversationId); }
   /** The chats whose sent messages carry a stored attachment, read from the runtime. */
   attachmentConversations(attachmentId: string): Promise<readonly string[]> { return this.queries.attachmentConversations(attachmentId); }
+  attachmentReattachContext(attachmentId: string) { return this.queries.attachmentReattachContext(attachmentId); }
   /** Reads one stored visual reply for the protocol route; `null` when the runtime has no such render. */
   readHtmlRender(renderId: string): Promise<RuntimeHtmlRenderDocument | null> {
     return this.htmlRenders.read(renderId);
@@ -333,26 +335,18 @@ export class RuntimeSupervisor {
   releaseUpdatePreparation(): Promise<boolean> {
     return this.updatePreparation.release();
   }
-  databaseRecovery(
-    operation: RuntimeDatabaseRecoveryOperation,
-    path: string,
-    targetDirectory?: string,
-  ): Promise<RuntimeDatabaseRecoverySummary | null> {
-    if (operation === "import" && !targetDirectory) {
-      return Promise.reject(new Error(
-        "The recovery import needs an explicitly authorized destination folder.",
-      ));
-    }
+  databaseRecovery(operation: RuntimeDatabaseRecoveryOperation, path: string, targetDirectory?: string): Promise<RuntimeDatabaseRecoverySummary | null> {
+    if (operation === "import" && !targetDirectory) return Promise.reject(new Error("The recovery import needs an explicitly authorized destination folder."));
     const record = this.current;
-    if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
-    }
-    return this.databaseRecoveryRequests.request(
-      record,
-      operation,
-      path,
-      targetDirectory,
-    );
+    if (this.phase !== "ready" || !record?.ready) return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
+    return this.databaseRecoveryRequests.request(record, operation, path, targetDirectory);
+  }
+  exportRecoveryData(path: string, options?: { includeAttachments?: boolean }): Promise<{ includeAttachments: boolean; attachments: number; missingAttachments: number }> {
+    const record = this.current;
+    if (this.phase !== "ready" || !record?.ready) return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
+    return this.databaseRecoveryRequests.requestDetailed(record, "export", path, undefined, options).then((result) => result.exportSummary ?? {
+      includeAttachments: options?.includeAttachments === true, attachments: 0, missingAttachments: 0,
+    });
   }
   privateConnectRequest(
     subject: PrivateConnectRuntimeAuthorization,

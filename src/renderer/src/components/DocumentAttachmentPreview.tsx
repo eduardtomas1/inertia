@@ -20,6 +20,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   ATTACHMENT_PREVIEW_BYTES as MAX_TEXT_ATTACHMENT_BYTES,
   chatAttachmentTypeLabel,
+  isExtractedDocumentAttachmentMimeType,
   isSpreadsheetAttachmentMimeType,
   type ChatAttachmentMimeType,
 } from "@shared/attachments";
@@ -131,6 +132,7 @@ function columnName(column: number): string {
 }
 
 const TRUNCATED_PREVIEW_NOTICE = "Showing the first 1 MiB. The complete file is saved and available to the agent.";
+const TRUNCATED_EXTRACTED_PREVIEW_NOTICE = "Showing extracted text truncated at document extraction limits. The complete file is saved.";
 
 function SpreadsheetPreview({
   title,
@@ -340,7 +342,11 @@ export function DocumentAttachmentPreview({
     ? (
         <div className="text-attachment-preview-frame">
           {preview}
-          <p className="text-attachment-preview-notice" role="status">{TRUNCATED_PREVIEW_NOTICE}</p>
+          <p className="text-attachment-preview-notice" role="status">
+            {isExtractedDocumentAttachmentMimeType(mimeType)
+              ? TRUNCATED_EXTRACTED_PREVIEW_NOTICE
+              : TRUNCATED_PREVIEW_NOTICE}
+          </p>
         </div>
       )
     : preview;
@@ -427,8 +433,9 @@ export function AttachmentPreviewDialog({
       )}
     >
       {attachment.snapshot && <div className="snapshot-preview-controls"><span>{attachment.snapshot.appName} · {attachment.snapshot.windowTitle}</span><button type="button" className="secondary-button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View accessibility data"}</button></div>}
+      {attachment.previewAnnotation && <div className="snapshot-preview-controls"><span title={attachment.previewAnnotation.selector}>{attachment.previewAnnotation.selector} · {attachment.previewAnnotation.pageUrl}</span><button type="button" className="secondary-button" aria-pressed={snapshotData} onClick={() => setSnapshotData((value) => !value)}>{snapshotData ? "Show screenshot" : "View annotation details"}</button></div>}
       <div className="attachment-preview-stage" data-load-failed={loadFailed}>
-        {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : loadFailed
+        {snapshotData && attachment.snapshot ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Accessibility data">{JSON.stringify(attachment.snapshot.accessibility, null, 2)}</pre> : snapshotData && attachment.previewAnnotation ? <pre className="snapshot-accessibility-data" tabIndex={0} aria-label="Page annotation details">{JSON.stringify(attachment.previewAnnotation, null, 2)}</pre> : loadFailed
           ? (
               <div className="attachment-preview-unavailable" role="alert">
                 <strong>Preview unavailable</strong>

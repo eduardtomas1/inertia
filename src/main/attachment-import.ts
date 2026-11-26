@@ -12,12 +12,14 @@ import {
   chatAttachmentKind,
   chatAttachmentPickerExtensions,
   chatAttachmentStorageExtension,
+  isExtractedDocumentAttachmentMimeType,
   isPotentialChatAttachment,
   isSpreadsheetAttachmentMimeType,
   type ChatAttachmentMimeType,
   type DocumentAttachmentMimeType,
   type ImageAttachmentMimeType,
 } from "../shared/attachments.js";
+import { extractStructuredDocumentText } from "../node/document-text-extract.js";
 import {
   ATTACHMENT_MIME_MISMATCH_ERROR,
   UNSUPPORTED_ATTACHMENT_TYPE_ERROR,
@@ -103,6 +105,8 @@ export interface ValidatedAttachmentImport {
   readonly bytes: Buffer;
   readonly size: number;
   readonly digest: string;
+  readonly extractedText?: string;
+  readonly extractedTruncated?: boolean;
 }
 
 export type PreparedAttachmentMetadata = Omit<
@@ -620,6 +624,8 @@ function bytesFromUnknown(value: unknown): Buffer | null {
  */
 export async function validateAttachmentImport(value: unknown): Promise<ValidatedAttachmentImport> {
   const prepared = prepareAttachmentImport(value);
+  let extractedText: string | undefined;
+  let extractedTruncated: boolean | undefined;
   if (prepared.mimeType.startsWith("image/")) {
     const image = await inspectImageAttachment(
       prepared.bytes,
@@ -629,6 +635,10 @@ export async function validateAttachmentImport(value: unknown): Promise<Validate
       throw new ImageAttachmentTooLargeError(image.width, image.height);
     }
     if (image.status !== "safe") throw new Error(UNSAFE_ATTACHMENT_CONTENT);
+  } else if (isExtractedDocumentAttachmentMimeType(prepared.mimeType)) {
+    const extracted = extractStructuredDocumentText(prepared.bytes, prepared.mimeType);
+    extractedText = extracted.text;
+    extractedTruncated = extracted.truncated;
   } else if (!hasExpectedDocumentSignature(
     prepared.bytes,
     prepared.mimeType as DocumentAttachmentMimeType,
@@ -639,6 +649,9 @@ export async function validateAttachmentImport(value: unknown): Promise<Validate
   return {
     ...prepared,
     digest: createHash("sha256").update(prepared.bytes).digest("hex"),
+    ...(extractedText !== undefined
+      ? { extractedText, extractedTruncated: extractedTruncated === true }
+      : {}),
   };
 }
 

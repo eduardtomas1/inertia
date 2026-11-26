@@ -86,9 +86,9 @@ const budgets = {
   // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
   // x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto e37ff42b with Orchestrator V2 measures 951_984 bytes on
-  // macOS arm64; the cap keeps the branch's 512-byte cross-platform headroom.
-  mainWorkbenchFirstLoadJavaScript: 951_984 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 967_089 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  mainWorkbenchFirstLoadJavaScript: 967_089 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -100,9 +100,9 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto e37ff42b with Orchestrator V2 measures 834_150 bytes on
-  // macOS arm64; the cap keeps the branch's 512-byte cross-platform headroom.
-  detachedChatFirstLoadJavaScript: 834_150 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 849_024 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  detachedChatFirstLoadJavaScript: 849_024 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -123,9 +123,9 @@ const budgets = {
   // Custom agents: the settings section entry and its search rows add 843
   // bytes over main's cap (102,199 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  // Main sync onto e37ff42b with Orchestrator V2 measures 106_969 bytes on
-  // macOS arm64; the cap keeps the branch's 512-byte cross-platform headroom.
-  settingsJavaScript: 106_969 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 115_659 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  settingsJavaScript: 115_659 + 512,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2 + 1_623,
@@ -150,9 +150,9 @@ const budgets = {
   // Move to background add 1,766 bytes.
   // Grok in the shared provider lists adds 18 bytes (21,232 measured). Keep 256 bytes.
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21 + 22 + 2 + 16 + 1_766 + 18 + 256,
-  // Nesting a watcher under its chat in the Work tab adds 6 bytes over v0.0.73
-  // (21,132 measured on Linux x64).
-  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 47_557 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  deferredTasksViewJavaScript: 47_557 + 512,
   // Main sync onto 6d8ab80f with Orchestrator V2 measures 30_616 bytes on
   // Windows x64; the cap keeps the branch's 512-byte cross-platform headroom.
   deferredLibraryViewJavaScript: 30_616 + 512,
@@ -182,20 +182,22 @@ const budgets = {
   // history and blame add 9,775 bytes over main's cap (127,535 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 6d8ab80f with Orchestrator V2 measures 163_213 bytes on
-  // Windows x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  filesFirstLoadJavaScript: 163_213 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 164_294 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  filesFirstLoadJavaScript: 164_294 + 512,
   deferredMarkdownJavaScript: 440 * kibibyte,
-  // Main sync onto e37ff42b with Orchestrator V2 measures 700_633 bytes on
-  // macOS arm64; the cap keeps the branch's 512-byte cross-platform headroom.
-  transcriptJavaScript: 700_633 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 704_753 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  transcriptJavaScript: 704_753 + 512,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
   // bytes to the same deferred chunk. Existing headroom is unchanged, and the
   // lightbox still loads only when an attachment preview is opened.
   deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418 + 512 + 459,
-  deferredPreviewJavaScript: 8 * kibibyte + 1_130,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 10_569 bytes on
+  // Linux x64 (preview picker & annotation additions); retain 512-byte headroom.
+  deferredPreviewJavaScript: 10_569 + 512,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte + 2_567,
@@ -208,9 +210,9 @@ const budgets = {
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
-  // Main sync onto e37ff42b with Orchestrator V2 measures 14_003 bytes on
-  // macOS arm64, as the branch alone does on the same dependencies.
-  deferredComposerQueueJavaScript: 14_003 + 256,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 17_464 bytes on
+  // Linux x64 (#777 queue edit/reattach additions); retain 256-byte headroom.
+  deferredComposerQueueJavaScript: 17_464 + 256,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
   // Account only this new module here; all existing ceilings remain unchanged.
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
@@ -281,9 +283,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto e37ff42b with Orchestrator V2 measures 2_754_846 bytes on
-  // macOS arm64; the cap keeps the branch's 512-byte cross-platform headroom.
-  coreJavaScript: 2_754_846 + 512,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 2_791_207 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  coreJavaScript: 2_791_207 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

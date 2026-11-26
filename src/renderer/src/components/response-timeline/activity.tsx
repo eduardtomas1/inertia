@@ -94,6 +94,7 @@ import { StreamingMarkdownText } from "./StreamingMarkdownText";
 import { SubagentActivityRow } from "./SubagentActivityRow";
 import { SubagentGroupBlock } from "./SubagentGroup";
 import { useLinkedActivityStatuses, useLinkedSubagent } from "./subagentActivityContext";
+import { ActivityOutput } from "./ActivityOutput";
 import {
   ReasoningSummary,
   useReadableThinkingLine,
@@ -321,9 +322,7 @@ export const ActivityRow = memo(function ActivityRow({
         </button>
       )}
       {showDisclosure && detailExpanded && (
-        <pre className="agent-activity-output" id={outputId}>
-          {detailPresentation.full}
-        </pre>
+        <ActivityOutput id={outputId} activity={activity} full={detailPresentation.full} />
       )}
       {tooltip.layer && <Tooltip anchor={rowRef} layer={tooltip.layer} label={visibleTitle} />}
     </div>

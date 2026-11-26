@@ -217,8 +217,12 @@ const bridge: MainWindowBridge = Object.freeze({
     return () => { ipcRenderer.removeListener(IPC.launchRequestAvailable, handler); };
   },
   selectCodexExecutable: () => ipcRenderer.invoke(IPC.selectCodexExecutable) as Promise<string | null>,
-  exportRecoveryData: () =>
-    ipcRenderer.invoke(IPC.exportRecoveryData) as ReturnType<
+  exportRecoveryData: (options?: Parameters<DesktopBridge["exportRecoveryData"]>[0]) =>
+    (options === undefined
+      ? ipcRenderer.invoke(IPC.exportRecoveryData)
+      : ipcRenderer.invoke(IPC.exportRecoveryData, {
+          includeAttachments: options.includeAttachments === true,
+        })) as ReturnType<
       DesktopBridge["exportRecoveryData"]
     >,
   importRecoveryData: () =>
@@ -318,6 +322,12 @@ const bridge: MainWindowBridge = Object.freeze({
     ipcRenderer.invoke(IPC.openAttachmentExternally, id) as Promise<void>,
   openProjectPath: (request: Parameters<DesktopBridge["openProjectPath"]>[0]) =>
     ipcRenderer.invoke(IPC.openProjectPath, request) as Promise<string>,
+  getAvailableEditors: (request?: Parameters<DesktopBridge["getAvailableEditors"]>[0]) =>
+    (request === undefined
+      ? ipcRenderer.invoke(IPC.getAvailableEditors)
+      : ipcRenderer.invoke(IPC.getAvailableEditors, { refresh: request.refresh === true })) as ReturnType<
+      DesktopBridge["getAvailableEditors"]
+    >,
   openExternal: (url: string) => ipcRenderer.invoke(IPC.openExternal, url) as Promise<void>,
   showContextMenu: (request: Parameters<DesktopBridge["showContextMenu"]>[0]) =>
     ipcRenderer.invoke(IPC.showContextMenu, request) as ReturnType<DesktopBridge["showContextMenu"]>,
@@ -367,6 +377,18 @@ const bridge: MainWindowBridge = Object.freeze({
     };
     ipcRenderer.on(IPC.previewState, handler);
     return () => ipcRenderer.removeListener(IPC.previewState, handler);
+  },
+  onPreviewAnnotation: (
+    listener: (event: import("../shared/preview-annotation").PreviewAnnotationDelivery) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      delivery: import("../shared/preview-annotation").PreviewAnnotationDelivery,
+    ) => {
+      listener(delivery);
+    };
+    ipcRenderer.on(IPC.previewAnnotationReady, handler);
+    return () => ipcRenderer.removeListener(IPC.previewAnnotationReady, handler);
   },
   syncThemePreference: (preference: Parameters<DesktopBridge["syncThemePreference"]>[0]) => ipcRenderer.invoke(IPC.syncThemePreference, preference) as Promise<void>,
   syncAppShortcutKeys: (keys: Parameters<DesktopBridge["syncAppShortcutKeys"]>[0]) => ipcRenderer.invoke(IPC.syncAppShortcutKeys, [...keys]) as Promise<void>,

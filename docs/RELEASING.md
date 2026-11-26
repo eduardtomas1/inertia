@@ -109,10 +109,24 @@ For a signed macOS release, configure these GitHub Actions secrets:
 - `MACOS_APPLE_API_KEY_ID`
 - `MACOS_APPLE_API_ISSUER`
 
-For a signed Windows release, configure:
+For a signed Windows release, configure exactly one of two sets. Azure
+Artifact Signing (formerly Trusted Signing):
+
+- `WINDOWS_AZURE_TENANT_ID`
+- `WINDOWS_AZURE_CLIENT_ID`
+- `WINDOWS_AZURE_CLIENT_SECRET`
+- `WINDOWS_TRUSTED_SIGNING_ENDPOINT`
+- `WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME`
+- `WINDOWS_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`
+- `WINDOWS_TRUSTED_SIGNING_PUBLISHER_NAME`
+
+Or an exportable PFX certificate:
 
 - `WINDOWS_CSC_LINK`
 - `WINDOWS_CSC_KEY_PASSWORD`
+
+Configuring both complete sets stops the build. See [Code signing](#code-signing)
+for the one-time setup.
 
 For Discord release notifications, configure:
 
@@ -121,7 +135,7 @@ For Discord release notifications, configure:
 The workflow writes the Apple API key to a temporary runner file, never to the
 repository or an uploaded artifact. Complete macOS credentials enable hardened
 runtime, Developer ID signing, notarization, and fail-closed signature checks.
-Complete Windows credentials enable fail-closed Authenticode signing.
+Either complete Windows set enables fail-closed Authenticode signing.
 
 Stable release packages use electron-builder's generic update provider at
 `https://github.com/eduardtomas1/inertia/releases/latest/download`. Canary
@@ -237,6 +251,171 @@ the installed production dependency graph, fails when a package references
 missing license material, and places deterministic third-party notices beside
 Inertia's own license in the packaged resources. Release validation must not
 bypass that prebuild step.
+
+## Code signing
+
+Signed macOS and Windows builds are what turn on in-app updates for those
+platforms. With no signing secrets, the release still succeeds. It ships
+unsigned Windows and ad-hoc macOS packages that update manually from the
+release page, and leaves out `latest.yml` and `latest-mac.yml`. Every secret
+below is a GitHub Actions repository secret (**Settings → Secrets and variables
+→ Actions → New repository secret**). A blank secret counts as unset. A
+partially configured set stops the build, and the error names only the missing
+variables, never a value.
+
+### Windows: Azure Artifact Signing
+
+Since June 2023, publicly trusted OV and EV code-signing certificates must be
+generated and kept on hardware security modules, so a newly bought certificate
+can't be exported as a PFX. For a small publisher, Azure Artifact Signing
+(Microsoft's renamed Trusted Signing service) is the practical route.
+electron-builder 26 signs through it with `win.azureSignOptions`: on the Windows
+runner it installs the `TrustedSigning` PowerShell module and calls
+`Invoke-TrustedSigning`, which reads the service principal from
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET`.
+
+One-time setup in the Azure portal:
+
+1. Under an Azure subscription you own, register the `Microsoft.CodeSigning`
+   resource provider (**Subscription → Resource providers**).
+2. Create an **Artifact Signing account** in a resource group. Pick its region
+   carefully, because the account endpoint depends on it, for example
+   `https://eus.codesigning.azure.net/` for East US or
+   `https://weu.codesigning.azure.net/` for West Europe. The **Account URI** on
+   the account overview is the exact endpoint value.
+3. Assign yourself the **Artifact Signing Identity Verifier** role on the
+   account (**Access control (IAM) → Add role assignment**).
+4. On the account, open **Identity validations → New identity → Public**. Fill
+   in the legal name and address exactly as they appear on your registration
+   documents, and complete Microsoft's verification. Public validation can take
+   from one to many business days. Individual developers are eligible only in
+   the countries Microsoft currently supports, and the billing account must be
+   of type Individual. Check the current list on Microsoft Learn before you
+   start.
+5. When the validation shows **Completed**, open **Certificate profiles →
+   Create → Public Trust**, select that validation, and name the profile.
+   Record the account name and the profile name.
+6. Record the certificate subject common name (CN) the profile issues. It is
+   the validated legal name as shown on the profile, without `CN=`. This is the
+   publisher name.
+7. In **Microsoft Entra ID → App registrations**, register an application, for
+   example `inertia-release-signing`. Record the **Directory (tenant) ID** and
+   the **Application (client) ID**. Under **Certificates & secrets**, create a
+   client secret and copy its **Value** immediately. Note its expiry date, and
+   rotate the secret before it expires.
+8. On the certificate profile (or the account), open **Access control (IAM) →
+   Add role assignment**, choose **Artifact Signing Certificate Profile
+   Signer** (earlier portal versions call it **Trusted Signing Certificate
+   Profile Signer**), and assign it to the application from step 7. Give the
+   application no other role.
+
+Create these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `WINDOWS_AZURE_TENANT_ID` | Directory (tenant) ID |
+| `WINDOWS_AZURE_CLIENT_ID` | Application (client) ID |
+| `WINDOWS_AZURE_CLIENT_SECRET` | The client secret value |
+| `WINDOWS_TRUSTED_SIGNING_ENDPOINT` | Account URI, such as `https://weu.codesigning.azure.net/` |
+| `WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME` | Artifact Signing account name |
+| `WINDOWS_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME` | Certificate profile name |
+| `WINDOWS_TRUSTED_SIGNING_PUBLISHER_NAME` | The certificate subject CN, exactly, without `CN=` |
+
+The release configuration requires an `https` endpoint with no path, query or
+credentials, account and profile names of letters, digits and hyphens, and a
+publisher name with no surrounding whitespace, no `=` and no control
+characters. The publisher name goes into each packaged `app-update.yml`.
+electron-updater compares it with the CN of every downloaded installer and
+refuses an update signed by anyone else. The release job also checks that the
+signed installer's signer CN equals it exactly. Keep the PFX secrets empty
+while the Azure set is in use.
+
+If the validated legal name ever changes, the CN changes with it. Installs that
+carry the old publisher name will then reject in-app updates and need one
+manual install of a build signed under the new name.
+
+### Windows: exportable PFX certificate
+
+`WINDOWS_CSC_LINK` holds a base64-encoded `.pfx` (or an HTTPS URL to one), and
+`WINDOWS_CSC_KEY_PASSWORD` holds its password. electron-builder reads the
+publisher name from the certificate's CN. This path exists only for a
+certificate that can still be exported. A newly issued public certificate
+cannot be.
+
+### macOS: Developer ID and notarization
+
+The macOS path signs with a Developer ID Application certificate, enables the
+hardened runtime with electron-builder's default entitlements (JIT,
+unsigned executable memory, and disabled library validation, which Electron and
+the unpacked native modules need), and notarizes with an App Store Connect API
+key through `notarytool`.
+
+1. Enroll in the Apple Developer Program.
+2. In Keychain Access on a Mac, choose **Certificate Assistant → Request a
+   Certificate From a Certificate Authority** and save the request to disk. In
+   **Certificates, Identifiers & Profiles → Certificates**, create a
+   **Developer ID Application** certificate from that request, then download
+   and open it.
+3. In Keychain Access, select the certificate together with its private key,
+   choose **Export 2 items**, save as `.p12`, and set a strong password.
+4. In App Store Connect, open **Users and Access → Integrations → App Store
+   Connect API → Team Keys**, generate a key with the **Developer** role, and
+   download the `.p8` file. Apple lets you download it only once. Record the
+   **Key ID** and the **Issuer ID** shown above the key list.
+5. Create these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `MACOS_CSC_LINK` | `base64 -i DeveloperID.p12` output |
+| `MACOS_CSC_KEY_PASSWORD` | The `.p12` export password |
+| `MACOS_APPLE_API_KEY_BASE64` | `base64 -i AuthKey_KEYID.p8` output |
+| `MACOS_APPLE_API_KEY_ID` | The API key ID |
+| `MACOS_APPLE_API_ISSUER` | The issuer ID |
+
+The workflow decodes the `.p8` into a mode-0600 runner temporary file, passes
+its path as `APPLE_API_KEY`, and removes it after packaging. The bundle check
+then requires a `Developer ID Application` authority and a stapled
+notarization ticket.
+
+### Moving existing installs from unsigned to signed builds
+
+Unsigned Windows and ad-hoc macOS installs are built for manual delivery, so
+they never start the native updater. They keep showing the new version with a
+link to its release page. On macOS, an ad-hoc install can't take a Developer
+ID update in-app, because Squirrel.Mac requires the update to satisfy the
+running app's code requirement. On Windows, electron-updater checks the
+publisher against the installed app's own `app-update.yml`. An unsigned build
+has no `publisherName` there, so it could not verify a signed update even if it
+ran the updater. Every existing user therefore installs the first signed
+release once, by hand, from the release page. That signed install carries the
+publisher name and in-app delivery, and later signed releases update in-app
+with the publisher check active.
+
+### Verifying the first signed release
+
+Release N is the first signed release. Release N+1 is the first in-app update
+between two signed builds.
+
+- [ ] The release run shows Windows packages signed (no `forceCodeSigning`
+      failure), the Authenticode step passes with the expected signer CN, and
+      the macOS step reports `Authority=Developer ID Application:` and a valid
+      stapler ticket.
+- [ ] Release N publishes `latest.yml` and `latest-mac.yml`, and both Windows
+      and macOS packages report `delivery: in-app` in their packaged
+      capability.
+- [ ] On Windows x64 and ARM64, install release N from the release page and
+      confirm that **Properties → Digital Signatures** on the installer and on
+      `Inertia.exe` shows the publisher. Confirm the installed
+      `resources\app-update.yml` lists that `publisherName`.
+- [ ] On macOS arm64 and x64, install release N from the DMG and confirm that
+      `spctl --assess --type execute -vv /Applications/Inertia.app` reports
+      `source=Notarized Developer ID`.
+- [ ] After publishing release N+1, open release N on each OS and architecture,
+      check for updates, download, restart to update, and confirm the app
+      relaunches as N+1 with conversations intact.
+- [ ] On Windows, check the updater log for
+      `Verifying signature` with no `ERR_UPDATER_INVALID_SIGNATURE`.
+- [ ] Repeat the N to N+1 check for Canary once Canary is also signed.
 
 ## What ships
 

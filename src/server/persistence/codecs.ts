@@ -1,6 +1,8 @@
 import { parseAttachmentStorageGiB } from "../../shared/attachment-storage";
+import { parsePreferredEditor } from "../../shared/editors";
 import { TURN_FAILURE_KINDS, type TurnFailureKind } from "../../shared/turn-lifecycle";
 import { snapshotSourceSchema } from "../../shared/snapshots";
+import { previewAnnotationSchema } from "../../shared/preview-annotation";
 import { parseProjectPreferences } from "../../shared/project-preferences";
 import { isContextCompaction } from "../../shared/context-compaction";
 import { isHtmlRenderReference } from "../../shared/html-render";
@@ -502,6 +504,7 @@ export function settingsFromState(state: StateRow): AppSettings {
     defaultInteractionMode: state.default_interaction_mode,
     codexBinaryPath: state.codex_binary_path,
     discordReleaseRepositoryUrl: state.discord_release_repository_url ?? "",
+    preferredEditor: parsePreferredEditor(state.preferred_editor),
     workingIndicator: parseWorkingIndicatorJson(state.working_indicator_json),
     completionSound: parseCompletionSoundJson(state.completion_sound_json),
   };
@@ -774,6 +777,7 @@ export function parseStoredAttachments(value: string): ChatAttachment[] {
       || attachmentLimitError([...attachments, attachment]) !== null
     ) continue;
     const snapshot = snapshotSourceSchema.safeParse(attachment.snapshot);
+    const previewAnnotation = previewAnnotationSchema.safeParse(attachment.previewAnnotation);
     attachments.push({
       id: attachment.id,
       name: attachment.name,
@@ -781,6 +785,7 @@ export function parseStoredAttachments(value: string): ChatAttachment[] {
       mimeType: attachment.mimeType,
       size: attachment.size,
       ...(snapshot.success ? { snapshot: snapshot.data } : {}),
+      ...(previewAnnotation.success ? { previewAnnotation: previewAnnotation.data } : {}),
     });
     ids.add(attachment.id);
   }
@@ -954,6 +959,7 @@ export function checkpointFromRow(row: CheckpointRow): CheckpointSummary {
     insertions: row.insertions,
     deletions: row.deletions,
     createdAt: row.created_at,
+    ...(row.expired_at ? { expiredAt: row.expired_at } : {}),
   };
 }
 

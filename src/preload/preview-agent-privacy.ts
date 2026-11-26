@@ -21,6 +21,13 @@ import {
   PREVIEW_AGENT_NAME_WORD_SOURCE,
   PREVIEW_AGENT_SENSITIVE_NAME_SOURCE,
 } from "../shared/preview-agent-sensitive-fields.js";
+import { PREVIEW_PICKER_EVENT_CHANNEL } from "../shared/preview-picker-channel.js";
+
+(globalThis as Record<string, unknown>).__inertiaPreviewPickerBridge = {
+  send: (payload: unknown): void => {
+    ipcRenderer.send(PREVIEW_PICKER_EVENT_CHANNEL, payload);
+  },
+};
 
 installPreviewAgentPrivacyGuard(
   createPreviewAgentPrivacyRuntime(PREVIEW_AGENT_SENSITIVE_NAME_SOURCE, PREVIEW_AGENT_NAME_WORD_SOURCE),

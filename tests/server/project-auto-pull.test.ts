@@ -22,8 +22,8 @@ function fixture() {
   const project = store.createProject("Project", root);
   store.updateProject(project.id, { preferences: { ...defaultProjectPreferences(), autoPull: true } });
   // Repository discovery is outside this scheduling test; Git safety uses real repositories in git-automatic-pull.test.ts.
-  const snapshot = store.shellSnapshot.bind(store);
-  vi.spyOn(store, "shellSnapshot").mockImplementation(() => ({ ...snapshot(), projects: snapshot().projects.map((item) => ({ ...item, status: "ready", repositoryRoot: root })) }));
+  const projects = store.projects.bind(store);
+  vi.spyOn(store, "projects").mockImplementation(() => projects().map((item) => ({ ...item, status: "ready", repositoryRoot: root })));
   const controller = new AbortController();
   cleanups.push(() => { controller.abort(); store.close(); });
   const dependencies: Parameters<typeof startProjectAutoPull>[0] = {

@@ -2,7 +2,172 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Unreleased
+## 0.0.85 — 2026-11-25
+
+Full-history message search, an editable queue that keeps unsent files across
+chats, Office, notebook and EPUB attachments, point-and-comment on local
+previews, opening files at the cited line in your editor, portable recovery
+backups with attachments, database compaction, bounded Git checkpoints, and
+lighter live updates.
+
+### Search
+
+- Message search in the command palette (`Ctrl/Cmd+K`) now indexes your whole
+  history in small background slices so older chats stay searchable without
+  pausing the app. Matches arrive newest first; choose **Search older
+  messages** to continue further back through history.
+
+### Composer and queue
+
+- Unsent attachments stay with your draft when you switch to another chat and
+  come back, instead of disappearing before you send.
+- The message queue lists every waiting message, lets you pull one back into
+  the composer to edit (preserving its text, attachments and annotations),
+  accepts documents as well as images, and re-sends with the chat's current
+  settings—asking for confirmation if those settings became broader.
+
+### Attachments and recovery
+
+- Attach Word (`.docx`), PowerPoint (`.pptx`), RTF (`.rtf`), OpenDocument
+  (`.odt`, `.ods`, `.odp`), Jupyter notebooks (`.ipynb`) and EPUB books
+  (`.epub`) so agents can read their text alongside PDFs, spreadsheets and
+  images.
+- **Settings → Data → Portable recovery export** can now include retained
+  attachments (**Include attachments**) in a single portable `.tar` bundle
+  and restore them cleanly on import.
+
+### Preview and editor
+
+- Point at any element on a local preview page (**Comment on this element**)
+  to capture a cropped screenshot with its selector, role, bounds, sanitized
+  HTML and your comment straight into the composer.
+- Choose a **Preferred editor** (VS Code, Cursor, Zed, JetBrains IDEs and
+  others) under **Settings → Chats → Review and terminal** to open project
+  files and cited `path:line` links directly at that line in your editor.
+
+### Storage, checkpoints and performance
+
+- **Settings → Data** shows the database size and reclaimable free space with
+  **Compact now** to shrink it cleanly; new databases start with incremental
+  auto-vacuum enabled.
+- Git checkpoint refs are now bounded per chat and per repository, cleaned up
+  when a project is removed, and expired checkpoints clearly show *No longer
+  available*.
+- Archived chats stay out of the live shell snapshot, internal reads no
+  longer rebuild the whole snapshot, and long command or tool outputs load on
+  expand and stream incrementally.
+
+### Releases
+
+- Windows release builds now support Azure Artifact Signing, enabling
+  verified in-app updates on Windows once the signing secrets are configured.
+
+### Dependencies
+
+- Updated the Claude Agent SDK to 0.3.329. If a wrapper script keeps Claude
+  Code from reading the settings Inertia sends at start-up, the chat now says
+  so instead of showing a generic failure.
+- Updated the Agent Client Protocol SDK used by Cursor, Kimi and Grok to
+  2.8.0, the Anthropic SDK to 1.11.0 and the OpenCode SDK to 1.19.6. Plans
+  an agent writes as a link to a file are no longer shown; the protocol
+  dropped them.
+
+## 0.0.84 — 2026-11-22
+
+Agents that work in AutoCAD and SketchUp, four new colour themes and a dark
+mode with depth again, an installer half the size, your provider's own slash
+commands, and agents that show you a full message while they work.
+
+### AutoCAD and SketchUp
+
+- Agents can read and edit the drawing or model you have open in AutoCAD for
+  Windows or in SketchUp Pro on Windows and macOS. They can say what is
+  selected, find objects by layer or type, and capture the view. They can
+  draw, move, copy, mirror, scale, offset, rotate, recolour and retag objects,
+  insert blocks, and add arcs, hatches and dimensions. Turn it on per project
+  with **Agent CAD tools** in the project's settings; it is off by default.
+- Every change is previewed first and applied as one Undo step, with no
+  dialog in the CAD app. A change whose objects were edited since the preview
+  is not applied. The agent tells you when an outcome is unknown or when a
+  drawing has unsaved changes.
+- With full AutoCAD installed, agents can export a drawing to PNG, PDF, DXF or
+  DWG, always working on a copy, and save a copy of your drawing once you
+  approve its name. See [AutoCAD and SketchUp](docs/user/cad.md).
+
+### Look
+
+- Four new colour themes: Graphite, Blossom, Lagoon and Saffron, in
+  Settings → Appearance next to Inertia, Grove, Ocean, Ember and Iris.
+- Dark mode has depth again. The sidebar, the chat and raised cards each sit
+  on their own step, borders and muted text are easier to read, and primary
+  buttons use a saturated fill with white text instead of a pale wash.
+- The send button glows with the theme colour once there is something to
+  send, turns slowly while a message is sending, and becomes a plain outlined
+  Stop during a run. With reduced motion it stays still, and Windows high
+  contrast shows a plain system button.
+
+### Composer and chats
+
+- The `/` menu also lists the provider's own commands for Claude, Cursor,
+  Kimi and Grok, with their argument hints. Pick one to fill it in, or press
+  Enter on an exact match to send it. A provider command is sent on its own,
+  without attached files or context.
+- Subagents appear where the agent started them in the transcript instead of
+  at the bottom of the turn, and keep that place when they finish and after a
+  restart.
+- Claude skills can contain links to files and folders. A link is followed
+  when its target is inside the skill, or where a linked skill folder may
+  point: inside the repository for a repository skill, or, for your own
+  skills, anywhere but your home folder, its parents and the rest of
+  `~/.claude`. Version-control folders and links that loop back into the
+  skill are still refused.
+
+### Agent tools
+
+- An agent can show you a draft, a code block or the subject of a question in
+  full while it works, instead of a shortened summary. The message appears in
+  the turn where the agent sent it, marked *Sent mid-turn*, stays in view
+  when the turn folds, and survives a restart. It is never taken for the
+  agent's reply. Message search, Private Connect and chats that read this one
+  see its text.
+- A chat that started another chat can see the questions that chat is
+  waiting on and answer them, after you approve the answer on a card that
+  shows each question and the proposed answer. Approvals, secret requests,
+  plan approvals and the chat picker stay yours: the agent never sees them
+  and is told to ask you instead.
+- An agent sending to a chat it started can now choose how: join the running
+  turn, add the message to that chat's queue to run next (up to three, which
+  you can see and remove), or stop the running turn and start again with the
+  message. The approval card says which.
+- Agents can list the models and backends a new chat can use, and why one
+  can't run right now. They can also read the pull request for the chat's
+  branch: its state, whether it can merge, the review decision, and its
+  checks with failures first.
+- Claude always has the secret request tool at hand, so it asks for a secret
+  on the private card instead of in the chat.
+
+### Browser agent
+
+- Agents can double- and triple-click, hold Shift, Control, Alt or Meta while
+  clicking or pressing a key, scroll sideways, and drag one control onto
+  another, including on pages that use native HTML drag and drop. A drag
+  never carries a file, needs both controls in view, and its approval names
+  both. Clicks at a screen position are not offered, because an approval
+  could not say what they would hit.
+- Agents can wait for the page to reach a path such as `/orders/*`, or for a
+  control to disappear. They still only see a page's origin: a wait compares
+  the whole path and answers only whether it matched.
+- Scrolling by pixels went the wrong way: scrolling down scrolled up. The
+  arrow keys reached pages as an unidentified key and stopped the agent as if
+  the user had typed. Both work now.
+
+### Smaller download
+
+- The installer is about half the size. Files the app never runs are no
+  longer shipped, among them the copy of Claude Code inside the Claude Agent
+  SDK; Inertia runs the Claude Code you installed. On Windows x64 the
+  installer went from 281 MB to 146 MB, and the installed app from 894 MB to
+  482 MB.
 
 ### Security
 
@@ -37,27 +202,11 @@ The useful changes in each Inertia release, in plain language.
   and on any high advisory in build tools unless it has a reviewed,
   expiring exception.
 
-### Browser agent
-
-- Agents can double- and triple-click, hold Shift, Control, Alt or Meta while
-  clicking or pressing a key, scroll sideways, and drag one control onto
-  another, including on pages that use native HTML drag and drop. A drag
-  never carries a file, needs both controls in view, and its approval names
-  both. Clicks at a screen position are not offered, because an approval
-  could not say what they would hit.
-- Agents can wait for the page to reach a path such as `/orders/*`, or for a
-  control to disappear. They still only see a page's origin: a wait compares
-  the whole path and answers only whether it matched.
-- Scrolling by pixels went the wrong way: scrolling down scrolled up. The
-  arrow keys reached pages as an unidentified key and stopped the agent as if
-  the user had typed. Both work now.
-
 ### Dependencies
 
 - Updated the Claude Agent SDK to 0.3.323. If a wrapper script keeps Claude
   Code from reading the managed settings Inertia sends at start-up, the chat
-  now says so instead of showing a generic failure. The Claude Code it
-  bundles is about 22 MB larger on every platform.
+  now says so instead of showing a generic failure.
 - Updated Electron to 45.4.1, with Chromium 156.0.8078.100 and Node 24.22.3.
 - Updated `@napi-rs/canvas` to 1.1.1. A canvas stays usable while a JPEG
   encode is pending, and image bytes are fully drawn before they load.
@@ -74,35 +223,6 @@ The useful changes in each Inertia release, in plain language.
   bundle prepares many of Inertia's queries again on every call, which made
   loading a chat's history about a third slower.
 
-### Agent tools
-
-- An agent can show you a draft, a code block or the subject of a question in
-  full while it works, instead of a shortened summary. The message appears in
-  the turn where the agent sent it, marked *Sent mid-turn*, stays in view
-  when the turn folds, and survives a restart. It is never taken for the
-  agent's reply. Message search, Private Connect and chats that read this one
-  see its text.
-- A chat that started another chat can see the questions that chat is
-  waiting on and answer them, after you approve the answer on a card that
-  shows each question and the proposed answer. Approvals, secret requests,
-  plan approvals and the chat picker stay yours: the agent never sees them
-  and is told to ask you instead.
-- An agent sending to a chat it started can now choose how: join the running
-  turn, add the message to that chat's queue to run next (up to three, which
-  you can see and remove), or stop the running turn and start again with the
-  message. The approval card says which.
-
-### Look
-
-- Four new colour themes: Graphite, Blossom, Lagoon and Saffron, in
-  Settings → Appearance next to Inertia, Grove, Ocean, Ember and Iris.
-- Dark mode has depth again. The sidebar, the chat and raised cards each sit
-  on their own step, borders and muted text are easier to read, and primary
-  buttons use a saturated fill with white text instead of a pale wash.
-- The send button glows with the theme colour once there is something to
-  send, turns slowly while a message is sending, and becomes a plain outlined
-  Stop during a run. With reduced motion it stays still, and Windows high
-  contrast shows a plain system button.
 ## 0.0.83 — 2026-11-11
 
 Calmer chats, Grok, custom agents you call by name, secrets that never enter

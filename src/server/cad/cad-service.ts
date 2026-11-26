@@ -459,7 +459,7 @@ export class CadService {
       }
       destination = copyName(document.path, this.now());
     }
-    if (input.destination !== undefined) return checkDestination(input.destination, this.platform, extension);
+    if (input.destination !== undefined || host.app === "autocad") return checkDestination(destination, this.platform, extension);
     if (!isAbsolute(destination) || extname(destination).toLowerCase() !== extension) {
       throw new CadError("INVALID_REQUEST", `destination must be an absolute path ending in ${extension}.`);
     }

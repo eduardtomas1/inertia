@@ -1090,6 +1090,10 @@ export class ProviderManager {
     return this.commandCatalog.list(scope);
   }
 
+  reportedProviderCommands(scope: ProviderCommandScope): readonly ProviderSlashCommand[] | undefined {
+    return this.commandCatalog.reported(scope);
+  }
+
   run(
     input: ProviderRunInput,
     callbacks: ProviderRunCallbacks = {},

@@ -1,3 +1,4 @@
+import { isEditorId, type EditorId } from "./editor-ids";
 import { isProjectRelativePath, UUID_PATTERN } from "./request-identifiers";
 
 export interface ContextMenuAnchor {
@@ -46,6 +47,13 @@ export type ContextMenuRequest =
       anchor: ContextMenuAnchor;
     }
   | {
+      kind: "editor-pick";
+      projectId: string;
+      conversationId?: string;
+      relativePath: string;
+      anchor: ContextMenuAnchor;
+    }
+  | {
       kind: "terminal";
       conversationId?: string;
       hasSelection: boolean;
@@ -61,6 +69,8 @@ export type ContextMenuAction =
   | "create-task"
   | "copy-code"
   | "open"
+  | "open-in-editor"
+  | `open-in-editor:${EditorId}`
   | "reveal"
   | "copy-path"
   | "copy-relative-path"
@@ -71,6 +81,13 @@ export type ContextMenuAction =
   | "terminal-add-to-prompt"
   | "terminal-clear";
 
+export function parseOpenInEditorAction(action: ContextMenuAction): EditorId | "preferred" | null {
+  if (action === "open-in-editor") return "preferred";
+  if (!action.startsWith("open-in-editor:")) return null;
+  const id = action.slice("open-in-editor:".length);
+  return isEditorId(id) ? id : null;
+}
+
 const MAX_ANCHOR_COORDINATE = 100_000;
 
 const REQUIRED_KEYS: Readonly<Record<ContextMenuRequest["kind"], readonly string[]>> = {
@@ -79,6 +96,7 @@ const REQUIRED_KEYS: Readonly<Record<ContextMenuRequest["kind"], readonly string
   "project-link": ["kind", "projectId", "relativePath", "anchor"],
   "diff-file": ["kind", "projectId", "relativePath", "anchor"],
   file: ["kind", "projectId", "relativePath", "directory", "anchor"],
+  "editor-pick": ["kind", "projectId", "relativePath", "anchor"],
   terminal: ["kind", "hasSelection", "clearable", "anchor"],
 };
 
@@ -87,6 +105,7 @@ const OPTIONAL_CONVERSATION: ReadonlySet<ContextMenuRequest["kind"]> = new Set([
   "project-link",
   "diff-file",
   "file",
+  "editor-pick",
   "terminal",
 ]);
 
@@ -153,6 +172,7 @@ export function parseContextMenuRequest(value: unknown): ContextMenuRequest | nu
       if (typeof value.hasSelection !== "boolean") return null;
       return { kind, ...conversation, hasSelection: value.hasSelection, anchor };
     case "project-link":
+    case "editor-pick":
       if (!uuid(value.projectId) || !isProjectRelativePath(value.relativePath)) return null;
       return { kind, projectId: value.projectId, ...conversation, relativePath: value.relativePath, anchor };
     case "diff-file":

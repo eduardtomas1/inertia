@@ -78,7 +78,20 @@ export function attachmentPreviewKind(
   return "text";
 }
 
-export type AttachmentPreviewSource = Pick<ChatAttachment, "id" | "name" | "mimeType" | "size" | "snapshot">;
+export type AttachmentIconKind = "file" | "image" | "spreadsheet" | "text";
+
+export function attachmentIconKind(
+  attachment: Pick<ChatAttachment, "mimeType">,
+): AttachmentIconKind {
+  const previewKind = attachmentPreviewKind(attachment);
+  if (previewKind === "pdf") return "text";
+  return previewKind === "text"
+    && attachment.mimeType === "application/vnd.oasis.opendocument.spreadsheet"
+    ? "spreadsheet"
+    : previewKind;
+}
+
+export type AttachmentPreviewSource = Pick<ChatAttachment, "id" | "name" | "mimeType" | "size" | "snapshot" | "previewAnnotation">;
 
 /** The privileged app protocol of this build: canary builds serve `inertia-canary:`. */
 export function appProtocolScheme(): "inertia" | "inertia-canary" {

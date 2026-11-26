@@ -22,7 +22,12 @@ import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { ActivityRow } from "./activity";
 import { PlanDetail } from "./PlanDetail";
 import { TurnTimeline } from "./turn";
+import {
+  CHECKPOINT_EXPIRED_DESCRIPTION,
+  CHECKPOINT_EXPIRED_LABEL,
+} from "@shared/turn-checkpoint";
 import type { ResponseTimelineProps } from "./types";
+import { TooltipButton } from "../TooltipButton";
 import { TooltipText } from "../TooltipText";
 
 const LEGACY_MESSAGE_LABELS: Record<ChatMessage["role"], string> = {
@@ -156,18 +161,32 @@ function CompatibilityDisclosure({
               </div>
             ))}
             {compatibility.plans.map((plan) => <PlanDetail key={`${plan.runId}:${plan.turnId ?? "legacy"}`} plan={plan} />)}
-            {compatibility.checkpoints.map((checkpoint) => (
-              <div className="agent-activity" key={checkpoint.id}>
-                <RotateCcw size={14} aria-hidden="true" />
-                <span><strong>Recovered checkpoint</strong><small>{checkpoint.label}</small></span>
-                <button
-                  type="button"
-                  className="message-revert"
-                  disabled={props.checkpointRestoreDisabled}
-                  onClick={() => props.onRevertCheckpoint(checkpoint)}
-                >Restore checkpoint</button>
-              </div>
-            ))}
+            {compatibility.checkpoints.map((checkpoint) => {
+              const checkpointExpired = Boolean(checkpoint.expiredAt);
+              const restoreDisabled = props.checkpointRestoreDisabled || checkpointExpired;
+              return (
+                <div className="agent-activity" key={checkpoint.id}>
+                  <RotateCcw size={14} aria-hidden="true" />
+                  <span><strong>Recovered checkpoint</strong><small>{checkpoint.label}</small></span>
+                  <TooltipButton
+                    className="message-revert"
+                    data-checkpoint-expired={checkpointExpired ? "true" : undefined}
+                    aria-label={checkpointExpired ? `Restore checkpoint (${CHECKPOINT_EXPIRED_LABEL.toLowerCase()})` : undefined}
+                    tooltip={checkpointExpired
+                      ? CHECKPOINT_EXPIRED_DESCRIPTION
+                      : props.checkpointRestoreDisabled
+                        ? "Stop the active run before restoring a checkpoint"
+                        : "Restore the project to this checkpoint"}
+                    disabled={restoreDisabled}
+                    onClick={() => {
+                      if (!checkpointExpired) props.onRevertCheckpoint(checkpoint);
+                    }}
+                  >
+                    {checkpointExpired ? CHECKPOINT_EXPIRED_LABEL : "Restore checkpoint"}
+                  </TooltipButton>
+                </div>
+              );
+            })}
           </>
         )}
       </details>

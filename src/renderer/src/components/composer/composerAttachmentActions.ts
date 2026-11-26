@@ -30,6 +30,8 @@ interface ComposerAttachmentActionOptions {
   releaseAttachmentRef: MutableRefObject<ComposerProps["onReleaseAttachment"]>;
   running: boolean;
   imageInputUnavailableReason: string | null;
+  documentsWhileRunning?: boolean;
+  transferringAttachmentIdsRef?: MutableRefObject<ReadonlySet<string>>;
   setAttachments: Dispatch<SetStateAction<ChatAttachment[]>>;
   setAttachmentImporting: Dispatch<SetStateAction<boolean>>;
   setAttachmentError: Dispatch<SetStateAction<string | null>>;
@@ -45,6 +47,8 @@ const SUPPORTED_ATTACHMENT_TYPES = "PNG, JPEG, WebP, GIF, PDF, TXT, Markdown, CS
 /** Same wording the runtime uses when it refuses a document follow-up. */
 export const DOCUMENT_FOLLOW_UP_UNSUPPORTED =
   "Follow-ups while the agent is working support images only. Documents were not attached.";
+export const DOCUMENT_FOLLOW_UP_UNQUEUEABLE =
+  "The agent can't take documents while it works, and this draft can't be queued. Send it after the turn ends.";
 
 export interface ComposerAttachmentActions {
   adoptAttachments(lease: ComposerAttachmentImportLease): Promise<ComposerAttachmentAdoptionResult>;
@@ -92,6 +96,8 @@ export function composerAttachmentActions({
   releaseAttachmentRef,
   running,
   imageInputUnavailableReason,
+  documentsWhileRunning = false,
+  transferringAttachmentIdsRef,
   setAttachments,
   setAttachmentImporting,
   setAttachmentError,
@@ -103,7 +109,7 @@ export function composerAttachmentActions({
   const reportAttachmentLimit = (): void => setAttachmentError(attachmentLimitMessage);
   const permitsKind = (mimeType: Parameters<typeof chatAttachmentKind>[0] | null): boolean => {
     const image = mimeType !== null && chatAttachmentKind(mimeType) === "image";
-    return image ? !imageInputUnavailableReason : !running;
+    return image ? !imageInputUnavailableReason : !running || documentsWhileRunning;
   };
   const reportImagesRejected = (
     mimeTypes: readonly (Parameters<typeof chatAttachmentKind>[0] | null)[],
@@ -116,7 +122,7 @@ export function composerAttachmentActions({
   const reportDocumentsRejected = (
     mimeTypes: readonly (Parameters<typeof chatAttachmentKind>[0] | null)[],
   ): void => {
-    if (running && mimeTypes.some((mimeType) =>
+    if (running && !documentsWhileRunning && mimeTypes.some((mimeType) =>
       mimeType !== null && chatAttachmentKind(mimeType) === "document")) {
       setAttachmentError(DOCUMENT_FOLLOW_UP_UNSUPPORTED);
     }
@@ -256,7 +262,7 @@ export function composerAttachmentActions({
       const importSequence = beginImport();
       const authority = attachmentAuthorityKey;
       try {
-        const lease = await onChooseAttachments(running ? "images" : "all");
+        const lease = await onChooseAttachments(running && !documentsWhileRunning ? "images" : "all");
         if (lease) await adoptPrivilegedLease(lease, authority);
       } finally {
         finishImport(importSequence);
@@ -348,6 +354,7 @@ export function composerAttachmentActions({
     },
     removeAttachment(attachment) {
       if (attachmentImportingRef.current) return;
+      if (transferringAttachmentIdsRef?.current.has(attachment.id)) return;
       if (!attachmentsRef.current.some(({ id }) => id === attachment.id)) return;
       markEditorChanged();
       setAttachmentError(null);

@@ -89,6 +89,7 @@ function TurnTimelineComponent({
   turn,
   props,
   previousArtifactTurnId,
+  previousArtifactCompareExpired = false,
   subagents,
   onBeforeToggle,
   onAfterToggle,
@@ -96,6 +97,7 @@ function TurnTimelineComponent({
   turn: ResponseTurn;
   props: ResponseTimelineProps;
   previousArtifactTurnId: string | null;
+  previousArtifactCompareExpired?: boolean;
   subagents?: SubagentTrace[];
   onBeforeToggle?: (turnId: string) => void;
   onAfterToggle?: (turnId: string) => void;
@@ -359,6 +361,7 @@ function TurnTimelineComponent({
               turn={turn}
               props={props}
               previousArtifactTurnId={previousArtifactTurnId}
+              previousArtifactCompareExpired={previousArtifactCompareExpired}
               durationShownAbove={foldVisible}
               onBeforeToggle={handleBeforeToggle}
               onAfterToggle={handleAfterToggle}
@@ -375,6 +378,7 @@ export function sameTurnTimelineProps(
     turn: ResponseTurn;
     props: ResponseTimelineProps;
     previousArtifactTurnId: string | null;
+    previousArtifactCompareExpired?: boolean;
     subagents?: SubagentTrace[];
     onBeforeToggle?: (turnId: string) => void;
     onAfterToggle?: (turnId: string) => void;
@@ -383,6 +387,7 @@ export function sameTurnTimelineProps(
     turn: ResponseTurn;
     props: ResponseTimelineProps;
     previousArtifactTurnId: string | null;
+    previousArtifactCompareExpired?: boolean;
     subagents?: SubagentTrace[];
     onBeforeToggle?: (turnId: string) => void;
     onAfterToggle?: (turnId: string) => void;
@@ -392,6 +397,7 @@ export function sameTurnTimelineProps(
   const right = next.props;
   return previous.turn === next.turn
     && previous.previousArtifactTurnId === next.previousArtifactTurnId
+    && Boolean(previous.previousArtifactCompareExpired) === Boolean(next.previousArtifactCompareExpired)
     && sameSubagentCallsForTurn(previous.subagents, next.subagents, left.customAgents, right.customAgents)
     && previous.onBeforeToggle === next.onBeforeToggle
     && previous.onAfterToggle === next.onAfterToggle

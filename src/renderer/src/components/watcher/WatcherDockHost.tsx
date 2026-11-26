@@ -25,7 +25,7 @@ export function WatcherDockHost({ watchedId }: { watchedId: string | null }): Re
     <WatcherDockHandle
       watchedId={watchedId}
       link={link}
-      providerId={watcher?.providerId}
+      providerId={watcher?.providerId ?? surface.archivedConversations?.get(link.watcherConversationId)?.providerId}
       dock={dock}
       controlsDock={controlsDock}
     />

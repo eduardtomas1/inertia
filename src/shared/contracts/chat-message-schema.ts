@@ -1,4 +1,5 @@
 import { snapshotSourceSchema } from "../snapshots";
+import { previewAnnotationSchema } from "../preview-annotation";
 import { isContextCompaction } from "../context-compaction";
 import { isHtmlRenderReference } from "../html-render-reference";
 import { ACCEPTED_ATTACHMENT_MIME_TYPES } from "../attachments";
@@ -34,6 +35,7 @@ function attachment(value: unknown): boolean {
       value.mimeType as (typeof ACCEPTED_ATTACHMENT_MIME_TYPES)[number],
     )
     && (value.snapshot === undefined || snapshotSourceSchema.safeParse(value.snapshot).success)
+    && (value.previewAnnotation === undefined || previewAnnotationSchema.safeParse(value.previewAnnotation).success)
     && typeof value.size === "number"
     && Number.isFinite(value.size)
     && value.size >= 0;

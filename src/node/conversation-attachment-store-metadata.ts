@@ -6,6 +6,8 @@ import { ACCEPTED_ATTACHMENT_MIME_TYPES, MAX_ATTACHMENT_BYTES,
 import type { ChatAttachment } from "../shared/contracts.js";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+export const RECOVERY_IMPORT_STAGING_PATTERN =
+  /^\.recovery-import-([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.partial$/iu;
 
 export interface PersistedAttachmentMetadata {
   readonly version: 1;

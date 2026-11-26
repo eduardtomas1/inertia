@@ -39,6 +39,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     threadId = message.params.threadId || threadId;
     return send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
   }
+  if (message.method === "thread/inject_items") return send({ id: message.id, error: { code: -32601, message: "Method not found" } });
   if (message.method !== "turn/start") return;
   const prompt = (message.params.input || []).filter((item) => item.type === "text").map((item) => item.text).join("\\n");
   const receipt = path.join(process.cwd(), ".git", ${JSON.stringify(PROMPT_RECEIPT)});

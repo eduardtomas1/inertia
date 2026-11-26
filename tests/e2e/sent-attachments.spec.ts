@@ -358,8 +358,13 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   const unsentTempPath = await stagedAttachmentPath(unsentId, "png");
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);
+  await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
+  await expect(attachments).toHaveCount(0);
+  expect(await stat(unsentTempPath).then(() => true, () => false)).toBe(true);
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await expectImagePreviewSettled(unsentPreview);
+  expect((await unsentPreview.getAttribute("src"))?.split("/").at(-1)).toBe(unsentId);
+  expect(await stat(unsentTempPath).then(() => true, () => false)).toBe(true);
 
   await expect(sentAttachments).toBeVisible();
   await expect.poll(() => sentPreview.evaluate((element) => {
@@ -384,6 +389,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   })).toEqual({ complete: true, width: 1 });
   await expect.poll(async () =>
     stat(retainedPath).then(() => true, () => false)).toBe(true);
+  await expect(page.getByRole("list", { name: "Attachments", exact: true })).toHaveCount(0);
+  await expect.poll(async () =>
+    stat(unsentTempPath).then(() => true, () => false)).toBe(false);
 
   expect(rendererErrors).toEqual([]);
 });

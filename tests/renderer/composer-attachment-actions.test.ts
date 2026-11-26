@@ -10,9 +10,10 @@ function file(name: string): File {
   return new File(["x"], name, { type: "application/octet-stream" });
 }
 
-function actions(overrides: { running?: boolean; imageInputUnavailableReason?: string | null } = {}) {
+function actions(overrides: { running?: boolean; imageInputUnavailableReason?: string | null; documentsWhileRunning?: boolean } = {}) {
   const errors: Array<string | null> = [];
   const onImportAttachments = vi.fn<(files: File[]) => Promise<null>>(async () => null);
+  const onChooseAttachments = vi.fn(async (_mode?: "images" | "all") => null);
   const attachmentsRef = { current: [] as ChatAttachment[] };
   const created = composerAttachmentActions({
     attachmentAuthorityKey: "conversation-1",
@@ -25,11 +26,12 @@ function actions(overrides: { running?: boolean; imageInputUnavailableReason?: s
     conversationId: "conversation-1",
     markEditorChanged: () => undefined,
     mountedRef: { current: true },
-    onChooseAttachments: vi.fn(async () => null),
+    onChooseAttachments,
     onImportAttachments,
     releaseAttachmentRef: { current: vi.fn(async () => undefined) },
     running: overrides.running ?? false,
     imageInputUnavailableReason: overrides.imageInputUnavailableReason ?? null,
+    documentsWhileRunning: overrides.documentsWhileRunning ?? false,
     setAttachments: () => undefined,
     setAttachmentImporting: () => undefined,
     setAttachmentError: (value) => {
@@ -38,7 +40,7 @@ function actions(overrides: { running?: boolean; imageInputUnavailableReason?: s
     setPendingAttachmentIds: () => undefined,
     submittingRef: { current: false },
   });
-  return { created, errors, onImportAttachments };
+  return { created, errors, onImportAttachments, onChooseAttachments };
 }
 
 describe("composer attachment imports", () => {
@@ -66,6 +68,15 @@ describe("composer attachment imports", () => {
     await created.importAttachments([file("report.pdf"), file("shot.png")]);
     expect(onImportAttachments).toHaveBeenCalledOnce();
     expect(onImportAttachments.mock.calls[0]![0].map((entry) => entry.name)).toEqual(["shot.png"]);
+  });
+
+  it("accepts documents while the agent works when the queue can take them", async () => {
+    const { created, errors, onImportAttachments, onChooseAttachments } = actions({ running: true, documentsWhileRunning: true });
+    await created.importAttachments([file("report.pdf"), file("shot.png")]);
+    expect(onImportAttachments.mock.calls[0]![0].map((entry) => entry.name)).toEqual(["report.pdf", "shot.png"]);
+    expect(errors.filter(Boolean)).toEqual([]);
+    await created.chooseAttachments();
+    expect(onChooseAttachments).toHaveBeenCalledWith("all");
   });
 
   it("keeps the existing image refusal message for text-only routes", async () => {

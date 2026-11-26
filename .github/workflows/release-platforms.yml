@@ -295,9 +295,18 @@ jobs:
           INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
           WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.WINDOWS_AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.WINDOWS_AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.WINDOWS_AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.WINDOWS_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.WINDOWS_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.WINDOWS_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.WINDOWS_TRUSTED_SIGNING_PUBLISHER_NAME }}
         run: |
           set -euo pipefail
-          for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+          for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET \
+            AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_ACCOUNT_NAME \
+            AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME AZURE_TRUSTED_SIGNING_PUBLISHER_NAME; do
             if [[ -z "${!name:-}" ]]; then
               unset "$name"
             fi
@@ -471,13 +480,31 @@ jobs:
         shell: pwsh
         env:
           WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.WINDOWS_TRUSTED_SIGNING_PUBLISHER_NAME }}
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
+          $azureSigning = -not [string]::IsNullOrWhiteSpace($env:AZURE_TRUSTED_SIGNING_PUBLISHER_NAME)
+          if ($azureSigning -or -not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
             $suffix = "${{ matrix.windows_asset_suffix }}"
             $prefix = if ($env:INERTIA_RELEASE_CHANNEL -eq "canary") { "Inertia.Canary.Setup" } else { "Inertia.Setup" }
-            $signature = Get-AuthenticodeSignature "release/$prefix.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe"
-            if ($signature.Status -ne "Valid") {
-              throw "The Windows release signature is not valid: $($signature.Status)"
+            $appPath = "${{ matrix.app_path }}"
+            if ($env:INERTIA_RELEASE_CHANNEL -eq "canary") {
+              $appPath = $appPath -replace 'Inertia\.exe$', 'Inertia Canary.exe'
+            }
+            $targets = @(
+              "release/$prefix.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe",
+              $appPath
+            )
+            foreach ($target in $targets) {
+              $signature = Get-AuthenticodeSignature $target
+              if ($signature.Status -ne "Valid") {
+                throw "The Windows release signature for $target is not valid: $($signature.Status)"
+              }
+              if ($azureSigning) {
+                $signer = $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+                if ($signer -cne $env:AZURE_TRUSTED_SIGNING_PUBLISHER_NAME) {
+                  throw "The Windows release signer common name for $target does not equal the configured publisher name."
+                }
+              }
             }
           }
 

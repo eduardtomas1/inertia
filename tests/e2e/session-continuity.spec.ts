@@ -41,6 +41,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     fs.writeFileSync(threadsPath, JSON.stringify([...known, threadId]));
     return send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
   }
+  if (message.method === "thread/inject_items") return send({ id: message.id, error: { code: -32601, message: "Method not found" } });
   if (message.method !== "turn/start") return;
   const prompt = (message.params.input || []).filter((item) => item.type === "text").map((item) => item.text).join("\\n");
   fs.appendFileSync(path.join(process.cwd(), ${JSON.stringify(turnLog)}), JSON.stringify({ threadId, prompt }) + "\\n");

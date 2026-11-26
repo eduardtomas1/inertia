@@ -1,6 +1,8 @@
 import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerChatAttachmentIpc } from "./chat-attachment-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
+import { EditorLauncher } from "./editor-launcher.js";
+import { openProjectPathInEditor, registerEditorIpc, resolveContextMenuEditorState, tryOpenLinkInPreferredEditor } from "./editor-ipc.js";
 import { MascotMain } from "./mascot-main.js";
 import { MascotFeedMemory } from "./mascot-feed-memory.js";
 import { DeferredWindowCreation } from "./deferred-window-creation.js";
@@ -32,11 +34,14 @@ import {
 } from "../shared/claude-backend-profiles.js";
 import {
   type AppHealthSnapshot,
+  parseDatabaseRecoveryExportOptions,
   parseDesktopNotificationRequest,
   DESKTOP_NOTIFICATION_COPY,
   parseOpenProjectPathRequest,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
+import { PREVIEW_PICKER_EVENT_CHANNEL } from "../shared/preview-picker-channel.js";
+import { previewAnnotationImportDocument } from "./preview-picker.js";
 import { openDesktopLink } from "./external-link-open.js";
 import { inertiaWindowInForeground } from "./desktop-notification-gate.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
@@ -200,6 +205,13 @@ const previewBroker = new PreviewBroker({
   recordOperationFailure: (failure) => runtimeDiagnostics?.record("browser.operation-failure", { ...failure }),
   confirmPageUnload: confirmPreviewPageUnload,
   partitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary-preview" : "inertia-preview",
+  annotations: {
+    window: () => mainWindow,
+    document: () => previewAnnotationImportDocument(mainWindow),
+    registry: attachmentRegistry,
+    get imports() { return rendererAttachmentImports; },
+    channel: IPC.previewAnnotationReady,
+  },
 });
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
@@ -215,6 +227,7 @@ const registerRendererProtocol = createAppProtocolRegistrar({
   scheme: releaseChannel.protocolScheme,
   attachmentRegistry: () => importedAttachments,
   conversationAttachments: () => conversationAttachments,
+  extractDocument: attachmentImportRunner.extract,
   runtimeSupervisor: () => runtimeSupervisor,
   mascotSprite: (id, name) => mascotMain?.sprite(id, name) ?? null,
 });
@@ -399,6 +412,7 @@ function registerIpcHandlers(): void {
   });
   registerCustomAgentFileIpc({ ipcMain, assertTrusted: assertTrustedIpc, window: () => mainWindow, dialog, defaultPath: () => app.getPath("documents") });
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
+  ipcMain.on(PREVIEW_PICKER_EVENT_CHANNEL, (event, value) => { previewBroker.handlePickerEvent(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length, Math.min(args.length, 1));
     applyRuntimeConnectionRequest(args, context.role, runtimeSupervisor);
@@ -465,24 +479,34 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.exportRecoveryData, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
+    assertTrustedIpc(event, args.length, args.length <= 1 ? args.length : 0);
     if (!mainWindow || !runtimeSupervisor) {
       throw new Error("Database recovery export is unavailable.");
     }
+    const exportOptions = parseDatabaseRecoveryExportOptions(args[0]);
+    if (!exportOptions) {
+      throw new Error("Invalid recovery export request.");
+    }
+    const includeAttachments = exportOptions.includeAttachments === true;
     const timestamp = new Date().toISOString().slice(0, 10);
-    const result = await dialog.showSaveDialog(mainWindow, {
-      title: "Export Inertia recovery data",
-      defaultPath: join(
-        app.getPath("documents"),
-        `Inertia recovery ${timestamp}.json`,
-      ),
-      buttonLabel: "Export recovery file",
-      filters: [{ name: "JSON", extensions: ["json"] }],
-      properties: ["createDirectory", "showOverwriteConfirmation"],
-    });
+    const result = await dialog.showSaveDialog(mainWindow, includeAttachments
+      ? {
+          title: "Export Inertia recovery bundle",
+          defaultPath: join(app.getPath("documents"), `Inertia recovery ${timestamp}.tar`),
+          buttonLabel: "Export recovery bundle",
+          filters: [{ name: "Inertia recovery bundle", extensions: ["tar"] }],
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        }
+      : {
+          title: "Export Inertia recovery data",
+          defaultPath: join(app.getPath("documents"), `Inertia recovery ${timestamp}.json`),
+          buttonLabel: "Export recovery file",
+          filters: [{ name: "JSON", extensions: ["json"] }],
+          properties: ["createDirectory", "showOverwriteConfirmation"],
+        });
     if (result.canceled || !result.filePath) return { status: "cancelled" };
-    await runtimeSupervisor.databaseRecovery("export", result.filePath);
-    return { status: "exported" };
+    const summary = await runtimeSupervisor.exportRecoveryData(result.filePath, { includeAttachments });
+    return { status: "exported", summary };
   });
 
   ipcMain.handle(IPC.importRecoveryData, async (event, ...args) => {
@@ -494,7 +518,11 @@ function registerIpcHandlers(): void {
       title: "Import Inertia recovery data",
       defaultPath: app.getPath("documents"),
       buttonLabel: "Import recovery file",
-      filters: [{ name: "JSON", extensions: ["json"] }],
+      filters: [
+        { name: "Inertia recovery files", extensions: ["json", "tar"] },
+        { name: "JSON", extensions: ["json"] },
+        { name: "Inertia recovery bundle", extensions: ["tar"] },
+      ],
       properties: ["openFile"],
     });
     const path = result.canceled ? undefined : result.filePaths[0];
@@ -526,9 +554,12 @@ function registerIpcHandlers(): void {
     (incident) => runtimeDiagnostics?.recordIncident(incident),
   );
 
+  const editorLauncher = new EditorLauncher();
+  registerEditorIpc({ channel: IPC.getAvailableEditors, assertTrusted: assertTrustedChatIpc, launcher: editorLauncher });
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
   registerContextMenuIpc({
     channel: IPC.showContextMenu, assertTrusted: assertTrustedChatIpc, isPackaged: () => app.isPackaged,
+    editorMenu: () => resolveContextMenuEditorState(editorLauncher, runtimeSupervisor),
     windowFor: (event, count, expected) => {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, expected);
@@ -569,13 +600,18 @@ function registerIpcHandlers(): void {
     }
     if (!runtimeSupervisor) throw new Error("The local runtime is not available");
     const path = await runtimeSupervisor.resolveProjectPath(request);
+    if (request.action === "open-in-editor") {
+      return openProjectPathInEditor(editorLauncher, runtimeSupervisor, path, request);
+    }
     return openAuthorizedProjectPath(path, request.action, shell);
   });
 
   ipcMain.handle(IPC.openExternal, async (event, ...args) => {
-    assertTrustedChatIpc(event, args.length, 1);
+    const context = assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
-    await openDesktopLink(value, shell);
+    const conversationId = context.role === "detached-chat" ? context.conversationId : undefined;
+    await openDesktopLink(value, shell, process.platform, (filePath, position) =>
+      tryOpenLinkInPreferredEditor(editorLauncher, runtimeSupervisor, filePath, position, conversationId));
   });
 
   ipcMain.handle(IPC.showThreadNotification, (event, ...args) => {

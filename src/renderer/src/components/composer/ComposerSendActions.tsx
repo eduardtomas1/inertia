@@ -16,7 +16,7 @@ import {
 import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryAction";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import "./ComposerSendActions.css";
-import type { QueueCommandRunner } from "./runtimeQueueClient";
+import type { QueueCommandRunner, QueuedMessageEdit } from "./runtimeQueueClient";
 
 const ComposerQueuedActions = lazy(async () => ({
   default: (await import("./ComposerQueuedActions")).ComposerQueuedActions,
@@ -111,6 +111,7 @@ export function ComposerSendActions({
   awaitingInput = false,
   onSendQueued,
   onQueueCommand,
+  queueEdit,
   onReleaseAttachment,
   onSubmit,
   onStop,
@@ -131,6 +132,7 @@ export function ComposerSendActions({
     attachments: ChatAttachment[],
   ) => Promise<unknown>;
   onQueueCommand?: QueueCommandRunner;
+  queueEdit?: QueuedMessageEdit;
   onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -167,6 +169,8 @@ export function ComposerSendActions({
           queueHost={queueHost}
           onSendQueued={onSendQueued}
           onQueueCommand={onQueueCommand}
+          queueEdit={queueEdit}
+          onFocusInput={onFocusInput}
           onReleaseAttachment={onReleaseAttachment}
         />
       </Suspense>

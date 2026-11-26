@@ -42,7 +42,7 @@ async function v110WithManagedChats(): Promise<Fixture> {
   await copyFile(resolve("tests/fixtures/database/v0.0.6.sqlite"), path);
   const database = new Database(path);
   database.pragma("foreign_keys = ON");
-  migrateRuntimeDatabase(database, 123);
+  migrateRuntimeDatabase(database, 126);
   const parent = database.prepare("SELECT id FROM conversations ORDER BY rowid LIMIT 1").get() as { id: string };
   const turn = database.prepare("SELECT id, run_id FROM agent_turns WHERE conversation_id = ? ORDER BY rowid LIMIT 1")
     .get(parent.id) as { id: string; run_id: string };
@@ -94,8 +94,8 @@ describe("delegated task migration", () => {
       const before = tableData(database);
       const objects = schemaObjects(database);
       const keys = database.pragma("foreign_key_list(agent_thread_operations)");
-      migrateRuntimeDatabase(database, 124);
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 124 });
+      migrateRuntimeDatabase(database, 127);
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 127 });
       const after = tableData(database);
       expect(after.agent_managed_conversations).toEqual(before.agent_managed_conversations);
       expect(after.agent_thread_operations).toEqual((before.agent_thread_operations as Record<string, unknown>[])
@@ -158,8 +158,8 @@ describe("delegated task migration", () => {
 
       const rerunRows = tableData(database);
       const rerunObjects = schemaObjects(database);
-      database.prepare("DELETE FROM schema_migrations WHERE version = 124").run();
-      migrateRuntimeDatabase(database, 124);
+      database.prepare("DELETE FROM schema_migrations WHERE version = 127").run();
+      migrateRuntimeDatabase(database, 127);
       expect(tableData(database)).toEqual(rerunRows);
       expect(schemaObjects(database)).toEqual(rerunObjects);
     } finally { database.close(); }
@@ -172,8 +172,8 @@ describe("delegated task migration", () => {
       const rows = tableData(database);
       const objects = schemaObjects(database);
       const operationSql = database.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'").get();
-      expect(() => migrateRuntimeDatabase(database, 124)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 123 });
+      expect(() => migrateRuntimeDatabase(database, 127)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 126 });
       expect(tableData(database)).toEqual(rows);
       expect(schemaObjects(database)).toEqual(objects);
       expect(database.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'").get()).toEqual(operationSql);
@@ -191,8 +191,8 @@ describe("delegated task migration", () => {
       database.exec(`ALTER TABLE agent_thread_operations RENAME TO agent_thread_operations_old;
         CREATE TABLE agent_thread_operations (id TEXT PRIMARY KEY, tool_name TEXT NOT NULL CHECK (tool_name IN ('inertia_other')));`);
       database.pragma("foreign_keys = ON");
-      expect(() => migrateRuntimeDatabase(database, 124)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 123 });
+      expect(() => migrateRuntimeDatabase(database, 127)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 126 });
     } finally { database.close(); }
   });
 });

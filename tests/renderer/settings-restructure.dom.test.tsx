@@ -9,6 +9,7 @@ import { modelRouteIdentityKey } from "../../src/renderer/src/utils/modelFavorit
 import { conversation } from "./composer-fixtures";
 import { settingsProvider, settingsViewProps } from "./settings-view-fixtures";
 import { backendView } from "./backend-view-fixtures";
+import { archivedChatsProps, archivedLoader } from "./archived-chats-fixtures";
 
 function row(id: string): HTMLElement {
   return document.querySelector<HTMLElement>(`[data-setting-id="${id}"]`)!;
@@ -225,7 +226,7 @@ describe("Archived chats paging", () => {
   }));
 
   it("shows twenty at a time newest first, moves focus to the first new chat and filters by title", async () => {
-    render(<SettingsView {...settingsViewProps({ target: { section: "data" }, archived, providers: [settingsProvider("codex", "Codex")] })} />);
+    render(<SettingsView {...settingsViewProps({ target: { section: "data" }, ...archivedChatsProps(archived), providers: [settingsProvider("codex", "Codex")] })} />);
     const list = await screen.findByRole("list", { name: "Archived chats" });
     const titles = () => within(list).getAllByRole("listitem").map((item) => item.querySelector("strong")!.textContent);
     expect(titles()).toHaveLength(20);
@@ -236,18 +237,33 @@ describe("Archived chats paging", () => {
     expect(screen.getByText("Showing 20 of 45")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Show 20 more" }));
-    expect(titles()).toEqual(expectedOrder.slice(0, 40));
+    await waitFor(() => expect(titles()).toEqual(expectedOrder.slice(0, 40)));
     expect(within(list).getAllByRole("button")[20]).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Show 5 more" }));
-    expect(titles()).toHaveLength(45);
+    await waitFor(() => expect(titles()).toHaveLength(45));
     expect(screen.queryByRole("button", { name: /^Show \d+ more$/u })).toBeNull();
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter archived chats" }), { target: { value: "odd" } });
-    expect(titles()).toHaveLength(20);
-    expect(titles().every((title) => title!.startsWith("Odd"))).toBe(true);
-    expect(screen.getByText("Showing 20 of 22")).toBeInTheDocument();
+    expect(await screen.findByText("Showing 20 of 22")).toBeInTheDocument();
+    const filtered = () => within(screen.getByRole("list", { name: "Archived chats" })).getAllByRole("listitem").map((item) => item.querySelector("strong")!.textContent);
+    expect(filtered()).toHaveLength(20);
+    expect(filtered().every((title) => title!.startsWith("Odd"))).toBe(true);
     fireEvent.change(screen.getByRole("searchbox", { name: "Filter archived chats" }), { target: { value: "missing" } });
-    expect(screen.getByText("No archived chats match this filter.")).toBeInTheDocument();
+    expect(await screen.findByText("No archived chats match this filter.")).toBeInTheDocument();
+  });
+
+  it("asks the runtime for matching providers, reports a failed load and retries it", async () => {
+    const chats = archived.slice(0, 3);
+    const load = archivedLoader(chats);
+    load.mockRejectedValueOnce(new Error("offline"));
+    render(<SettingsView {...settingsViewProps({ target: { section: "data" }, archivedCount: 3, onLoadArchived: load,
+      providers: [settingsProvider("codex", "Codex"), settingsProvider("claude", "Claude")] })} />);
+    expect(await screen.findByText("Archived chats could not be loaded.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Showing 3 of 3")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter archived chats" }), { target: { value: "cod" } });
+    expect(await screen.findByText("Showing 3 of 3")).toBeInTheDocument();
+    expect(load).toHaveBeenLastCalledWith({ query: "cod", providerIds: ["codex"], after: null, limit: 20 });
   });
 
   it("says so when nothing is archived", async () => {

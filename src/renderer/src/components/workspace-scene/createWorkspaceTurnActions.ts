@@ -40,12 +40,13 @@ export function createWorkspaceTurnActions({
 }: WorkspaceTurnActionInput) {
   return {
     revertCheckpoint(checkpoint: CheckpointSummary): void {
+      if (!conversation || checkpoint.expiredAt) return;
       const confirmed = !confirmDestructiveActions
         || window.confirm(
           "Restore the project to this checkpoint? "
           + "A recovery checkpoint will save current edits first. Untracked files created later will be left in place.",
         );
-      if (!conversation || !confirmed) return;
+      if (!confirmed) return;
       void run("checkpoint.revert", {
         type: "checkpoint.revert",
         payload: {

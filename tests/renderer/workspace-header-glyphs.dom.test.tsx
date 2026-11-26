@@ -14,7 +14,7 @@ describe("workspace header glyphs", () => {
   it("opens checkouts with distinct glyphs and hints without native titles", () => {
     for (const path of ["src/renderer/src/components/workspace-header/OpenInControl.tsx", "src/renderer/src/components/workspace-header/HeaderActionMenus.tsx"]) {
       const source = readSourceText(path);
-      expect(source).toMatch(/folder: ExternalLink,\n  "file-manager": FolderOpen,\n  files: Folder,/u);
+      expect(source).toMatch(/if \(target\.startsWith\("editor:"\)\) return Code2;\n  if \(target === "file-manager"\) return FolderOpen;\n  if \(target === "files"\) return Folder;\n  return ExternalLink;\n/u);
       expect(source).not.toContain("title={disabled ?");
     }
   });

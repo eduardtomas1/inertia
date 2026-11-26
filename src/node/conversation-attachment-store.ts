@@ -1,4 +1,11 @@
-import { metadataFor, metadataFromUnknown, type PersistedAttachmentMetadata } from "./conversation-attachment-store-metadata.js";
+import { metadataFor, metadataFromUnknown, RECOVERY_IMPORT_STAGING_PATTERN, type PersistedAttachmentMetadata } from "./conversation-attachment-store-metadata.js";
+import {
+  createAttachmentReconciliationState,
+  queueImportedReferences,
+  referencedNow,
+  type AttachmentReconciliationState,
+  type ConversationAttachmentReconcileOptions,
+} from "./conversation-attachment-reconciliation-state.js";
 import { availableAttachmentDiskBytes, describeAttachmentStorage, cleanupOldestAttachments, type AttachmentStorageManagement, type AuthorizeAttachmentCleanup } from "./conversation-attachment-storage-management.js";
 import {
   ATTACHMENT_DISK_RESERVE_BYTES,
@@ -6,7 +13,7 @@ import {
   type AttachmentStorageStatus,
 } from "../shared/attachment-storage.js";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, type Dir } from "node:fs";
+import { constants } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -49,6 +56,7 @@ import { attachmentUsage, ConversationAttachmentStorageFullError, ConversationAt
 export type {
   ConversationAttachmentStoreOperationRunner,
 } from "./conversation-attachment-store-child.js";
+export type { ConversationAttachmentReconcileOptions };
 
 const STORE_DIRECTORY = "conversation-attachments";
 const MAX_PERSISTED_RECORDS = MAX_RETAINED_ATTACHMENTS;
@@ -119,15 +127,6 @@ interface StoreDirectoryAuthority {
   readonly dev: string;
   readonly ino: string;
   readonly uid: string | null;
-}
-
-interface AttachmentReconciliationState {
-  readonly directory: Dir;
-  readonly references: ReadonlyMap<string, ChatAttachment>;
-  readonly records: Map<string, number>;
-  readonly retryNames: string[];
-  directoryExhausted: boolean;
-  scheduled: boolean;
 }
 
 function contained(root: string, target: string): boolean {
@@ -544,7 +543,10 @@ export class ConversationAttachmentStore {
     });
   }
 
-  async reconcile(references: readonly ChatAttachment[]): Promise<void> {
+  async reconcile(
+    references: readonly ChatAttachment[],
+    options: ConversationAttachmentReconcileOptions = {},
+  ): Promise<void> {
     this.assertOpen();
     await this.serialize(async () => {
       this.assertOpen();
@@ -552,38 +554,11 @@ export class ConversationAttachmentStore {
         throw new Error("Conversation attachment storage is already reconciling.");
       }
       await this.assertStoreRootAuthority();
-      const referenced = new Map<string, ChatAttachment>();
-      const conflicted = new Set<string>();
-      for (const attachment of references) {
-        if (!UUID_PATTERN.test(attachment.id)) continue;
-        if (conflicted.has(attachment.id)) continue;
-        const prior = referenced.get(attachment.id);
-        if (
-          prior
-          && (
-            prior.name !== attachment.name
-            || prior.mimeType !== attachment.mimeType
-            || prior.size !== attachment.size
-          )
-        ) {
-          referenced.delete(attachment.id);
-          conflicted.add(attachment.id);
-          continue;
-        }
-        referenced.set(attachment.id, attachment);
-      }
       const directory = await opendir(this.directory, {
         bufferSize: this.reconciliationBatchEntries,
       });
       this.reconciliationFailure = null;
-      const state: AttachmentReconciliationState = {
-        directory,
-        references: referenced,
-        records: new Map<string, number>(),
-        retryNames: [],
-        directoryExhausted: false,
-        scheduled: false,
-      };
+      const state = createAttachmentReconciliationState(directory, references, options);
       this.reconciliation = state;
       try {
         await this.advanceReconciliation(state);
@@ -616,6 +591,31 @@ export class ConversationAttachmentStore {
     this.assertOpen();
     this.maxBytes = boundedLimit(maxBytes, MAX_PERSISTED_BYTES);
     this.autoRemoveOldAttachments = autoRemoveOldAttachments;
+  }
+
+  whenReconciled(): Promise<void> {
+    return this.reconciliation?.settled ?? Promise.resolve();
+  }
+
+  async syncImportedReferences(references: readonly ChatAttachment[]): Promise<void> {
+    this.assertOpen();
+    await this.serialize(async () => {
+      this.assertOpen();
+      const reconciling = this.reconciliation;
+      if (reconciling) {
+        queueImportedReferences(reconciling, references);
+        return;
+      }
+      if (this.reconciliationFailure) return;
+      for (const attachment of references) {
+        if (!UUID_PATTERN.test(attachment.id)) continue;
+        if (this.records?.has(attachment.id)) continue;
+        const current = await this.inspect(attachment.id, undefined, false);
+        if (!current) continue;
+        this.records?.set(attachment.id, current.attachment.size);
+        this.authoritativeRecords.add(attachment.id);
+      }
+    });
   }
 
   private async availableDiskBytes(): Promise<number> {
@@ -733,6 +733,8 @@ export class ConversationAttachmentStore {
           await this.assertStoreRootAuthority();
           await state.directory.close();
           if (this.reconciliation !== state) return;
+          await this.mergeImportedReferences(state, operationSignal);
+          if (this.reconciliation !== state) return;
           this.records = state.records;
           this.reconcilePendingRecords(state.records);
           this.authoritativeRecords.clear();
@@ -740,6 +742,7 @@ export class ConversationAttachmentStore {
             this.authoritativeRecords.add(id);
           }
           this.reconciliation = null;
+          state.settle();
           return;
         }
         if (deadline.signal.aborted) {
@@ -768,9 +771,15 @@ export class ConversationAttachmentStore {
       state.retryNames.push(name);
       return false;
     }
+    if (RECOVERY_IMPORT_STAGING_PATTERN.test(name)) return false;
     const expected = UUID_PATTERN.test(name) ? state.references.get(name) : undefined;
     if (expected) {
       state.records.set(name, expected.size);
+      return false;
+    }
+    if (UUID_PATTERN.test(name) && referencedNow(state, name)) {
+      const current = await this.inspect(name, signal, false);
+      if (current) state.records.set(name, current.attachment.size);
       return false;
     }
     if (UUID_PATTERN.test(name)) await this.removeRecord(name, signal);
@@ -814,13 +823,25 @@ export class ConversationAttachmentStore {
   ): Promise<void> {
     if (this.reconciliation === state) this.reconciliation = null;
     await state.directory.close().catch(() => undefined);
+    state.settle();
+  }
+
+  private async mergeImportedReferences(
+    state: AttachmentReconciliationState,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (const id of state.imported.keys()) {
+      if (state.records.has(id)) continue;
+      const current = await this.inspect(id, signal, false).catch(() => null);
+      if (current) state.records.set(id, current.attachment.size);
+    }
   }
 
   private async loadUsage(): Promise<ConversationAttachmentUsage> {
     if (this.records) return attachmentUsage(this.records);
     const records = new Map<string, number>();
     for (const name of await readdir(this.directory)) {
-      if (this.activeStagingRecords.has(name)) continue;
+      if (this.activeStagingRecords.has(name) || RECOVERY_IMPORT_STAGING_PATTERN.test(name)) continue;
       if (!UUID_PATTERN.test(name)) {
         await this.removeContainedEntry(name);
         continue;

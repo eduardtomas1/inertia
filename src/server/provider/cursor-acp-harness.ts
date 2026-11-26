@@ -986,16 +986,10 @@ function handleCursorUpdate(
           explanation: null,
           steps: cursorPlanSteps(update.plan.entries),
         });
-      } else if (update.plan.type === "markdown") {
-        emitter.rich({
-          type: "plan",
-          explanation: bounded(update.plan.content),
-          steps: [],
-        });
       } else {
         emitter.rich({
           type: "plan",
-          explanation: `Cursor plan: ${bounded(update.plan.uri)}`,
+          explanation: bounded(update.plan.content),
           steps: [],
         });
       }
@@ -1060,6 +1054,9 @@ function handleCursorUpdate(
       // lifecycle update above is projected; replaying the summary here would
       // falsely append historical context to the current answer.
       compactions.observeSummaryChunk(update);
+      return;
+    case "prompt_suggestions_update":
+    case "cursor_update":
       return;
     case "notice":
       throw new Error("Cursor ACP sent a notice without negotiated support.");

@@ -89,6 +89,7 @@ export interface TurnRequestContext {
 
 export interface ChatAttachment {
   snapshot?: import("../snapshots").SnapshotSource;
+  previewAnnotation?: import("../preview-annotation").PreviewAnnotation;
   id: string;
   name: string;
   /** Renderer projections use the opaque attachment id; only privileged code may carry a local path. */
@@ -268,6 +269,8 @@ export interface AgentActivity {
   kind: "status" | "tool" | "command" | "file" | "reasoning" | "error";
   title: string;
   detail: string | null;
+  detailBytes?: number;
+  detailTruncated?: boolean;
   status: "running" | "completed" | "failed";
   createdAt: string;
 }
@@ -459,4 +462,5 @@ export interface CheckpointSummary {
   insertions: number;
   deletions: number;
   createdAt: string;
+  expiredAt?: string | null;
 }

@@ -15,6 +15,8 @@ export type PreviewNavigationAction = "back" | "forward" | "reload";
 export interface PreviewNavigation {
   navigate(action: PreviewNavigationAction): void;
   agentBusy(): boolean;
+  commentOnElement?(point: { x: number; y: number }): void;
+  canCommentOnElement?(): boolean;
 }
 
 export interface PreviewContextMenuOptions extends PreviewNavigation {
@@ -75,7 +77,14 @@ export function previewContextMenuTemplate(
     { label: "Forward", enabled: idle && history.canGoForward(), click: navigate("forward") },
     { label: "Reload", enabled: idle, click: navigate("reload") },
   ];
-  return [edit, linkItems, navigationItems]
+  const commentItems: MenuItemConstructorOptions[] = navigation.commentOnElement
+    ? [{
+        label: "Comment on this element",
+        enabled: idle && (navigation.canCommentOnElement?.() ?? true),
+        click: () => navigation.commentOnElement?.({ x: params.x, y: params.y }),
+      }]
+    : [];
+  return [edit, linkItems, commentItems, navigationItems]
     .filter((group) => group.length > 0)
     .flatMap((group, index): MenuItemConstructorOptions[] => (
       index === 0 ? group : [{ type: "separator" }, ...group]

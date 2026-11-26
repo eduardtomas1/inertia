@@ -5,7 +5,8 @@ import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import type { ChatAttachment, ClientCommand, ServerEvent } from "../../src/shared/contracts";
-import { createQueuedMessageRuntime, UNREAD_FOLLOW_UP_ROUTE_CHANGED } from "../../src/server/runtime/queued-message-runtime";
+import { createQueuedMessageRuntime, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END, QUEUED_EDIT_GRANT_MS, UNREAD_FOLLOW_UP_ROUTE_CHANGED } from "../../src/server/runtime/queued-message-runtime";
+import { QUEUED_ROUTE_CHANGED_ERROR } from "../../src/shared/queued-messages";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { RuntimeStore } from "../../src/server/database";
 import { searchMessages } from "../../src/server/persistence/message-search";
@@ -121,6 +122,41 @@ describe("stop and send", () => {
       expect(f.provider.runCount).toBe(2);
       expect(f.store.latestAgentTurnForConversation(f.conversationId)?.status).not.toBe("cancelled");
     } finally { await f.close(); }
+  });
+
+  it("preserves stop-and-send authority across a transient dispatch failure and an update hold", async () => {
+    const f = await fixture();
+    try {
+      const first = startRunning(f);
+      const id1 = randomUUID();
+      const admission = vi.spyOn(f.controller, "acquireTurnAdmission").mockResolvedValueOnce(null);
+      await f.stopAndSend(id1, first.turn.id, "Retry after transient failure");
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id1)?.state).toBe("accepted"));
+      await f.drain();
+      expect(admission).toHaveBeenCalledTimes(2);
+      expect(f.provider.runCount).toBe(2);
+      admission.mockRestore();
+
+      const second = f.store.latestAgentTurnForConversation(f.conversationId)!;
+      const id2 = randomUUID();
+      const cleanup = f.controller.waitForProviderCleanup.bind(f.controller);
+      let heldOnce = false;
+      const cleanupSpy = vi.spyOn(f.controller, "waitForProviderCleanup").mockImplementation(async (ids, deadline) => {
+        const ready = await cleanup(ids, deadline);
+        if (!heldOnce && deadline !== undefined) {
+          heldOnce = true;
+          hold();
+        }
+        return ready;
+      });
+      await f.stopAndSend(id2, second.id, "Resume after update hold");
+      await vi.waitFor(() => expect(heldOnce).toBe(true));
+      cleanupSpy.mockRestore();
+      release();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id2)?.state).toBe("accepted"), { timeout: 5_000 });
+      await f.drain();
+      expect(f.provider.runCount).toBe(3);
+    } finally { release(); await f.close(); }
   });
 
   it("keeps a repeated Stop and send explicit when provider cleanup outlasts the dispatch wait", async () => {
@@ -1647,6 +1683,177 @@ describe("messages a parent chat queues for its managed child", () => {
       expect(receipt).toMatchObject({ state: "accepted", turnId: expect.any(String) });
       expect(f.store.message(receipt.userMessageId!).content).toBe("Managed task 1");
       expect(f.store.queuedMessages.list(f.conversationId).map((entry) => entry.id)).toEqual(ids.slice(1));
+    } finally { await f.close(); }
+  });
+});
+
+describe("editing, re-confirming and documents in the queue", () => {
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+  type Access = { interactionMode: "build" | "plan"; accessMode: "supervised" | "auto-edit" | "full" };
+  const run = async (f: Fixture, command: ClientCommand) => {
+    await f.queue.handler(null as unknown as WebSocket, command);
+    const event = queueResult(f, command.requestId);
+    return event?.type === "request.result" && event.result.kind === "message.queue" ? event.result : null;
+  };
+  const edit = (f: Fixture, id: string) => run(f, {
+    type: "message.queue.edit", requestId: randomUUID(), payload: { conversationId: f.conversationId, id },
+  });
+  const reconfirm = (f: Fixture, id: string, confirmed?: Access) => run(f, {
+    type: "message.queue.reconfirm", requestId: randomUUID(),
+    payload: { conversationId: f.conversationId, id, ...(confirmed ? { confirmed } : {}) },
+  });
+  const textDocument = () => ({ id: randomUUID(), name: "notes.txt", path: "opaque", mimeType: "text/plain" as const, size: 7 });
+  const resolveAsText = (f: Fixture) => {
+    f.dependencies.attachmentResolver = {
+      resolvePayloads: async (requested: ChatAttachment[]) => requested.map((attachment) => ({ attachment, bytes: Buffer.from("Read me") })),
+      releaseAll: async () => undefined, relinquishAll: async () => undefined,
+    } as unknown as TurnInteractionCommandDependencies["attachmentResolver"];
+  };
+
+  it("takes a queued message back atomically with its content and attachments, then frees the stored copies once the edit grant ends", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID();
+      const image = { id: randomUUID(), name: "queued.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
+      await f.command("message.queue.enqueue", id, [image]); await f.drain();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const result = await edit(f, id);
+      expect(result?.edited).toMatchObject({ id, content: "Do the next task.", attachments: [{ id: image.id, name: "queued.png" }] });
+      expect(result?.entries).toEqual([]);
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("cancelled");
+      expect(f.queue.editedAttachmentConversations(image.id)).toEqual([f.conversationId]);
+      expect(f.queue.editedAttachmentConversations(randomUUID())).toEqual([]);
+      expect(await f.attachments.preview(image.id)).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(QUEUED_EDIT_GRANT_MS);
+      vi.useRealTimers();
+      await vi.waitFor(async () => expect(await f.attachments.preview(image.id)).toBeNull());
+      expect(f.queue.editedAttachmentConversations(image.id)).toEqual([]);
+      await expect(edit(f, id)).rejects.toThrow("already being sent");
+    } finally { vi.useRealTimers(); await f.close(); }
+  });
+
+  it("never lets an edited message dispatch, and refuses to edit one that is already dispatching", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      const edited = randomUUID();
+      const claimed = randomUUID();
+      await f.command("message.queue.enqueue", edited); await f.drain();
+      await f.command("message.queue.enqueue", claimed); await f.drain();
+      await edit(f, edited);
+      expect(f.store.queuedMessages.claim(f.conversationId, claimed)).toBe(true);
+      await expect(edit(f, claimed)).rejects.toThrow("already being sent");
+      expect(f.store.queuedMessages.get(f.conversationId, claimed)?.state).toBe("dispatching");
+      expect(f.store.queuedMessages.release(f.conversationId, claimed)).toBe(true);
+      await edit(f, claimed);
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
+      expect(f.provider.runCount).toBe(1);
+      expect(f.store.queuedMessages.get(f.conversationId, edited)?.state).toBe("cancelled");
+      expect(f.store.queuedMessages.get(f.conversationId, claimed)?.state).toBe("cancelled");
+    } finally { await f.close(); }
+  });
+
+  it("refuses to edit a forwarded watcher note", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID();
+      f.queue.enqueueWatcherNote({ conversationId: f.conversationId, id, content: "Check the tests.", watcherNote: {
+        linkId: randomUUID(), wakeId: randomUUID(), watcherConversationId: randomUUID(),
+        preset: "reviewer", watcherLabel: "Codex · test route", delivery: "queue",
+      } });
+      await expect(edit(f, id)).rejects.toThrow("watcher note");
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+    } finally { await f.close(); }
+  });
+
+  it("re-confirms a route-blocked message with no wider current settings and sends it through the queue", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      f.store.updateConversation(f.conversationId, { modelSelection: { ...f.store.conversation(f.conversationId).modelSelection, modelId: "other-model" } });
+      await f.command("message.queue.send", id);
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "blocked", error: QUEUED_ROUTE_CHANGED_ERROR });
+      const result = await reconfirm(f, id);
+      expect(result?.confirmation).toBeUndefined();
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("asks for confirmation instead of silently widening access, and requires the exact current settings", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      await f.command("message.queue.send", id);
+      const asked = await reconfirm(f, id);
+      expect(asked?.confirmation).toEqual({
+        id, queued: { interactionMode: "build", accessMode: "supervised" }, current: { interactionMode: "build", accessMode: "full" },
+      });
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "blocked", error: QUEUED_ROUTE_CHANGED_ERROR });
+      const stale = await reconfirm(f, id, { interactionMode: "build", accessMode: "auto-edit" });
+      expect(stale?.confirmation).toBeDefined();
+      expect(f.provider.runCount).toBe(0);
+      await reconfirm(f, id, { interactionMode: "build", accessMode: "full" }); await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(1);
+    } finally { await f.close(); }
+  });
+
+  it("treats leaving Plan for Build as wider access", async () => {
+    const f = await fixture({}, { interactionMode: "plan" });
+    try {
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      f.store.updateConversation(f.conversationId, { interactionMode: "build" });
+      await f.command("message.queue.send", id);
+      expect((await reconfirm(f, id))?.confirmation?.queued).toEqual({ interactionMode: "plan", accessMode: "supervised" });
+      expect(f.provider.runCount).toBe(0);
+    } finally { await f.close(); }
+  });
+
+  it("refuses to re-confirm a message that is not blocked on a settings change", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID(); await f.command("message.queue.enqueue", id); await f.drain();
+      await expect(reconfirm(f, id)).rejects.toThrow("not waiting on a settings change");
+      f.store.queuedMessages.block(f.conversationId, id, "The agent received this message, but Inertia could not record it.");
+      await expect(reconfirm(f, id)).rejects.toThrow("not waiting on a settings change");
+      expect(f.provider.runCount).toBe(0);
+    } finally { await f.close(); }
+  });
+
+  it("queues documents and sends them with the next turn", async () => {
+    const f = await fixture();
+    try {
+      resolveAsText(f);
+      startRunning(f);
+      const id = randomUUID();
+      const document = textDocument();
+      await f.command("message.queue.enqueue", id, [document]); await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({ state: "waiting", attachments: [{ id: document.id, mimeType: "text/plain" }] });
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      const receipt = f.store.queuedMessages.get(f.conversationId, id)!;
+      expect(receipt.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(2);
+      expect(f.store.message(receipt.userMessageId!).attachments).toMatchObject([{ id: document.id }]);
+    } finally { await f.close(); }
+  });
+
+  it("refuses to steer a queued document into the running turn and keeps it for the next turn", async () => {
+    const f = await fixture();
+    try {
+      resolveAsText(f);
+      startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id, [textDocument()]); await f.drain();
+      const steer = vi.spyOn(f.provider, "steer");
+      await expect(f.command("message.queue.send", id)).rejects.toThrow(QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
+      expect(steer).not.toHaveBeenCalled();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      f.provider.resolve({ status: "completed" }); await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
     } finally { await f.close(); }
   });
 });

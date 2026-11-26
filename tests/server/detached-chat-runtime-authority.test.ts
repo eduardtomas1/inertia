@@ -1,4 +1,10 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
+
+import { RuntimeStore } from "../../src/server/database";
 
 import type {
   AgentApprovalRequest,
@@ -285,6 +291,72 @@ describe("detached chat runtime authority", () => {
     expect(projected.activeConversationId).toBe(CONVERSATION);
     expect(projected.activeProjectId).toBe(PROJECT);
     expect(JSON.stringify(projected)).not.toContain("Secret");
+  });
+
+  it("keeps an archived detached chat visible by reading it from the store", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-detached-archived-"));
+    const store = new RuntimeStore(join(root, "inertia.sqlite"), root, { recoverInterruptedRuns: false });
+    try {
+      const project = store.createProject("Detached", root);
+      const detached = store.createConversation(project.id, "Detached chat");
+      const main = store.createConversation(project.id, "Main chat");
+      store.selectConversation(main.id);
+      store.archiveConversation(detached.id, true);
+      const records = {
+        conversation: (id: string) => store.conversationShell(id),
+        project: (id: string) => store.project(id),
+      };
+
+      const live = store.shellSnapshot();
+      expect(live.conversations.map(({ id }) => id)).not.toContain(detached.id);
+      expect(projectDetachedChatSnapshot(live, detached.id).conversations).toEqual([]);
+
+      const projected = projectDetachedChatSnapshot(live, detached.id, records);
+      expect(projected.conversations.map(({ id }) => id)).toEqual([detached.id]);
+      expect(projected.conversations[0]!.archivedAt).not.toBeNull();
+      expect(projected.projects.map(({ id }) => id)).toEqual([project.id]);
+      expect(projected.activeConversationId).toBe(detached.id);
+
+      const sync = { runtimeGeneration: "33333333-3333-4333-8333-333333333333", latestSequence: 3 };
+      const frame = projectRuntimeFrameForAuthority(
+        { type: "runtime.event", sync, scope: { kind: "shell" }, event: { type: "snapshot.updated", snapshot: live } },
+        { conversationIds: [detached.id] },
+        { kind: "detached-chat", conversationId: detached.id, clientId: "window-8" },
+        undefined,
+        records,
+      );
+      expect(frame.type === "runtime.event" && frame.event.type === "snapshot.updated"
+        ? frame.event.snapshot.conversations.map(({ id }) => id)
+        : null).toEqual([detached.id]);
+    } finally {
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("never lets a store lookup hand a detached window another chat or project", () => {
+    const missing = { ...snapshot(), conversations: [conversation(OTHER_CONVERSATION, OTHER_PROJECT)], projects: [] };
+    const foreign = projectDetachedChatSnapshot(missing, CONVERSATION, {
+      conversation: () => conversation(OTHER_CONVERSATION, OTHER_PROJECT),
+      project: () => ({ id: OTHER_PROJECT, name: "Secret", path: "/secret" }) as AppSnapshot["projects"][number],
+    });
+    expect(foreign.conversations).toEqual([]);
+    expect(foreign.projects).toEqual([]);
+    expect(foreign.activeConversationId).toBeNull();
+
+    const wrongProject = projectDetachedChatSnapshot(missing, CONVERSATION, {
+      conversation: () => conversation(CONVERSATION, PROJECT),
+      project: () => ({ id: OTHER_PROJECT, name: "Secret", path: "/secret" }) as AppSnapshot["projects"][number],
+    });
+    expect(wrongProject.conversations.map(({ id }) => id)).toEqual([CONVERSATION]);
+    expect(wrongProject.projects).toEqual([]);
+
+    const failing = projectDetachedChatSnapshot(missing, CONVERSATION, {
+      conversation: () => { throw new Error("Conversation not found."); },
+      project: () => { throw new Error("Project not found."); },
+    });
+    expect(failing.conversations).toEqual([]);
+    expect(JSON.stringify([foreign, wrongProject, failing])).not.toContain("Secret");
   });
 
   it("turns unrelated shell and detail mutations into cursor-only frames", () => {
@@ -1308,5 +1380,30 @@ describe("detached chat workspace tools", () => {
         expect(mainRejection(command), command.type).toBeNull();
       }
     }
+  });
+
+  it("authorizes commands for an archived detached chat omitted from the main shell snapshot via conversationShell fallback", () => {
+    const base = resources();
+    const archivedShell = base.snapshot().conversations.find(({ id }) => id === CONVERSATION)!;
+    const withoutArchived: DetachedChatRuntimePolicyResources = {
+      ...base,
+      snapshot: () => ({
+        ...base.snapshot(),
+        conversations: base.snapshot().conversations.filter(({ id }) => id !== CONVERSATION),
+      }),
+      conversationShell: (id) => (id === CONVERSATION ? archivedShell : null),
+    };
+    const readDetail: ClientCommand = {
+      type: "activity.detail.read",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, activityId: REQUEST },
+    };
+    expect(detachedChatCommandRejection(authority, readDetail, withoutArchived)).toBeNull();
+    const otherRead: ClientCommand = {
+      type: "activity.detail.read",
+      requestId: REQUEST,
+      payload: { conversationId: OTHER_CONVERSATION, activityId: REQUEST },
+    };
+    expect(detachedChatCommandRejection(authority, otherRead, withoutArchived)).toBe(REJECTED);
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { FileCode2, FileCog, FileImage, FileText, type LucideIcon } from "lucide-react";
+import { editorLabel, isEditorId } from "@shared/editor-ids";
 import {
   middleTruncate,
   type FileChipKind,
@@ -7,7 +8,8 @@ import {
 } from "../../utils/fileChipReference";
 import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import { useCopiedState } from "../../hooks/useCopiedState";
-import { projectPathContextMenu } from "../../utils/contextMenu";
+import { useEditorPreference } from "../../hooks/useAvailableEditors";
+import { projectPathContextMenu, showEditorPickMenu } from "../../utils/contextMenu";
 import "./FileChip.css";
 
 export const FILE_CHIP_NOT_IN_WORKSPACE = "Not in this workspace";
@@ -50,6 +52,7 @@ export function FileChip({
   onOpenProjectFile,
 }: FileChipProps): React.JSX.Element {
   const clipboard = useCopiedState();
+  const { preferredEditor, detectedEditors } = useEditorPreference();
   const [copyStarted, setCopyStarted] = useState(false);
   const [missing, setMissing] = useState(false);
   const noticeTimer = useRef<number | null>(null);
@@ -65,7 +68,7 @@ export function FileChip({
       setMissing(false);
     }, FILE_CHIP_NOTICE_DURATION_MS);
   };
-  const open = (): void => {
+  const openInFiles = (): void => {
     setMissing(false);
     let opened: FileChipOpenResult;
     try {
@@ -77,6 +80,32 @@ export function FileChip({
     }
     if (opened === false) showMissing();
   };
+  const open = (event?: MouseEvent<HTMLButtonElement>): void => {
+    if (isEditorId(preferredEditor)) {
+      setMissing(false);
+      void window.inertia.openProjectPath({
+        projectId,
+        ...(conversationId ? { conversationId } : {}),
+        relativePath,
+        action: "open-in-editor",
+        editor: preferredEditor,
+        ...(reference.location ? {
+          line: reference.location.startLine,
+          ...(reference.location.startColumn !== undefined ? { column: reference.location.startColumn } : {}),
+        } : {}),
+      }).catch(() => showMissing());
+      return;
+    }
+    if (preferredEditor === "ask" && detectedEditors.length > 0 && event) {
+      showEditorPickMenu(
+        { projectId, conversationId, relativePath, location: reference.location, open: openInFiles },
+        event.currentTarget,
+        event.detail > 0 ? { x: event.clientX, y: event.clientY } : undefined,
+      );
+      return;
+    }
+    openInFiles();
+  };
   const copy = (): void => {
     setCopyStarted(true);
     void clipboard.copy(reference.token);
@@ -86,8 +115,12 @@ export function FileChip({
     conversationId,
     projectRoot,
     relativePath,
-    open,
+    location: reference.location,
+    open: openInFiles,
   });
+  const accessibleOpenTarget = isEditorId(preferredEditor)
+    ? editorLabel(preferredEditor)
+    : "Files";
   return (
     <>
       <button
@@ -96,10 +129,10 @@ export function FileChip({
         data-file-chip-kind={reference.kind}
         data-file-chip-text={reference.token}
         title={reference.token}
-        aria-label={`Open ${reference.token} in Files`}
+        aria-label={`Open ${reference.token} in ${accessibleOpenTarget}`}
         onClick={(event) => {
           if (wantsCopy(event)) copy();
-          else open();
+          else open(event);
         }}
         onMouseDown={(event) => {
           if (event.button === 1) event.preventDefault();

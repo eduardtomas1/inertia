@@ -1,10 +1,47 @@
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 import {
+  regularOwnedFile,
   removeIfRegularFile,
   removeInterruptedDatabaseFileFamily,
 } from "./database-backup-cancellation";
+
+export interface BackupFileMetadata {
+  readonly filename: string;
+  readonly modifiedAt: number;
+  readonly path: string;
+  readonly size: number;
+}
+
+export function listCompleteBackupMetadata(
+  databasePath: string,
+  backupsDirectory: string,
+): BackupFileMetadata[] {
+  if (!existsSync(backupsDirectory)) return [];
+  const pattern = databaseBackupPattern(databasePath, "complete");
+  const backups: BackupFileMetadata[] = [];
+  for (const filename of readdirSync(backupsDirectory)) {
+    if (!pattern.test(filename)) continue;
+    const path = join(backupsDirectory, filename);
+    if (!regularOwnedFile(path)) continue;
+    try {
+      const metadata = statSync(path);
+      backups.push({
+        filename,
+        modifiedAt: metadata.mtimeMs,
+        path,
+        size: metadata.size,
+      });
+    } catch {
+      continue;
+    }
+  }
+  backups.sort((left, right) =>
+    right.modifiedAt - left.modifiedAt
+    || right.filename.localeCompare(left.filename, "en"));
+  return backups;
+}
 
 export function safeDatabaseStem(databasePath: string): string {
   const raw = basename(databasePath, extname(databasePath));

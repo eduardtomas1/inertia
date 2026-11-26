@@ -74,6 +74,9 @@ export function turnGitArtifactFromRow(
     absenceReason: row.absence_reason === "not-repository"
       ? row.absence_reason
       : null,
+    ...(row.after_fingerprint !== null && row.after_ref === null
+      ? { afterSnapshotExpired: true }
+      : {}),
   };
 }
 

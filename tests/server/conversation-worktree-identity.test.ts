@@ -156,12 +156,10 @@ describe("conversation isolated-worktree source identity", () => {
     const createConversation = vi.fn(() => ({ id: conversationId }));
     const dependencies = {
       store: {
-        shellSnapshot: vi.fn(() => ({
-          settings: {
-            defaultProvider: "codex",
-            defaultModel: "gpt-test",
-            defaultReasoningEffort: "high",
-          },
+        settings: vi.fn(() => ({
+          defaultProvider: "codex",
+          defaultModel: "gpt-test",
+          defaultReasoningEffort: "high",
         })),
         project: vi.fn(() => ({ id: projectId })),
         projectPath: vi.fn(() => fixture.workspace),
@@ -237,12 +235,10 @@ describe("conversation isolated-worktree source identity", () => {
     const broadcastSnapshot = vi.fn();
     const dependencies = {
       store: {
-        shellSnapshot: vi.fn(() => ({
-          settings: {
-            defaultProvider: "codex",
-            defaultModel: "gpt-test",
-            defaultReasoningEffort: "high",
-          },
+        settings: vi.fn(() => ({
+          defaultProvider: "codex",
+          defaultModel: "gpt-test",
+          defaultReasoningEffort: "high",
         })),
         project: vi.fn(() => ({ id: projectId })),
         projectPath: vi.fn(() => fixture.workspace),

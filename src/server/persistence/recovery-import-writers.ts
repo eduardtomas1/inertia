@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 
 import type Database from "better-sqlite3";
 
-import type { Conversation, Project } from "../../shared/contracts";
+import type { ChatAttachment, Conversation, Project } from "../../shared/contracts";
 import { normalizeIdentityPath } from "../project-identity";
 import { recoveredConversationModel } from "./database-export";
 import type { DatabaseRecoveryImportWriters } from "./database-recovery-store";
@@ -20,6 +20,7 @@ export interface RecoveryImportWriterContext {
     content: string,
     role: "user" | "assistant" | "system",
     createdAt: string,
+    attachments?: ChatAttachment[],
   ): void;
 }
 
@@ -59,8 +60,15 @@ export function recoveryImportWriters(context: RecoveryImportWriterContext): Dat
         accessMode: "supervised",
         activate: false,
       }).id,
-    createMessage: (id, conversationId, message) => {
-      context.createRecoveredMessage(id, conversationId, message.content, message.role, message.createdAt);
+    createMessage: (id, conversationId, message, attachments) => {
+      context.createRecoveredMessage(
+        id,
+        conversationId,
+        message.content,
+        message.role,
+        message.createdAt,
+        attachments,
+      );
     },
   };
 }

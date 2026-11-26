@@ -159,7 +159,7 @@ describe("message search in the palette", () => {
   it("shows escaped snippets, supports keyboard selection and discloses bounded results", async () => {
     vi.useFakeTimers();
     const onSelectMessage = vi.fn(async () => true);
-    const send = vi.fn(async (): Promise<ServerEvent> => response("needle", { hasMore: true, incomplete: true }));
+    const send = vi.fn(async (): Promise<ServerEvent> => response("needle", { incomplete: true }));
     const noOp = (): void => undefined;
     const view = render(<CommandPalette
       open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
@@ -175,7 +175,9 @@ describe("message search in the palette", () => {
     expect(option).toHaveTextContent(hit.snippet);
     expect(option.querySelector("mark")).toHaveTextContent("needle");
     expect(option.querySelector("img")).toBeNull();
-    expect(view.container.querySelectorAll("[role=status]")).toHaveLength(2);
+    expect(view.container.querySelectorAll("[role=status]")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("Some very large messages could not be searched.");
+    expect(screen.queryByText(/history limit/u)).toBeNull();
     expect(input).toHaveAttribute("aria-activedescendant", option.id);
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
     expect(onSelectMessage).toHaveBeenCalledWith(hit, expect.any(AbortSignal));
@@ -237,6 +239,83 @@ describe("message search in the palette", () => {
     expect(select).not.toHaveBeenCalled();
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
     expect(select).toHaveBeenCalledOnce();
+  });
+
+  it("appends older matches from a keyboard-reachable action without closing the palette", async () => {
+    vi.useFakeTimers();
+    const older = deferred<ServerEvent>();
+    const continuation = { createdAt: chat.createdAt, messageId: "message-older" };
+    const olderHit: MessageSearchHit = { ...hit, messageId: "message-older", snippet: "Older needle", matchStart: 6, matchEnd: 12 };
+    const send = vi.fn((command: ClientCommand): Promise<ServerEvent> => {
+      if (command.type !== "conversation.messages.search") return Promise.resolve({ type: "request.ok", requestId: command.requestId });
+      return command.payload.continuation ? older.promise : Promise.resolve(response("needle", { hasMore: true, continuation, indexing: true }));
+    });
+    const close = vi.fn();
+    const select = vi.fn(async () => true);
+    const noOp = (): void => undefined;
+    render(<CommandPalette open projects={[{ id: chat.projectId, name: "Inertia", path: "/workspace" } as Project]} conversations={[chat]}
+      newThreadShortcut="Ctrl+N" sendCommand={send} onSelectMessage={select}
+      onClose={close} onSelectProject={noOp} onSelectConversation={noOp} onNewThread={noOp} onNewThreadIn={noOp} currentProjectId={null} onAddProject={noOp} onOpenSettings={noOp}
+    />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "needle" } });
+    await debounce();
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    const action = screen.getByRole("option", { name: /Search older messages/u });
+    expect(action).toHaveTextContent("More messages match this search");
+    expect(screen.getByRole("status")).toHaveTextContent("Indexing older messages…");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute("aria-activedescendant", action.id);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(send).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "conversation.messages.search", payload: { query: "needle", continuation },
+    }));
+    expect(close).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(input).toHaveFocus();
+    expect(screen.getByText("Searching older messages…")).toBeInTheDocument();
+    expect(action).toHaveAttribute("aria-disabled", "true");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(send.mock.calls.filter(([command]) => command.type === "conversation.messages.search")).toHaveLength(2);
+    await act(async () => older.resolve(response("needle", { hits: [olderHit], continuation: null, indexing: false })));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      expect.stringContaining(hit.snippet), expect.stringContaining("Older needle"),
+    ]);
+    expect(screen.queryByRole("option", { name: /Search older messages/u })).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
+    expect(select).toHaveBeenCalledWith(olderHit, expect.any(AbortSignal));
+  });
+
+  it("cancels an older-page request when the query changes and reports a failed page", async () => {
+    vi.useFakeTimers();
+    const pending = deferred<ServerEvent>();
+    const continuation = { createdAt: chat.createdAt, messageId: "message-older" };
+    let fail = false;
+    const send = vi.fn((command: ClientCommand): Promise<ServerEvent> => {
+      if (command.type !== "conversation.messages.search") return Promise.resolve({ type: "request.ok", requestId: command.requestId });
+      if (command.payload.continuation) return fail ? Promise.reject(new Error("private detail")) : pending.promise;
+      return Promise.resolve(response(command.payload.query, { hasMore: true, continuation }));
+    });
+    const hook = renderHook(({ query }) => useMessageSearch(true, query, send), { initialProps: { query: "needle" } });
+    await debounce();
+    act(() => hook.result.current.loadMore());
+    expect(hook.result.current.loadingMore).toBe(true);
+    const olderRequest = send.mock.calls.at(-1)![0];
+    hook.rerender({ query: "other" });
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: "conversation.messages.search.cancel", payload: { searchRequestId: olderRequest.requestId },
+    }));
+    await debounce();
+    await act(async () => pending.resolve(response("needle", { hits: [{ ...hit, messageId: "late" }] })));
+    expect(hook.result.current.result?.query).toBe("other");
+    expect(hook.result.current.result?.hits.map(({ messageId }) => messageId)).toEqual([hit.messageId]);
+    fail = true;
+    await act(async () => hook.result.current.loadMore());
+    expect(hook.result.current.loadingMore).toBe(false);
+    expect(hook.result.current.moreError).toBe("Older messages could not be searched. Try again.");
+    expect(hook.result.current.result?.continuation).toEqual(continuation);
   });
 
   it("surfaces failures without leaking details, and retries the same query", async () => {

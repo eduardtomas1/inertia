@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
 
 import type { Conversation, TurnRequestContext } from "../../../shared/contracts";
+import { MAX_CHAT_ATTACHMENT_BYTES, isExtractedDocumentAttachmentMimeType } from "../../../shared/attachments";
 import type { CommandSource, JsonValue } from "../../orchestration-v2/types";
 import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
 import { providerImageRequestLimitError } from "../../provider/provider-image-read";
@@ -286,11 +287,15 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       : null;
     if (queuedImageLimit) throw new RuntimeRequestError(queuedImageLimit);
     for (const attachment of dependencies.queuedMessage.attachments) {
+      const readQueued = isExtractedDocumentAttachmentMimeType(attachment.mimeType)
+        && attachment.size <= MAX_CHAT_ATTACHMENT_BYTES
+        ? dependencies.conversationAttachments.preview(attachment.id)
+        : dependencies.conversationAttachments.resolve(attachment.id);
       const preview = await awaitMessageSendPreparation(
-        dependencies.conversationAttachments.resolve(attachment.id), preparationDeadlineAt,
+        readQueued, preparationDeadlineAt,
       );
       if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
-      resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) } });
+      resolvedAttachments.push({ ...preview, attachment: { ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}), ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}) } });
     }
   } else if (handedOff && dependencies.compactionHandoff) {
     resolvedAttachments = [...dependencies.compactionHandoff.attachments];

@@ -1054,16 +1054,10 @@ function handleKimiUpdate(
           explanation: null,
           steps: planSteps(update.plan.entries),
         });
-      } else if (update.plan.type === "markdown") {
-        emitter.rich({
-          type: "plan",
-          explanation: bounded(update.plan.content),
-          steps: [],
-        });
       } else {
         emitter.rich({
           type: "plan",
-          explanation: `Kimi Code plan: ${bounded(update.plan.uri)}`,
+          explanation: bounded(update.plan.content),
           steps: [],
         });
       }
@@ -1127,6 +1121,9 @@ function handleKimiUpdate(
       // provider handled this turn, but are not assistant response text or
       // ordinary-turn evidence.
       compactions.observeSummaryChunk(update);
+      return;
+    case "prompt_suggestions_update":
+    case "cursor_update":
       return;
     case "notice":
       throw new Error("Kimi ACP sent a notice without negotiated support.");

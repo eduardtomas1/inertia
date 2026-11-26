@@ -18,6 +18,7 @@ import type {
   ProviderSkillInput,
   ProviderId,
   ProviderInfo,
+  ProviderSlashCommand,
   RuntimeMutationEvent,
   TurnRequestContext,
 } from "../../../shared/contracts";
@@ -115,6 +116,7 @@ export interface TurnProviderRuntime {
     providerToolUseId: string,
     identity: { runId: string; turnId: string },
   ): Promise<SubagentBackgroundResult>;
+  reportedProviderCommands?(scope: { providerId: ProviderId; cwd: string; conversationId: string | null }): readonly ProviderSlashCommand[] | undefined;
   disposeAll(): Promise<void>;
 }
 
@@ -475,6 +477,7 @@ export interface ActiveTurn {
   providerCommandRuns: Map<string, { id: string; label: string }>;
   providerOutputActivityIds: Set<string>;
   pendingActivityUpdates: Map<string, AgentActivity>;
+  broadcastActivityDetails?: Map<string, string | null>;
   activityFlushTimer: unknown;
   approvalIds: Set<string>;
   inputIds: Set<string>;

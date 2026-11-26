@@ -39,6 +39,13 @@ const credentialEnvironmentKeys = [
   "APPLE_API_ISSUER",
   "WIN_CSC_LINK",
   "WIN_CSC_KEY_PASSWORD",
+  "AZURE_TENANT_ID",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_TRUSTED_SIGNING_ENDPOINT",
+  "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+  "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+  "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME",
 ];
 for (const name of credentialEnvironmentKeys) {
   if (typeof process.env[name] === "string" && process.env[name].trim().length === 0) {
@@ -51,13 +58,13 @@ function credentialSet(label, names) {
     && process.env[name].trim().length > 0);
   if (present.length > 0 && present.length !== names.length) {
     const missing = names.filter((name) => !present.includes(name));
-    throw new Error(`${label} signing configuration is incomplete. Missing: ${missing.join(", ")}.`);
+    throw new Error(`${label} configuration is incomplete. Missing: ${missing.join(", ")}.`);
   }
   return present.length === names.length;
 }
 
 const macSigning = isMac && credentialSet(
-  "macOS",
+  "macOS signing",
   [
     "CSC_LINK",
     "CSC_KEY_PASSWORD",
@@ -66,10 +73,78 @@ const macSigning = isMac && credentialSet(
     "APPLE_API_ISSUER",
   ],
 );
-const windowsSigning = isWindows && credentialSet(
-  "Windows",
+const windowsCertificateSigning = isWindows && credentialSet(
+  "Windows signing",
   ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD"],
 );
+const windowsAzureSigning = isWindows && credentialSet(
+  "Windows Azure Trusted Signing",
+  [
+    "AZURE_TENANT_ID",
+    "AZURE_CLIENT_ID",
+    "AZURE_CLIENT_SECRET",
+    "AZURE_TRUSTED_SIGNING_ENDPOINT",
+    "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+    "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+    "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME",
+  ],
+);
+if (windowsCertificateSigning && windowsAzureSigning) {
+  throw new Error(
+    "Windows signing configuration is ambiguous. Configure either WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD or Azure Trusted Signing, not both.",
+  );
+}
+
+function azureSigningValue(name, valid) {
+  const value = process.env[name];
+  if (!valid(value)) {
+    throw new Error(`Windows Azure Trusted Signing configuration has an invalid ${name}.`);
+  }
+  return value;
+}
+
+function validAzureEndpoint(value) {
+  try {
+    const url = new URL(value);
+    return value === value.trim()
+      && url.protocol === "https:"
+      && url.username === ""
+      && url.password === ""
+      && url.search === ""
+      && url.hash === ""
+      && url.pathname === "/";
+  } catch {
+    return false;
+  }
+}
+
+function validAzureResourceName(value) {
+  return /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/u.test(value);
+}
+
+function validPublisherName(value) {
+  return value === value.trim()
+    && Buffer.byteLength(value, "utf8") >= 1
+    && Buffer.byteLength(value, "utf8") <= 512
+    && !value.includes("=")
+    && !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+const azureSignOptions = windowsAzureSigning
+  ? {
+      publisherName: azureSigningValue("AZURE_TRUSTED_SIGNING_PUBLISHER_NAME", validPublisherName),
+      endpoint: azureSigningValue("AZURE_TRUSTED_SIGNING_ENDPOINT", validAzureEndpoint),
+      codeSigningAccountName: azureSigningValue(
+        "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+        validAzureResourceName,
+      ),
+      certificateProfileName: azureSigningValue(
+        "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+        validAzureResourceName,
+      ),
+    }
+  : null;
+const windowsSigning = windowsCertificateSigning || windowsAzureSigning;
 const signingRequired = macSigning || windowsSigning;
 const updateCapability = isLinux
   ? { delivery: "in-app", platform: "linux" }
@@ -161,6 +236,8 @@ module.exports = {
   },
   win: {
     ...packageJson.build.win,
+    verifyUpdateCodeSignature: true,
+    ...(azureSignOptions ? { azureSignOptions } : {}),
     // Keep the established x64 filename while giving the ARM64 installer and
     // its blockmap an architecture-qualified public identity.
     artifactName: canary

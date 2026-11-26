@@ -1,3 +1,4 @@
+import { hasComposerDraftAttachments } from "./composerDraftAttachments";
 import { readComposerDraft } from "./composerDraftPersistence";
 
 export type ComposerDetachmentBlocker =
@@ -48,8 +49,14 @@ export function prepareComposerDetachment(
   conversationId: string,
 ): ComposerDetachmentPreparation {
   const owner = composerOwners.get(conversationId);
-  return owner?.prepare() ?? {
-    status: "ready",
-    draft: readComposerDraft(conversationId),
-  };
+  if (owner) return owner.prepare();
+  const draft = readComposerDraft(conversationId);
+  return hasComposerDraftAttachments(conversationId)
+    ? {
+        status: "blocked",
+        blocker: "attachments",
+        reason: "Open this chat and send or remove its unsent attachments before moving it to a window.",
+        draft,
+      }
+    : { status: "ready", draft };
 }

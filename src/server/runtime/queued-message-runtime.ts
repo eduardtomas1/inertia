@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ClientCommand, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
-import { MAX_QUEUED_MESSAGES, type MessageQueueResult, type QueuedMessage } from "../../shared/queued-messages";
+import { MAX_QUEUED_MESSAGES, QUEUED_ROUTE_CHANGED_ERROR, type MessageQueueResult, type QueuedAccess, type QueuedMessage } from "../../shared/queued-messages";
+import { effectiveAccessMode } from "../../shared/access-modes";
 import type { DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity, releasesQueue } from "../persistence/queued-message-repository";
 import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
@@ -23,6 +24,11 @@ import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note
 import { delegatedDelivery, delegatedSteerContent } from "./delegation/delivery-instruction";
 
 const ADMISSION_RETRY_MS = 1_000;
+export const QUEUED_EDIT_GRANT_MS = 120_000;
+export const QUEUED_DOCUMENTS_WAIT_FOR_TURN_END = "The agent can't take documents while it works. This message will send when the turn ends.";
+const ACCESS_RANK = { supervised: 0, "auto-edit": 1, full: 2 } as const;
+const INTERACTION_RANK = { plan: 0, build: 1 } as const;
+const MAX_EDIT_GRANTS = 16;
 
 type QueueCommand = Extract<ClientCommand, { type: `message.queue.${string}` }>;
 type QueueIntake =
@@ -63,7 +69,7 @@ export function createQueuedMessageRuntime(
   const enqueueing = new Map<string, Promise<void>>();
   const again = new Set<string>();
   const deferred = new Set<string>();
-  const manualRetries = new Map<string, string>();
+  const manualRetries = new Map<string, { id: string; retriesLeft: number }>();
   let recovering: Set<string> | null = null;
   const result = (conversationId: string, id?: string): MessageQueueResult => ({
     kind: "message.queue", conversationId, entries: store.queuedMessages.list(conversationId),
@@ -88,8 +94,15 @@ export function createQueuedMessageRuntime(
     store.queuedMessages.block(conversationId, entry.id, reason);
     undelivered(entry, reason);
   };
-  const retryAfterCleanup = (conversationId: string, manualId?: string): void => {
-    if (manualId) manualRetries.set(conversationId, manualId);
+  const routeChanged = (conversationId: string, entry: QueuedMessage): boolean => {
+    try {
+      return !store.queuedMessages.routeMatches(entry, store.conversation(conversationId));
+    } catch {
+      return false;
+    }
+  };
+  const retryAfterCleanup = (conversationId: string, manual?: { id: string; retriesLeft: number }): void => {
+    if (manual) manualRetries.set(conversationId, manual);
     void turns.waitForProviderCleanup([conversationId]).then(() => schedule(conversationId)).catch(() => undefined);
   };
 
@@ -117,7 +130,11 @@ export function createQueuedMessageRuntime(
     const retry = manualRetries.get(conversationId);
     manualRetries.delete(conversationId);
     if (!first || (manualId && first.id !== manualId)) return;
-    const manual = manualId ?? (retry === first.id && first.state === "waiting" ? retry : undefined);
+    const manual = manualId
+      ? { id: manualId, retriesLeft: 1 }
+      : retry && retry.id === first.id && first.state === "waiting"
+        ? retry
+        : undefined;
     if (!manual && first.state !== "waiting") return;
     if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
       retryAfterCleanup(conversationId, manual);
@@ -138,12 +155,13 @@ export function createQueuedMessageRuntime(
     if (!manual && !releasesQueue(store.latestAgentTurnForConversation(conversationId))) return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
       block(conversationId, first, first.userMessageId === null
-        ? "This chat's model, access or workspace changed. Remove and queue the message again."
+        ? QUEUED_ROUTE_CHANGED_ERROR
         : UNREAD_FOLLOW_UP_ROUTE_CHANGED);
       changed(conversationId);
       return;
     }
     if (isHeld()) {
+      if (manual) manualRetries.set(conversationId, manual);
       retryAfterAdmission(conversationId);
       return;
     }
@@ -186,8 +204,15 @@ export function createQueuedMessageRuntime(
       if (attribution && turnId) hooks?.dispatched(attribution, turnId);
     } catch (error) {
       if (options.signal.aborted || turns.isClosing()) store.queuedMessages.release(conversationId, first.id);
-      else if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) retryAfterCleanup(conversationId, manualId);
-      else block(conversationId, first, publicRuntimeError(error));
+      else if (transientDispatchFailure(error) && store.queuedMessages.release(conversationId, first.id)) {
+        retryAfterCleanup(
+          conversationId,
+          manual && manual.retriesLeft > 0 ? { id: manual.id, retriesLeft: manual.retriesLeft - 1 } : undefined,
+        );
+      }
+      else block(conversationId, first, routeChanged(conversationId, first)
+        ? (first.userMessageId === null ? QUEUED_ROUTE_CHANGED_ERROR : UNREAD_FOLLOW_UP_ROUTE_CHANGED)
+        : publicRuntimeError(error));
     } finally {
       changed(conversationId);
     }
@@ -250,9 +275,6 @@ export function createQueuedMessageRuntime(
       const digest = queuedIntentDigest(input.content, input.attachments);
       if (store.queuedMessages.replay(conversation.id, input.id, digest)) return;
       if (!dependencies.enableProviders) throw new RuntimeRequestError("Message queues require an available provider runtime.");
-      if (input.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) {
-        throw new RuntimeRequestError("Queued messages support images only.");
-      }
       const retentionId = randomUUID();
       const abort = new AbortController();
       const deadline = messageSendPreparationDeadline();
@@ -263,7 +285,7 @@ export function createQueuedMessageRuntime(
         const payloads = input.attachments.length > 0
           ? await awaitMessageSendPreparation(
             dependencies.attachmentResolver?.resolvePayloads(input.attachments, handoffId, abort.signal)
-              ?? Promise.reject(new RuntimeRequestError("The selected image is no longer available.")),
+              ?? Promise.reject(new RuntimeRequestError("The selected attachment is no longer available.")),
             deadline, () => abort.abort(),
           ) : [];
         sourceIds = payloads.map(({ attachment }) => attachment.id);
@@ -406,7 +428,7 @@ export function createQueuedMessageRuntime(
         return;
       }
     }
-    retryAfterCleanup(conversationId, id);
+    retryAfterCleanup(conversationId, { id, retriesLeft: 1 });
   }
 
   async function sendDuringTurn(conversationId: string, id: string): Promise<void> {
@@ -422,9 +444,12 @@ export function createQueuedMessageRuntime(
     if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
     if (first.state === "dispatching") return;
     if (!store.queuedMessages.routeMatches(first, conversation)) {
-      block(conversationId, first, "This chat's model, access or workspace changed. Remove and queue the message again.");
+      block(conversationId, first, QUEUED_ROUTE_CHANGED_ERROR);
       changed(conversationId);
       return;
+    }
+    if (first.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) {
+      throw new RuntimeRequestError(QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
     }
     const admission = turns.acquireFollowUpAdmission(conversationId);
     if (!admission) throw new RuntimeRequestError("This agent cannot take a message while it works. It will send when the turn ends.");
@@ -439,7 +464,7 @@ export function createQueuedMessageRuntime(
       for (const attachment of first.attachments) {
         const preview = await awaitMessageSendPreparation(conversationAttachments.resolve(attachment.id), deadline);
         if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
-        attachments.push({ ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}) });
+        attachments.push({ ...preview.attachment, ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}), ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}) });
       }
       if (!store.queuedMessages.claim(conversationId, first.id)) return;
       claimed = true;
@@ -489,20 +514,152 @@ export function createQueuedMessageRuntime(
     }
   }
 
+  const editGrants = new Map<string, {
+    conversationId: string;
+    attachmentIds: string[];
+    attachments: QueuedMessage["attachments"];
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  const releaseEditGrant = async (id: string): Promise<void> => {
+    const grant = editGrants.get(id);
+    if (!grant) return;
+    editGrants.delete(id);
+    clearTimeout(grant.timer);
+    const referenced = store.referencedAttachmentIds(grant.attachmentIds);
+    await conversationAttachments.release(grant.attachmentIds.filter((attachmentId) => !referenced.has(attachmentId)));
+  };
+  options.signal.addEventListener("abort", () => {
+    for (const grant of editGrants.values()) clearTimeout(grant.timer);
+    editGrants.clear();
+  }, { once: true });
+
+  function edit(conversationId: string, id: string): QueuedMessage {
+    requireConversation(conversationId);
+    const existing = store.queuedMessages.get(conversationId, id);
+    if (existing?.watcherNote) {
+      throw new RuntimeRequestError("A watcher note can't be edited. Remove it instead.");
+    }
+    if (existing?.delegatedCompletion) {
+      throw new RuntimeRequestError("Delegated results can't be edited. Remove them instead.");
+    }
+    if (existing?.userMessageId !== null && existing?.userMessageId !== undefined) {
+      throw new RuntimeRequestError("An unread follow-up can't be edited. Remove it instead.");
+    }
+    const removed = store.queuedMessages.cancel(conversationId, id);
+    if (!removed) throw new RuntimeRequestError("This queued message is already being sent.");
+    if (removed.attachments.length > 0) {
+      for (const oldest of editGrants.keys()) {
+        if (editGrants.size < MAX_EDIT_GRANTS) break;
+        void releaseEditGrant(oldest).catch(() => undefined);
+      }
+      const timer = setTimeout(() => { void releaseEditGrant(id).catch(() => undefined); }, QUEUED_EDIT_GRANT_MS);
+      timer.unref?.();
+      editGrants.set(id, {
+        conversationId,
+        attachmentIds: removed.attachments.map(({ id: attachmentId }) => attachmentId),
+        attachments: removed.attachments,
+        timer,
+      });
+    }
+    changed(conversationId);
+    void schedule(conversationId).catch(() => undefined);
+    return removed;
+  }
+
+  function editedAttachmentConversations(attachmentId: string): string[] {
+    const owners: string[] = [];
+    for (const [grantId, grant] of editGrants.entries()) {
+      if (!grant.attachmentIds.includes(attachmentId)) continue;
+      try {
+        store.conversation(grant.conversationId);
+      } catch {
+        void releaseEditGrant(grantId).catch(() => undefined);
+        continue;
+      }
+      owners.push(grant.conversationId);
+    }
+    return [...new Set(owners)];
+  }
+
+  function editedAttachmentMetadata(
+    attachmentId: string,
+  ): { previewAnnotation?: QueuedMessage["attachments"][number]["previewAnnotation"]; snapshot?: QueuedMessage["attachments"][number]["snapshot"] } | null {
+    for (const [grantId, grant] of editGrants.entries()) {
+      const attachment = grant.attachments.find(({ id }) => id === attachmentId);
+      if (!attachment) continue;
+      try {
+        store.conversation(grant.conversationId);
+      } catch {
+        void releaseEditGrant(grantId).catch(() => undefined);
+        continue;
+      }
+      if (!attachment.previewAnnotation && !attachment.snapshot) continue;
+      return {
+        ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}),
+        ...(attachment.snapshot ? { snapshot: attachment.snapshot } : {}),
+      };
+    }
+    return null;
+  }
+
+  async function reconfirm(conversationId: string, id: string, confirmed: QueuedAccess | undefined): Promise<MessageQueueResult["confirmation"]> {
+    const conversation = requireConversation(conversationId);
+    const entry = store.queuedMessages.get(conversationId, id);
+    if (!entry || (entry.state !== "waiting" && entry.state !== "blocked")) {
+      throw new RuntimeRequestError("This queued message has already been dispatched.");
+    }
+    const routeBlocked = entry.state === "blocked"
+      ? entry.error === QUEUED_ROUTE_CHANGED_ERROR
+      : !store.queuedMessages.routeMatches(entry, conversation);
+    if (!routeBlocked) throw new RuntimeRequestError("This queued message is not waiting on a settings change.");
+    const queued = store.queuedMessages.queuedRoute(conversationId, id);
+    if (!queued) throw new RuntimeRequestError("This queued message's original settings can't be read. Edit or remove it.");
+    const current: QueuedAccess = { interactionMode: conversation.interactionMode, accessMode: conversation.accessMode };
+    const widens = ACCESS_RANK[effectiveAccessMode(conversation.providerId, conversation.accessMode)]
+        > ACCESS_RANK[effectiveAccessMode(queued.providerId, queued.accessMode)]
+      || INTERACTION_RANK[conversation.interactionMode] > INTERACTION_RANK[queued.interactionMode];
+    if (widens && (confirmed?.accessMode !== current.accessMode || confirmed.interactionMode !== current.interactionMode)) {
+      return { id, queued: { interactionMode: queued.interactionMode, accessMode: queued.accessMode }, current };
+    }
+    if (!store.queuedMessages.reroute(conversation, id)) throw new RuntimeRequestError("This queued message has already been dispatched.");
+    changed(conversationId);
+    if (turns.isActive(conversationId)) {
+      void schedule(conversationId).catch(() => undefined);
+      return undefined;
+    }
+    await running.get(conversationId);
+    await dispatch(conversationId, id);
+    return undefined;
+  }
+
   const handler = defineRuntimeCommandHandler([
     "message.queue.get", "message.queue.enqueue", "message.queue.remove", "message.queue.send", "message.queue.stop-and-send",
+    "message.queue.edit", "message.queue.reconfirm",
   ], async (socket, command) => {
     if (!command.type.startsWith("message.queue.")) return "not-handled";
     if (command.type !== "message.queue.get" && command.type !== "message.queue.enqueue" && command.type !== "message.queue.remove"
-      && command.type !== "message.queue.send" && command.type !== "message.queue.stop-and-send") return "not-handled";
+      && command.type !== "message.queue.send" && command.type !== "message.queue.stop-and-send"
+      && command.type !== "message.queue.edit" && command.type !== "message.queue.reconfirm") return "not-handled";
     const { conversationId } = command.payload;
     const conversation = store.conversation(conversationId);
-    if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send") && isHeld()) {
+    if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send" || command.type === "message.queue.reconfirm") && isHeld()) {
       throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
     }
-    if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send")
+    if ((command.type === "message.queue.send" || command.type === "message.queue.stop-and-send" || command.type === "message.queue.reconfirm")
       && store.conversationWork.restoreBlocksConversation(conversationId)) {
       throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS);
+    }
+    if (command.type === "message.queue.edit") {
+      const edited = edit(conversationId, command.payload.id);
+      dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+        result: { ...result(conversationId, command.payload.id), edited } });
+      return "handled";
+    }
+    if (command.type === "message.queue.reconfirm") {
+      const confirmation = await reconfirm(conversationId, command.payload.id, command.payload.confirmed);
+      dependencies.send(socket, { type: "request.result", requestId: command.requestId,
+        result: { ...result(conversationId, command.payload.id), ...(confirmation ? { confirmation } : {}) } });
+      return "handled";
     }
     const reply = (id?: string): "handled" => {
       const event: ServerEvent = { type: "request.result", requestId: command.requestId, result: result(conversationId, id) };
@@ -520,7 +677,7 @@ export function createQueuedMessageRuntime(
       return reply(command.payload.id);
     }
     if (start.kind === "replay") {
-      if (command.type === "message.queue.stop-and-send") retryAfterCleanup(conversationId, command.payload.id);
+      if (command.type === "message.queue.stop-and-send") retryAfterCleanup(conversationId, { id: command.payload.id, retriesLeft: 1 });
       else void schedule(conversationId).catch(() => undefined);
       return reply(command.payload.id);
     }
@@ -704,6 +861,8 @@ export function createQueuedMessageRuntime(
     enqueueWatcherNote,
     enqueueManagedMessage,
     withdrawWatcherNote,
+    editedAttachmentConversations,
+    editedAttachmentMetadata,
     onTurnSettled(turn: AgentTurn): void { if (releasesQueue(turn)) void schedule(turn.conversationId).catch(() => undefined); },
     onCompactionSettled(conversationId: string): void {
       if (store.queuedMessages.list(conversationId).length > 0) void schedule(conversationId).catch(() => undefined);

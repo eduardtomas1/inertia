@@ -266,6 +266,30 @@ describe("Library view", () => {
     });
   });
 
+  it("resolves and restores an answer whose archived chat is only a snapshot reference", async () => {
+    const user = userEvent.setup();
+    const live = appSnapshot(fullLibrary, false);
+    const archivedChat = live.conversations.find(({ id }) => id === otherConversationId)!;
+    const referenced: AppSnapshot = {
+      ...live,
+      conversations: live.conversations.filter(({ id }) => id !== otherConversationId),
+      archivedConversationRefs: [{
+        id: archivedChat.id, projectId: archivedChat.projectId, title: archivedChat.title,
+        providerId: archivedChat.providerId, archivedAt: stamp,
+      }],
+    };
+    const view = harness(referenced);
+    const card = screen.getByText("Soup for a cold day").closest("li")!;
+    expect(within(card).getByText("Archived")).toBeVisible();
+    expect(within(card).getByText(/Weekend cooking/u)).toBeVisible();
+    await user.click(within(card).getByRole("button", { name: "Restore and open" }));
+    expect(sent(view.request, "conversation.unarchive")).toEqual([
+      { type: "conversation.unarchive", payload: { conversationId: otherConversationId } },
+    ]);
+    act(() => view.update(live));
+    expect(view.onOpenAnswer).toHaveBeenCalledWith(expect.objectContaining({ conversationId: otherConversationId }));
+  });
+
   it("moves, renames and removes an answer from its card", async () => {
     const user = userEvent.setup();
     const view = harness(appSnapshot(fullLibrary));

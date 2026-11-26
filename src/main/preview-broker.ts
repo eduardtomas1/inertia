@@ -53,6 +53,12 @@ import {
 import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 import { createPreviewPartition } from "./preview-session.js";
 import { createPreviewTab, type PreviewTab } from "./preview-tab.js";
+import {
+  isPickablePreviewPage,
+  PreviewPickerCoordinator,
+  type PreviewAnnotationImportBridge,
+  type PreviewPickerSessionView,
+} from "./preview-picker.js";
 export { previewAppShortcutKey } from "./preview-keyboard.js";
 export { createPreviewPartition, hardenDesktopSession } from "./preview-session.js";
 
@@ -69,6 +75,8 @@ interface PreviewSession extends AgentOperationSession {
   controller: "agent" | "user";
   operation: AgentOperationScope | null;
   unloadStayUntil: Map<string, number>;
+  pickerActive: boolean;
+  pickerSelection: import("../shared/desktop.js").PreviewPickerSelection | null;
 }
 
 interface PreviewBrokerOptions {
@@ -80,6 +88,7 @@ interface PreviewBrokerOptions {
   confirmPageUnload?(window: BrowserWindow, pageNumber: number): boolean;
   partitionPrefix?: string;
   now?(): number;
+  annotations?: PreviewAnnotationImportBridge;
 }
 const MAX_BROWSER_TABS = 8;
 const MAX_PARKED_SESSIONS = 4;
@@ -101,6 +110,10 @@ function budgetFor(request: AgentBrowserRequest): number {
 
 export class PreviewBroker {
   reportInputRefusal(contents: WebContents, value: unknown): boolean { return captureAgentPageInputRefusal(contents, value); }
+  handlePickerEvent(contents: WebContents, value: unknown): void {
+    const session = [...this.#sessions.values()].find((candidate) => liveContents(this.#active(candidate)) === contents);
+    this.#picker.handleGuestEvent(contents, value, session ? this.#pickerView(session) : null);
+  }
   readonly #sessions = new Map<string, PreviewSession>();
   readonly #approvals = new PreviewAgentApprovalRegistry();
   readonly #registeredContexts = new PreviewContextRegistry();
@@ -110,9 +123,17 @@ export class PreviewBroker {
   }>();
   readonly #captureLocked = new WeakSet<PreviewTab["view"]["webContents"]>();
   readonly #operations: PreviewAgentOperations<PreviewSession>;
+  readonly #picker: PreviewPickerCoordinator;
   #idleSweep: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: PreviewBrokerOptions) {
+    this.#picker = new PreviewPickerCoordinator({
+      publish: (contextId) => {
+        const session = this.#sessions.get(contextId);
+        if (session) this.#publish(session);
+      },
+      ...(options.annotations ? { annotations: options.annotations } : {}),
+    });
     this.#operations = new PreviewAgentOperations<PreviewSession>({
       captureLocked: this.#captureLocked,
       active: (session) => this.#active(session),
@@ -155,6 +176,7 @@ export class PreviewBroker {
       return this.#state(request.ownerId, request.contextId);
     }
     const session = this.#ensureAttached(request.ownerId, request.contextId);
+    this.#picker.cancel(this.#pickerView(session), false);
     return await this.#serializeSessionAction(session, async () => {
       if (this.#ownedSession(request.ownerId, request.contextId) !== session) {
         return this.#state(request.ownerId, request.contextId);
@@ -174,6 +196,7 @@ export class PreviewBroker {
       contextId?: unknown;
       action?: unknown;
       viewport?: unknown;
+      comment?: unknown;
     };
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
@@ -186,10 +209,25 @@ export class PreviewBroker {
       }
       return this.#state(ownerId, contextId);
     }
+    if (action === "pick-start") {
+      if (session) await this.#picker.start(this.#pickerView(session));
+      return this.#state(ownerId, contextId);
+    }
+    if (action === "pick-cancel") {
+      if (session) this.#picker.cancel(this.#pickerView(session));
+      return this.#state(ownerId, contextId);
+    }
+    if (action === "pick-submit") {
+      if (session && typeof request.comment === "string") {
+        await this.#picker.submit(this.#pickerView(session), request.comment);
+      }
+      return this.#state(ownerId, contextId);
+    }
     if (
       !session
       || (action !== "back" && action !== "forward" && action !== "reload")
     ) return this.#state(ownerId, contextId);
+    this.#picker.cancel(this.#pickerView(session), false);
     return await this.#serializeSessionAction(session, async () => {
       if (this.#ownedSession(ownerId, contextId) !== session) {
         return this.#state(ownerId, contextId);
@@ -287,6 +325,10 @@ export class PreviewBroker {
         );
       }
       session.busy += 1;
+      if (session.busy === 1) {
+        this.#picker.cancel(this.#pickerView(session), false);
+        this.#publish(session);
+      }
       try {
         const entered = await this.#serializeSessionAction(session, async (): Promise<AgentBrowserResult> => {
           if (this.#sessions.get(contextId) !== session) {
@@ -394,6 +436,7 @@ export class PreviewBroker {
       } finally {
         session.busy -= 1;
         session.lastUsedAt = this.#now();
+        if (session.busy === 0) this.#publish(session);
         if (session.surface === null) this.#evictParked(session);
       }
     } catch (error) {
@@ -613,6 +656,9 @@ export class PreviewBroker {
       pageFocused: contents?.isFocused() ?? false,
       tabs: session ? [...session.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
       ...(session ? { viewport: agentViewportState(session) } : {}),
+      ...(session?.busy ? { agentBusy: true } : {}),
+      ...(session?.pickerActive ? { pickerActive: true } : {}),
+      ...(session?.pickerSelection ? { pickerSelection: session.pickerSelection } : {}),
     };
   }
   #agentState(session: PreviewSession): AgentBrowserState {
@@ -672,6 +718,7 @@ export class PreviewBroker {
   #park(contextId: string, ownerId: PreviewOwner): void {
     const session = this.#sessions.get(contextId);
     if (!session || session.surface !== ownerId) return;
+    this.#picker.cancel(this.#pickerView(session), false);
     session.surface = null;
     session.displayed = false;
     session.lastUsedAt = this.#now();
@@ -745,6 +792,7 @@ export class PreviewBroker {
       return;
     }
     session.evidenceInspectors.close();
+    this.#picker.cancel(this.#pickerView(session), false);
     for (const tab of dead) {
       session.tabs.delete(tab.id);
       session.unloadStayUntil.delete(tab.id);
@@ -783,6 +831,7 @@ export class PreviewBroker {
 
   #destroy(session: PreviewSession): void {
     if (this.#sessions.get(session.contextId) !== session) return;
+    this.#picker.cancel(this.#pickerView(session), false);
     this.#sessions.delete(session.contextId);
     session.surface = null;
     session.displayed = false;
@@ -836,6 +885,8 @@ export class PreviewBroker {
       controller: "agent",
       operation: null,
       unloadStayUntil: new Map(),
+      pickerActive: false,
+      pickerSelection: null,
     };
     const tab = this.#openTab(session);
     session.activeTabId = tab.id;
@@ -876,10 +927,25 @@ export class PreviewBroker {
           .catch(() => undefined);
       },
       agentBusy: () => session.busy > 0,
+      commentOnElement: (point) => {
+        const scale = session.viewportScale > 0 ? session.viewportScale : 1;
+        void this.#picker.start(this.#pickerView(session), {
+          x: Math.round(point.x / scale),
+          y: Math.round(point.y / scale),
+        }).catch(() => undefined);
+      },
+      canCommentOnElement: () => {
+        const current = session.tabs.get(session.activeTabId);
+        const contents = current ? liveContents(current) : null;
+        return contents !== null && isPickablePreviewPage(session.partition, contents.getURL());
+      },
       targetContents: () => this.#window()?.webContents,
       guardNavigation: (event, url) => this.#guardNavigation(event, url),
       publish,
       navigated: (currentTab, url, sameDocument) => {
+        if (!sameDocument && currentTab.id === session.activeTabId) {
+          this.#picker.cancel(this.#pickerView(session), false);
+        }
         session.evidenceInspectors.close();
         session.evidence.recordNavigation(
           this.#evidencePage(currentTab),
@@ -948,6 +1014,7 @@ export class PreviewBroker {
     if (!window) throw new Error("The preview window is unavailable");
     const previous = session.tabs.get(session.activeTabId);
     if (previous && previous !== next) {
+      this.#picker.cancel(this.#pickerView(session), false);
       window.contentView.removeChildView(previous.view);
       previous.view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
     }
@@ -961,6 +1028,7 @@ export class PreviewBroker {
     if (!tab) throw new Error("That Inertia Browser tab no longer exists.");
     session.evidenceInspectors.close();
     const wasActive = session.activeTabId === tabId;
+    if (wasActive) this.#picker.cancel(this.#pickerView(session), false);
     session.tabs.delete(tabId);
     session.unloadStayUntil.delete(tabId);
     this.#destroyTab(tab);
@@ -1031,6 +1099,25 @@ export class PreviewBroker {
     text: string,
   ): AgentBrowserResult {
     return successfulAgentBrowserResult(text, this.#agentState(session));
+  }
+
+  #pickerView(session: PreviewSession): PreviewPickerSessionView {
+    const active = session.tabs.get(session.activeTabId);
+    const contents = active ? liveContents(active) : null;
+    return {
+      contextId: session.contextId,
+      partition: session.partition,
+      activeTabId: session.activeTabId,
+      get busy() { return session.busy; },
+      get viewportScale() { return session.viewportScale; },
+      get pickerActive() { return session.pickerActive; },
+      set pickerActive(value: boolean) { session.pickerActive = value; },
+      get pickerSelection() { return session.pickerSelection; },
+      set pickerSelection(value: import("../shared/desktop.js").PreviewPickerSelection | null) { session.pickerSelection = value; },
+      activeTab: active && contents
+        ? { id: active.id, documentSequence: active.documentSequence, contents }
+        : null,
+    };
   }
 
   #guardNavigation(event: { preventDefault: () => void }, url: string): void {

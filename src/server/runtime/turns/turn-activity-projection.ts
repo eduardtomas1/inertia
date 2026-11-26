@@ -5,6 +5,7 @@ import {
   mergeProviderActivityOutputWithinTurnBudget,
 } from "../../provider/activity-detail";
 import type { ProviderActivityEvent } from "../../provider/contracts";
+import { activityDetailPatch } from "./activity-detail-patch";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import {
   broadcastTurnConversationShell,
@@ -31,6 +32,19 @@ export interface RecordedTurnActivity {
 }
 
 export const MAX_PROVIDER_ACTIVITY_LINKS = 4_096;
+export const ACTIVITY_DETAIL_PATCH_REWRITE_CHARS = 1_024;
+
+function rememberBroadcastDetail(active: ActiveTurn, activity: AgentActivity): void {
+  const details = active.broadcastActivityDetails ??= new Map<string, string | null>();
+  details.delete(activity.id);
+  if (activity.status !== "running") return;
+  details.set(activity.id, activity.detail);
+  while (details.size > MAX_PROVIDER_ACTIVITY_LINKS) {
+    const oldest = details.keys().next().value;
+    if (oldest === undefined) break;
+    details.delete(oldest);
+  }
+}
 
 export function linkProviderActivity(
   active: ActiveTurn,
@@ -108,6 +122,7 @@ export class TurnActivityProjection {
       if (candidates.length === 0) {
         active.runningActivities.delete(event.kind);
       }
+      rememberBroadcastDetail(active, activity);
       return {
         activity,
         runsChanged: this.syncCommandRun(active, activity, event.phase),
@@ -133,6 +148,7 @@ export class TurnActivityProjection {
           detail: this.eventDetail(active, null, match.detail, event),
           status,
         });
+        rememberBroadcastDetail(active, activity);
         return {
           activity,
           runsChanged: this.syncCommandRun(active, activity, event.phase),
@@ -150,6 +166,7 @@ export class TurnActivityProjection {
       createdAt: this.options.now(),
     });
     linkProviderActivity(active, event.activityId, activity.id);
+    rememberBroadcastDetail(active, activity);
     const runsChanged = this.syncCommandRun(active, activity, event.phase);
     if (event.phase === "started") {
       candidates.push(activity);
@@ -176,7 +193,15 @@ export class TurnActivityProjection {
       });
       runsChanged = this.syncCommandRun(active, activity, "started")
         || runsChanged;
-      this.options.hooks.broadcast({ type: "agent.activity", activity });
+      const detailPatch = activityDetailPatch(
+        active.broadcastActivityDetails?.get(activity.id),
+        activity.detail,
+        ACTIVITY_DETAIL_PATCH_REWRITE_CHARS,
+      );
+      rememberBroadcastDetail(active, activity);
+      this.options.hooks.broadcast(detailPatch
+        ? { type: "agent.activity", activity, detailPatch }
+        : { type: "agent.activity", activity });
     }
     if (runsChanged) broadcastTurnConversationShell(this.options.hooks, active);
   }
@@ -212,6 +237,7 @@ export class TurnActivityProjection {
         this.options.hooks.broadcast({ type: "agent.activity", activity });
       }
     }
+    active.broadcastActivityDetails?.clear();
     active.runningActivities.clear();
     active.providerActivitiesById.clear();
     active.providerOutputActivityIds.clear();

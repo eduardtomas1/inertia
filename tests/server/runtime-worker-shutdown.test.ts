@@ -42,6 +42,7 @@ function runtimeWithClose(
     prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
     releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),
+    editorContext: vi.fn(async () => ({ preferredEditor: "system" as const })),
     readHtmlRender: vi.fn(() => null),
     attachmentConversations: vi.fn(() => []),
     deliverAgentSecret: vi.fn(async () => ({ status: "rejected" as const, reason: "ended" as const })),
@@ -56,7 +57,11 @@ function runtimeWithClose(
       throw new Error("unused");
     }),
     forgetPrivateConnectTranscripts: vi.fn(),
-    exportRecoveryData: vi.fn(async () => undefined),
+    exportRecoveryData: vi.fn(async () => ({
+      includeAttachments: false,
+      attachments: 0,
+      missingAttachments: 0,
+    })),
     importRecoveryData: vi.fn(async () => ({
       projects: 0,
       conversations: 0,

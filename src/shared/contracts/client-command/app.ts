@@ -2,9 +2,11 @@ import { usageSourceInputSchema } from "../../provider-usage-limits";
 import { z } from "zod";
 import { conversationHistoryRequestSchema } from "../../conversation-history";
 import { backgroundTaskCursorSchema } from "../../background-tasks";
+import { archivedConversationsRequestSchema } from "../../archived-conversations";
 import { ATTACHMENT_STORAGE_GIB_OPTIONS } from "../../attachment-storage";
-import { messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
+import { messageSearchContinuationSchema, messageSearchQuerySchema, messageSearchTargetSchema } from "../../message-search-schema";
 import { APP_SHORTCUT_KEYS } from "../../keybindings";
+import { PREFERRED_EDITOR_VALUES } from "../../editor-ids";
 import { QUOTA_WARNING_THRESHOLDS } from "../../quota-warnings";
 import {
   AUTO_COMPACT_TOKENS_MAX,
@@ -100,7 +102,7 @@ export const appCommandSchemas = [
   z.strictObject({ ...requestBase, type: z.literal("usage.source.remove"), payload: z.strictObject({ id: z.string().uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("usage.reset.prepare"), payload: z.strictObject({ accountId: z.string().min(1).max(256) }) }),
   z.strictObject({ ...requestBase, type: z.literal("usage.reset.confirm"), payload: z.strictObject({ confirmationId: z.string().uuid(), confirmed: z.literal(true) }) }),
-  z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search"), payload: z.strictObject({ query: messageSearchQuerySchema }) }),
+  z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search"), payload: z.strictObject({ query: messageSearchQuerySchema, continuation: messageSearchContinuationSchema.optional() }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.messages.search.cancel"), payload: z.strictObject({ searchRequestId: z.string().uuid() }) }),
   z.strictObject({ ...requestBase, type: z.literal("conversation.message.reveal"), payload: messageSearchTargetSchema.extend({ focusDetached: z.boolean().optional() }) }),
   z.object({ ...requestBase, type: z.literal("app.refresh") }).strict(),
@@ -285,6 +287,16 @@ export const appCommandSchemas = [
     type: z.literal("conversation.background-tasks.get"),
     payload: z.strictObject({ conversationId: z.uuid(), before: backgroundTaskCursorSchema.nullable() }),
   }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("conversation.archived.list"),
+    payload: archivedConversationsRequestSchema,
+  }),
+  z.strictObject({
+    ...requestBase,
+    type: z.literal("activity.detail.read"),
+    payload: z.strictObject({ conversationId: z.uuid(), activityId: z.string().min(1).max(128) }),
+  }),
   z
     .object({
       ...requestBase,
@@ -386,6 +398,8 @@ export const appCommandSchemas = [
 export const configurationCommandSchemas = [
   z.object({ ...requestBase, type: z.literal("attachment.storage.get") }).strict(),
   z.object({ ...requestBase, type: z.literal("attachment.storage.cleanup") }).strict(),
+  z.object({ ...requestBase, type: z.literal("database.storage.get") }).strict(),
+  z.object({ ...requestBase, type: z.literal("database.storage.compact") }).strict(),
   z
     .object({
       ...requestBase,
@@ -457,6 +471,7 @@ export const configurationCommandSchemas = [
           defaultReasoningEffort: z.string().trim().max(40).optional(),
           defaultInteractionMode: interactionModeSchema.optional(),
           codexBinaryPath: z.string().trim().max(4096).optional(),
+          preferredEditor: z.enum(PREFERRED_EDITOR_VALUES).optional(),
           workingIndicator: z.object({
             style: z.enum(WORKING_INDICATOR_STYLES).optional(),
             color: z.enum(WORKING_INDICATOR_COLORS).optional(),

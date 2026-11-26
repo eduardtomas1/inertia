@@ -57,6 +57,7 @@ function isolatedWorld(contents: Contents, answers: { dragStarted?: () => boolea
     if (source.includes("addEventListener(\"dragstart\"")) { scripts.push("watch"); return true; }
     if (source.includes("agentDragStart;")) { scripts.push("started"); return answers.dragStarted?.() ?? false; }
     if (source.includes("agentDragWatchStop?.(), true")) { scripts.push("stop"); return true; }
+    if (source.includes("state.agentDragCancelled = true")) { scripts.push(`cancel@${contents.sentInputs.length}`); return true; }
     if (source.includes("rect.bottom <= 0 || rect.right <= 0")) return answers.outside ?? false;
     if (source.includes("getComputedStyle(element);\n    return style.visibility")) { scripts.push("rendered"); return false; }
     return await original(world, code);
@@ -293,12 +294,21 @@ describe("Browser drag", () => {
 
   it("gives the element back instead of dropping it when the target left during a pointer drag", async () => {
     const { broker, contents } = await loadedBroker();
-    isolatedWorld(contents);
+    const scripts = isolatedWorld(contents);
     pageTools.agentPageDropPoint.mockResolvedValue(null);
     const result = await broker.perform(runIdentity, drag);
     expect(result).toMatchObject({ ok: false, code: "not-found", message: expect.stringContaining("nothing was dropped") });
     expect(contents.sentInputs.at(-1)).toEqual({ type: "mouseUp", x: 100, y: 200, button: "left", clickCount: 1 });
     expect(contents.sentInputs.some((input) => input.type === "mouseUp" && input.x === 600)).toBe(false);
+    expect(scripts.slice(-2)).toEqual([`cancel@${contents.sentInputs.length - 1}`, "stop"]);
+  });
+
+  it("tells the page a drag that fails midway was given back before releasing the button", async () => {
+    const { broker, contents } = await loadedBroker();
+    const scripts = isolatedWorld(contents, { dragStarted: () => { throw new Error("The page went away."); } });
+    await expect(broker.perform(runIdentity, drag)).resolves.toMatchObject({ ok: false });
+    expect(contents.sentInputs.at(-1)).toEqual({ type: "mouseUp", x: 200, y: 220, button: "left", clickCount: 1 });
+    expect(scripts.slice(-2)).toEqual([`cancel@${contents.sentInputs.length - 1}`, "stop"]);
   });
 
   it("cancels a native drag without a drop when the target no longer passes its check", async () => {

@@ -16,6 +16,7 @@ import { basename, dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../helpers/snapshot-fixture";
+import { documentArchive } from "../fixtures/attachments/document-archives";
 
 import {
   AttachmentRegistry,
@@ -1413,5 +1414,58 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }])).resolves.toHaveLength(1);
+  });
+});
+
+describe("structured document previews", () => {
+  it("imports a Word document and previews its extracted text, not its archive bytes", async () => {
+    const { registry: attachments } = await registry();
+    const data = documentArchive({
+      "word/document.xml": '<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>Quarterly plan</w:t></w:r></w:p></w:body></w:document>',
+    });
+    const [imported] = await attachments.import([{
+      name: "plan.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      data,
+    }]);
+    expect(imported).toMatchObject({
+      name: "plan.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: data.length,
+    });
+    await expect(attachments.preview(imported!.id)).resolves.toEqual({
+      bytes: Buffer.from("Quarterly plan", "utf8"),
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: data.length,
+      truncated: false,
+    });
+  });
+
+  it("refuses an unreadable document at import with a specific message", async () => {
+    const { registry: attachments } = await registry();
+    await expect(attachments.import([{
+      name: "broken.epub",
+      mimeType: "application/epub+zip",
+      data: documentArchive({ "META-INF/container.xml": "<container/>" }),
+    }])).rejects.toThrow("The document is corrupt or unreadable.");
+  });
+});
+
+describe("temporary storage of structured documents", () => {
+  it("accounts for and removes orphaned document files of every new type", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-attachment-orphans-"));
+    directories.push(directory);
+    const extensions = ["docx", "pptx", "rtf", "odt", "ods", "odp", "ipynb", "epub"];
+    const names = extensions.map((extension, index) =>
+      `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111.${extension}`);
+    for (const name of names) await writeFile(join(directory, name), "orphan");
+    await writeFile(join(directory, "11111111-1111-4111-8111-111111111111.exe"), "unrelated");
+
+    await expect(cleanupOrphanedAttachments(directory, { preserveExisting: true }))
+      .resolves.toEqual({ records: extensions.length, bytes: extensions.length * 6 });
+    await cleanupOrphanedAttachments(directory);
+    for (const name of names) await expect(readFile(join(directory, name))).rejects.toThrow();
+    await expect(readFile(join(directory, "11111111-1111-4111-8111-111111111111.exe"), "utf8"))
+      .resolves.toBe("unrelated");
   });
 });

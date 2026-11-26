@@ -874,13 +874,28 @@
     },
     {
       "version": 120,
-      "name": "OrchestrationV2EventStore",
-      "digest": "6af5241a8c8230e9a8dc74ba2dc8b64f01836ae8da7303f778ae3ac57dc438b1"
+      "name": "RecordCheckpointExpiration",
+      "digest": "26c0763c5c2ac4288d94da14b060e14d6e8203c752ac2323cd83850d4013ae84"
     },
     {
       "version": 121,
+      "name": "PersistPreferredEditor",
+      "digest": "67281a228dceee5b5682e2268cdb9909fa66a4d14838891cc4dbfe13841be37f"
+    },
+    {
+      "version": 122,
+      "name": "IndexMessageSearchText",
+      "digest": "f7c3bdf3d66499d34ccc41f0a4dd8f6bfd8a9e1ddc4242f035fcd74f87c41777"
+    },
+    {
+      "version": 123,
+      "name": "OrchestrationV2EventStore",
+      "digest": "ea10cdedb7d1facd6a777c7745ef33ad9ed6f51be0240754fec685fbecbef990"
+    },
+    {
+      "version": 124,
       "name": "SupportNativePiProvider",
-      "digest": "060bfe6e0bcf7521844c6ceaf1e5cee0457454e6359b9a71bb7d483ea214d63d",
+      "digest": "298be7bd045a5170290b9f683495a8a9c71d13ba8f2880423ff398eae5dd156f",
       "sources": [
         {
           "path": "src/server/persistence/migrations/native-pi-provider.ts",
@@ -895,9 +910,9 @@
       ]
     },
     {
-      "version": 122,
+      "version": 125,
       "name": "SupportCursorSdkHarness",
-      "digest": "9cc7d7bdad3bce454ec6ffe66bf70a8a721f3fa3fcb9086b2604c33be2e68c37",
+      "digest": "1c218f0ea7da4e313df9f5773f4e356a0c485edbffd7e6db5b96723b17388f24",
       "sources": [
         {
           "path": "src/server/persistence/migrations/cursor-sdk-provider.ts",
@@ -910,14 +925,14 @@
       ]
     },
     {
-      "version": 123,
+      "version": 126,
       "name": "RaiseConversationContextSupplementBound",
-      "digest": "c3d998f6985fb70fab04cee77c8abf81238fdeebec1f43ae2d889a8944b241dd"
+      "digest": "0e60cc0df994a767b9489f07fc59447853306e702e5d7ca6660e3b87afc886eb"
     },
     {
-      "version": 124,
+      "version": 127,
       "name": "PersistDelegatedTasks",
-      "digest": "3f33e06bb75be35b3a512d2902042e5b5e0631edb6b307fa63271d815445585a",
+      "digest": "a64c1926c77303925cbb48b26b10f7a51ee56cc1b65ea7a616064713182d5821",
       "sources": [
         {
           "path": "src/server/persistence/migrations/delegated-tasks.ts",
@@ -934,14 +949,14 @@
       ]
     },
     {
-      "version": 125,
+      "version": 128,
       "name": "PersistDelegationAutomaticWakes",
-      "digest": "26f48b7837b5bcd9de6277ab7233dcf2c8b45159d9928ec34aead50eef8b5734"
+      "digest": "9890293bd60bbaa8ff0bc1dcb9f3b67b610a12486862de7fb0c4bdacc815beba"
     },
     {
-      "version": 126,
+      "version": 129,
       "name": "OrchestrationV2ReceiptStatusAndProjectionMetadata",
-      "digest": "fc5359dff10a69364c25b0c55f14f5916180aa0d91713e80da8ef10197804942"
+      "digest": "64e188bb6ee9d3b299faa732d7f3c8b5ed854d6894b896d8c07889d38f23a705"
     }
   ]
 }

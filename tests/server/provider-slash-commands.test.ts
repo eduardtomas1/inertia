@@ -74,7 +74,7 @@ function claudeCatalog(options: {
   const claudeExecutable = vi.fn(async () => options.executable?.() ?? "/fixture/missing/claude");
   const catalog = new ProviderCommandCatalog({
     installationAuthority,
-    resolvedCommand: () => undefined,
+    resolvedCommand: (providerId) => providerId === "claude" ? options.executable?.() ?? "/fixture/missing/claude" : undefined,
     claudeExecutable,
     trackAuxiliary: async (operation) => await operation(),
     rememberEnvironment: () => undefined,
@@ -348,6 +348,36 @@ describe("provider command catalog", () => {
     await expect(catalog.list({ providerId: "codex", cwd: "/project-a", conversationId: CONVERSATION })).resolves.toEqual([]);
     cursorExecutable = "/fixture/updated/cursor-agent";
     await expect(catalog.list({ providerId: "cursor", cwd: "/project-a", conversationId: CONVERSATION })).resolves.toEqual([]);
+  });
+
+  it("answers synchronously only with the list Claude reported for the resolved executable", async () => {
+    let executable = "/fixture/missing/claude";
+    const { catalog } = claudeCatalog({ executable: () => executable });
+    const scope = { providerId: "claude", cwd: "/project-a", conversationId: CONVERSATION } as const;
+    expect(catalog.reported(scope)).toBeUndefined();
+    await catalog.list(scope);
+    expect(catalog.reported(scope)).toEqual([{ name: "advisor", description: "advisor command", argumentHint: null }]);
+    expect(catalog.reported({ ...scope, cwd: "/project-b", conversationId: null })).toEqual([
+      { name: "advisor", description: "advisor command", argumentHint: null },
+    ]);
+    executable = "/fixture/missing/updated/claude";
+    expect(catalog.reported(scope)).toBeUndefined();
+
+    const failing = claudeCatalog({ query: () => claudeQuery(async () => null) });
+    await expect(failing.catalog.list(scope)).rejects.toThrow("Claude did not report its slash commands.");
+    expect(failing.catalog.reported(scope)).toBeUndefined();
+  });
+
+  it("answers synchronously with an ACP list only once the session reported one", () => {
+    const catalog = acpCatalog();
+    const review = { name: "review", description: "Review the diff", argumentHint: null };
+    const scope = { providerId: "cursor", cwd: "/project-a", conversationId: CONVERSATION } as const;
+    expect(catalog.reported(scope)).toBeUndefined();
+    catalog.learn(scope, [review]);
+    expect(catalog.reported(scope)).toEqual([review]);
+    expect(catalog.reported({ ...scope, cwd: "/project-b" })).toBeUndefined();
+    expect(catalog.reported({ ...scope, providerId: "kimi" })).toBeUndefined();
+    expect(catalog.reported({ ...scope, providerId: "codex" })).toBeUndefined();
   });
 
   it("prefers a conversation's own list over its workspace's latest list", async () => {

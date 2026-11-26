@@ -52,7 +52,7 @@ async function guardedPage() {
   const card = element("DIV");
   const column = element("DIV");
   const board = element("MAIN");
-  const state = context.__inertiaAgentBrowser as { refs: Map<string, unknown> };
+  const state = context.__inertiaAgentBrowser as { refs: Map<string, unknown>; agentDragCancelled?: boolean };
   state.refs.set("e1", card);
   state.refs.set("e2", column);
   const fire = (name: string, path: unknown[]) => {
@@ -61,7 +61,7 @@ async function guardedPage() {
     listeners.get(name)?.({ isTrusted: true, composedPath: () => path, preventDefault, stopImmediatePropagation });
     return preventDefault.mock.calls.length > 0 && stopImmediatePropagation.mock.calls.length > 0;
   };
-  return { contents, listeners, card, column, board, fire };
+  return { contents, listeners, state, card, column, board, fire };
 }
 
 describe("agent input guard for double clicks and drags", () => {
@@ -83,6 +83,21 @@ describe("agent input guard for double clicks and drags", () => {
     expect(page.fire("mouseup", [element("SPAN"), page.board])).toBe(false);
     expect(page.fire("click", [page.board])).toBe(false);
     await expect(agentPageInputRefusal(page.contents as never)).resolves.toBeNull();
+  });
+
+  it("stops every click a given-back drag would send to the dragged element until the next guard", async () => {
+    const page = await guardedPage();
+    await setAgentPageInputGuard(page.contents as never, true, "e1", true, "e2");
+    expect(page.fire("mousedown", [page.card, page.board])).toBe(false);
+    page.state.agentDragCancelled = true;
+    expect(page.fire("mouseup", [page.card, page.board])).toBe(false);
+    expect(page.fire("click", [page.card, page.board])).toBe(true);
+    expect(page.fire("dblclick", [page.card, page.board])).toBe(true);
+    await expect(agentPageInputRefusal(page.contents as never)).resolves.toBeNull();
+
+    await setAgentPageInputGuard(page.contents as never, true, "e1", true, "e2");
+    expect(page.state.agentDragCancelled).toBeUndefined();
+    expect(page.fire("click", [page.board])).toBe(false);
   });
 
   it("refuses a drag that presses another element, and a drag click on a file input", async () => {

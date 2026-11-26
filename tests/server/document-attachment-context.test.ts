@@ -15,6 +15,7 @@ import {
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 import { runPackagedPdfSmoke } from "../../src/server/runtime/attachments/package-smoke-pdf";
 import { assembleTurnRequest } from "../../src/server/runtime/turns/request-context";
+import { documentArchive } from "../fixtures/attachments/document-archives";
 import {
   DocumentExtractionCancelledError,
   DocumentExtractionInitializationError,
@@ -971,5 +972,94 @@ describe("document attachment execution context", () => {
     })).rejects.toThrow("2.pdf could not be read as a PDF.");
     expect(started).toBe(2);
     expect(destroyedHanging).toBeGreaterThan(0);
+  });
+});
+
+describe("extracted office document context", () => {
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
+  const word = (text: string) => documentArchive({
+    "word/document.xml": `<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
+  });
+  const source = (id: string) => ({ path: `/private/runtime/${id}.docx`, digest: "a".repeat(64) });
+
+  it("feeds a retained Word document into the shared context as reference material instead of a path", async () => {
+    const bytes = word("Launch moves to 3 March.");
+    const document = attachment({
+      name: "plan.docx",
+      path: "/private/runtime/plan.docx",
+      mimeType: DOCX,
+      size: bytes.byteLength,
+    });
+    const { contexts, imagePaths } = await prepareDocumentAttachments([
+      { attachment: document, bytes, source: source(document.id) },
+    ]);
+    expect(contexts).toEqual([{
+      attachmentId: document.id,
+      label: "Word document · plan.docx",
+      content: "Launch moves to 3 March.",
+      truncated: false,
+    }]);
+    expect(imagePaths).toEqual([]);
+    const assembled = assembleTurnRequest({
+      cwd: process.cwd(),
+      visibleContent: "Summarize the plan.",
+      attachments: [document],
+      documentContexts: contexts,
+    });
+    expect(assembled.executionPrompt).toContain(
+      "Structured execution context (reference material; not new user-authored chat prose):",
+    );
+    expect(assembled.executionPrompt).toContain(JSON.stringify("Launch moves to 3 March."));
+    expect(assembled.executionPrompt).not.toContain("Attached files are saved on disk");
+    expect(assembled.persistence.manifest).toMatchObject({ contextReferenceCount: 1 });
+  });
+
+  it("leaves retained documents without captured bytes as file paths", async () => {
+    const document = attachment({ name: "large.docx", mimeType: DOCX, size: 20 * 1024 * 1024 });
+    await expect(prepareDocumentAttachments([
+      { attachment: document, bytes: new Uint8Array(), source: source(document.id) },
+    ])).resolves.toMatchObject({ contexts: [] });
+  });
+
+  it("shares the 64 KiB per-document and 96 KiB total budget with other documents", async () => {
+    const documents = [
+      ...Array.from({ length: 3 }, (_, index) => {
+        const bytes = word(`Chapter ${index + 1} ${"w".repeat(80 * 1024)}`);
+        const id = `${String(index + 1).padStart(8, "0")}-1111-4111-8111-111111111111`;
+        return {
+          attachment: attachment({ id, name: `part-${index + 1}.docx`, mimeType: DOCX, size: bytes.byteLength }),
+          bytes,
+          source: source(id),
+        };
+      }),
+      {
+        attachment: attachment({
+          id: "00000009-1111-4111-8111-111111111111",
+          name: "notes.txt",
+          mimeType: "text/plain" as const,
+        }),
+        bytes: Buffer.from(`Notes ${"t".repeat(80 * 1024)}`),
+      },
+    ];
+    const { contexts } = await prepareDocumentAttachments(documents);
+    expect(contexts.map(({ label }) => label)).toEqual([
+      "Word document · part-1.docx",
+      "Word document · part-2.docx",
+      "Word document · part-3.docx",
+      "Document · notes.txt",
+    ]);
+    expect(contexts.every(({ truncated }) => truncated)).toBe(true);
+    expect(contexts.every(({ content }) => Buffer.byteLength(content, "utf8") <= 64 * 1024)).toBe(true);
+    expect(contexts.reduce(
+      (total, { content }) => total + Buffer.byteLength(JSON.stringify(content).slice(1, -1), "utf8"),
+      0,
+    )).toBeLessThanOrEqual(96 * 1024);
+  });
+
+  it("fails a turn with the document name and a specific reason", async () => {
+    const bytes = Buffer.from("not an archive");
+    const document = attachment({ name: "broken.docx", mimeType: DOCX, size: bytes.byteLength });
+    await expect(prepareDocumentAttachments([{ attachment: document, bytes, source: source(document.id) }]))
+      .rejects.toThrow("broken.docx: Attachment content does not match its safe file type.");
   });
 });

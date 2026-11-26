@@ -296,4 +296,26 @@ describe("re-attach IPC", () => {
     await expect(unavailable.invoke({ conversationId, attachmentId: textId })).rejects.toThrow(REATTACH_UNAVAILABLE_ERROR);
     expect(registry.usage().records).toBe(0);
   });
+
+  it("preserves trusted previewAnnotation and snapshot metadata when re-attaching a PNG", async () => {
+    const { store, registry } = await fixture();
+    const previewAnnotation = {
+      pageUrl: "http://127.0.0.1:4173/app",
+      selector: "#cta",
+      role: "button",
+      name: "Submit",
+      bounds: { x: 10, y: 20, width: 100, height: 32 },
+      html: "<button id=\"cta\">Submit</button>",
+      comment: "Align icon",
+      capturedAt: "2026-11-25T06:00:00.000Z",
+    };
+    const [reattached] = await importRetainedAttachment(
+      registry,
+      store,
+      imageId,
+      new AbortController().signal,
+      { previewAnnotation },
+    );
+    expect(reattached?.previewAnnotation).toEqual(previewAnnotation);
+  });
 });

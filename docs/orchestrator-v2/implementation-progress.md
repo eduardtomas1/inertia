@@ -5787,3 +5787,76 @@ that, as it should; the test's provider reports a fresh id and the file passes
 
 Not run: the full `npm run check`, the Electron scenarios, a packaged build,
 Windows and Linux, and real Claude Code, Codex, Pi or Cursor accounts.
+
+## 5th main sync (`29fb5e78` / `v0.0.85`), CI fixes, and Phase 5 §2.1 spike — 2026-11-26
+
+### Main sync & migration renumbering
+
+Merged `origin/main` at `29fb5e78` (`v0.0.85`, including PR #777 queue edit/reattach,
+preview annotations, preferred editor, FTS5 message search, and storage compaction/recovery):
+
+- Preserved `origin/main` migrations `1..122` byte-identical in `database-migration-lineage.json`
+  and renumbered branch migrations `120–126 → 123–129` across `src/server/persistence/migrations/`,
+  `database-migration-lineage.json`, `database-recovery-required-tables.ts`,
+  `orchestrator-v2-development-database.ts` (`LAST_PRE_MERGE_BRANCH_VERSION = 126`,
+  `message_search_documents` sentinel), and migration test fixtures.
+- Kept the branch's thin `turn-interaction-commands.ts` wrapper and ported #777's
+  queued extracted-document and `previewAnnotation` handoff into
+  `src/server/runtime/commands/message-send-command.ts`; added `"pi"` to
+  `src/shared/archived-conversations.ts` `providerIdSchema`; compacted
+  `src/server/database.ts` pass-throughs under the 1,250-line architecture ceiling;
+  synced `scripts/check-renderer-bundle.mjs` ceilings to `v0.0.85` measured sizes.
+- Temporary #777 queue edit/reconfirm surfaces are kept for this sync commit and will
+  be replaced in Phase 5 Packages 1–5 by in-place edit preserving composer drafts
+  (retaining #777's `openReattachLease`, `queueOwnedAttachmentIdsRef`, `mediaLabel`,
+  and `useComposerPreviewAnnotations`) and Decision 4.3 (no access ceiling/reconfirm).
+
+### CI fixes landed on this sync
+
+1. **Windows Codex stdout EOF race:** Replaced `process.stdout.end()` in
+   `tests/helpers/codex-app-server-fixture.ts` with `realStdoutDestroy` +
+   `process.stdout.destroy()` + `fs.closeSync(stdoutFd)` (same cross-platform pattern
+   as `antigravity-cli-harness.test.ts`).
+2. **Windows Pi `.cmd` shim exit-128 race:** Added a 100 ms unref'd `closedOutputTimer`
+   on `child.stdout.once("end")` in `src/server/provider/pi-rpc.ts` matching Codex and
+   Antigravity transports.
+3. **E2E Codex fixture `thread/inject_items` timeout:** Updated all 7 failing E2E
+   fixture servers (`runtime-stranded-profile`, `conversation-continuation`, `library`,
+   `limit-reset`, `session-continuity`, `transcript-reader-position`,
+   `transcript-turn-anchor`) to answer unknown `thread/inject_items` JSON-RPC requests
+   with `-32601 Method not found`.
+
+### Phase 5 §2.1 spike decision: separate `queue-item` entities (not queued `run` entities)
+
+Audited all 28 `kind = 'run'` sites (4 writers in `projector.ts` / `event-store.ts`,
+24 readers across 13 files — 7 `agent_turns` joins + 17 direct `kind = 'run'` lookups)
+against the 10 spike questions in `phase5-queue-design.md` §2.1:
+
+- **Decision:** Adopt separate `queue-item` + `queue-state` entities (plus `superseded-turn`
+  for Q10 `adoptUndeliveredPrompt`) rather than queued V2 `run` entities.
+- **Failed questions for queued `run`:** **Q1, Q2, Q3, Q6, Q8, Q9** — active runs already
+  use `status: "queued"`; `orchestrationRunSchema`/`orchestrationAttemptSchema` require
+  non-null `turnId`/`messageId`/`providerInstanceId`/`selection` not fixed before start;
+  4 direct readers (`projector.ts`, `run-control-projector.ts`, `run-control-repository.ts`,
+  `native-boundary-projector.ts`) treat any non-terminal `run` as active; Pkg 3 per-item
+  selections conflict with `run.accepted` checks; G6 `VERIFIED_PROJECTION_KINDS` parses
+  every `run` strictly; and delegated coalescing/shrinking/steering creates items that
+  never execute as runs.
+- **Deliberate difference recorded per §2.1:** Keep T3's exact queue field names, assign
+  dense run ordinals at `run.accepted`, propagate `requestedAt` onto accepted runs, and
+  fold Pkg 1 + Pkg 3 (`selection_json`) into a single append-only Migration 130
+  (`PersistQueueItemOrderDeliveryAndSelection`).
+
+### Verification (Linux x64, Node 22)
+
+- `npm run check:quality`: passed (workflow-concurrency, 129 verified migrations,
+  2,182 architecture files, color-themes, cad-bridges, 0/0 lint warnings/errors,
+  5/5 TypeScript projects).
+- `electron-vite build && npm run build:private-connect && npm run check:renderer-bundle`: passed.
+- Targeted Vitest suites (12/12 files, including `codex-app-server-history-injection`
+  18/18, `pi-rpc-harness` 32/32, `database-migration-lineage`,
+  `orchestrator-v2-development-database`, `queued-message-runtime`,
+  `runtime-composer-queue.dom` 27/27): passed.
+- Real Electron Playwright E2E across all 7 fixed specs (`runtime-stranded-profile`,
+  `conversation-continuation`, `library`, `limit-reset`, `session-continuity`,
+  `transcript-reader-position`, `transcript-turn-anchor`): 9/9 passed.

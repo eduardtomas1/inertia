@@ -1,6 +1,8 @@
 import type {
   AppSnapshot,
+  ArchivedConversationRef,
   ConversationShell,
+  Project,
   ConversationDetail,
   ConversationContextPacketSummary,
   ProviderInfo,
@@ -76,6 +78,13 @@ import {
 import { agentContextReadSummaries } from "./conversation-context-turn-reads";
 import { watcherLinkViews, watcherWakeSummaries } from "./watcher-link-codecs";
 import { DelegationReads, defaultLiveNativeChildren } from "../orchestration-v2/delegation-reads";
+import {
+  ARCHIVED_CONVERSATIONS_PAGE_SIZE,
+  type ArchivedConversationsPage,
+  type ArchivedConversationsRequest,
+} from "../../shared/archived-conversations";
+import { MAX_ACTIVITY_DETAIL_READ_CHARS, type ActivityDetailReadResult } from "../../shared/activity-detail";
+import { activityDetailPreview } from "./activity-detail-preview";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number; failure_kind: string | null };
@@ -122,6 +131,19 @@ export interface RecentConversationLimits {
 type SnapshotPersistenceContext = Pick<PersistenceContext, "database"> & {
   contextPackets(conversationId: string, messageIds?: string[]): ConversationContextPacketSummary[];
 };
+
+const unicodeLowerRegistered = new WeakSet<PersistenceContext["database"]>();
+
+function foldUnicodeSearchText(value: string): string {
+  return value.toLocaleLowerCase("en").replaceAll("\u03c2", "\u03c3");
+}
+
+function ensureUnicodeLowerFunction(database: PersistenceContext["database"]): void {
+  if (unicodeLowerRegistered.has(database)) return;
+  database.function("inertia_unicode_lower", { deterministic: true }, (value: unknown) =>
+    typeof value === "string" ? foldUnicodeSearchText(value) : null);
+  unicodeLowerRegistered.add(database);
+}
 
 export class SnapshotRepository {
   readonly promptPresets: PromptPresetRepository;
@@ -191,33 +213,11 @@ export class SnapshotRepository {
 
   shellSnapshot(providers: ProviderInfo[] = []): AppSnapshot {
     const state = this.state();
-    // One index probe per conversation. The window-function form scanned and
-    // decoded every turn ever recorded on each coalesced shell snapshot.
-    const latestTurns = new Map(
-      (this.context.database.prepare(`
-        SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited, ${TURN_FAILURE_KIND_SQL} AS failure_kind
-        FROM conversations
-        JOIN agent_turns ON agent_turns.id = (
-          SELECT id
-          FROM agent_turns AS latest
-          WHERE latest.conversation_id = conversations.id
-          ORDER BY latest.requested_at DESC, latest.id DESC
-          LIMIT 1
-        )
-      `).all() as UsageLimitedTurnRow[])
-        .map((row) => [row.conversation_id, { turn: agentTurnFromRow(row), usageLimited: row.usage_limited === 1 }] as const),
-    );
     return {
-      projects: (this.context.database.prepare(
-        "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
-      ).all() as ProjectRow[]).map(projectFromRow),
-      conversations: (this.context.database.prepare(`
-        SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
-        FROM conversations ORDER BY updated_at DESC, id ASC
-      `).all() as ConversationShellRow[]).map((row) => {
-        const latest = latestTurns.get(row.id);
-        return conversationShellFromRow(row, latest?.turn ?? null, latest?.usageLimited);
-      }),
+      projects: this.projects(),
+      conversations: this.conversationShells("conversations.archived_at IS NULL OR conversations.id = ?", [state.active_conversation_id ?? ""]),
+      archivedConversationRefs: this.referencedArchivedConversations(state.active_conversation_id),
+      archivedConversationCount: this.archivedConversationCount(),
       runs: (this.context.database.prepare(
         "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
@@ -233,6 +233,115 @@ export class SnapshotRepository {
     };
   }
 
+  projects(): Project[] {
+    return (cachedStatement(this.context.database,
+      "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
+    ).all() as ProjectRow[]).map(projectFromRow);
+  }
+
+  conversationIds(): string[] {
+    return (cachedStatement(this.context.database,
+      "SELECT id FROM conversations ORDER BY updated_at DESC, id ASC",
+    ).all() as { id: string }[]).map(({ id }) => id);
+  }
+
+  projectConversations(projectId: string): ConversationShell[] {
+    return this.conversationShells("conversations.project_id = ?", [projectId]);
+  }
+
+  archivedConversations(request: ArchivedConversationsRequest): ArchivedConversationsPage {
+    const filters: string[] = ["conversations.archived_at IS NOT NULL"];
+    const parameters: string[] = [];
+    const query = request.query?.trim() ?? "";
+    if (query) {
+      ensureUnicodeLowerFunction(this.context.database);
+      const providers = request.providerIds ?? [];
+      filters.push(`(instr(inertia_unicode_lower(conversations.title), ?) > 0${providers.length
+        ? ` OR conversations.provider_id IN (${providers.map(() => "?").join(", ")})` : ""})`);
+      parameters.push(foldUnicodeSearchText(query), ...providers);
+    }
+    const where = filters.join(" AND ");
+    const total = (this.context.database.prepare(
+      `SELECT COUNT(*) AS count FROM conversations WHERE ${where}`,
+    ).get(...parameters) as { count: number }).count;
+    const after = request.after
+      ? { sql: " AND (conversations.archived_at < ? OR (conversations.archived_at = ? AND conversations.id > ?))",
+        parameters: [request.after.archivedAt, request.after.archivedAt, request.after.id] }
+      : { sql: "", parameters: [] };
+    const limit = Math.min(Math.max(1, Math.trunc(request.limit ?? ARCHIVED_CONVERSATIONS_PAGE_SIZE)), ARCHIVED_CONVERSATIONS_PAGE_SIZE);
+    const rows = (this.context.database.prepare(`
+      SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
+      FROM conversations WHERE ${where}${after.sql}
+      ORDER BY conversations.archived_at DESC, conversations.id ASC
+      LIMIT ?
+    `).all(...parameters, ...after.parameters, limit + 1) as ConversationShellRow[]);
+    const conversations = rows.slice(0, limit).map(conversationDetailFromRow);
+    const last = conversations.at(-1);
+    return {
+      kind: "conversation.archived",
+      conversations,
+      total,
+      next: rows.length > limit && last ? { archivedAt: last.archivedAt!, id: last.id } : null,
+    };
+  }
+
+  activityDetail(conversationId: string, activityId: string): ActivityDetailReadResult | null {
+    const row = cachedStatement(this.context.database,
+      "SELECT id, conversation_id, turn_id, detail FROM activities WHERE id = ? AND conversation_id = ?",
+    ).get(activityId, conversationId) as Pick<ActivityRow, "id" | "conversation_id" | "turn_id" | "detail"> | undefined;
+    if (!row) return null;
+    return { kind: "activity.detail", conversationId: row.conversation_id, activityId: row.id, turnId: row.turn_id,
+      detail: row.detail === null ? null : row.detail.slice(0, MAX_ACTIVITY_DETAIL_READ_CHARS) };
+  }
+
+  private archivedConversationCount(): number {
+    return (cachedStatement(this.context.database,
+      "SELECT COUNT(*) AS count FROM conversations WHERE archived_at IS NOT NULL",
+    ).get() as { count: number }).count;
+  }
+
+  private referencedArchivedConversations(activeConversationId: string | null): ArchivedConversationRef[] {
+    return (cachedStatement(this.context.database, `
+      SELECT id, project_id, title, provider_id, archived_at FROM conversations
+      WHERE archived_at IS NOT NULL AND id <> ? AND (
+        EXISTS (SELECT 1 FROM saved_answers WHERE saved_answers.conversation_id = conversations.id)
+        OR EXISTS (SELECT 1 FROM todos WHERE todos.conversation_id = conversations.id OR todos.source_conversation_id = conversations.id)
+        OR EXISTS (SELECT 1 FROM watcher_links WHERE watcher_links.watcher_conversation_id = conversations.id)
+        OR EXISTS (SELECT 1 FROM watcher_links WHERE watcher_links.watched_conversation_id = conversations.id
+          AND watcher_links.status <> 'detached')
+        OR EXISTS (SELECT 1 FROM html_renders WHERE html_renders.conversation_id = conversations.id)
+        OR id IN (SELECT conversation_id FROM workspace_runs WHERE conversation_id IS NOT NULL ORDER BY started_at DESC LIMIT 200)
+      )
+      ORDER BY archived_at DESC, id ASC
+    `).all(activeConversationId ?? "") as Pick<ConversationRow, "id" | "project_id" | "title" | "provider_id" | "archived_at">[])
+      .map((row) => ({ id: row.id, projectId: row.project_id, title: row.title, providerId: row.provider_id, archivedAt: row.archived_at! }));
+  }
+
+  private conversationShells(where: string, parameters: readonly string[]): ConversationShell[] {
+    const latestTurns = new Map(
+      (this.context.database.prepare(`
+        SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited, ${TURN_FAILURE_KIND_SQL} AS failure_kind
+        FROM conversations
+        JOIN agent_turns ON agent_turns.id = (
+          SELECT id
+          FROM agent_turns AS latest
+          WHERE latest.conversation_id = conversations.id
+          ORDER BY latest.requested_at DESC, latest.id DESC
+          LIMIT 1
+        )
+        WHERE ${where}
+      `).all(...parameters) as UsageLimitedTurnRow[])
+        .map((row) => [row.conversation_id, { turn: agentTurnFromRow(row), usageLimited: row.usage_limited === 1 }] as const),
+    );
+    return (this.context.database.prepare(`
+      SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
+      FROM conversations WHERE ${where} ORDER BY updated_at DESC, id ASC
+    `).all(...parameters) as ConversationShellRow[]).map((row) => {
+      const latest = latestTurns.get(row.id);
+      return conversationShellFromRow(row, latest?.turn ?? null, latest?.usageLimited);
+    });
+  }
+
   private conversationRow(conversationId: string): ConversationShellRow | undefined {
     return cachedStatement(this.context.database, `
       SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
@@ -244,7 +353,7 @@ export class SnapshotRepository {
     const row = this.conversationRow(conversationId);
     if (!row) return null;
     const latestTurn = cachedStatement(this.context.database, `
-      SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited FROM agent_turns
+      SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited, ${TURN_FAILURE_KIND_SQL} AS failure_kind FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
@@ -284,7 +393,7 @@ export class SnapshotRepository {
         scope.older = scope.units.at(-1)!;
         continue;
       }
-      const detail = bytes <= MAX_CONVERSATION_HISTORY_BYTES ? page(this.historyRecords(conversationId, scope)) : null;
+      const detail = bytes <= MAX_CONVERSATION_HISTORY_BYTES ? page(this.historyRecords(conversationId, scope, true)) : null;
       if (detail) return detail;
       if (scope.units.length > 1) {
         scope.units = scope.units.slice(0, Math.max(1, Math.floor(scope.units.length / 2)));
@@ -344,7 +453,7 @@ export class SnapshotRepository {
     };
   }
 
-  private historyRecords(conversationId: string, scope?: ConversationHistoryScope): HistoryPageRecords {
+  private historyRecords(conversationId: string, scope?: ConversationHistoryScope, previewActivities = false): HistoryPageRecords {
     const query = <T>(table: Parameters<typeof historyPredicate>[0], columns: string, order: string): T[] => {
       const where = scope
         ? historyPredicate(table, scope, conversationId)
@@ -359,7 +468,10 @@ export class SnapshotRepository {
       agentTurns: turns,
       turnGitArtifacts: query<TurnGitArtifactRow>("turn_git_artifacts", "*", "created_at ASC, id ASC").map(turnGitArtifactFromRow),
       messages,
-      activities: query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map(activityFromRow),
+      activities: query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map((row) => {
+        const activity = activityFromRow(row);
+        return previewActivities ? { ...activity, ...activityDetailPreview(activity) } : activity;
+      }),
       subagents: query<SubagentTraceRow>("subagent_traces", "*", "created_at ASC, sequence ASC, id ASC").map(subagentTraceFromRow),
       reasonings: query<AgentReasoningRow>("agent_reasonings", REASONING_PROJECTION_COLUMNS, "agent_reasonings.created_at ASC, agent_reasonings.id ASC").map(reasoningFromRow),
       plans: query<AgentPlanRow>("agent_plans", "conversation_id, run_id, turn_id, explanation, steps_json", "updated_at ASC, conversation_id ASC, run_id ASC").map(planFromRow),

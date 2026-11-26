@@ -32,7 +32,7 @@ export interface TaskStatus {
 export interface TaskStatusInput {
   todo: Pick<Todo, "completedAt" | "conversationId" | "linkedAt">;
   status: SidebarThreadStatus | null;
-  shell: Pick<ConversationShell, "archivedAt" | "latestTurn"> | null;
+  shell: (Pick<ConversationShell, "archivedAt"> & Partial<Pick<ConversationShell, "latestTurn">>) | null;
   now: number;
   starting: boolean;
 }
@@ -65,12 +65,12 @@ export function deriveTaskStatus({ todo, status: chat, shell, now, starting }: T
   if (todo.conversationId === null) return status("todo", "to-do", null, null);
   const turn = shell?.latestTurn ?? null;
   const fresh = withinStartGrace(todo.linkedAt, now);
+  if (shell && shell.archivedAt !== null) return status("archived", "to-do", "Chat archived", "muted");
   if (!shell || chat === null) {
     return fresh
       ? status("starting", "working", "Starting…", "muted")
       : status("parked", "to-do", "Not started", "muted");
   }
-  if (shell.archivedAt !== null) return status("archived", "to-do", "Chat archived", "muted");
   if (chat === "approval" || chat === "input" || chat === "limited") {
     return status("needs", "needs-you", NEED_WORDS[chat], chat === "input" ? "input" : "approval", chat);
   }

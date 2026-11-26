@@ -125,6 +125,7 @@ beforeAll(() => {
   const store = new RuntimeStore(databasePath, directory, { recoverInterruptedRuns: false });
   try {
     const { busyConversationId } = seed(store, directory);
+    while (store.indexMessageSearchBatch(1_000).remaining) continue;
     const database = (store as unknown as { database: Database.Database }).database;
     recorded.set("app snapshot", recordReads(database, () => {
       store.shellSnapshot();
@@ -140,6 +141,8 @@ beforeAll(() => {
   try {
     recorded.set("message search", recordReads(reader, () => {
       searchMessages(reader, "plans 3");
+      searchMessages(reader, "pl");
+      searchMessages(reader, "plans", { sortedCandidateLimit: 0 });
     }));
   } finally {
     reader.close();
@@ -181,7 +184,10 @@ describe("hot query plans on a seeded runtime database", () => {
     expect(history).toMatch(/SEARCH agent_reasonings USING (COVERING )?INDEX agent_reasonings_conversation_turn_created_idx/u);
     expect(history).not.toMatch(/\bSCAN (messages|activities|agent_reasonings|agent_turns)$/mu);
     const search = plans(recorded.get("message search")!, "analyzed").join("\n");
-    expect(search).toMatch(/SCAN messages USING COVERING INDEX messages_created_id_idx/u);
+    expect(search).toMatch(/SCAN message_search_index VIRTUAL TABLE INDEX/u);
+    expect(search).toMatch(/SCAN m USING COVERING INDEX messages_created_id_idx/u);
+    expect(search).toMatch(/SCAN m USING COVERING INDEX messages_created_id_idx\nSEARCH d USING INDEX sqlite_autoindex_message_search_documents_1 \(message_id=\?\) LEFT-JOIN/u);
+    expect(search).not.toMatch(/\bSCAN (messages|m)$/mu);
     const snapshot = plans(recorded.get("app snapshot")!, "analyzed").join("\n");
     expect(snapshot).toMatch(/SEARCH latest USING COVERING INDEX agent_turns_conversation_requested_idx/u);
   });

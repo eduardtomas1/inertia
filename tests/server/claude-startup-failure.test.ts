@@ -160,6 +160,7 @@ describe("Claude startup failures", () => {
     ["initialize_not_first", "Claude Code didn't receive Inertia's start request first. If Claude Code runs through a wrapper script, make sure it passes input through unchanged."],
     ["config_file_invalid", "A Claude Code configuration file isn't valid JSON. Repair the file named in the details, then try again."],
     ["managed_settings_not_delivered", "Claude Code couldn't read the managed settings Inertia sends when it starts. If Claude Code runs through a wrapper script, make sure it passes Inertia's arguments and input through unchanged."],
+    ["initialize_fields_not_delivered", "Claude Code couldn't read the settings Inertia sends when it starts. If Claude Code runs through a wrapper script, make sure it passes Inertia's arguments and input through unchanged."],
   ] as const)("explains %s without offering a fresh session", (reason, message) => {
     const result = failedResult({
       startup_failure_reason: reason,

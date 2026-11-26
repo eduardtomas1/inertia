@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   Check,
+  Code2,
   Copy,
   ExternalLink,
   Folder,
@@ -11,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { ProjectAction } from "@shared/contracts";
+import type { EditorId } from "@shared/editor-ids";
 
 import type { EnvironmentRunItem } from "../../utils/environmentSummary";
 import { TooltipButton } from "../TooltipButton";
@@ -193,24 +195,30 @@ export function ProjectActionMenuItems({
   );
 }
 
-export type OpenInTarget = "folder" | "file-manager" | "files";
+export type OpenInTarget = "folder" | "file-manager" | "files" | `editor:${EditorId}`;
 
-const openInIcons = {
-  folder: ExternalLink,
-  "file-manager": FolderOpen,
-  files: Folder,
-} as const;
+export interface OpenInTargetOption {
+  target: OpenInTarget;
+  label: string;
+}
+
+function openInIcon(target: OpenInTarget) {
+  if (target.startsWith("editor:")) return Code2;
+  if (target === "file-manager") return FolderOpen;
+  if (target === "files") return Folder;
+  return ExternalLink;
+}
 
 export function OpenInMenuItems({
   presentation,
-  labels,
+  options,
   preferred,
   filesAvailable,
   checkoutPath,
   onOpen,
 }: {
   presentation: HeaderMenuPresentation;
-  labels: Record<OpenInTarget, string>;
+  options: readonly OpenInTargetOption[];
   preferred: OpenInTarget;
   filesAvailable: boolean;
   checkoutPath: string | null;
@@ -234,8 +242,8 @@ export function OpenInMenuItems({
   };
   return (
     <>
-      {(Object.keys(labels) as OpenInTarget[]).map((target) => {
-        const Icon = openInIcons[target];
+      {options.map(({ target, label }) => {
+        const Icon = openInIcon(target);
         const disabled = target === "files" && !filesAvailable;
         return (
           <HintButton
@@ -247,7 +255,7 @@ export function OpenInMenuItems({
             onClick={() => onOpen(target)}
           >
             <Icon size={14} aria-hidden="true" />
-            <span><strong>{labels[target]}</strong></span>
+            <span><strong>{label}</strong></span>
             {target === preferred && <small className="header-menu-hint">Default</small>}
           </HintButton>
         );

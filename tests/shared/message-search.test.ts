@@ -24,6 +24,20 @@ describe("message search contract", () => {
     expect(serverEventSchema.safeParse({ type: "request.result", requestId: id, result }).success).toBe(true);
   });
 
+  it("accepts a bounded keyset continuation in both directions and stays compatible without one", () => {
+    const continuation = { createdAt: hit.createdAt, messageId: "message-older" };
+    const search = (payload: unknown) => clientCommandSchema.safeParse({ type: "conversation.messages.search", requestId: id, payload }).success;
+    expect(search({ query: "hello", continuation })).toBe(true);
+    for (const invalid of [
+      { ...continuation, messageId: "" }, { ...continuation, messageId: "x".repeat(201) },
+      { ...continuation, createdAt: "x".repeat(65) }, { ...continuation, offset: 20 }, null,
+    ]) expect(search({ query: "hello", continuation: invalid })).toBe(false);
+    for (const valid of [
+      { ...result, continuation, indexing: true }, { ...result, continuation: null, indexing: false }, result,
+    ]) expect(serverEventSchema.safeParse({ type: "request.result", requestId: id, result: valid }).success).toBe(true);
+    expect(messageSearchResultSchema.safeParse({ ...result, continuation: { ...continuation, offset: 1 } }).success).toBe(false);
+  });
+
   it("rejects oversized, duplicate and malformed result payloads at the bridge", () => {
     for (const invalid of [
       { ...result, hits: Array.from({ length: 21 }, (_, index) => ({ ...hit, messageId: String(index) })) },

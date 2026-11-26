@@ -493,12 +493,15 @@ async function captureArchivedStates(viewport: Viewport): Promise<void> {
   const filter = page.getByRole("searchbox", { name: "Filter archived chats" });
   await filter.scrollIntoViewIfNeeded();
   await filter.fill("investigate");
+  await expect(page.getByRole("list", { name: "Archived chats" }).getByRole("listitem").first()).toContainText(/investigat/iu);
   await page.waitForTimeout(200);
   await capture(evidenceName("data", "archived-filter", viewport)(null));
   await filter.fill("");
   const more = page.getByRole("button", { name: /^Show \d+ more$/u });
   await more.scrollIntoViewIfNeeded();
+  const shown = await page.getByRole("list", { name: "Archived chats" }).getByRole("listitem").count();
   await more.click();
+  await expect.poll(() => page.getByRole("list", { name: "Archived chats" }).getByRole("listitem").count()).toBeGreaterThan(shown);
   await page.waitForTimeout(200);
   await capture(evidenceName("data", "archived-all", viewport)(null), { keepFocus: true });
   await scrollContentTo(0);

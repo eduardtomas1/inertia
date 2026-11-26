@@ -1,15 +1,16 @@
 import { Worker } from "node:worker_threads";
-import { type MessageSearchResult } from "../../shared/message-search";
+import { type MessageSearchContinuation, type MessageSearchResult } from "../../shared/message-search";
 import { messageSearchResultSchema } from "../../shared/message-search-schema";
 
 export function runMessageSearchWorker(
   databasePath: string,
   query: string,
   signal: AbortSignal,
+  continuation: MessageSearchContinuation | null = null,
 ): Promise<MessageSearchResult> {
   if (signal.aborted) return Promise.reject(new Error("Search cancelled."));
   const worker = new Worker(new URL("./message-search-worker.js", import.meta.url), {
-    workerData: { databasePath, query },
+    workerData: { databasePath, query, continuation },
     resourceLimits: { maxOldGenerationSizeMb: 128 },
   });
   return new Promise((resolve, reject) => {

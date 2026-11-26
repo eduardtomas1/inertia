@@ -165,12 +165,16 @@ function resumeBlockedReason(
   surface: WatcherSurfaceModel,
 ): string | null {
   if (link.status !== "paused") return null;
-  if (watcher && watcher.archivedAt !== null) {
+  const archivedWatcher = watcher ? watcher.archivedAt !== null : surface.archivedConversations?.has(link.watcherConversationId) === true;
+  const archivedWatched = watched
+    ? watched.archivedAt !== null
+    : link.watchedConversationId !== null && surface.archivedConversations?.has(link.watchedConversationId) === true;
+  if (archivedWatcher) {
     return link.pauseReason === "watcher-archived"
       ? watcherPauseText(link.pauseReason, link.pauseDetail)
       : "Unarchive the watcher chat to resume it.";
   }
-  if (watched && watched.archivedAt !== null) return "Unarchive the main chat to resume its watcher.";
+  if (archivedWatched) return "Unarchive the main chat to resume its watcher.";
   if ((link.pauseReason === "usage-limit" || link.pauseReason === "route-unavailable") && watcher) {
     const readiness = composerRouteReadiness({
       provider: surface.providers.find(({ id }) => id === watcher.providerId),

@@ -17,6 +17,9 @@ import { CUSTOM_AGENTS_SCHEMA_VERSION } from "../../src/server/persistence/migra
 import { ORCHESTRATION_V2_SCHEMA_VERSION } from "../../src/server/persistence/migrations/orchestration-v2";
 import { SENT_TO_USER_MESSAGES_SCHEMA_VERSION } from "../../src/server/persistence/migrations/sent-to-user-messages";
 import { AGENT_THREAD_QUESTION_ANSWERS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-thread-question-answers";
+import { CHECKPOINT_EXPIRATION_SCHEMA_VERSION } from "../../src/server/persistence/migrations/checkpoint-expiration";
+import { PREFERRED_EDITOR_SCHEMA_VERSION } from "../../src/server/persistence/migrations/preferred-editor";
+import { MESSAGE_SEARCH_INDEX_SCHEMA_VERSION } from "../../src/server/persistence/migrations/message-search-index";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import {
   RuntimeStartupBlockerError,
@@ -42,6 +45,7 @@ describe("orchestrator-v2 development databases from before a main sync", () => 
   it.each([
     ["92e23166", 118],
     ["e37ff42b", 123],
+    ["d290381c", 126],
   ] as const satisfies readonly (readonly [PreMergeSync, number])[])(
     "refuses a database from before the %s sync with a typed blocker and leaves it and its backups unchanged",
     (sync, latest) => {
@@ -51,7 +55,12 @@ describe("orchestrator-v2 development databases from before a main sync", () => 
       simulatePreMergeOrchestratorV2Database(legacy, sync);
       expect(legacy.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(latest);
       // This build would treat the recorded numbers as main's migrations and skip them.
-      expect(legacy.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'sent_to_user'").get()).toBeUndefined();
+      if (sync === "d290381c") {
+        expect(legacy.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'sent_to_user'").get()).toBeDefined();
+        expect(legacy.prepare("SELECT 1 FROM sqlite_master WHERE name = 'message_search_documents'").get()).toBeUndefined();
+      } else {
+        expect(legacy.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'sent_to_user'").get()).toBeUndefined();
+      }
       if (sync === "e37ff42b") {
         expect(legacy.prepare("SELECT 1 FROM sqlite_master WHERE name = 'custom_agents'").get()).toBeDefined();
         const operations = legacy.prepare("SELECT sql FROM sqlite_master WHERE name = 'agent_thread_operations'").pluck().get() as string;
@@ -88,6 +97,9 @@ describe("orchestrator-v2 development databases from before a main sync", () => 
       SENT_TO_USER_MESSAGES_SCHEMA_VERSION - 1,
       SENT_TO_USER_MESSAGES_SCHEMA_VERSION,
       AGENT_THREAD_QUESTION_ANSWERS_SCHEMA_VERSION,
+      CHECKPOINT_EXPIRATION_SCHEMA_VERSION,
+      PREFERRED_EDITOR_SCHEMA_VERSION,
+      MESSAGE_SEARCH_INDEX_SCHEMA_VERSION,
       ORCHESTRATION_V2_SCHEMA_VERSION,
       CURRENT_DATABASE_SCHEMA_VERSION - 1,
       undefined,

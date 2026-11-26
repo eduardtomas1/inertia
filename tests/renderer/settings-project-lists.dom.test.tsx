@@ -29,7 +29,6 @@ function props(target: ComponentProps<typeof SettingsView>["target"]): Component
     backendDefaults: [],
     projects: [user, scratch],
     conversations: [],
-    archived: [],
     databaseBackup: { lastValidatedAt: "2026-08-03T10:15:00.000Z" },
     onUpdate: vi.fn(async () => undefined),
     onSetDefaultModel: vi.fn(async () => undefined),

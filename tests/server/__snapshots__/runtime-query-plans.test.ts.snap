@@ -10,9 +10,17 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
     ],
   },
   {
+    "query": "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN projects",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
     "query": "SELECT agent_turns.*, EXISTS (SELECT 1 FROM usage_limited_turns WHERE usage_limited_turns.turn_id = agent_turns.id) AS usage_limited, (SELECT failure_kind FROM …",
     "withStatistics": [
-      "SCAN conversations USING COVERING INDEX sqlite_autoindex_conversations_1",
+      "SCAN conversations",
       "SEARCH agent_turns USING INDEX agent_turns_provider_run_identity_idx (id=?)",
       "CORRELATED SCALAR SUBQUERY 3",
       "SEARCH latest USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
@@ -22,7 +30,7 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
       "SEARCH turn_failure_kinds USING INDEX sqlite_autoindex_turn_failure_kinds_1 (turn_id=?)",
     ],
     "withoutStatistics": [
-      "SCAN conversations USING COVERING INDEX sqlite_autoindex_conversations_1",
+      "SCAN conversations",
       "SEARCH agent_turns USING INDEX sqlite_autoindex_agent_turns_1 (id=?)",
       "CORRELATED SCALAR SUBQUERY 3",
       "SEARCH latest USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
@@ -30,14 +38,6 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
       "SEARCH usage_limited_turns USING COVERING INDEX sqlite_autoindex_usage_limited_turns_1 (turn_id=?)",
       "CORRELATED SCALAR SUBQUERY 2",
       "SEARCH turn_failure_kinds USING INDEX sqlite_autoindex_turn_failure_kinds_1 (turn_id=?)",
-    ],
-  },
-  {
-    "query": "SELECT * FROM projects ORDER BY updated_at DESC, id ASC",
-    "withStatistics": "same",
-    "withoutStatistics": [
-      "SCAN projects",
-      "USE TEMP B-TREE FOR ORDER BY",
     ],
   },
   {
@@ -50,6 +50,38 @@ exports[`hot query plans on a seeded runtime database > snapshots every app snap
       "CORRELATED SCALAR SUBQUERY 2",
       "SEARCH agent_turns USING COVERING INDEX agent_turns_conversation_requested_idx (conversation_id=?)",
       "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT id, project_id, title, provider_id, archived_at FROM conversations WHERE archived_at IS NOT NULL AND id <> ? AND ( EXISTS (SELECT 1 FROM saved_answers WH…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN conversations",
+      "CORRELATED SCALAR SUBQUERY 1",
+      "SEARCH saved_answers USING COVERING INDEX saved_answers_conversation_idx (conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 2",
+      "MULTI-INDEX OR",
+      "INDEX 1",
+      "SEARCH todos USING INDEX todos_conversation_idx (conversation_id=?)",
+      "INDEX 2",
+      "SEARCH todos USING INDEX todos_source_conversation_idx (source_conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 3",
+      "SEARCH watcher_links USING COVERING INDEX sqlite_autoindex_watcher_links_2 (watcher_conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 4",
+      "SEARCH watcher_links USING INDEX watcher_links_active_watched_idx (watched_conversation_id=?)",
+      "CORRELATED SCALAR SUBQUERY 5",
+      "SEARCH html_renders USING COVERING INDEX html_renders_conversation_idx (conversation_id=?)",
+      "LIST SUBQUERY 6",
+      "SCAN workspace_runs USING INDEX workspace_runs_started_at_idx",
+      "CREATE BLOOM FILTER",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT COUNT(*) AS count FROM conversations WHERE archived_at IS NOT NULL",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN conversations",
     ],
   },
   {
@@ -659,10 +691,38 @@ exports[`hot query plans on a seeded runtime database > snapshots every history 
 exports[`hot query plans on a seeded runtime database > snapshots every message search plan with and without planner statistics 1`] = `
 [
   {
-    "query": "SELECT id AS messageId FROM messages INDEXED BY messages_created_id_idx ORDER BY created_at DESC, id DESC",
+    "query": "SELECT complete, before_created_at AS createdAt, before_message_id AS messageId FROM message_search_backfill WHERE singleton = 1",
     "withStatistics": "same",
     "withoutStatistics": [
-      "SCAN messages USING COVERING INDEX messages_created_id_idx",
+      "SEARCH message_search_backfill USING INTEGER PRIMARY KEY (rowid=?)",
+    ],
+  },
+  {
+    "query": "SELECT count(*) FROM ( SELECT rowid FROM message_search_index WHERE message_search_index MATCH ? LIMIT ? )",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "CO-ROUTINE (subquery-1)",
+      "SCAN message_search_index VIRTUAL TABLE INDEX 0:M1",
+      "SCAN (subquery-1)",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt FROM message_search_index JOIN message_search_documents d ON d.document_id = message_search_index.rowid JOIN…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN message_search_index VIRTUAL TABLE INDEX 0:M1",
+      "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt FROM message_search_documents d INDEXED BY message_search_documents_unindexed_idx JOIN messages m ON m.id = …",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN d USING INDEX message_search_documents_unindexed_idx",
+      "SEARCH m USING INDEX sqlite_autoindex_messages_1 (id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
     ],
   },
   {
@@ -691,6 +751,28 @@ exports[`hot query plans on a seeded runtime database > snapshots every message 
     "withStatistics": "same",
     "withoutStatistics": [
       "SEARCH message_content_chunks USING INDEX message_content_chunks_message_sequence_idx (message_id=?)",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt, NULL AS documentId, NULL AS state FROM messages m INDEXED BY messages_created_id_idx WHERE 1 ORDER BY m.cre…",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN m USING COVERING INDEX messages_created_id_idx",
+    ],
+  },
+  {
+    "query": "SELECT rowid FROM message_search_index WHERE message_search_index MATCH ? ORDER BY rowid",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN message_search_index VIRTUAL TABLE INDEX 64:M1",
+    ],
+  },
+  {
+    "query": "SELECT m.id AS messageId, m.created_at AS createdAt, d.document_id AS documentId, d.state AS state FROM messages m INDEXED BY messages_created_id_idx LEFT JOIN …",
+    "withStatistics": "same",
+    "withoutStatistics": [
+      "SCAN m USING COVERING INDEX messages_created_id_idx",
+      "SEARCH d USING INDEX sqlite_autoindex_message_search_documents_1 (message_id=?) LEFT-JOIN",
     ],
   },
 ]

@@ -76,7 +76,7 @@ interface WatcherDeliveryDependencies {
 }
 
 export function watcherLabel(
-  store: Pick<RuntimeStore, "conversation" | "shellSnapshot">,
+  store: Pick<RuntimeStore, "conversation" | "settings">,
   watcherConversationId: string,
   providerLabels: Readonly<Record<string, string | undefined>> = {},
 ): string {
@@ -84,7 +84,7 @@ export function watcherLabel(
   const labels = {
     ...WATCHER_PROVIDER_NAMES,
     ...providerLabels,
-    ...store.shellSnapshot().settings.providerIdentityLabels,
+    ...store.settings().providerIdentityLabels,
   };
   return watcherAgentLabel(conversation, labels);
 }

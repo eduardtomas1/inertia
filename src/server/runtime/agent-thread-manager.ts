@@ -517,11 +517,8 @@ export class AgentThreadManager {
   private list(source: Conversation, args: unknown): ProviderHostToolResult {
     const input = listSchema.parse(args ?? {});
     const limit = input.limit ?? 10;
-    const candidates = this.dependencies.store.shellSnapshot().conversations
-      .filter((conversation) => (
-        conversation.projectId === source.projectId
-        && (input.includeArchived || conversation.archivedAt === null)
-      ))
+    const candidates = this.dependencies.store.projectConversations(source.projectId)
+      .filter((conversation) => input.includeArchived || conversation.archivedAt === null)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt, "en"))
       .slice(0, limit + 1);
     const rows = candidates
@@ -1230,9 +1227,9 @@ export class AgentThreadManager {
 
   private activeManagedChildren(sourceConversationId: string): number {
     const active = new Set(this.dependencies.turns.activeConversationIds());
-    for (const conversation of this.dependencies.store.shellSnapshot().conversations) {
-      if (this.dependencies.providerTerminalResumes.isActive(conversation.id)) {
-        active.add(conversation.id);
+    for (const conversationId of this.dependencies.store.conversationIds()) {
+      if (this.dependencies.providerTerminalResumes.isActive(conversationId)) {
+        active.add(conversationId);
       }
     }
     return [...active].filter((conversationId) =>

@@ -157,9 +157,9 @@ describe("runtime transport payload budget", () => {
       const snapshot = store.shellSnapshot([]);
       snapshotBytes = bytes(snapshot);
       samples.push(performance.now() - started);
-      expect(snapshot.conversations).toHaveLength(CONVERSATIONS);
-      expect(snapshot.conversations.filter(({ archivedAt }) => archivedAt))
-        .toHaveLength(ARCHIVED_CONVERSATIONS);
+      expect(snapshot.conversations).toHaveLength(CONVERSATIONS - ARCHIVED_CONVERSATIONS);
+      expect(snapshot.conversations.filter(({ archivedAt }) => archivedAt)).toHaveLength(0);
+      expect(snapshot.archivedConversationCount).toBe(ARCHIVED_CONVERSATIONS);
     }
     const median = [...samples].sort((left, right) => left - right)[2]!;
 

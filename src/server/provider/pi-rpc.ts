@@ -87,7 +87,12 @@ export function openPiRpcConnection(options: PiRpcOptions): PiRpcConnection {
     else if (force) void terminate(true).catch(() => undefined);
     return stopped;
   };
+  let closedOutputTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearClosedOutputTimer = (): void => {
+    if (closedOutputTimer) { clearTimeout(closedOutputTimer); closedOutputTimer = null; }
+  };
   const fail = (reason: Error): void => {
+    clearClosedOutputTimer();
     if (closing || error) return;
     error = reason;
     decoder?.stop();
@@ -151,7 +156,17 @@ export function openPiRpcConnection(options: PiRpcOptions): PiRpcConnection {
     stderrBytes += chunk.length;
     if (stderrBytes > 256 * 1024) fail(new Error("Pi diagnostic output exceeded its safety limit."));
   });
-  child.stdout.once("end", () => { decoder.end(); fail(new Error("Pi closed its protocol output before settling.")); });
+  child.stdout.once("end", () => {
+    decoder.end();
+    if (closing || error || closedOutputTimer) return;
+    // Allow a dying child (notably Windows .cmd shims) to emit `close` before
+    // force-terminating, matching Codex and Antigravity transport-close grace.
+    closedOutputTimer = setTimeout(() => {
+      closedOutputTimer = null;
+      fail(new Error("Pi closed its protocol output before settling."));
+    }, 100);
+    closedOutputTimer.unref();
+  });
   child.once("error", () => fail(new Error("Pi process could not start.")));
   child.once("close", () => fail(new Error("Pi process exited before settling.")));
   if (options.signal?.aborted) abort();
@@ -159,6 +174,7 @@ export function openPiRpcConnection(options: PiRpcOptions): PiRpcConnection {
     child, failure, request, send,
     close: async (force = true) => {
       closing = true;
+      clearClosedOutputTimer();
       decoder.stop();
       options.signal?.removeEventListener("abort", abort);
       rejectPending(new Error("Pi RPC connection closed."));

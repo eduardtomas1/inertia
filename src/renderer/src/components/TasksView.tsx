@@ -59,6 +59,7 @@ import {
 import { deriveTaskStatus, tasksSummary, type TaskStatus } from "./tasks/taskStatus";
 import { useDialogPresence } from "./DialogPresence";
 import { LoadingMark } from "./ui";
+import { archivedConversationRefsById } from "../utils/conversationReferences";
 import "./TasksView.css";
 
 type TasksMenuName = TaskDetailMenu | "done" | `row:${string}`;
@@ -85,6 +86,7 @@ export interface TasksViewProps {
   focusAddRequest?: number;
   request(command: CommandWithoutId, options?: { passive?: boolean }): Promise<ServerEvent>;
   onOpenConversation(conversation: Conversation): void;
+  onOpenArchivedConversation?(conversationId: string): void;
   onError(message: string): void;
 }
 
@@ -134,6 +136,7 @@ export function TasksView({
   focusAddRequest = 0,
   request,
   onOpenConversation,
+  onOpenArchivedConversation,
   onError,
 }: TasksViewProps): React.JSX.Element {
   const viewRef = useRef<HTMLElement>(null);
@@ -197,6 +200,7 @@ export function TasksView({
     () => new Map((snapshot?.conversations ?? []).map((conversation) => [conversation.id, conversation])),
     [snapshot?.conversations],
   );
+  const archivedRefs = useMemo(() => archivedConversationRefsById(snapshot), [snapshot]);
   const linkedConversations = useMemo(() => {
     const linkedIds = new Set(todos.flatMap(({ conversationId }) => conversationId ? [conversationId] : []));
     return (snapshot?.conversations ?? []).filter(({ id }) => linkedIds.has(id));
@@ -208,7 +212,9 @@ export function TasksView({
   ), [linkedConversations, snapshot?.activeConversationId, snapshot?.runs]);
 
   const derivedStatuses = useMemo(() => new Map(visibleTodos.map((todo) => {
-    const shell = todo.conversationId ? conversationsById.get(todo.conversationId) ?? null : null;
+    const shell = todo.conversationId
+      ? conversationsById.get(todo.conversationId) ?? archivedRefs.get(todo.conversationId) ?? null
+      : null;
     return [todo.id, deriveTaskStatus({
       todo,
       status: todo.conversationId ? threadViews.get(todo.conversationId)?.status ?? null : null,
@@ -216,7 +222,7 @@ export function TasksView({
       now: nowMs,
       starting: starting.has(todo.id),
     })];
-  })), [conversationsById, nowMs, starting, threadViews, visibleTodos]);
+  })), [archivedRefs, conversationsById, nowMs, starting, threadViews, visibleTodos]);
   const statuses = useStableValues(derivedStatuses, sameTaskStatus);
   const derivedDues = useMemo(
     () => new Map(visibleTodos.map((todo) => [todo.id, todoDueLabel(todo, now)])),
@@ -459,7 +465,8 @@ export function TasksView({
   const openChat = useCallback((todo: Todo): void => {
     const chat = todo.conversationId ? conversationsById.get(todo.conversationId) : undefined;
     if (chat) onOpenConversation(chat);
-  }, [conversationsById, onOpenConversation]);
+    else if (todo.conversationId && archivedRefs.has(todo.conversationId)) onOpenArchivedConversation?.(todo.conversationId);
+  }, [archivedRefs, conversationsById, onOpenArchivedConversation, onOpenConversation]);
 
   const stopTodo = useCallback((todo: Todo): void => {
     if (!todo.conversationId) return;
@@ -590,7 +597,8 @@ export function TasksView({
     id: "chat",
     label: "Open chat",
     icon: <MessageSquare size={14} aria-hidden="true" />,
-    disabled: !todo.conversationId || !conversationsById.has(todo.conversationId),
+    disabled: !todo.conversationId || !(conversationsById.has(todo.conversationId)
+      || (onOpenArchivedConversation !== undefined && archivedRefs.has(todo.conversationId))),
     restoreFocus: false,
     onSelect: () => openChat(todo),
   });
@@ -656,7 +664,7 @@ export function TasksView({
     ? statuses.get(detailTodo.id) ?? deriveTaskStatus({
       todo: detailTodo,
       status: detailTodo.conversationId ? threadViews.get(detailTodo.conversationId)?.status ?? null : null,
-      shell: detailShell,
+      shell: detailShell ?? (detailTodo.conversationId ? archivedRefs.get(detailTodo.conversationId) ?? null : null),
       now: nowMs,
       starting: starting.has(detailTodo.id),
     })
@@ -737,13 +745,17 @@ export function TasksView({
               ? snapshot.projects.find(({ id }) => id === detailTodo.projectId)?.name ?? null
               : null}
             sourceChatTitle={detailTodo.sourceConversationId
-              ? conversationsById.get(detailTodo.sourceConversationId)?.title ?? null
+              ? conversationsById.get(detailTodo.sourceConversationId)?.title
+                ?? archivedRefs.get(detailTodo.sourceConversationId)?.title ?? null
               : null}
             onOpenSourceChat={() => {
               const source = detailTodo.sourceConversationId
                 ? conversationsById.get(detailTodo.sourceConversationId)
                 : undefined;
               if (source) onOpenConversation(source);
+              else if (detailTodo.sourceConversationId && archivedRefs.has(detailTodo.sourceConversationId)) {
+                onOpenArchivedConversation?.(detailTodo.sourceConversationId);
+              }
             }}
             focusTarget={focusRequest?.id === detailTodo.id ? focusRequest.target : null}
             openMenu={detailMenu}

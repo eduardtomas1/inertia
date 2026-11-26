@@ -8,9 +8,7 @@ export function providerConversationIds(
   store: RuntimeStore,
   providers: TurnProviderRuntime,
 ): string[] {
-  return store.shellSnapshot().conversations
-    .filter(({ id }) => providers.isRunning(id))
-    .map(({ id }) => id);
+  return store.conversationIds().filter((id) => providers.isRunning(id));
 }
 
 export function hasActiveTurnCheckout(

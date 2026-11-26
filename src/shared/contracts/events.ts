@@ -1,6 +1,8 @@
 import type { LimitResetResult } from "../limit-reset";
 import type { UpdatesRunResult } from "../updates";
 import type { BackgroundTasksResult } from "../background-tasks";
+import type { ArchivedConversationsPage } from "../archived-conversations";
+import type { ActivityDetailPatch, ActivityDetailReadResult } from "../activity-detail";
 import type { UsageLimitsSnapshot, UsageResetConfirmation, UsageResetOutcome } from "../provider-usage-limits";
 import type { CliConversationPreview, CliConversationScan } from "../cli-conversations";
 import type { MessageQueueResult } from "../queued-messages";
@@ -130,7 +132,7 @@ export type RuntimeMutationEvent =
   | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string; replace?: true }
   | { type: "agent.commentary.persisted"; message: ChatMessage }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }
-  | { type: "agent.activity"; activity: AgentActivity }
+  | { type: "agent.activity"; activity: AgentActivity; detailPatch?: ActivityDetailPatch }
   | { type: "agent.subagent.updated"; trace: SubagentTrace }
   | { type: "agent.approval.requested"; request: AgentApprovalRequest }
   | { type: "agent.approval.resolved"; conversationId: string; runId: string; turnId: string; requestId: string; decision: "approve" | "deny" | "cancel" | "cancelled" }
@@ -218,6 +220,7 @@ export type ServerEvent =
         | import("../cursor-sdk-auth").CursorSdkStatusResult
         | import("../cursor-sdk-auth").CursorSdkModelsResult
         | { kind: "attachment.storage"; storage: import("../attachment-storage").AttachmentStorageStatus; removed?: { records: number; bytes: number } }
+        | { kind: "database.storage"; storage: import("../database-storage").DatabaseStorageStatus; compaction?: import("../database-storage").DatabaseCompactionSummary }
         | { kind: "support.report"; report: import("../issue-report").IssueReport | null; github?: import("../issue-report").IssueGitHubState }
         | { kind: "git.status"; status: GitStatusSnapshot }
         | { kind: "git.diff"; diff: GitDiffSnapshot }
@@ -264,6 +267,8 @@ export type ServerEvent =
         | LimitResetResult
         | UpdatesRunResult
         | BackgroundTasksResult
+        | ArchivedConversationsPage
+        | ActivityDetailReadResult
         | ConversationCompactionResult
         | ConversationCompactAndSendResult
         | DuoPreparedResult

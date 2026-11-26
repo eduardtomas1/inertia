@@ -84,7 +84,7 @@ export class ScratchWorkspace {
   }
 
   private chatsOf(projectId: string): Conversation[] {
-    return this.store.shellSnapshot().conversations.filter((conversation) => conversation.projectId === projectId);
+    return this.store.projectConversations(projectId);
   }
 
   private adoptMovedChats(projectId: string, root: string): void {
@@ -126,7 +126,7 @@ export class ScratchWorkspace {
       if (created) releaseClaimedFolder(root, created);
       throw error;
     }
-    const current = this.store.shellSnapshot().projects.find((project) => project.workspaceKind === "scratch");
+    const current = this.store.projects().find((project) => project.workspaceKind === "scratch");
     if (!current) return this.store.createProject("No project", root, { workspaceKind: "scratch", activate: false });
     const bound = normalizeIdentityPath(current.path) === normalizeIdentityPath(root) && this.hasValidReceipt(current.id);
     const project = bound ? current : this.store.rebindScratchProject(current.id, root);
@@ -175,7 +175,7 @@ export class ScratchWorkspace {
   }
 
   private async planProvisioning(): Promise<{ projectId: string; pending: Conversation[]; leftovers: Map<string, string> } | null> {
-    const project = this.store.shellSnapshot().projects.find(({ workspaceKind }) => workspaceKind === "scratch");
+    const project = this.store.projects().find(({ workspaceKind }) => workspaceKind === "scratch");
     if (!project) return null;
     const root = resolve(this.dataDirectory, "scratch");
     const chats = this.chatsOf(project.id);

@@ -4,6 +4,11 @@ import { MESSAGE_SEARCH_LIMIT, MESSAGE_SEARCH_QUERY_MAX, MESSAGE_SEARCH_SNIPPET_
 export const messageSearchQuerySchema = z.string().trim().min(2)
   .max(MESSAGE_SEARCH_QUERY_MAX).refine((query) => !query.includes("\0"));
 
+export const messageSearchContinuationSchema = z.strictObject({
+  createdAt: z.string().min(1).max(64),
+  messageId: z.string().min(1).max(200),
+});
+
 export const messageSearchTargetSchema = z.strictObject({
   projectId: z.string().uuid(),
   conversationId: z.string().uuid(),
@@ -25,4 +30,6 @@ export const messageSearchResultSchema = z.strictObject({
   hits: z.array(messageSearchHitSchema).max(MESSAGE_SEARCH_LIMIT),
   hasMore: z.boolean(),
   incomplete: z.boolean(),
+  continuation: messageSearchContinuationSchema.nullable().optional(),
+  indexing: z.boolean().optional(),
 }).refine((result) => new Set(result.hits.map((hit) => hit.messageId)).size === result.hits.length);

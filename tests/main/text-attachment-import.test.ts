@@ -15,12 +15,29 @@ describe("text attachment formats", () => {
     ["settings.jsonc", "application/json", Buffer.from('{ // editor settings\n "enabled": true\n}')],
     ["Dockerfile", "", Buffer.from("FROM scratch\n")],
     [".gitignore", "text/plain", Buffer.from("node_modules/\n")],
-    ["analysis.ipynb", "application/x-ipynb+json", Buffer.from('{"cells": [], "nbformat": 4}\n')],
   ])("imports %s with %s and preserves its bytes", async (name, mimeType, data) => {
     const result = await validateAttachmentImport({ name, mimeType, data });
     expect(result.mimeType).toBe("text/plain");
     expect(result.bytes).toEqual(data);
     expect(result.size).toBe(data.length);
+  });
+
+  it("imports a notebook as a Jupyter notebook with its extracted text and preserves its bytes", async () => {
+    const data = Buffer.from('{"cells": [{"cell_type": "code", "source": "print(1)"}], "nbformat": 4}\n');
+    const result = await validateAttachmentImport({ name: "analysis.ipynb", mimeType: "application/x-ipynb+json", data });
+    expect(result).toMatchObject({
+      mimeType: "application/x-ipynb+json",
+      extension: "ipynb",
+      bytes: data,
+      size: data.length,
+      extractedText: "## Cell 1 (code)\nprint(1)",
+      extractedTruncated: false,
+    });
+    await expect(validateAttachmentImport({
+      name: "empty.ipynb",
+      mimeType: "application/x-ipynb+json",
+      data: Buffer.from('{"cells": [], "nbformat": 4}\n'),
+    })).rejects.toThrow("The document contains no readable text.");
   });
 
   it.each([

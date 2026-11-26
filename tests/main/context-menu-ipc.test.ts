@@ -288,4 +288,28 @@ describe("surface context menu IPC", () => {
     await expect(show({ kind: "code", hasSelection: false, anchor })).rejects.toThrow("Rejected untrusted");
     expect(electron.build).not.toHaveBeenCalled();
   });
+
+  it("adds Open in <Editor> on file context menus when a preferred editor is configured", async () => {
+    const window = {
+      isDestroyed: vi.fn(() => false),
+      webContents: { getZoomFactor: vi.fn(() => 1), inspectElement: vi.fn() },
+    };
+    registerContextMenuIpc({
+      channel,
+      assertTrusted: () => ({ role: "main" }),
+      windowFor: () => window as unknown as BrowserWindow,
+      isPackaged: () => true,
+      platform: "win32",
+      editorMenu: () => ({
+        preferredEditor: "vscode",
+        detectedEditors: [{ id: "vscode", label: "VS Code" }, { id: "zed", label: "Zed" }],
+      }),
+    });
+    const handler = electron.handlers.get(channel)!;
+    const result = handler({ sender: {} }, { kind: "file", projectId, relativePath: "src/app.ts", directory: false, anchor });
+    await vi.waitFor(() => expect(electron.popup).toHaveBeenCalledOnce());
+    expect(shape()).toEqual(["Open", "Open in VS Code", "Reveal in File Explorer", "-", "Copy path", "Copy relative path"]);
+    choose("Open in VS Code");
+    await expect(result).resolves.toBe("open-in-editor:vscode");
+  });
 });

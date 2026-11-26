@@ -109,6 +109,8 @@ export function createPreviewTab(options: PreviewTabOptions): PreviewTab {
     lastInputFromUser: () => lastInputFromUser,
     navigate: options.navigate,
     agentBusy: options.agentBusy,
+    ...(options.commentOnElement ? { commentOnElement: options.commentOnElement } : {}),
+    ...(options.canCommentOnElement ? { canCommentOnElement: options.canCommentOnElement } : {}),
   });
   contents.on("before-mouse-event", (event) => {
     if (options.captureLocked.has(contents)) event.preventDefault();

@@ -313,7 +313,7 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     harnessId: "claude-agent-sdk",
     implementationRevision: 1,
     protocolRevision: "claude-agent-sdk/messages-v1",
-    bundledSdkVersion: "0.3.323",
+    bundledSdkVersion: "0.3.329",
     requiresConfiguration: ["custom-backend", "endpoint-selection"],
     support: {
       ...CORE_NATIVE,
@@ -334,8 +334,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "cursor",
     harnessId: "cursor-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.6.0/cursor",
-    bundledSdkVersion: "2.6.0",
+    protocolRevision: "acp-v1/sdk-2.8.0/cursor",
+    bundledSdkVersion: "2.8.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -359,8 +359,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "kimi",
     harnessId: "kimi-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.6.0/kimi",
-    bundledSdkVersion: "2.6.0",
+    protocolRevision: "acp-v1/sdk-2.8.0/kimi",
+    bundledSdkVersion: "2.8.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",
@@ -374,8 +374,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "opencode",
     harnessId: "opencode-sdk",
     implementationRevision: 3,
-    protocolRevision: "opencode-owned-server/sdk-1.19.5+http-2.0.28",
-    bundledSdkVersion: "1.19.5",
+    protocolRevision: "opencode-owned-server/sdk-1.19.6+http-2.0.28",
+    bundledSdkVersion: "1.19.6",
     support: {
       ...CORE_NATIVE,
       "follow-up-steer": "native",
@@ -409,8 +409,8 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
     providerId: "grok",
     harnessId: "grok-acp",
     implementationRevision: 1,
-    protocolRevision: "acp-v1/sdk-2.6.0/grok",
-    bundledSdkVersion: "2.6.0",
+    protocolRevision: "acp-v1/sdk-2.8.0/grok",
+    bundledSdkVersion: "2.8.0",
     support: {
       ...CORE_NATIVE,
       images: "negotiated",

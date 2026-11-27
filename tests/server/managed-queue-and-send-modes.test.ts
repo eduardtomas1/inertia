@@ -709,6 +709,7 @@ describe("D.7 inertia_queue tool and H2/G5 managed queue semantics", () => {
       env.store.orchestration.synchronize(env.store.agentTurn(firstTurn.id));
       env.store.orchestration.cleanup({ turnId: firstTurn.id, runId: firstTurn.runId }, "confirmed");
       env.store.updateConversation(env.source.id, { accessMode: "auto-edit", interactionMode: "build" });
+      env.db.prepare("UPDATE agent_turns SET access_mode = 'auto-edit', interaction_mode = 'build' WHERE id = ?").run(env.sourceTurn.id);
       env.store.updateConversation(env.childId, { accessMode: "auto-edit", interactionMode: "build" });
 
       // (a) Caller accessMode lowered DURING acquireTurnAdmission -> rejects before turns.queue and releases admission.

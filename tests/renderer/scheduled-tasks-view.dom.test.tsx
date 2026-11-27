@@ -384,6 +384,8 @@ describe("ScheduledTasksView", () => {
     expect(within(runsRegion).getByText("Manual")).toBeVisible();
     expect(within(runsRegion).getByText("Quota limit hit")).toBeVisible();
     expect(within(runsRegion).getByText("Scheduled")).toBeVisible();
+    const runOpenButtons = within(runsRegion).getAllByRole("button", { name: "Open chat" });
+    expect(runOpenButtons.length).toBe(2);
 
     // Error surfacing on list failure
     const failingRequest = vi.fn<RequestFn>(async () => ({

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { AccessMode, AgentTurn, Conversation, RuntimeMutationEvent } from "../../shared/contracts";
-import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
+import { COMMAND_ONLY_STEER_REFUSED, isCommandOnlyPrompt, supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
 import {
   MAX_QUEUED_USER_AND_AGENT_ITEMS,
   queueAgentCommandId,
@@ -292,7 +292,9 @@ export function hasUnheldWaitingQueueItem(store: RuntimeStore, conversationId: s
 export function shouldAutoQueueInsteadOfSteer(
   dependencies: Pick<ManagedDispatchDependencies, "store" | "turns" | "isCompacting">,
   target: Conversation,
+  content?: string,
 ): boolean {
+  if (content !== undefined && isCommandOnlyPrompt(content, 0)) return true;
   if (dependencies.isCompacting?.(target.id) === true) return true;
   if (dependencies.store.orchestration.runControl.interruptRequested(target.id)) return true;
   const activeIdentity = dependencies.turns.activeIdentity(target.id);
@@ -316,6 +318,7 @@ export async function steerManagedTurn(
   link?: ManagedFollowUpLink,
   source?: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
 ): Promise<ProviderHostToolResult> {
+  if (isCommandOnlyPrompt(content, 0)) throw new Error(COMMAND_ONLY_STEER_REFUSED);
   const lease = dependencies.turns.acquireFollowUpAdmission(target.id);
   if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
   try {
@@ -768,10 +771,14 @@ export function preflightManagedSend(
   },
   target: Conversation,
   mode: SendMode,
+  content?: string,
 ): void {
   const active = dependencies.turns.isActive(target.id);
   const compacting = dependencies.isCompacting?.(target.id) === true;
   if (mode === "steer" && !active) throw new Error(STEER_IDLE);
+  if (mode === "steer" && content !== undefined && isCommandOnlyPrompt(content, 0)) {
+    throw new Error(COMMAND_ONLY_STEER_REFUSED);
+  }
   if (mode === "restart" && !active) throw new Error(RESTART_IDLE);
   if (mode === "restart") assertManagedTurnCanStart(dependencies, target);
   if (mode === "queue") {
@@ -781,7 +788,7 @@ export function preflightManagedSend(
       assertManagedTurnCanStart(dependencies, target);
     }
   }
-  if (mode === "auto" && (active || compacting) && shouldAutoQueueInsteadOfSteer(dependencies, target)) {
+  if (mode === "auto" && (active || compacting) && shouldAutoQueueInsteadOfSteer(dependencies, target, content)) {
     assertManagedQueueRoom(dependencies, target);
   }
 }
@@ -830,7 +837,7 @@ export async function dispatchManagedSend(
     return queueManagedMessage(dependencies, target, content, operationId, { source }).result;
   }
   if (mode === "auto" && (active || compacting)) {
-    if (shouldAutoQueueInsteadOfSteer(dependencies, target)) {
+    if (shouldAutoQueueInsteadOfSteer(dependencies, target, content)) {
       return queueManagedMessage(dependencies, target, content, operationId, { source }).result;
     }
     return await steerManagedTurn(dependencies, target, content, operationId, signal, link, source);

@@ -38,9 +38,10 @@ tests, not just interfaces, documentation, or a disconnected prototype.
 - [x] Managed delegation across providers/models, explicit task context,
   permission ceilings, nested completion, stable result generations,
   follow-up/cancel/wait, durable parent inbox and wake acknowledgements.
-  (Phases 4–5, 2026-11-26: verified with fixture providers; V2 atomic queue
-  events, bounded `offerDelegated` retries, and `prepareCancel` for held child
-  queues. Deferred: inherited runtime-mode step-down and child-question reactor.)
+  (Phases 4–5 + Wave A, 2026-11-27: verified with fixture providers; V2 atomic queue
+  events, bounded `offerDelegated` retries, `prepareCancel` for held child queues,
+  persisted `childQuestionWake` parent wakes withdrawn when stale, and effective
+  turn/chat mode ceiling enforcement via `narrowConversationByTurn`.)
 - [x] Native children represented separately as observed child threads, with
   provider-specific status/results and supported control operations.
   (Phase 4, 2026-11-01: a derived read-only projection over subagent traces,

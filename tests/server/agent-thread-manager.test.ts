@@ -2408,7 +2408,9 @@ describe("inertia_send_message modes", () => {
     const env = await runtime();
     try {
       env.store.updateConversation(env.source.id, { accessMode: "full" });
-      const bridge = env.manager.bridgeFor({ conversation: env.store.conversation(env.source.id), turn: env.sourceTurn });
+      (env.store as unknown as { database: { prepare(sql: string): { run(...args: unknown[]): unknown } } })
+        .database.prepare("UPDATE agent_turns SET access_mode = 'full' WHERE id = ?").run(env.sourceTurn.id);
+      const bridge = env.manager.bridgeFor({ conversation: env.store.conversation(env.source.id), turn: env.store.agentTurn(env.sourceTurn.id) });
       const createCall = { ...call("inertia_create_conversation", { title: "Full Child", prompt: "Work in full access" }), toolCallId: `create-${crypto.randomUUID()}` };
       const createdRes = await bridge.invoke(createCall);
       expect(createdRes.success).toBe(true);
@@ -2461,13 +2463,16 @@ describe("inertia_send_message modes", () => {
       (env.store as unknown as { database: { prepare(sql: string): { run(...args: unknown[]): unknown } } })
         .database.prepare("UPDATE agent_turns SET harness_id = 'codex-app-server', model_selection_json = json_set(model_selection_json, '$.harnessId', 'codex-app-server') WHERE id = ?").run(env.firstTurnId);
 
-      // b0b2c4f95 agent-sender note (regular vs slash command) + create hidden instruction.
+      // b0b2c4f95 agent-sender note + c38537754 command-only steer refusal/queueing.
       expect(env.queuedRequests[0]?.content).toBe("Delegated work");
       expect(JSON.stringify(env.queuedRequests[0]?.internalInstructions)).toContain("sent this message, not the user.");
       expect((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "Check logs", mode: "steer" }))).success).toBe(true);
       expect((env.steerRequests.at(-1)!.options as { providerContent: string }).providerContent).toContain("sent this message, not the user.");
-      expect((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "/compact now", mode: "steer" }))).success).toBe(true);
-      expect((env.steerRequests.at(-1)!.options as { providerContent: string }).providerContent).toBe("/compact now");
+      const cmdSteer = await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "/compact now", mode: "steer" }));
+      expect(cmdSteer.success).toBe(false);
+      expect(cmdSteer.text).toContain("Commands must run as a separate turn.");
+      const cmdAuto = JSON.parse((await env.bridge.invoke(sendCall({ conversationId: env.conversationId, content: "/compact now", mode: "auto" }))).text);
+      expect(cmdAuto).toMatchObject({ disposition: "queued", accepted: true });
     } finally { env.store.close(); }
   });
 

@@ -452,6 +452,7 @@ describe("extended managed host tools", () => {
 
       // Full access auto-approves without asking, defaults to latest completed turn, and dispatches optional prompt.
       env.store.updateConversation(env.source.id, { accessMode: "full", interactionMode: "build" });
+      env.db.prepare("UPDATE agent_turns SET access_mode = 'full', interaction_mode = 'build' WHERE id = ?").run(env.sourceTurn.id);
       const fullCall = makeCall(FORK_CONVERSATION_TOOL_NAME, {
         title: "Full Access Fork",
         prompt: "Investigate branch A",

@@ -845,7 +845,7 @@ export class AgentThreadManager {
       const input = sendSchema.parse(args);
       const target = this.managedTarget(current, input.conversationId);
       assertManagedDispatchCeiling(current, target);
-      preflightManagedSend(this.dependencies, target, input.mode ?? "auto");
+      preflightManagedSend(this.dependencies, target, input.mode ?? "auto", input.content);
       await this.assertRouteReady(this.dependencies.backendProfileController.validateSelection(target.modelSelection));
       return;
     }

@@ -252,6 +252,7 @@ export const queueEventSchema = z.discriminatedUnion("type", [
       attachmentIds: z.array(id).max(MAX_ATTACHMENT_COUNT).optional(),
       modelSelection: modelSelectionSchema.nullable().optional(),
       routeIdentity: routeIdentitySchema.optional(),
+      clearSteerWhenReady: z.literal(true).optional(),
       editedAt: timestamp,
     }),
   }),

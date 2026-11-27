@@ -3,6 +3,7 @@ import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ClientCommand, ModelSelection, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
 import { providerIdForHarness } from "../../shared/model-routing";
+import { COMMAND_ONLY_STEER_REFUSED, isCommandOnlyPrompt } from "../../shared/follow-up-steer";
 import { MAX_QUEUED_USER_AND_AGENT_ITEMS, queueDeferredSteerCommandId, type ChildQuestionWakeAttribution, type ScheduledTaskQueueAttribution } from "../../shared/orchestration-queue";
 import { QUEUED_ROUTE_CHANGED_ERROR, type MessageQueueResult, type QueuedMessage } from "../../shared/queued-messages";
 import type { DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
@@ -687,9 +688,8 @@ export function createQueuedMessageRuntime(
       changed(conversationId);
       return;
     }
-    if (first.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) {
-      throw new RuntimeRequestError(QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
-    }
+    if (first.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) throw new RuntimeRequestError(QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
+    if (isCommandOnlyPrompt(first.content, first.attachments.length)) throw new RuntimeRequestError(COMMAND_ONLY_STEER_REFUSED);
     const admission = turns.acquireFollowUpAdmission(conversationId);
     if (!admission) throw new RuntimeRequestError("This agent cannot take a message while it works. It will send when the turn ends.");
     let claimed = false;

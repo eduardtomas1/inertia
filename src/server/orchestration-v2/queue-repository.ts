@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 
 import type { ChatAttachment, Conversation, ModelSelection } from "../../shared/contracts";
+import { isCommandOnlyPrompt } from "../../shared/follow-up-steer";
 import { modelSelectionSchema } from "../../shared/model-routing";
 import {
   QUEUE_ITEM_PROJECTION,
@@ -450,6 +451,12 @@ export class OrchestrationQueueRepository {
       const modelSelection = input.modelSelection !== undefined
         ? (input.modelSelection === null ? null : modelSelectionSchema.parse(input.modelSelection))
         : undefined;
+      const existingProjection = this.getItem(input.itemId);
+      const nextAttachmentCount = sanitizedAttachments !== undefined
+        ? sanitizedAttachments.length
+        : (existingProjection?.attachmentIds.length ?? 0);
+      const clearSteerWhenReady = existingProjection?.steerWhenReadyRunId !== undefined
+        && isCommandOnlyPrompt(content, nextAttachmentCount);
       const committed = this.events.commit({
         ...identity, command, commandType, expectedRevision: this.events.revision(conversation.id),
         events: [{
@@ -460,6 +467,7 @@ export class OrchestrationQueueRepository {
             ...(sanitizedAttachments !== undefined ? { attachmentIds: sanitizedAttachments.map(({ id }) => id) } : {}),
             ...(modelSelection !== undefined ? { modelSelection } : {}),
             ...(input.routeIdentity !== undefined ? { routeIdentity: input.routeIdentity } : {}),
+            ...(clearSteerWhenReady ? { clearSteerWhenReady: true as const } : {}),
             editedAt,
           },
         }],
@@ -472,11 +480,12 @@ export class OrchestrationQueueRepository {
         const nextSelection = modelSelection !== undefined ? (modelSelection === null ? null : JSON.stringify(modelSelection)) : row.selection_json;
         this.database.prepare(`UPDATE queued_messages
           SET content = ?, attachments_json = ?, intent_digest = ?, route_identity = ?,
-              edit_revision = ?, edited_at = ?, state = 'waiting', error = NULL, selection_json = ?
+              edit_revision = ?, edited_at = ?, state = 'waiting', error = NULL, selection_json = ?,
+              steer_when_ready_run_id = CASE WHEN ? = 1 THEN NULL ELSE steer_when_ready_run_id END
           WHERE id = ? AND conversation_id = ?`).run(
           content, JSON.stringify(nextAttachments), queuedIntentDigest(content, nextAttachments),
           input.routeIdentity ?? row.route_identity, input.expectedRevision + 1, editedAt, nextSelection,
-          input.itemId, conversation.id,
+          clearSteerWhenReady ? 1 : 0, input.itemId, conversation.id,
         );
       });
       return { replayed: committed.replayed, value: this.requireItem(input.itemId), events: committed.events };

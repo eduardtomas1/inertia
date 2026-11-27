@@ -234,8 +234,10 @@ export function projectQueueEvent(
         throw new OrchestrationConflict("revision-conflict");
       }
       const cleared = withoutBlockedFields(item);
+      const { steerWhenReadyRunId: _droppedSteerWhenReady, ...withoutSteerWhenReady } = cleared;
+      const base = payload.clearSteerWhenReady ? withoutSteerWhenReady : cleared;
       const updated = queueItemProjectionSchema.parse({
-        ...cleared,
+        ...base,
         contentRef: payload.contentRef,
         attachmentIds: payload.attachmentIds ?? cleared.attachmentIds,
         ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),

@@ -4,7 +4,7 @@ import type WebSocket from "ws";
 
 import type { Conversation, ModelSelection, TurnRequestContext } from "../../../shared/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES, isExtractedDocumentAttachmentMimeType } from "../../../shared/attachments";
-import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
+import { COMMAND_ONLY_STEER_REFUSED, isCommandOnlyPrompt, supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { providerIdForHarness } from "../../../shared/model-routing";
 import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 import { hasIncompleteWorktreeSetup } from "../../workspace-path-authority";
@@ -383,6 +383,10 @@ function routeMessageSend(
     enterStage("follow-up-preparation");
     if (command.payload.context !== undefined) {
       throw new RuntimeRequestError("Follow-ups while the agent is working cannot add workspace context.");
+    }
+    if (isCommandOnlyPrompt(command.payload.content, command.payload.attachments.length)) {
+      if (!dependencies.undeliveredFollowUps) throw new RuntimeRequestError(COMMAND_ONLY_STEER_REFUSED);
+      return { kind: "after-turn" };
     }
     const stopping = dependencies.store.orchestration.runControl.interruptRequested(conversation.id);
     const admission = stopping ? null : dependencies.turns.acquireFollowUpAdmission(conversation.id);

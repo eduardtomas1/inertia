@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { Conversation } from "../../shared/contracts";
-import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
+import { COMMAND_ONLY_STEER_REFUSED, isCommandOnlyPrompt, supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
 import {
   MAX_QUEUED_CONTENT_CHARS,
   queueAgentCommandId,
@@ -384,6 +384,35 @@ export async function executeManagedQueueMutation(
   }
   if (dependencies.store.orchestration.runControl.interruptRequested(target.id)) {
     throw new Error("The managed chat's running turn is stopping and cannot be steered.");
+  }
+  const promoteContent = dependencies.store.orchestration.queue.getContent(target.id, itemId)?.content ?? "";
+  if (isCommandOnlyPrompt(promoteContent, currentItem.attachmentIds.length)) {
+    assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source);
+    const activeItems = dependencies.store.orchestration.queue.listActive(target.id);
+    const firstMoveTarget = activeItems.find((item) => item.kind !== "delegated-results" && item.state !== "dispatching");
+    if (firstMoveTarget && firstMoveTarget.id !== itemId) {
+      dependencies.store.orchestration.queue.reorder({
+        conversationId: target.id,
+        itemId,
+        beforeItemId: firstMoveTarget.id,
+        commandType: "message.queue.reorder",
+        source: {
+          actorId: "runtime",
+          commandId,
+          command: { type: "message.queue.reorder", conversationId: target.id, id: itemId, beforeId: firstMoveTarget.id },
+        },
+      });
+      publish();
+    }
+    return json({
+      conversationId: target.id,
+      action: "promote_to_steer",
+      itemId,
+      disposition: "queued",
+      movedFirst: true,
+      accepted: true,
+      message: COMMAND_ONLY_STEER_REFUSED,
+    });
   }
   const activeIdentity = dependencies.turns.activeIdentity(target.id);
   if (input.targetTurnId && activeIdentity && activeIdentity.turnId !== input.targetTurnId) {

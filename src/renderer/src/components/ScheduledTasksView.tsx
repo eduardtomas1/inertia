@@ -170,8 +170,11 @@ function buildSchedule(draft: FormDraft): { schedule: ScheduledTaskSchedule } | 
   return { schedule: { type: "once", runAt: parsed.toISOString() } };
 }
 
-function statusBadge(task: ScheduledTask): { label: string; tone: "active" | "paused" | "failed" } {
+function statusBadge(task: ScheduledTask): { label: string; tone: "active" | "running" | "paused" | "failed" } {
   if (!task.enabled) return { label: "Paused", tone: "paused" };
+  if (task.lastRunStatus === "running" || task.lastRunStatus === "queued" || task.lastRunStatus === "claimed") {
+    return { label: task.lastRunStatus === "running" ? "Running" : "Queued", tone: "running" };
+  }
   if (task.lastRunStatus === "failed" || task.lastError) return { label: "Failed", tone: "failed" };
   return { label: "Active", tone: "active" };
 }
@@ -697,14 +700,22 @@ export function ScheduledTasksView({
                             <p className="scheduled-runs-empty">No runs recorded yet.</p>
                           ) : (
                             <ul className="scheduled-runs-list">
-                              {recentRuns.map((run) => (
-                                <li key={run.id} className="scheduled-run-row">
-                                  <span className={`scheduled-run-state is-${run.state}`}>{runStateLabel(run.state)}</span>
-                                  <span className="scheduled-run-trigger">{run.trigger === "manual" ? "Manual" : "Scheduled"}</span>
-                                  <span className="scheduled-run-time">{formatLocalTimestamp(run.finishedAt ?? run.claimedAt)}</span>
-                                  {run.error && <span className="scheduled-run-error" role="alert">{run.error}</span>}
-                                </li>
-                              ))}
+                              {recentRuns.map((run) => {
+                                const runConv = run.conversationId ? conversationsById.get(run.conversationId) ?? null : null;
+                                return (
+                                  <li key={run.id} className="scheduled-run-row">
+                                    <span className={`scheduled-run-state is-${run.state}`}>{runStateLabel(run.state)}</span>
+                                    <span className="scheduled-run-trigger">{run.trigger === "manual" ? "Manual" : "Scheduled"}</span>
+                                    <span className="scheduled-run-time">{formatLocalTimestamp(run.finishedAt ?? run.claimedAt)}</span>
+                                    {runConv && (
+                                      <button type="button" className="scheduled-run-open" onClick={() => { onOpenConversation(runConv); }}>
+                                        <MessageSquare size={12} aria-hidden="true" /><span>Open chat</span>
+                                      </button>
+                                    )}
+                                    {run.error && <span className="scheduled-run-error" role="alert">{run.error}</span>}
+                                  </li>
+                                );
+                              })}
                             </ul>
                           )}
                         </div>

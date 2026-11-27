@@ -103,3 +103,11 @@ export function supportsSteerDuringCompaction(harnessId: string | null): boolean
 export function supportsNativeResume(harnessId: string | null): boolean {
   return harnessSteeringCapabilities(harnessId)?.nativeResume === "native";
 }
+
+/** T3 `c38537754`: slash-command-only prompts must run as their own turn, never steer an active turn. */
+export const COMMAND_ONLY_STEER_REFUSED = "Commands must run as a separate turn. Queue it or wait for the active turn to finish.";
+const COMMAND_ONLY_PROMPT_PATTERN = /^\/[\w:-]+(?:\s|$)/u;
+
+export function isCommandOnlyPrompt(content: string, attachmentCount = 0): boolean {
+  return attachmentCount === 0 && COMMAND_ONLY_PROMPT_PATTERN.test(content.trim());
+}

@@ -966,7 +966,15 @@ export class ScheduledTaskService {
       this.onTurnSettled(turn);
       return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
     }
-    this.trackedByTurnId.set(run.turnId, run.id);
+    this.trackRun({
+      runId: run.id,
+      taskId: run.taskId,
+      conversationId: run.conversationId ?? turn.conversationId,
+      queueItemId: run.queueItemId ?? run.id,
+      turnId: run.turnId,
+      claimedAt: run.claimedAt,
+      providerContent: "",
+    });
     return null;
   }
 

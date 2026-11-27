@@ -71,6 +71,7 @@ interface RouteBoundSkillDiscoveryState {
 interface SkillDiscoveryFlight {
   forceReload: boolean;
   routeKey: string;
+  pinnedRoute: boolean;
   promise: Promise<AgentSkillSummary[]>;
 }
 
@@ -791,10 +792,12 @@ export class AgentWorkflowController {
         "This route does not expose safe structured skill invocation.",
       );
     }
+    const pinnedRoute = effectiveConversation !== undefined;
     const routeKey = this.skillRouteKey(conversation, cwd);
     const existing = this.skillDiscoveryFlights.get(conversationId);
     if (
       existing?.routeKey === routeKey
+      && existing.pinnedRoute === pinnedRoute
       && (existing.forceReload || !forceReload)
     ) return await existing.promise;
     const predecessor = existing?.promise ?? Promise.resolve([]);
@@ -802,24 +805,11 @@ export class AgentWorkflowController {
       const current = effectiveConversation ?? this.store.conversation(conversationId);
       const currentCwd = this.store.conversationPath(conversationId);
       if (this.skillRouteKey(current, currentCwd) !== routeKey) {
-        throw new RuntimeRequestError(
-          "The provider route changed while skills were refreshing.",
-        );
+        throw new RuntimeRequestError("The provider route changed while skills were refreshing.");
       }
-      return await this.discoverSkills(
-        conversationId,
-        current,
-        currentCwd,
-        forceReload,
-        routeKey,
-        effectiveConversation !== undefined,
-      );
+      return await this.discoverSkills(conversationId, current, currentCwd, forceReload, routeKey, pinnedRoute);
     });
-    const flight: SkillDiscoveryFlight = {
-      forceReload,
-      routeKey,
-      promise,
-    };
+    const flight: SkillDiscoveryFlight = { forceReload, routeKey, pinnedRoute, promise };
     this.skillDiscoveryFlights.set(conversationId, flight);
     try {
       return await promise;

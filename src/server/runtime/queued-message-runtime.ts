@@ -807,6 +807,11 @@ export function createQueuedMessageRuntime(
   }
 
   const directTurnInteraction = createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps });
+  const socketlessDirectTurnInteraction = createTurnInteractionCommandHandler({
+    ...dependencies,
+    undeliveredFollowUps,
+    send: () => undefined,
+  });
   const operationsContext: QueueOperationsContext = {
     dependencies,
     running,
@@ -820,10 +825,17 @@ export function createQueuedMessageRuntime(
     schedule,
     retryAfterCleanup,
     dispatch: async (conversationId, requestedId) => { await dispatch(conversationId, requestedId); },
-    directTurnInteraction: (socket, command, authority, sendOptions) =>
-      sendOptions?.modelSelectionOverride
-        ? sendMessageCommand({ ...dependencies, undeliveredFollowUps }, socket, command, sendOptions)
-        : directTurnInteraction(socket, command, authority),
+    directTurnInteraction: (socket, command, authority, sendOptions) => {
+      if (sendOptions?.modelSelectionOverride) {
+        const deps = socket
+          ? { ...dependencies, undeliveredFollowUps }
+          : { ...dependencies, undeliveredFollowUps, send: () => undefined };
+        return sendMessageCommand(deps, socket ?? (null as unknown as WebSocket), command, sendOptions);
+      }
+      return socket
+        ? directTurnInteraction(socket, command, authority)
+        : socketlessDirectTurnInteraction(null as unknown as WebSocket, command, authority);
+    },
   };
 
   const handler = defineRuntimeCommandHandler([

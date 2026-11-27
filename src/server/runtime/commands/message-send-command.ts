@@ -518,13 +518,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   const selectionOverride = selectionOverrideFor(dependencies, options);
   const effectiveSelection = effectiveSelectionFor(dependencies, conversation, options);
   const effectiveProviderId = effectiveProviderIdFor(dependencies, conversation, options);
-  const effectiveRouteDiffers = selectionOverride !== null && (
-    effectiveProviderId !== conversation.providerId
-    || effectiveSelection.harnessId !== conversation.modelSelection.harnessId
-    || effectiveSelection.backendProfileId !== conversation.modelSelection.backendProfileId
-    || effectiveSelection.backendConfigurationRevision !== conversation.modelSelection.backendConfigurationRevision
-  );
-  const skillConversation: Conversation | undefined = effectiveRouteDiffers
+  const skillConversation: Conversation | undefined = selectionOverride
     ? { ...conversation, providerId: effectiveProviderId, modelSelection: effectiveSelection }
     : undefined;
   let resolvedAttachments: Awaited<
@@ -841,8 +835,11 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   let deriveInitialTitle = false;
   try {
     scheduledDispatch?.assertCurrent();
+    const latestConversation = dependencies.store.conversation(conversation.id);
     if (dependencies.queuedMessage) {
-      assertQueuedClaimCurrent(dependencies, dependencies.store.conversation(conversation.id));
+      assertQueuedClaimCurrent(dependencies, latestConversation);
+    } else if (latestConversation.archivedAt != null) {
+      throw new RuntimeRequestError("Archived chats are read-only until restored.");
     }
     // A real first-message title can itself equal an untitled placeholder.
     // Capture history before queue/createMessage persists this message.

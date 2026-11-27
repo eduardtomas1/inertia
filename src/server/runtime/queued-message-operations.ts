@@ -156,7 +156,7 @@ export interface QueueOperationsContext {
   retryAfterCleanup(conversationId: string): void;
   dispatch(conversationId: string, requestedId?: string): Promise<void>;
   directTurnInteraction(
-    socket: WebSocket,
+    socket: WebSocket | undefined,
     command: Extract<ClientCommand, { type: "message.send" }>,
     authority: { kind: "main" },
     sendOptions?: SendMessageCommandOptions,
@@ -429,7 +429,7 @@ export async function dispatchPinnedResumePlan(
 ): Promise<boolean> {
   if (!ctx.dependencies.enableProviders) return false;
   await ctx.directTurnInteraction(
-    socket ?? (null as unknown as WebSocket),
+    socket,
     {
       type: "message.send",
       requestId: `${requestId}:continue`,

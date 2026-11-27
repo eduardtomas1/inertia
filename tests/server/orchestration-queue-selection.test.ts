@@ -43,6 +43,7 @@ import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import type WebSocket from "ws";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
+import { sendRuntimeEvent } from "../../src/server/runtime-protocol";
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import {
   computeQueueHoldReason,
@@ -1298,6 +1299,294 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
         name: "pi-check",
         path: piSkillPath,
       }]);
+    } finally {
+      abort.abort();
+      await drain();
+      await controller.dispose();
+      await attachments.close();
+    }
+  });
+
+  it("S15 race: pinned Pi $skill send does not fail by joining an in-flight live Pi skill refresh after composer switches to Claude", async () => {
+    const { directory, workspace, store, conversation, claudeSelection } = createEnv();
+    const attachments = await ConversationAttachmentStore.open(directory);
+    const abort = new AbortController();
+    const piSelection = providerNativeModelSelection({ providerId: "pi", modelId: "provider-default" });
+    store.updateConversation(conversation.id, { providerId: "pi", modelSelection: piSelection });
+
+    const capturedInputs: ProviderRunInput[] = [];
+    const { runtime } = makeProviderRuntime({
+      onRun: async (input, callbacks) => {
+        capturedInputs.push(input);
+        callbacks.onStarted?.();
+        return {
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          status: "completed",
+          terminalReason: { outcome: "completed", reason: "provider-completed" },
+          text: "Pi skill applied",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      },
+    });
+    const piSkillPath = join(workspace, ".pi", "skills", "pi-check", "SKILL.md");
+    let releaseLivePiSkills!: () => void;
+    const livePiSkillsGate = new Promise<void>((resolve) => { releaseLivePiSkills = resolve; });
+    const piSkills = vi.fn(async () => {
+      if (piSkills.mock.calls.length === 1) {
+        await livePiSkillsGate;
+      }
+      return [{
+        name: "pi-check",
+        description: "Pi-specific check skill",
+        argumentHint: null,
+        scope: "repo" as const,
+        path: piSkillPath,
+      }];
+    });
+    const workflows = new AgentWorkflowController(store, { piSkills } as never);
+    const tasks = new Set<Promise<unknown>>();
+    let queue!: ReturnType<typeof createQueuedMessageRuntime>;
+    const controller = new TurnController(
+      store,
+      runtime,
+      new Map<string, AgentApprovalRequest>(),
+      new Map<string, AgentInputRequest>(),
+      new Map<string, AgentPlan>(),
+      {
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        providerInfo: () => makeProviderInfo(),
+        onTurnSettled: (turn) => queue.onTurnSettled(turn),
+      },
+    );
+    const dependencies: TurnInteractionCommandDependencies = {
+      store,
+      turns: controller,
+      conversationAttachments: attachments,
+      backendProfileController: {
+        validateSelection: (selection: ModelSelection) => selection,
+        isExternalSelection: () => false,
+        readiness: async () => null,
+      } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+      isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+      workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      dataDirectory: directory,
+      enableProviders: true,
+      attachmentResolver: null,
+      generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+      workflows,
+      providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+      providerInfo: () => makeProviderInfo(),
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      send: () => undefined,
+    };
+    queue = createQueuedMessageRuntime(dependencies, {
+      signal: abort.signal,
+      track: (op) => {
+        const task = op();
+        tasks.add(task);
+        void task.finally(() => tasks.delete(task));
+        return task;
+      },
+    });
+    const drain = async () => {
+      await Promise.resolve();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+      await controller.drainSettlementTasks();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+    };
+
+    try {
+      // 1. Start a live Pi skill refresh and hold it in flight.
+      const liveRefresh = workflows.listSkills(conversation.id, true);
+      await vi.waitFor(() => expect(piSkills).toHaveBeenCalledTimes(1));
+
+      // 2. Switch the live composer to Claude while the live Pi refresh is still running.
+      store.updateConversation(conversation.id, { providerId: "claude", modelSelection: claudeSelection });
+
+      // 3. Enqueue and send a Pi-pinned queued item with $pi-check while live refresh is still in flight.
+      const itemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId,
+        content: "$pi-check run pinned",
+        modelSelection: piSelection,
+      });
+      const pinnedSend = queue.sendNow(conversation.id, itemId, randomUUID());
+
+      // 4. Release the live Pi refresh -> it must reject on route change, while the pinned send succeeds!
+      releaseLivePiSkills();
+      await expect(liveRefresh).rejects.toThrow("The provider route changed while skills were refreshing.");
+      await pinnedSend;
+      await vi.waitFor(() => expect(capturedInputs).toHaveLength(1));
+      await drain();
+
+      expect(capturedInputs[0]!.providerId).toBe("pi");
+      expect(capturedInputs[0]!.skills).toEqual([{
+        source: "pi-native",
+        name: "pi-check",
+        path: piSkillPath,
+      }]);
+    } finally {
+      releaseLivePiSkills();
+      abort.abort();
+      await drain();
+      await controller.dispose();
+      await attachments.close();
+    }
+  });
+
+  it("S18 & S19: socketless cross-provider Resume succeeds with production sendRuntimeEvent and rejects if archived during preparation", async () => {
+    const { directory, store, conversation, claudeSelection } = createEnv();
+    const attachments = await ConversationAttachmentStore.open(directory);
+    const abort = new AbortController();
+    const capturedInputs: ProviderRunInput[] = [];
+    let nextStatus: "cancelled" | "completed" = "cancelled";
+    const { runtime } = makeProviderRuntime({
+      onRun: async (input, callbacks) => {
+        capturedInputs.push(input);
+        callbacks.onStarted?.();
+        callbacks.onEvent?.({
+          type: "session",
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          sessionId: "s18-codex-sess",
+        });
+        return {
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          status: nextStatus,
+          terminalReason: nextStatus === "cancelled"
+            ? { outcome: "cancelled", reason: "provider-cancelled" }
+            : { outcome: "completed", reason: "provider-completed" },
+          text: nextStatus === "cancelled" ? "" : "Resumed cleanly",
+          textTruncated: false,
+          exitCode: nextStatus === "cancelled" ? null : 0,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      },
+    });
+    let readinessHook: (() => Promise<void>) | null = null;
+    const tasks = new Set<Promise<unknown>>();
+    let queue!: ReturnType<typeof createQueuedMessageRuntime>;
+    const controller = new TurnController(
+      store,
+      runtime,
+      new Map<string, AgentApprovalRequest>(),
+      new Map<string, AgentInputRequest>(),
+      new Map<string, AgentPlan>(),
+      {
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        providerInfo: () => makeProviderInfo(),
+        onTurnSettled: (turn) => queue.onTurnSettled(turn),
+      },
+    );
+    const dependencies: TurnInteractionCommandDependencies = {
+      store,
+      turns: controller,
+      conversationAttachments: attachments,
+      backendProfileController: {
+        validateSelection: (selection: ModelSelection) => selection,
+        isExternalSelection: () => false,
+        readiness: async () => {
+          if (readinessHook) await readinessHook();
+          return null;
+        },
+      } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+      isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+      workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      dataDirectory: directory,
+      enableProviders: true,
+      attachmentResolver: null,
+      generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+      workflows: {
+        resolveTurnSkills: async () => ({ inputs: [], routeKey: null }),
+        assertTurnSkillsCurrent: () => undefined,
+      } as unknown as TurnInteractionCommandDependencies["workflows"],
+      providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+      providerInfo: () => makeProviderInfo(),
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      // Production sender that dereferences socket.readyState if handed null!
+      send: sendRuntimeEvent,
+    };
+    queue = createQueuedMessageRuntime(dependencies, {
+      signal: abort.signal,
+      track: (op) => {
+        const task = op();
+        tasks.add(task);
+        void task.finally(() => tasks.delete(task));
+        return task;
+      },
+    });
+    const drain = async () => {
+      await Promise.resolve();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+      await controller.drainSettlementTasks();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+    };
+
+    try {
+      // Initial Codex turn gets cancelled with a saved session.
+      const firstItem = randomUUID();
+      store.orchestration.queue.enqueue({ conversationId: conversation.id, itemId: firstItem, content: "Initial work" });
+      await queue.sendNow(conversation.id, firstItem, randomUUID());
+      await vi.waitFor(() => expect(capturedInputs).toHaveLength(1));
+      await drain();
+
+      // Switch composer to Claude before socketless Resume.
+      store.updateConversation(conversation.id, { providerId: "claude", modelSelection: claudeSelection });
+
+      // S19: archive the chat while Resume is paused in readiness preparation -> must reject before starting provider!
+      let releaseReadiness!: () => void;
+      const readinessGate = new Promise<void>((resolve) => { releaseReadiness = resolve; });
+      let readinessEntered!: () => void;
+      const entered = new Promise<void>((resolve) => { readinessEntered = resolve; });
+      readinessHook = async () => {
+        readinessEntered();
+        await readinessGate;
+      };
+      nextStatus = "completed";
+      const archivedResume = queue.resume(conversation.id, randomUUID());
+      await entered;
+      store.archiveConversation(conversation.id, true);
+      releaseReadiness();
+      await expect(archivedResume).rejects.toThrow("Archived chats are read-only until restored.");
+      await drain();
+      expect(capturedInputs).toHaveLength(1);
+
+      // Unarchive and run S18 socketless Resume with real production `sendRuntimeEvent`:
+      // must NOT dereference null socket or persist a failed turn; provider starts and completes!
+      readinessHook = null;
+      store.archiveConversation(conversation.id, false);
+      await queue.resume(conversation.id, randomUUID());
+      await vi.waitFor(() => expect(capturedInputs).toHaveLength(2));
+      await drain();
+
+      expect(capturedInputs[1]!.providerId).toBe("codex");
+      expect(capturedInputs[1]!.sessionId).toBe("s18-codex-sess");
+      const turnStatuses = (store.orchestration.effects.connection.prepare(
+        "SELECT status FROM agent_turns WHERE conversation_id = ? ORDER BY created_at ASC",
+      ).all(conversation.id) as Array<{ status: string }>).map((row) => row.status);
+      expect(turnStatuses).not.toContain("failed");
+      expect(turnStatuses[turnStatuses.length - 1]).toBe("completed");
     } finally {
       abort.abort();
       await drain();

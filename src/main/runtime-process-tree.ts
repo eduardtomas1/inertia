@@ -19,6 +19,7 @@ interface RuntimeTreeDependencies {
   readFile: (path: string, encoding: "utf8") => string;
   deadlineAt: number;
   now: () => number;
+  pause: (ms: number) => void;
   setTimer: typeof setTimeout;
 }
 
@@ -173,6 +174,7 @@ export async function forceKillRuntimeProcessTree(
     rootProcessGroup: dependencies.rootProcessGroup ?? false,
     deadlineAt,
     now,
+    ...(dependencies.pause ? { pause: dependencies.pause } : {}),
   });
   return killed.snapshotConfirmed
     && killed.scanStabilized

@@ -189,14 +189,19 @@ describe("runtime process-tree termination", () => {
         status: 0,
       }));
 
+      let clock = 0;
+      const pause = vi.fn((ms: number) => { clock += ms; });
       await expect(forceKillRuntimeProcessTree(100, {
         platform,
         kill,
         readFile: () => processStat(100, "Z"),
         spawnProcessSync: spawnProcessSync as never,
+        deadlineAt: 2_000,
+        now: () => clock,
+        pause,
       })).resolves.toBe(false);
 
-      expect(spawnProcessSync).toHaveBeenCalledTimes(9);
+      expect(spawnProcessSync).toHaveBeenCalledTimes(15);
       expect(kill).toHaveBeenCalledWith(100, "SIGKILL");
     },
   );

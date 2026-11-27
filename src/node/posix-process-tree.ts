@@ -3,7 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const MAX_FREEZE_PASSES = 8;
-const MAX_STOP_OBSERVATION_READS = 8;
+const MAX_STOP_OBSERVATION_READS = 14;
+const MAX_STOP_OBSERVATION_PAUSE_MS = 128;
 const PROCESS_TABLE_COMMAND = "/bin/ps";
 const PROCESS_SNAPSHOT_TIMEOUT_MS = 250;
 const PROCESS_TABLE_MAX_BYTES = 2 * 1024 * 1024;
@@ -225,7 +226,11 @@ export function forceKillPosixProcessTreeWithStatus(
       ) {
         if (rootProcessGroup) sendStop(-rootPid);
         sendStop(rootPid);
-        const pauseMs = Math.min(2 ** stopObservationReads, deadlineAt - now());
+        const pauseMs = Math.min(
+          MAX_STOP_OBSERVATION_PAUSE_MS,
+          2 ** stopObservationReads,
+          deadlineAt - now(),
+        );
         if (pauseMs > 0) pause(pauseMs);
         stopObservationReads += 1;
         pass -= 1;

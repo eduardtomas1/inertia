@@ -273,8 +273,9 @@ class InstallSourceContext {
   }
 
   key(value: string): string {
-    const slashed = value.replaceAll("\\", "/");
-    return this.platform === "win32" ? slashed.toLocaleLowerCase("en-US") : slashed;
+    return this.platform === "win32"
+      ? value.replaceAll("\\", "/").toLocaleLowerCase("en-US")
+      : value;
   }
 
   same(left: string, right: string): boolean {

@@ -452,6 +452,18 @@ function mergeById<T extends { id: string }>(previous: readonly T[], next: reado
   return [...merged.values()];
 }
 
+function mergePrioritizedModels(
+  previous: readonly ProviderModel[],
+  next: readonly ProviderModel[],
+  prioritizedIds: ReadonlySet<string>,
+): ProviderModel[] {
+  const merged = mergeById(previous, next);
+  if (prioritizedIds.size === 0) return merged.slice(0, MAX_MODELS);
+  const prioritized = merged.filter(({ id }) => prioritizedIds.has(id));
+  const rest = merged.filter(({ id }) => !prioritizedIds.has(id));
+  return [...prioritized, ...rest].slice(0, MAX_MODELS);
+}
+
 function inheritUnobservedReasoning(previous: readonly ProviderModel[], next: ProviderModel[]): ProviderModel[] {
   if (!next.some(({ reasoningObserved }) => reasoningObserved)) return next;
   const known = new Map(previous.map((model) => [model.id, model]));
@@ -734,11 +746,17 @@ export class ProviderMetadataCache {
     const rateLimits = validateProviderRateLimits(metadata.rateLimits);
     let learned = false;
     if (models.length > 0 && AVAILABLE_FIELDS[scope.providerId].includes("models")) {
-      entry.models.values = options.merge ? mergeById(entry.models.values, models).slice(0, MAX_MODELS) : models;
       if (provenance === "session") {
         if (!options.merge) entry.sessionModelIds.clear();
         for (const model of models) entry.sessionModelIds.add(model.id);
       }
+      entry.models.values = options.merge
+        ? mergePrioritizedModels(
+            entry.models.values,
+            models,
+            provenance === "session" ? entry.sessionModelIds : new Set(),
+          )
+        : models;
       entry.models.updatedAt = attemptedAt;
       entry.models.lastAttemptedAt = attemptedAt;
       entry.models.provenance = provenance;
@@ -953,7 +971,20 @@ export class ProviderMetadataCache {
       provenance: models.length > 0 ? "persistent-cache" : null,
       stale: cached.modelsStale === true,
     };
-    if (cached.modelsProvenance === "session") {
+    let hasExplicitSessionMarker = false;
+    if (Array.isArray(cached.models)) {
+      for (const raw of cached.models) {
+        if (
+          raw && typeof raw === "object" && !Array.isArray(raw)
+          && (raw as { sessionObserved?: unknown }).sessionObserved === true
+        ) {
+          hasExplicitSessionMarker = true;
+          const id = cleanString((raw as { id?: unknown }).id, 160);
+          if (id) entry.sessionModelIds.add(id);
+        }
+      }
+    }
+    if (!hasExplicitSessionMarker && cached.modelsProvenance === "session") {
       for (const model of models) entry.sessionModelIds.add(model.id);
     }
     entry.rateLimits = {
@@ -1010,9 +1041,16 @@ export class ProviderMetadataCache {
   private persist(entry: CachedProviderMetadata): void {
     if (!this.persistence) return;
     try {
+      const persistedModels = entry.sessionModelIds.size > 0
+        ? entry.models.values.map((model) => (
+            entry.sessionModelIds.has(model.id)
+              ? ({ ...model, sessionObserved: true } as ProviderModel)
+              : model
+          ))
+        : entry.models.values;
       this.persistence.save({
         scope: entry.scope,
-        models: entry.models.values,
+        models: persistedModels,
         modelsUpdatedAt: isoTimestamp(entry.models.updatedAt),
         modelsLastAttemptedAt: isoTimestamp(entry.models.lastAttemptedAt),
         modelsProvenance: entry.models.provenance,

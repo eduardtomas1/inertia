@@ -744,7 +744,9 @@ process.exit(1);
       read: async () => ({ models: cliCatalog }),
     });
     persisted.correlate("antigravity", { executable, version: "1.5.18", authState: "unknown" });
-    persisted.learn("antigravity", executable, {
+    await persisted.metadata("antigravity", executable, {}, "/workspace", { force: true });
+    // Full 128-entry CLI catalog + session learn with merge: true must prioritize ACP models before capping
+    const merged = persisted.learn("antigravity", executable, {
       models: [
         {
           id: "orchestrator",
@@ -758,10 +760,57 @@ process.exit(1);
           fastMode: null,
         },
       ],
-    }, "session");
+    }, "session", { merge: true });
+    expect(merged.models).toHaveLength(128);
+    expect(merged.models[0]).toMatchObject({
+      id: "orchestrator",
+      inputModalities: ["text", "image"],
+    });
+
+    // Restart immediately after session merge (provenance="session") admits new CLI models instead of freezing 127 obsolete ones
+    const mergedPersisted = persistedRecords.at(-1)!;
+    expect(mergedPersisted.modelsProvenance).toBe("session");
+    const replacementCliCatalog = Array.from({ length: 128 }, (_, index) => ({
+      id: `next-cli-model-${index}`,
+      label: `Next CLI Model ${index}`,
+      description: "Available through Antigravity CLI",
+      isDefault: false,
+      inputModalities: ["text"] as ["text"],
+      reasoningOptions: [],
+      defaultReasoningEffort: "",
+      fastMode: null,
+    }));
+    const restartedAfterMerge = new ProviderMetadataCache({
+      persistence: {
+        load: () => [mergedPersisted],
+        save: () => undefined,
+      },
+      read: async () => ({ models: replacementCliCatalog }),
+    });
+    restartedAfterMerge.correlate("antigravity", { executable, version: "1.5.18", authState: "unknown" });
+    const refreshedAfterMergeRestart = await restartedAfterMerge.metadata(
+      "antigravity",
+      executable,
+      {},
+      "/workspace",
+      { force: true },
+    );
+    expect(refreshedAfterMergeRestart.models).toHaveLength(128);
+    expect(refreshedAfterMergeRestart.models[0]).toMatchObject({
+      id: "orchestrator",
+      inputModalities: ["text", "image"],
+    });
+    expect(refreshedAfterMergeRestart.models.some(({ id }) => id === "next-cli-model-0")).toBe(true);
+    expect(refreshedAfterMergeRestart.models.some(({ id }) => id === "cli-model-1")).toBe(false);
+
+    // CLI refresh persists provenance="provider" while keeping ACP session markers across cold restart
+    await persisted.metadata("antigravity", executable, {}, "/workspace", { force: true });
+    const latestPersisted = persistedRecords.at(-1)!;
+    expect(latestPersisted.modelsProvenance).toBe("provider");
+
     const restarted = new ProviderMetadataCache({
       persistence: {
-        load: () => persistedRecords.slice(-1),
+        load: () => [latestPersisted],
         save: () => undefined,
       },
       read: async () => ({ models: cliCatalog }),

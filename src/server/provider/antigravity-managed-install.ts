@@ -921,6 +921,17 @@ export async function runManagedAntigravityUpdate(
         cleanupConfirmed: true,
       };
     }
+    if (providerVersionBelowFloor(asset.version, active.version)) {
+      return {
+        status: "failed",
+        exitCode: null,
+        signal: null,
+        message: `Refused to downgrade Antigravity from ${active.version} to ${asset.version}.`,
+        output: null,
+        outputTruncated: false,
+        cleanupConfirmed: true,
+      };
+    }
     if (options.beforeVersion && providerVersionBelowFloor(asset.version, options.beforeVersion)) {
       return {
         status: "failed",

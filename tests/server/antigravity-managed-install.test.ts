@@ -682,6 +682,29 @@ describe("antigravity-managed-install", () => {
           message: expect.stringContaining("Refused to downgrade"),
         });
 
+        // S8: Active runtime version (1.5.18) enforces anti-downgrade even when beforeVersion is omitted or stale
+        await expect(runManagedAntigravityUpdate({
+          dataDirectory,
+          expectedExecutable: active!.executablePath,
+          signal: new AbortController().signal,
+          fetch: rollbackFetch as unknown as typeof fetch,
+        })).resolves.toMatchObject({
+          status: "failed",
+          cleanupConfirmed: true,
+          message: expect.stringContaining("Refused to downgrade Antigravity from 1.5.18 to 1.5.17"),
+        });
+        await expect(runManagedAntigravityUpdate({
+          dataDirectory,
+          expectedExecutable: active!.executablePath,
+          beforeVersion: "1.5.17",
+          signal: new AbortController().signal,
+          fetch: rollbackFetch as unknown as typeof fetch,
+        })).resolves.toMatchObject({
+          status: "failed",
+          cleanupConfirmed: true,
+          message: expect.stringContaining("Refused to downgrade Antigravity from 1.5.18 to 1.5.17"),
+        });
+
         const belowFloor = makeRelease("1.5.16");
         await expect(installManagedAntigravityRelease({
           dataDirectory,

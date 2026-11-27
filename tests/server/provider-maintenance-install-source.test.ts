@@ -524,4 +524,15 @@ describe("provider install source classification", () => {
     });
     expect(capabilities.message).toMatch(/^Inertia could not tell /u);
   });
+
+  posixIt("does not treat literal backslashes in POSIX paths as Antigravity install directories", async () => {
+    const { home } = await layout();
+    const executable = await file(join(home, ".local\\bin", "agy"));
+    const capabilities = await classify("antigravity", executable, home, environment([dirname(executable)]));
+    expect(capabilities).toMatchObject({
+      installMethod: "manual",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+  });
 });

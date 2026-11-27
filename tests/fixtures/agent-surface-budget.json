@@ -308,6 +308,30 @@
       "cursorKimi": 591,
       "opencode": 591
     },
+    "inertia_list_scheduled_tasks": {
+      "claude": 452,
+      "codex": 348,
+      "cursorKimi": 452,
+      "opencode": 452
+    },
+    "inertia_schedule_task": {
+      "claude": 1713,
+      "codex": 1607,
+      "cursorKimi": 1713,
+      "opencode": 1713
+    },
+    "inertia_delete_scheduled_task": {
+      "claude": 413,
+      "codex": 308,
+      "cursorKimi": 414,
+      "opencode": 413
+    },
+    "inertia_run_scheduled_task_now": {
+      "claude": 493,
+      "codex": 387,
+      "cursorKimi": 493,
+      "opencode": 493
+    },
     "inertia_request_secret": {
       "claude": 1428,
       "codex": 1285,
@@ -380,24 +404,24 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 38808,
-      "withoutBrowser": 25811,
-      "withCad": 61172
+      "withBrowser": 41879,
+      "withoutBrowser": 28882,
+      "withCad": 64243
     },
     "codex": {
-      "withBrowser": 33492,
-      "withoutBrowser": 22277,
-      "withCad": 54707
+      "withBrowser": 36142,
+      "withoutBrowser": 24927,
+      "withCad": 57357
     },
     "cursorKimi": {
-      "withBrowser": 38743,
-      "withoutBrowser": 25736,
-      "withCad": 61108
+      "withBrowser": 41815,
+      "withoutBrowser": 28808,
+      "withCad": 64180
     },
     "opencode": {
-      "withBrowser": 38732,
-      "withoutBrowser": 25735,
-      "withCad": 61096
+      "withBrowser": 41803,
+      "withoutBrowser": 28806,
+      "withCad": 64167
     }
   }
 }

@@ -967,6 +967,11 @@
       "version": 131,
       "name": "PersistQueueItemOrderDeliveryAndSelection",
       "digest": "027529bca6808f0703d6d426050b1afc861244db80774e35bcf0b30ac2c28ecf"
+    },
+    {
+      "version": 132,
+      "name": "PersistScheduledTasks",
+      "digest": "2382286c694e06c27cfb994f97a8f369f8a83ff5f178cb3b4c23aa5ab405a962"
     }
   ]
 }

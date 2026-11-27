@@ -54,6 +54,7 @@ type ConversationRuntimeMutationEvent = Exclude<
   | { type: "snapshot.updated" }
   | { type: "conversation.shell.updated" }
   | { type: "todos.updated" }
+  | { type: "scheduled-tasks.changed" }
   | { type: "library.updated" }
   | { type: "workspace.git.invalidated" }
   | { type: "provider.maintenance.updated" }
@@ -95,6 +96,7 @@ export function runtimeMutationScope(event: RuntimeMutationEvent): RuntimeEventS
     case "snapshot.updated":
     case "conversation.shell.updated":
     case "todos.updated":
+    case "scheduled-tasks.changed":
     case "library.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":

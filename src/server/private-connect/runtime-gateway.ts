@@ -50,6 +50,11 @@ import {
   type PrivateConnectQueueStore,
 } from "./queue-gateway";
 import { PrivateConnectTranscriptCache } from "./transcript-cache";
+import {
+  handlePrivateConnectScheduledTaskRequest,
+  isPrivateConnectRuntimeScheduledTaskRequest,
+  type PrivateConnectScheduledTaskGatewayHandlers,
+} from "./scheduled-tasks-gateway";
 
 interface PrivateConnectGatewayDependencies {
   shell(): AppSnapshot;
@@ -71,6 +76,7 @@ interface PrivateConnectGatewayDependencies {
   transcriptCache?: PrivateConnectTranscriptCache;
   store?: PrivateConnectQueueStore;
   queueHandlers?: PrivateConnectQueueCommandHandlers;
+  scheduledTasks?: PrivateConnectScheduledTaskGatewayHandlers;
   onQueueMutated?(conversationId: string): void;
   now?(): Date;
 }
@@ -192,6 +198,12 @@ export class PrivateConnectRuntimeGateway {
     }
     if (isPrivateConnectRuntimeQueueRequest(request)) {
       return await this.handleQueueCommand(subject, request);
+    }
+    if (isPrivateConnectRuntimeScheduledTaskRequest(request)) {
+      if (!this.dependencies.scheduledTasks) {
+        return failedResponse(request.requestId, "unavailable", "Scheduled tasks are not available while the local runtime is restarting.");
+      }
+      return await handlePrivateConnectScheduledTaskRequest(subject, request, this.dependencies.scheduledTasks);
     }
     return failedResponse(
       request.requestId,

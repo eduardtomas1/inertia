@@ -76,6 +76,7 @@ import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
 import { createCachedAccountUsageLimitHold } from "./runtime/queued-message-runtime-helpers";
 import { registerRunControlEffectHandlers } from "./runtime/run-control-effect-handlers";
 import { createDelegationRuntime, type DelegationRuntime } from "./runtime/delegation/delegation-runtime";
+import { createScheduledTaskRuntime, type ScheduledTaskRuntime } from "./runtime/scheduled-tasks/scheduled-task-runtime";
 import type { ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
 import { ConversationCompactionStates } from "./runtime/conversation-compaction-states";
 import { AgentWorkflowController } from "./runtime/agent-workflow-controller";
@@ -152,6 +153,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
   let delegation: DelegationRuntime | undefined;
+  let scheduledTasks: ScheduledTaskRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let watchers: WatcherRuntime | undefined;
   let closed = false;
@@ -743,6 +745,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         (settled) => conversationTitles.onTurnSettled(settled, settlement),
         (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
         (settled) => delegation?.onTurnSettled(settled),
+        (settled) => scheduledTasks?.onTurnSettled(settled),
         (settled) => duoLaunches?.onTurnSettled(settled),
         (settled) => watchers?.onTurnSettled(settled),
         (settled) => testOnlyOnTurnSettled?.(settled),
@@ -763,6 +766,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     messageQueue: () => queuedMessages,
     conversationAttachments: initializedConversationAttachments,
     agentBrowser: options.agentBrowser, watcherPolicy, delegation: delegation.service,
+    scheduledTasks: () => scheduledTasks?.service,
     backendCredentials: options.backendCredentials, lifetime: runtimeLifetimeAbort.signal,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
@@ -803,7 +807,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     recordWorktreeCreation(conversationId, plannedPath, plannedBranch, identity);
     queuedMessages?.onWorktreeSetupRetried(conversationId);
   };
-  void queuedMessages.start(() => delegation?.recover());
+  scheduledTasks = createScheduledTaskRuntime({
+    store, creation: () => agentThreads?.creation, messageQueue: () => queuedMessages,
+    broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell,
+    enableProviders, isUpdateHeld: () => updatePreparation.isAdmissionClosed(),
+  });
+  void queuedMessages.start(async () => { await delegation?.recover(); scheduledTasks?.start(); });
   const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork });
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
@@ -856,6 +865,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       agentThreads,
       agentWorkflows,
       delegation,
+      scheduledTasks: scheduledTasks.service,
       queuedMessages,
       usageHandlers: usageRuntime.handlers,
       turnInteraction: turnInteractionDependencies,
@@ -998,6 +1008,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       send: (conversationId, itemId, _deviceId, requestId) => queuedMessages?.sendNow(conversationId, itemId, requestId, { textOnly: true }),
       resume: async (conversationId, _deviceId, requestId) => { await queuedMessages?.resume(conversationId, requestId); },
     },
+    scheduledTasks: scheduledTasks.privateConnectHandlers,
     onQueueMutated: (conversationId) => {
       broadcast({
         type: "conversation.queue.changed",
@@ -1149,6 +1160,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         snapshotBroadcasts.close();
         mascotStatus.close();
         watchers?.dispose();
+        scheduledTasks?.dispose();
         secureFileAuthorities.clear();
         try {
           await runRuntimeShutdownPhases({

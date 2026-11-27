@@ -321,6 +321,11 @@ export const RUNTIME_COMMAND_POLICIES = {
   "todo.delete": shortMutation,
   "todo.start": gitMutation,
   "todo.update": shortMutation,
+  "scheduled-task.list": shortRetrySafe,
+  "scheduled-task.create": shortMutation,
+  "scheduled-task.update": shortMutation,
+  "scheduled-task.delete": shortMutation,
+  "scheduled-task.run-now": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "updates.finish": shortMutation,
   "updates.run": {
     timeoutMs: UPDATES_RUN_REQUEST_TIMEOUT_MS,

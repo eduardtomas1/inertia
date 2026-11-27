@@ -409,6 +409,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "snapshot.updated":
     case "conversation.shell.updated":
     case "todos.updated":
+    case "scheduled-tasks.changed":
     case "library.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":

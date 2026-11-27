@@ -86,9 +86,9 @@ const budgets = {
   // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
   // x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 1_011_589 bytes on
-  // Linux x64; keep 512-byte cross-platform headroom.
-  mainWorkbenchFirstLoadJavaScript: 1_011_589 + 512,
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 1_012_804 bytes on
+  // Linux x64 (scheduled-task event validators, command policy, sidebar Schedules link); keep 512-byte cross-platform headroom.
+  mainWorkbenchFirstLoadJavaScript: 1_012_804 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -100,9 +100,9 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 893_484 bytes on
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 894_355 bytes on
   // Linux x64; keep 512-byte cross-platform headroom.
-  detachedChatFirstLoadJavaScript: 893_484 + 512,
+  detachedChatFirstLoadJavaScript: 894_355 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -153,6 +153,9 @@ const budgets = {
   // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 47_557 bytes on
   // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
   deferredTasksViewJavaScript: 47_557 + 512,
+  // Orchestrator V2 Wave B deferred ScheduledTasksView chunk (schedules-*.js) measures 23_906 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  deferredScheduledTasksJavaScript: 23_906 + 512,
   // Main sync onto 6d8ab80f with Orchestrator V2 measures 30_616 bytes on
   // Windows x64; the cap keeps the branch's 512-byte cross-platform headroom.
   deferredLibraryViewJavaScript: 30_616 + 512,
@@ -289,9 +292,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 2_846_548 bytes on
-  // Linux x64 (after subtracting deferredComposerQueueJavaScript & deferredWorkspaceMediaPreviewJavaScript); keep 512-byte headroom.
-  coreJavaScript: 2_846_548 + 512,
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 2_851_650 bytes on
+  // Linux x64 (after subtracting deferredScheduledTasksJavaScript & other deferred chunks); keep 512-byte headroom.
+  coreJavaScript: 2_851_650 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -839,6 +842,12 @@ if (entryJavaScriptClosure.has(tasksViewEntry) || mainWorkbenchJavaScriptClosure
   throw new Error("The Tasks view must remain deferred from the initial chat routes");
 }
 const deferredTasksViewJavaScriptBytes = await assetBytes(`assets/${tasksViewEntry}`);
+const scheduledTasksViewEntry = assetNames.find((name) => /^schedules-.*\.js$/u.test(name));
+if (!scheduledTasksViewEntry) throw new Error("Missing deferred Scheduled tasks view");
+if (entryJavaScriptClosure.has(scheduledTasksViewEntry) || mainWorkbenchJavaScriptClosure.has(scheduledTasksViewEntry) || detachedChatJavaScriptClosure.has(scheduledTasksViewEntry)) {
+  throw new Error("The Scheduled tasks view must remain deferred from the initial chat routes");
+}
+const deferredScheduledTasksJavaScriptBytes = await assetBytes(`assets/${scheduledTasksViewEntry}`);
 const libraryEntries = [/^library-(?!menu-).*\.js$/u, /^library-menu-.*\.js$/u].map((pattern) => {
   const entry = assetNames.find((name) => pattern.test(name));
   if (!entry) throw new Error(`Missing deferred Library surface: ${pattern}`);
@@ -895,6 +904,7 @@ const coreJavaScriptBytes =
   - deferredCliConversationImportJavaScriptBytes
   - deferredBackgroundTasksJavaScriptBytes
   - deferredTasksViewJavaScriptBytes
+  - deferredScheduledTasksJavaScriptBytes
   - deferredLibraryViewJavaScriptBytes
   - deferredIconRegionJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
@@ -943,6 +953,7 @@ const measurements = {
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
   deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,
   deferredTasksViewJavaScript: deferredTasksViewJavaScriptBytes,
+  deferredScheduledTasksJavaScript: deferredScheduledTasksJavaScriptBytes,
   deferredLibraryViewJavaScript: deferredLibraryViewJavaScriptBytes,
   deferredIconRegionJavaScript: deferredIconRegionJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,

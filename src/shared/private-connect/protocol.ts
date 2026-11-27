@@ -114,6 +114,31 @@ export const privateConnectRequestSchema = z.discriminatedUnion("type", [
   }).strict(),
   z.object({
     protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-tasks.list"),
+    requestId: uuid,
+    projectId: entityId.optional(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-task.toggle"),
+    requestId: uuid,
+    taskId: uuid,
+    enabled: z.boolean(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-task.run-now"),
+    requestId: uuid,
+    taskId: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-task.delete"),
+    requestId: uuid,
+    taskId: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
     type: z.literal("session.logout"),
     requestId: uuid,
   }).strict(),

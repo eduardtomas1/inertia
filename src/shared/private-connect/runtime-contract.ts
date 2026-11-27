@@ -136,6 +136,24 @@ export type PrivateConnectQueueProjection = z.infer<
   typeof privateConnectQueueProjectionSchema
 >;
 
+export const privateConnectScheduledTaskSchema = z.object({
+  id: uuid,
+  projectId: entityId,
+  projectName: safeLabel,
+  title: safeLabel,
+  scheduleLabel: safeLabel,
+  enabled: z.boolean(),
+  nextRunAt: timestamp.nullable(),
+  lastRunAt: timestamp.nullable(),
+  lastRunStatus: z.enum(["claimed", "queued", "running", "completed", "failed", "skipped"]).nullable(),
+  lastError: z.string().max(300).nullable(),
+  consecutiveFailures: z.number().int().min(0),
+  boundConversationId: uuid.nullable(),
+}).strict();
+export type PrivateConnectScheduledTask = z.infer<
+  typeof privateConnectScheduledTaskSchema
+>;
+
 export const privateConnectRuntimeSafeConversationDetailSchema = z.object({
   generatedAt: timestamp,
   conversation: privateConnectRuntimeSafeConversationSchema,
@@ -164,6 +182,10 @@ export const privateConnectRuntimeRequestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("queue.edit"), requestId: uuid, conversationId: uuid, id: uuid, expectedRevision: z.number().int().min(0), content: z.string().trim().min(1).max(PRIVATE_CONNECT_RUNTIME_LIMITS.promptCharacters) }).strict(),
   z.object({ type: z.literal("queue.remove"), requestId: uuid, conversationId: uuid, id: uuid }).strict(),
   z.object({ type: z.literal("queue.resume"), requestId: uuid, conversationId: uuid }).strict(),
+  z.object({ type: z.literal("scheduled-tasks.list"), requestId: uuid, projectId: entityId.optional() }).strict(),
+  z.object({ type: z.literal("scheduled-task.toggle"), requestId: uuid, taskId: uuid, enabled: z.boolean() }).strict(),
+  z.object({ type: z.literal("scheduled-task.run-now"), requestId: uuid, taskId: uuid }).strict(),
+  z.object({ type: z.literal("scheduled-task.delete"), requestId: uuid, taskId: uuid }).strict(),
 ]);
 export type PrivateConnectRuntimeRequest = z.infer<typeof privateConnectRuntimeRequestSchema>;
 
@@ -178,6 +200,10 @@ export const privateConnectRuntimeResponseSchema = z.discriminatedUnion("ok", [
       z.object({ kind: z.literal("input.accepted"), conversationId: uuid, inputRequestId: uuid }).strict(),
       z.object({ kind: z.literal("run.stopped"), conversationId: uuid, runId: entityId, alreadyStopped: z.boolean() }).strict(),
       z.object({ kind: z.literal("queue.updated"), conversationId: uuid, revision: z.number().int().min(0) }).strict(),
+      z.object({ kind: z.literal("scheduled-tasks"), tasks: z.array(privateConnectScheduledTaskSchema).max(200) }).strict(),
+      z.object({ kind: z.literal("scheduled-task.updated"), task: privateConnectScheduledTaskSchema }).strict(),
+      z.object({ kind: z.literal("scheduled-task.ran"), task: privateConnectScheduledTaskSchema, conversationId: uuid.nullable() }).strict(),
+      z.object({ kind: z.literal("scheduled-task.deleted"), taskId: uuid }).strict(),
     ]),
   }).strict(),
   z.object({

@@ -30,6 +30,9 @@ export const loadUsageSurface = createSurfaceLoader(() => import("./UsageSurface
 export const loadTasksView = createSurfaceLoader(async () => ({
   default: (await import("./TasksView")).TasksView,
 }));
+export const loadScheduledTasksView = createSurfaceLoader(async () => ({
+  default: (await import("./ScheduledTasksView")).ScheduledTasksView,
+}));
 export const loadLibraryView = createSurfaceLoader(async () => ({
   default: (await import("./LibraryView")).LibraryView,
 }));

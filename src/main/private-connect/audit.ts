@@ -37,12 +37,29 @@ interface MutationAudit {
 
 export type PrivateConnectAuditedMutationRequest = Extract<
   PrivateConnectRequest,
-  { type: "input.respond" | "run.stop" | "queue.send" | "queue.edit" | "queue.remove" | "queue.resume" }
+  {
+    type:
+      | "input.respond"
+      | "run.stop"
+      | "queue.send"
+      | "queue.edit"
+      | "queue.remove"
+      | "queue.resume"
+      | "scheduled-task.toggle"
+      | "scheduled-task.run-now"
+      | "scheduled-task.delete";
+  }
 >;
 
 const MUTATION_META: Readonly<Record<PrivateConnectAuditedMutationRequest["type"], {
   started: string;
-  expectedKind: "input.accepted" | "run.stopped" | "queue.updated";
+  expectedKind:
+    | "input.accepted"
+    | "run.stopped"
+    | "queue.updated"
+    | "scheduled-task.updated"
+    | "scheduled-task.ran"
+    | "scheduled-task.deleted";
   acceptedType: PrivateConnectAuditEvent["type"];
   acceptedDetail: string;
 }>> = {
@@ -81,6 +98,24 @@ const MUTATION_META: Readonly<Record<PrivateConnectAuditedMutationRequest["type"
     expectedKind: "queue.updated",
     acceptedType: "prompt.accepted",
     acceptedDetail: "A remote queue resume was accepted.",
+  },
+  "scheduled-task.toggle": {
+    started: "A remote scheduled-task update was requested.",
+    expectedKind: "scheduled-task.updated",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote scheduled-task update was accepted.",
+  },
+  "scheduled-task.run-now": {
+    started: "A remote scheduled-task run was requested.",
+    expectedKind: "scheduled-task.ran",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote scheduled-task run was accepted.",
+  },
+  "scheduled-task.delete": {
+    started: "A remote scheduled-task deletion was requested.",
+    expectedKind: "scheduled-task.deleted",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote scheduled-task deletion was accepted.",
   },
 };
 

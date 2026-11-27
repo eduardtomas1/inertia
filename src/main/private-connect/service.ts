@@ -690,7 +690,9 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       const runtimeSubject = this.runtimeAuthorization(session, device);
       const runtimeRequest = parsed.data.type === "state.get"
         ? { type: "state.get", requestId: parsed.data.requestId, ...(parsed.data.ifNoneMatch === undefined ? {} : { ifNoneMatch: parsed.data.ifNoneMatch }) }
-        : { type: "conversation.get", requestId: parsed.data.requestId, conversationId: parsed.data.conversationId, ...(parsed.data.ifNoneMatch === undefined ? {} : { ifNoneMatch: parsed.data.ifNoneMatch }) };
+        : parsed.data.type === "scheduled-tasks.list"
+          ? { type: "scheduled-tasks.list", requestId: parsed.data.requestId, ...(parsed.data.projectId === undefined ? {} : { projectId: parsed.data.projectId }) }
+          : { type: "conversation.get", requestId: parsed.data.requestId, conversationId: parsed.data.conversationId, ...(parsed.data.ifNoneMatch === undefined ? {} : { ifNoneMatch: parsed.data.ifNoneMatch }) };
       const response = await this.options.runtime.privateConnectRequest(runtimeSubject, runtimeRequest as Exclude<PrivateConnectRuntimeRequest, { type: "prompt.send" }>);
       // Reads can outlive a grant edit, logout, or host lock. Revalidate before
       // returning their projection, including HTTP requests with no live socket

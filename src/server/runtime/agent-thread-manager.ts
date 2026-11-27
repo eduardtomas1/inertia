@@ -104,33 +104,23 @@ import {
   extendedManagedOperationTool, isExtendedManagedReadTool, isExtendedManagedTool, preflightExtendedManagedTool,
 } from "./managed-extended-tools";
 import {
-  ANSWER_QUESTION_TOOL_NAME,
-  answerApprovalDetail,
-  answerQuestionSchema,
-  findPendingQuestion,
-  sendQuestionAnswer,
-  type ManagedQuestionDependencies,
-} from "./managed-child-questions";
+  SCHEDULED_TASK_FULL_ACCESS_AUTO_APPROVED_TOOLS, executeScheduledTaskTool, isScheduledTaskReadTool,
+  isScheduledTaskTool, scheduledTaskApprovalDetail, scheduledTaskInputChars,
+} from "./scheduled-tasks/scheduled-task-host-tools";
+import type { ScheduledTaskService } from "./scheduled-tasks/scheduled-task-service";
+import { ANSWER_QUESTION_TOOL_NAME, answerApprovalDetail, answerQuestionSchema, findPendingQuestion, sendQuestionAnswer, type ManagedQuestionDependencies } from "./managed-child-questions";
 import type { TurnCapabilityOffer } from "./turns/turn-controller-types";
-import {
-  boundedUntrustedAgentText,
-  neutralizeUntrustedAgentText,
-} from "./untrusted-agent-text";
+import { boundedUntrustedAgentText, neutralizeUntrustedAgentText } from "./untrusted-agent-text";
 
 const MAX_ACTIVE_CHILDREN = 3;
 const MAX_CANCELLED_DELEGATE_WAITS = 64;
 const STORED_CONTENT_TOOLS = new Set([
   HTML_RENDER_TOOL_NAME, SEND_TO_USER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation", "inertia_send_message",
   MANAGED_QUEUE_TOOL_NAME, ANSWER_QUESTION_TOOL_NAME, DELEGATE_TASK_TOOL, CANCEL_TASK_TOOL,
-  ...EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS,
+  ...EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS, ...SCHEDULED_TASK_FULL_ACCESS_AUTO_APPROVED_TOOLS,
 ]);
 const LATEST_RESULT_RUNNING_NEXT = "Still running; wait for it with inertia_wait_for_conversation, then call inertia_get_latest_result again.";
-const TERMINAL_TURN_STATUSES = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-  "interrupted",
-]);
+const TERMINAL_TURN_STATUSES = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 interface AgentThreadSource {
   conversation: Conversation;
@@ -165,6 +155,7 @@ export interface AgentThreadManagerDependencies {
   watcherPolicy?: AgentContextWatcherPolicy;
   agentBrowser?: RuntimeAgentBrowserBroker;
   delegation?: DelegationTaskService;
+  scheduledTasks?(): ScheduledTaskService | undefined;
   turnGitArtifacts?: WorkspaceHostToolDependencies["turnGitArtifacts"];
   workspaceRuns?: WorkspaceHostToolDependencies["workspaceRuns"];
   cadTools?: CadHostTools;
@@ -392,6 +383,16 @@ export class AgentThreadManager {
           runId: source.turn.runId,
           turnId: source.turn.id,
         }, imagesAccepted(source.turn, this.dependencies.providerInfo()));
+      }
+      if (isScheduledTaskTool(call.tool)) {
+        const scheduledTool = call.tool;
+        const scheduledTasks = this.dependencies.scheduledTasks?.();
+        if (!scheduledTasks) return failure("unavailable", "Scheduled tasks are not available right now.");
+        const deps = { scheduledTasks, conversationPath: (id: string) => this.dependencies.store.conversationPath(id) };
+        if (isScheduledTaskReadTool(scheduledTool)) return await executeScheduledTaskTool(deps, current, scheduledTool, call.arguments);
+        const approval = scheduledTaskApprovalDetail(deps, current, scheduledTool, call.arguments);
+        return await this.mutate(source, call, "inertia_send_message", () => executeScheduledTaskTool(deps, this.assertSource(source), scheduledTool, call.arguments), undefined, approval,
+          { fingerprintToolName: scheduledTool, inputChars: scheduledTaskInputChars(scheduledTool, call.arguments), autoApproveToolName: scheduledTool, skipPreflight: true });
       }
       if (isExtendedManagedTool(call.tool)) {
         const extendedTool = call.tool;
@@ -702,7 +703,7 @@ export class AgentThreadManager {
     const liveSource = this.dependencies.store.conversation(source.conversation.id);
     const autoApproveTool = options?.autoApproveToolName ?? toolName;
     if (!shouldAutoApproveManagedMutation(liveSource.accessMode, autoApproveTool)
-      && !(liveSource.accessMode === "full" && EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS.has(autoApproveTool))) {
+      && !(liveSource.accessMode === "full" && (EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS.has(autoApproveTool) || SCHEDULED_TASK_FULL_ACCESS_AUTO_APPROVED_TOOLS.has(autoApproveTool)))) {
       const detail = approval ?? this.approvalDetail(source, toolName, call.arguments);
       const decision = await call.requestApproval({
         title: detail.title, detail: detail.detail,

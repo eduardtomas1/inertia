@@ -14,6 +14,7 @@ import { ANSWER_QUESTION_TOOL_DEFINITION, ANSWER_QUESTION_TOOL_NAME } from "./ma
 import { EXTENDED_MANAGED_TOOL_DEFINITIONS } from "./managed-extended-tools";
 import { MANAGED_QUEUE_TOOL_DEFINITION } from "./managed-queue-tools";
 import { SEND_MESSAGE_TOOL_DEFINITION } from "./managed-send-modes";
+import { SCHEDULED_TASK_TOOL_DEFINITIONS } from "./scheduled-tasks/scheduled-task-host-tools";
 
 const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = MAX_MANAGED_PROMPT_CHARS;
@@ -143,4 +144,5 @@ export const AGENT_THREAD_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[
   },
   ...DELEGATION_TOOL_DEFINITIONS,
   ...EXTENDED_MANAGED_TOOL_DEFINITIONS,
+  ...SCHEDULED_TASK_TOOL_DEFINITIONS,
 ] as const;

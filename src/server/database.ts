@@ -85,6 +85,7 @@ import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { QueuedMessageRepository } from "./persistence/queued-message-repository";
+import { ScheduledTaskRepository } from "./persistence/scheduled-task-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import type { UsagePricing } from "./usage/price-list";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
@@ -142,6 +143,7 @@ export class RuntimeStore {
   readonly transcriptRepository: TranscriptRepository;
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
+  readonly scheduledTasks: ScheduledTaskRepository;
   readonly htmlRenders: HtmlRenderRepository;
   readonly sentToUser: SentToUserRepository;
   readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database); readonly idleCompactionCandidates = new IdleCompactionCandidateRepository(() => this.database);
@@ -208,6 +210,7 @@ export class RuntimeStore {
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.limitResets = new LimitResetRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
+    this.scheduledTasks = new ScheduledTaskRepository(this.database);
     this.htmlRenders = new HtmlRenderRepository(this.database, this);
     this.sentToUser = new SentToUserRepository(this.database, this);
     this.projectRepository = new ProjectRepository({

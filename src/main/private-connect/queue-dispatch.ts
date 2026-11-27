@@ -15,12 +15,30 @@ import type { PrivateConnectAuditEvent, PrivateConnectDevice } from "./store";
 
 export type PrivateConnectQueueRequest = Extract<
   PrivateConnectRequest,
-  { type: "queue.send" | "queue.edit" | "queue.remove" | "queue.resume" }
+  {
+    type:
+      | "queue.send"
+      | "queue.edit"
+      | "queue.remove"
+      | "queue.resume"
+      | "scheduled-task.toggle"
+      | "scheduled-task.run-now"
+      | "scheduled-task.delete";
+  }
 >;
 
 export type PrivateConnectRuntimeQueueRequest = Extract<
   PrivateConnectRuntimeRequest,
-  { type: "queue.send" | "queue.edit" | "queue.remove" | "queue.resume" }
+  {
+    type:
+      | "queue.send"
+      | "queue.edit"
+      | "queue.remove"
+      | "queue.resume"
+      | "scheduled-task.toggle"
+      | "scheduled-task.run-now"
+      | "scheduled-task.delete";
+  }
 >;
 
 export function isPrivateConnectQueueRequest(
@@ -29,7 +47,10 @@ export function isPrivateConnectQueueRequest(
   return request.type === "queue.send"
     || request.type === "queue.edit"
     || request.type === "queue.remove"
-    || request.type === "queue.resume";
+    || request.type === "queue.resume"
+    || request.type === "scheduled-task.toggle"
+    || request.type === "scheduled-task.run-now"
+    || request.type === "scheduled-task.delete";
 }
 
 export function privateConnectRequiredScope(
@@ -38,6 +59,7 @@ export function privateConnectRequiredScope(
   if (
     type === "state.get"
     || type === "conversation.get"
+    || type === "scheduled-tasks.list"
     || type === "client.ping"
     || type === "session.logout"
   ) {
@@ -49,6 +71,9 @@ export function privateConnectRequiredScope(
     || type === "queue.edit"
     || type === "queue.remove"
     || type === "queue.resume"
+    || type === "scheduled-task.toggle"
+    || type === "scheduled-task.run-now"
+    || type === "scheduled-task.delete"
   ) {
     return "private:prompt";
   }
@@ -95,6 +120,25 @@ function toRuntimeQueueRequest(
         type: "queue.resume",
         requestId: request.requestId,
         conversationId: request.conversationId,
+      };
+    case "scheduled-task.toggle":
+      return {
+        type: "scheduled-task.toggle",
+        requestId: request.requestId,
+        taskId: request.taskId,
+        enabled: request.enabled,
+      };
+    case "scheduled-task.run-now":
+      return {
+        type: "scheduled-task.run-now",
+        requestId: request.requestId,
+        taskId: request.taskId,
+      };
+    case "scheduled-task.delete":
+      return {
+        type: "scheduled-task.delete",
+        requestId: request.requestId,
+        taskId: request.taskId,
       };
   }
 }

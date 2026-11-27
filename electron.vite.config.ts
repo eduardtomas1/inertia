@@ -184,6 +184,7 @@ export default defineConfig({
               attentionVisibility: "chat",
               BackgroundTasksSurface: "tasks",
               TasksView: "todo",
+              ScheduledTasksView: "schedules",
               LibraryView: "library",
               LibrarySaveMenu: "library-menu",
               BrowserEvidenceTimeline: "evidence",

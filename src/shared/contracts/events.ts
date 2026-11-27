@@ -77,6 +77,7 @@ import type {
   WorkspaceFilePreview,
 } from "./workspace";
 import type { Todo } from "../todos";
+import type { ScheduledTask, ScheduledTaskRun, ScheduledTaskSummary } from "../scheduled-tasks";
 import type { LibraryCategory, LibraryPage, LibrarySnapshot, SavedAnswer } from "../library";
 import type { UsageDashboard } from "./usage-dashboard";
 import type { DailyWorkDashboard } from "./daily-work";
@@ -113,6 +114,7 @@ export type RuntimeMutationEvent =
   | { type: "conversation.detail.invalidated"; conversationId: string }
   | { type: "conversation.queue.changed"; conversationId: string; revision: number }
   | { type: "todos.updated"; todos: Todo[] }
+  | { type: "scheduled-tasks.changed"; projectId?: string }
   | { type: "library.updated"; library: LibrarySnapshot }
   | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
@@ -255,6 +257,9 @@ export type ServerEvent =
         | import("./client-command/delegation").DelegationDeliveryResult
         | import("../observed-child-thread").ObservedChildReadResult
         | { kind: "todo.started"; conversationId: string }
+        | { kind: "scheduled-tasks.list"; tasks: ScheduledTaskSummary[] }
+        | { kind: "scheduled-task"; task: ScheduledTask; recentRuns?: ScheduledTaskRun[] }
+        | { kind: "scheduled-task.ran"; task: ScheduledTask; run: ScheduledTaskRun | null; conversationId: string | null }
         | { kind: "library.category"; category: LibraryCategory }
         | { kind: "library.answer"; savedAnswer: SavedAnswer }
         | { kind: "library.pages"; pages: LibraryPage[] }

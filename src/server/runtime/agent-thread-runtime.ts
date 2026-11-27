@@ -53,6 +53,7 @@ interface AgentThreadRuntimeDependencies {
   backendCredentials?: RuntimeBackendCredentialBroker;
   lifetime?: AbortSignal;
   delegation?: import("./delegation/task-service").DelegationTaskService;
+  scheduledTasks?(): import("./scheduled-tasks/scheduled-task-service").ScheduledTaskService | undefined;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;

@@ -7,6 +7,10 @@ import {
   type PrivateConnectResponse,
 } from "../../../shared/private-connect/protocol";
 import {
+  privateConnectScheduledTaskSchema,
+  type PrivateConnectScheduledTask,
+} from "../../../shared/private-connect/runtime-contract";
+import {
   apiRequest,
   browserDeviceId,
   connectPrivateConnectSocket,
@@ -47,6 +51,8 @@ export default function App({
   const [browserNonce] = useState(createPrivateConnectPairingNonce);
   const [shell, setShell] = useState<Shell | null>(null);
   const [detail, setDetail] = useState<ConversationDetailWithQueue | null>(null);
+  const [scheduledTasks, setScheduledTasks] = useState<PrivateConnectScheduledTask[]>([]);
+  const [scheduledTasksLoading, setScheduledTasksLoading] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, PromptDraft>>({});
   const promptDraft = selectedConversation ? promptDrafts[selectedConversation] : undefined;
@@ -66,6 +72,7 @@ export default function App({
   const clearWorkspace = useCallback((): void => {
     setShell(null);
     setDetail(null);
+    setScheduledTasks([]);
     setPromptDrafts({});
     setSelectedConversation(null);
     selectedConversationRef.current = null;
@@ -499,6 +506,69 @@ export default function App({
   const resumeQueue = (): Promise<void> =>
     mutateQueue({ type: "queue.resume" }, "The queue could not be resumed.").then(() => undefined);
 
+  const refreshScheduledTasks = useCallback(async (): Promise<void> => {
+    if (hostUnavailable || pair.kind !== "ready") return;
+    setScheduledTasksLoading(true);
+    try {
+      const response = await request(
+        { protocolVersion: 1, type: "scheduled-tasks.list", requestId: crypto.randomUUID() },
+        pair.csrf,
+      );
+      if (!response.ok) throw new Error(response.message);
+      const raw = response.result as { kind?: unknown; tasks?: unknown };
+      if (raw?.kind === "scheduled-tasks" && Array.isArray(raw.tasks)) {
+        const parsed = raw.tasks.flatMap((entry) => {
+          const item = privateConnectScheduledTaskSchema.safeParse(entry);
+          return item.success ? [item.data] : [];
+        });
+        setScheduledTasks(parsed);
+      }
+    } catch (error) {
+      setPair((current) => current.kind === "ready"
+        ? { ...current, error: error instanceof Error ? error.message : "Scheduled tasks could not be loaded." }
+        : current);
+    } finally {
+      setScheduledTasksLoading(false);
+    }
+  }, [hostUnavailable, pair, request]);
+
+  useEffect(() => {
+    if (pair.kind === "ready" && shell && !hostUnavailable) {
+      void refreshScheduledTasks();
+    }
+  }, [hostUnavailable, pair.kind, refreshScheduledTasks, shell]);
+
+  const mutateScheduledTask = async (
+    payload:
+      | { type: "scheduled-task.toggle"; taskId: string; enabled: boolean }
+      | { type: "scheduled-task.run-now"; taskId: string }
+      | { type: "scheduled-task.delete"; taskId: string },
+    fallbackError: string,
+  ): Promise<void> => {
+    if (hostUnavailable || pair.kind !== "ready" || !shell?.capabilities.scopes.includes("private:prompt")) return;
+    setBusy(true);
+    try {
+      const response = await request({ protocolVersion: 1, requestId: crypto.randomUUID(), ...payload }, pair.csrf);
+      if (!response.ok) throw new Error(response.message);
+      await refreshScheduledTasks();
+    } catch (error) {
+      setPair((current) => current.kind === "ready"
+        ? { ...current, error: error instanceof Error ? error.message : fallbackError }
+        : current);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleScheduledTask = (taskId: string, enabled: boolean): Promise<void> =>
+    mutateScheduledTask({ type: "scheduled-task.toggle", taskId, enabled }, "The scheduled task could not be updated.");
+
+  const runScheduledTaskNow = (taskId: string): Promise<void> =>
+    mutateScheduledTask({ type: "scheduled-task.run-now", taskId }, "The scheduled task could not be started.");
+
+  const deleteScheduledTask = (taskId: string): Promise<void> =>
+    mutateScheduledTask({ type: "scheduled-task.delete", taskId }, "The scheduled task could not be deleted.");
+
   const signOut = async (): Promise<void> => {
     if (pair.kind !== "ready") return;
     try {
@@ -524,6 +594,8 @@ export default function App({
     <WorkspaceShell
       shell={shell}
       detail={detail}
+      scheduledTasks={scheduledTasks}
+      scheduledTasksLoading={scheduledTasksLoading}
       error={pair.error ?? promptDraft?.error ?? null}
       prompt={prompt}
       busy={busy}
@@ -552,6 +624,10 @@ export default function App({
       onEditQueueItem={editQueueItem}
       onRemoveQueueItem={removeQueueItem}
       onResumeQueue={resumeQueue}
+      onRefreshScheduledTasks={refreshScheduledTasks}
+      onToggleScheduledTask={toggleScheduledTask}
+      onRunScheduledTaskNow={runScheduledTaskNow}
+      onDeleteScheduledTask={deleteScheduledTask}
       onSignOut={() => void signOut()}
     />
   );

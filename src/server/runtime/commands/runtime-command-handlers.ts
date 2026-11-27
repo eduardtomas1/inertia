@@ -42,6 +42,8 @@ import { createLibraryCommandHandler } from "./library-commands";
 import { createSecretRequestCommandHandler } from "./secret-request-commands";
 import { createWorktreeCommandHandler } from "./worktree-commands";
 import { createTerminalLinkCommandHandler } from "./terminal-link-commands";
+import { createScheduledTaskCommandHandler } from "./scheduled-task-commands";
+import type { ScheduledTaskService } from "../scheduled-tasks/scheduled-task-service";
 import type { TurnInteractionCommandDependencies } from "./turn-interaction-commands";
 
 type IsolatedReviewDependencies = Parameters<typeof createIsolatedReviewCommandHandler>[0];
@@ -92,6 +94,7 @@ export interface RuntimeCommandHandlerServices {
   agentThreads: AgentThreadRuntime;
   agentWorkflows: AgentWorkflowController;
   delegation: DelegationRuntime;
+  scheduledTasks: ScheduledTaskService;
   queuedMessages: ReturnType<typeof createQueuedMessageRuntime>;
   usageHandlers: readonly RuntimeCommandHandler[];
   turnInteraction: TurnInteractionCommandDependencies;
@@ -269,5 +272,6 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       send,
     }),
     createTerminalLinkCommandHandler({ workspacePath, send }),
+    createScheduledTaskCommandHandler({ scheduledTasks: services.scheduledTasks, send }),
   ];
 }

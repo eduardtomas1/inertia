@@ -44,6 +44,7 @@ import { delegationCancelResultSchema, delegationDeliveryResultSchema, delegatio
 import { cursorSdkLoginEventSchema, cursorSdkStatusResultSchema, cursorSdkModelsResultSchema } from "./cursor-sdk-auth-schema";
 import { workspaceToolResultValidators } from "./workspace-tool-results-schema";
 import { duoResultValidators } from "./duo-results-schema";
+import { scheduledTaskRunSchema, scheduledTaskSchema, MAX_SCHEDULED_TASKS_TOTAL, MAX_SCHEDULED_TASK_RUN_HISTORY } from "../scheduled-tasks";
 import { syncCursor } from "./server-event-discriminants";
 import { record, stringField, nonemptyStringField, nullableStringField, booleanField, numberField, integerField, integerFieldAtLeast, nullableNumberField, optionalStringField, optionalNullableStringField, optionalBooleanField, oneOf, recordWithStrings, arrayOf, type UnknownRecord } from "./server-event-fields";
 const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
@@ -963,6 +964,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
     case "conversation.detail.invalidated": return stringField(value, "conversationId");
     case "conversation.queue.changed": return stringField(value, "conversationId") && integerFieldAtLeast(value, "revision");
     case "todos.updated": return Array.isArray(value.todos) && todoCollectionCoherent(value.todos);
+    case "scheduled-tasks.changed": return optionalStringField(value, "projectId");
     case "library.updated": return record(value.library) && libraryCoherent(value.library);
     case "conversation.message.persisted":
     case "agent.commentary.persisted":
@@ -1109,6 +1111,16 @@ const REQUEST_RESULT_VALIDATORS = {
     gitDiff(value.diff) && reversalOperation(value.operation),
   "review.selection.answer": (value) => reviewSelectionAnswer(value.answer),
   "review.summary": (value) => reviewSummary(value.summary),
+  "scheduled-tasks.list": (value) => Array.isArray(value.tasks) && value.tasks.length <= MAX_SCHEDULED_TASKS_TOTAL
+    && arrayOf(value.tasks, (entry) => record(entry) && scheduledTaskSchema.safeParse(entry.task).success
+      && Array.isArray(entry.recentRuns) && entry.recentRuns.length <= MAX_SCHEDULED_TASK_RUN_HISTORY
+      && arrayOf(entry.recentRuns, (run) => scheduledTaskRunSchema.safeParse(run).success)),
+  "scheduled-task": (value) => scheduledTaskSchema.safeParse(value.task).success
+    && (value.recentRuns === undefined || (Array.isArray(value.recentRuns) && value.recentRuns.length <= MAX_SCHEDULED_TASK_RUN_HISTORY
+      && arrayOf(value.recentRuns, (run) => scheduledTaskRunSchema.safeParse(run).success))),
+  "scheduled-task.ran": (value) => scheduledTaskSchema.safeParse(value.task).success
+    && (value.run === null || scheduledTaskRunSchema.safeParse(value.run).success)
+    && nullableStringField(value, "conversationId"),
 } satisfies Record<RequestResultKind, (value: UnknownRecord) => boolean>;
 function requestResult(value: unknown): value is RequestResult {
   if (!recordWithStrings(value, "kind")) return false;

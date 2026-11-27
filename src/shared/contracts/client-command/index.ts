@@ -22,6 +22,7 @@ import { cursorSdkCommandSchemas } from "./cursor-sdk";
 import { delegationCommandSchemas } from "./delegation";
 import { observedChildCommandSchemas } from "./observed-children";
 import { worktreeCommandSchemas } from "./worktrees";
+import { scheduledTaskCommandSchemas } from "./scheduled-tasks";
 
 export const clientCommandSchema = z.discriminatedUnion("type", [
   ...appCommandSchemas,
@@ -45,6 +46,7 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   ...workspaceCommandSchemas,
   ...terminalLinkCommandSchemas,
   ...worktreeCommandSchemas,
+  ...scheduledTaskCommandSchemas,
 ]);
 
 export type ClientCommand = z.infer<typeof clientCommandSchema>;

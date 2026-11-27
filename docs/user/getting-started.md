@@ -37,7 +37,7 @@ A chat uses one route at a time: the account, or an API key you choose in the mo
 
 **API keys for credits.** An API key bills your provider's API credits instead of a subscription. Keys are stored in your operating system's credential vault, never in Inertia's database.
 
-**Antigravity.** Google says wrapping agy in another app isn't supported on consumer plans and points to a Gemini API key. Inertia doesn't offer a Gemini API key route yet, so Antigravity runs on its own sign-in.
+**Antigravity.** Inertia connects to your local `agy` CLI (1.5.17 or newer) over its official Agent Client Protocol (`agy acp`). Antigravity uses your local `agy` sign-in (`agy acp --login`), a `GEMINI_API_KEY`, or Gemini Enterprise Application Default Credentials configured in `agy`. Inertia does not store Gemini keys or modify Antigravity's settings.
 
 **Usage for Cursor, Kimi and Grok.** Cursor, Kimi Code and Grok don't report usage to Inertia, so **Usage → Limits** shows *Usage is not reported by this agent.* for them.
 
@@ -51,7 +51,7 @@ What each provider supports:
 | OpenCode | **Sign in through OpenCode** runs `opencode auth login`. | OpenCode keeps its own keys; add them with `opencode auth login`. |
 | Cursor | **Sign in through Cursor** runs Cursor's own sign-in. Usage is not reported. | Account only. |
 | Grok | **Sign in through Grok** runs `grok login`. Usage is not reported. | Account only. |
-| Antigravity | Sign in with Antigravity's own prompt; see the note above. | Account only. |
+| Antigravity | **Sign in through Antigravity** runs `agy acp --login` in a terminal, or uses your existing local `agy` sign-in. | Configured through `agy` via `GEMINI_API_KEY` or Gemini Enterprise ADC. Inertia does not store it. |
 
 ### Add an API key
 

@@ -66,6 +66,12 @@ export const HARNESS_STEERING_CAPABILITIES: Readonly<
     steerDuringCompaction: "unavailable",
     nativeResume: "negotiated",
   }),
+  "antigravity-acp": Object.freeze({
+    followUpSteer: "unavailable",
+    steerAcceptsAttachments: "unavailable",
+    steerDuringCompaction: "unavailable",
+    nativeResume: "negotiated",
+  }),
   "antigravity-cli": Object.freeze({
     followUpSteer: "unavailable",
     steerAcceptsAttachments: "unavailable",

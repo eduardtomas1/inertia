@@ -21,7 +21,7 @@ const HARNESS_PROFILES: Readonly<Record<string, WatcherHarnessProfile>> = Object
   "cursor-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
   "kimi-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
   "grok-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
-  "antigravity-cli": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: false }),
+  "antigravity-acp": Object.freeze({ systemInstruction: false, sessionInstruction: false, sessionInstructionRecordedAtCompaction: false, editsGatedBeforeStart: true }),
 });
 
 export function watcherHarnessProfile(harnessId: string): WatcherHarnessProfile {

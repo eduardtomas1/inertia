@@ -54,6 +54,7 @@ import { agentThreadQuestionAnswersMigration } from "./agent-thread-question-ans
 import { checkpointExpirationMigration } from "./checkpoint-expiration";
 import { preferredEditorMigration } from "./preferred-editor";
 import { messageSearchIndexMigration } from "./message-search-index";
+import { nativeAntigravityAcpHarnessMigration } from "./native-antigravity-acp-harness";
 
 export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] = [
   nativeAntigravityProviderMigration,
@@ -103,6 +104,7 @@ export const recentMigrationDefinitions: readonly DatabaseMigrationDefinition[] 
   checkpointExpirationMigration,
   preferredEditorMigration,
   messageSearchIndexMigration,
+  nativeAntigravityAcpHarnessMigration,
   orchestrationV2Migration,
   nativePiProviderMigration,
   cursorSdkProviderMigration,

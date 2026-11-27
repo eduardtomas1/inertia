@@ -85,7 +85,7 @@ const API_KEY_VENDORS: Readonly<Partial<Record<ProviderId, string>>> = {
   antigravity: "Gemini",
 };
 
-const ANTIGRAVITY_POLICY = "Google says wrapping agy in another app isn't supported on consumer plans.";
+const ANTIGRAVITY_POLICY = "Connects over official agy acp. Uses local agy sign-in, GEMINI_API_KEY, or Enterprise ADC.";
 const PI_ACCOUNTS = "Pi keeps its own accounts and API keys. Use Pi's /login command or its native configuration.";
 
 export function addProviderMenuItems(
@@ -227,9 +227,8 @@ export function addProviderFacts(id: ProviderId): readonly AddProviderFact[] {
   }
   if (id === "antigravity") {
     return [
-      { label: "Sign-in", value: "Antigravity's own prompt." },
-      { label: "API key", value: "Account only." },
-      { label: "Policy", value: ANTIGRAVITY_POLICY },
+      { label: "Sign-in", value: "agy acp --login." },
+      { label: "API key", value: addProviderSupportsApiKey(id) ? "Gemini API key." : "GEMINI_API_KEY or ADC in agy." },
     ];
   }
   if (id === "grok") {

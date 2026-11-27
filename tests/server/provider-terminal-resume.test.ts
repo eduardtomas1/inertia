@@ -71,7 +71,7 @@ function readyProvider(providerId: ProviderId): ProviderInfo {
       : `${providerId[0]!.toUpperCase()}${providerId.slice(1)}`,
     command: providerId,
     available: true,
-    version: providerId === "cursor" ? "2026.08.04-aaa8809" : "1.2.3",
+    version: providerId === "cursor" ? "2026.08.04-aaa8809" : "1.5.18",
     executable: `/opt/provider/${providerId}`,
     installState: "installed",
     authState: "authenticated",
@@ -164,6 +164,10 @@ describe("provider terminal resume mapping", () => {
     expect(providerTerminalResumeArguments("opencode", sessionIds.opencode)).toEqual([
       "--session",
       sessionIds.opencode,
+    ]);
+    expect(providerTerminalResumeArguments("antigravity", sessionIds.antigravity)).toEqual([
+      "--conversation",
+      sessionIds.antigravity,
     ]);
   });
 

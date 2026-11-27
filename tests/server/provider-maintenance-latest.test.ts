@@ -191,6 +191,58 @@ describe("ProviderLatestVersionCache", () => {
       heldVersion: "2.0.0",
     });
   });
+
+  it("checks Google's official Antigravity release manifest with caching, stale fallback, and abort handling", async () => {
+    const os = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "windows" : "linux";
+    const cpu = process.arch === "arm64" ? "arm64" : "x64";
+    const extension = process.platform === "win32" ? "exe" : "tar.gz";
+    const folder = `${process.platform === "win32" ? "windows" : process.platform}-${process.arch === "arm64" ? "arm" : "x64"}`;
+    const manifestResponse = (version: string) => new Response(JSON.stringify({
+      version,
+      url: `https://storage.googleapis.com/antigravity-public/antigravity-cli/${version}-42/${folder}/cli_${os}_${cpu}.${extension}`,
+      sha512: "a".repeat(128),
+    }), { status: 200 });
+
+    let now = 1_000_000_000;
+    const request = vi.fn()
+      .mockResolvedValueOnce(manifestResponse("1.5.18"))
+      .mockRejectedValueOnce(new Error("offline"));
+    const cache = new ProviderLatestVersionCache({
+      fetch: request as typeof fetch,
+      now: () => now,
+      successTtlMs: 60_000,
+      failureTtlMs: 10_000,
+    });
+
+    const [first, concurrent] = await Promise.all([
+      cache.antigravity(),
+      cache.antigravity(),
+    ]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      expect.stringMatching(/^https:\/\/antigravity-cli-auto-updater-974169037036\.us-central1\.run\.app\/manifests\/.+\.json$/u),
+      expect.objectContaining({ redirect: "error" }),
+    );
+    expect(first).toMatchObject({
+      version: "1.5.18",
+      heldVersion: null,
+      freshness: "fresh",
+      error: null,
+    });
+    expect(concurrent).toEqual(first);
+
+    now += 61_000;
+    const stale = await cache.antigravity();
+    expect(stale).toMatchObject({
+      version: "1.5.18",
+      freshness: "stale",
+      error: "Latest-version information is temporarily unavailable.",
+    });
+
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled"));
+    await expect(cache.antigravity(true, controller.signal)).rejects.toThrow("cancelled");
+  });
 });
 
 describe("selectProviderRelease", () => {

@@ -1350,7 +1350,7 @@ describe("server event provider identity boundary", () => {
     cursor: "cursor-acp",
     kimi: "kimi-acp",
     opencode: "opencode-sdk",
-    antigravity: "antigravity-cli",
+    antigravity: "antigravity-acp",
     grok: "grok-acp",
   } as const;
   const provider = {

@@ -295,7 +295,7 @@ describe("database health check for settings and subagent columns", () => {
     expect(messages).toEqual(["coherent schema"]);
   });
 
-  it.each([...Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 128,
+  it.each([...Array.from({ length: AGENT_SECRET_REQUESTS_SCHEMA_VERSION - 87 }, (_, index) => 87 + index), 129,
     ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, QUEUE_ITEMS_SCHEMA_VERSION])("restores a complete schema %i backup and upgrades it", async (version) => {
     const { databasePath, newer, report, messages } = await backups(version, () => undefined);
     expect(report).toMatchObject({ outcome: "restored", restoredBackup: newer.filename, invalidBackupsSkipped: 0 });

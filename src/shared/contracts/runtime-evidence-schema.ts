@@ -12,7 +12,7 @@ const PROVIDER_HARNESS_IDS = {
   cursor: "cursor-acp",
   kimi: "kimi-acp",
   opencode: "opencode-sdk",
-  antigravity: "antigravity-cli",
+  antigravity: "antigravity-acp",
   grok: "grok-acp",
   pi: "pi-rpc",
 } as const;

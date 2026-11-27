@@ -123,6 +123,7 @@ function inactiveExtension(
     || harnessId === "kimi-acp"
     || harnessId === "grok-acp"
     || harnessId === "opencode-sdk"
+    || harnessId === "antigravity-acp"
     || harnessId === "pi-rpc"
   ) {
     return {
@@ -130,13 +131,6 @@ function inactiveExtension(
       respondToApproval,
       respondToInput: harnessId === "cursor-sdk" ? () => false : respondToInput,
       steer,
-    };
-  }
-  if (harnessId === "antigravity-cli") {
-    return {
-      kind: harnessId,
-      respondToApproval: () => false,
-      respondToInput: () => false,
     };
   }
   return {
@@ -147,7 +141,9 @@ function inactiveExtension(
         ? "claude"
         : harnessId === "cursor-cli"
           ? "cursor"
-          : "opencode",
+          : harnessId === "antigravity-cli"
+            ? "antigravity"
+            : "opencode",
   };
 }
 
@@ -299,12 +295,12 @@ describe("production provider lifecycle conformance", () => {
       "cursor-sdk",
       "kimi-acp",
       "opencode-sdk",
-      "antigravity-cli",
+      "antigravity-acp",
       "grok-acp",
       "pi-rpc",
     ]);
     expect(PRODUCTION_HARNESSES.some(({ harnessId }) =>
-      ["codex-cli", "claude-cli", "cursor-cli", "opencode-cli"].includes(harnessId)))
+      ["codex-cli", "claude-cli", "cursor-cli", "opencode-cli", "antigravity-cli"].includes(harnessId)))
       .toBe(false);
   });
 
@@ -798,7 +794,7 @@ describe("production provider lifecycle conformance", () => {
     },
   );
 
-  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) => harnessId !== "antigravity-cli"))(
+  it.each(PRODUCTION_HARNESSES)(
     "$harnessId binds interaction response, replay, and cancellation to the exact run",
     async (route) => {
       const controlled = controlledManager(route);
@@ -865,39 +861,6 @@ describe("production provider lifecycle conformance", () => {
     },
   );
 
-  it("keeps Antigravity approvals and questions inside its own headless policy", async () => {
-    const route = PRODUCTION_HARNESSES.find(({ harnessId }) =>
-      harnessId === "antigravity-cli")!;
-    const controlled = controlledManager(route);
-    const input = inputFor(route);
-    const running = controlled.manager.run(input);
-    const exact = { runId: input.runId, turnId: input.turnId };
-
-    expect(controlled.manager.respondToApproval(
-      input.conversationId,
-      "approval-1",
-      "approve",
-      exact,
-    )).toBe(false);
-    expect(controlled.manager.respondToInput(
-      input.conversationId,
-      "input-1",
-      { answer: ["yes"] },
-      exact,
-    )).toBe(false);
-    expect(controlled.observations).toMatchObject({ approvals: [], inputs: [] });
-    expect(controlled.manager.cancel(input.conversationId)).toBe(true);
-    controlled.resolve({
-      ...providerRunTerminal(input, "cancelled"),
-      text: "",
-      textTruncated: false,
-      exitCode: null,
-      signal: null,
-      cleanupConfirmed: true,
-    });
-    await running;
-  });
-
   it.each(PRODUCTION_HARNESSES)(
     "$harnessId applies its declared follow-up exception at the exact run",
     async (route) => {
@@ -944,9 +907,7 @@ describe("production provider lifecycle conformance", () => {
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);
       const input = inputFor(route);
-      const capability = route.harnessId === "antigravity-cli"
-        ? "tool-activity" as const
-        : "approvals" as const;
+      const capability = "approvals" as const;
       expect(controlled.manager.providerCapabilityAvailable(
         input,
         capability,
@@ -1555,7 +1516,7 @@ describe("production provider lifecycle conformance", () => {
     expect(compileTimeProviderContractAssertions).toBeTypeOf("function");
   });
 
-  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) => harnessId !== "antigravity-cli"))(
+  it.each(PRODUCTION_HARNESSES)(
     "$harnessId retains admitted interaction authority after installation evidence is refreshed",
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);

@@ -8,7 +8,7 @@ import { CLAUDE_ISOLATED_SKILL_PLUGIN_NAME } from "./claude-skill-plugin";
 
 export const MAX_PROVIDER_SLASH_COMMANDS = PROVIDER_SLASH_COMMAND_LIMITS.commands;
 
-export const SLASH_COMMAND_PROVIDERS: readonly ProviderId[] = ["claude", "cursor", "kimi", "grok"];
+export const SLASH_COMMAND_PROVIDERS: readonly ProviderId[] = ["claude", "cursor", "kimi", "antigravity", "grok"];
 
 const HIDDEN_FOR_EVERY_PROVIDER: readonly string[] = [
   "build",
@@ -54,6 +54,49 @@ const HIDDEN_BY_PROVIDER: Partial<Record<ProviderId, readonly string[]>> = {
     "vim",
   ],
   cursor: ["summarize"],
+  antigravity: [
+    "add-dir",
+    "agents",
+    "artifact",
+    "branch",
+    "changelog",
+    "codesearch",
+    "config",
+    "context",
+    "conversation",
+    "copy",
+    "credits",
+    "cs",
+    "diff",
+    "effort",
+    "feedback",
+    "fork",
+    "help",
+    "hooks",
+    "keybindings",
+    "mcp",
+    "model",
+    "new",
+    "open",
+    "permissions",
+    "plugin",
+    "plugins",
+    "quota",
+    "record",
+    "remote-control",
+    "rename",
+    "rewind",
+    "search",
+    "settings",
+    "skills",
+    "statusline",
+    "switch",
+    "tasks",
+    "title",
+    "undo",
+    "usage",
+    "voice",
+  ],
 };
 
 export interface RawProviderSlashCommand {

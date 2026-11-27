@@ -1,6 +1,7 @@
 import type {
   ProviderMaintenanceFreshness,
 } from "../../shared/provider-maintenance";
+import { fetchLatestAntigravityRelease } from "./antigravity-cli-release";
 import {
   homebrewInfoArgs,
   homebrewLatestVersion,
@@ -221,6 +222,25 @@ export class ProviderLatestVersionCache {
         if (!version) throw new Error("Homebrew did not report a version");
         return { version, heldVersion: null };
       },
+    );
+  }
+
+  async antigravity(
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<LatestVersionResult> {
+    return await this.cached(
+      "antigravity",
+      force,
+      async () => {
+        const release = await fetchLatestAntigravityRelease({
+          fetch: this.fetchImplementation,
+          timeoutMs: this.timeoutMs,
+          ...(signal ? { signal } : {}),
+        });
+        return { version: release.version, heldVersion: null };
+      },
+      signal,
     );
   }
 

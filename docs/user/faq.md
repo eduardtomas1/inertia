@@ -14,7 +14,7 @@ No. Inertia uses the coding accounts you already have with each provider.
 
 ## Can I use API credits instead of a subscription?
 
-Yes. In **Settings → Agents → Accounts and API keys**, choose **Add API key** on the Claude Code card for an Anthropic API key, or on the Codex card for an OpenAI API key. For Claude Code you can also choose **Sign in for API billing through Claude Code**, which uses your Anthropic Console credits. It is under **Sign in through Claude Code** while you are signed out, and beside **Refresh** once you are signed in. Antigravity is account only for now. The provider's command-line tool must be installed, but you don't need to sign in to its account. See [Accounts and API keys](getting-started.md#accounts-and-api-keys).
+Yes. In **Settings → Agents → Accounts and API keys**, choose **Add API key** on the Claude Code card for an Anthropic API key, or on the Codex card for an OpenAI API key. For Claude Code you can also choose **Sign in for API billing through Claude Code**, which uses your Anthropic Console credits. It is under **Sign in through Claude Code** while you are signed out, and beside **Refresh** once you are signed in. Antigravity connects over official `agy acp` and uses your local `agy` sign-in, `GEMINI_API_KEY`, or Gemini Enterprise ADC configured in `agy` (Inertia does not store Gemini keys yet). The provider's command-line tool must be installed, but you don't need to sign in to its account. See [Accounts and API keys](getting-started.md#accounts-and-api-keys).
 
 ## Does a chat use my account or my API key?
 

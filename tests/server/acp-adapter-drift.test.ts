@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createAntigravityAcpHarness } from "../../src/server/provider/antigravity-acp-harness";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createGrokAcpHarness } from "../../src/server/provider/grok-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
@@ -13,13 +14,19 @@ import { nativeProviderRunInput } from "./model-route-fixture";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(removePortableFixture)); });
 
-type AcpDriftProvider = "cursor" | "kimi" | "grok";
+type AcpDriftProvider = "cursor" | "kimi" | "grok" | "antigravity";
 
-const AGENT_NAMES: Record<AcpDriftProvider, string> = { cursor: "Cursor", kimi: "Kimi Code", grok: "Grok" };
+const AGENT_NAMES: Record<AcpDriftProvider, string> = {
+  cursor: "Cursor",
+  kimi: "Kimi Code",
+  grok: "Grok",
+  antigravity: "Antigravity ACP Server",
+};
 
 function driftHarness(providerId: AcpDriftProvider) {
   if (providerId === "cursor") return createCursorAcpHarness({ controlRpcTimeoutMs: 5_000 });
   if (providerId === "kimi") return createKimiAcpHarness({ controlRpcTimeoutMs: 5_000 });
+  if (providerId === "antigravity") return createAntigravityAcpHarness({ controlRpcTimeoutMs: 5_000 });
   return createGrokAcpHarness({ controlRpcTimeoutMs: 5_000 });
 }
 
@@ -54,7 +61,9 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
     const replay = ${JSON.stringify(replay ?? null)};
     if (replay) send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: replay } });
     return send({ jsonrpc: "2.0", id: message.id, result: {
-      modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: []
+      modes: ${providerId === "antigravity"
+        ? `{ currentModeId: "default", availableModes: [{ id: "default", name: "Default" }] }`
+        : `{ currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }`}, configOptions: []
     } });
   }
   if (message.method === "session/prompt") {
@@ -83,7 +92,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
   }) }) };
 }
 
-describe.each(["cursor", "kimi", "grok"] as const)("%s ACP drift regressions", (providerId) => {
+describe.each(["cursor", "kimi", "grok", "antigravity"] as const)("%s ACP drift regressions", (providerId) => {
   it.each(["initialize", "session/load"])("cancels a resumed session stalled at %s", async (method) => {
     const { start, marker } = fixture(providerId, method);
     const run = start();

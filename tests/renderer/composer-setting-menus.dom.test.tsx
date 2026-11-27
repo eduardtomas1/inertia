@@ -218,29 +218,22 @@ describe("composer setting menus", () => {
     }
   });
 
-  it("runs Antigravity's Supervised as Auto-accept edits and explains why Supervised is unavailable", () => {
-    const current = {
-      ...conversation("access-antigravity"),
-      providerId: "antigravity" as const,
-      modelSelection: providerNativeModelSelection({ providerId: "antigravity" }),
-      accessMode: "supervised" as const,
-    };
-    render(<Composer {...composerProps(current)} />);
-    const trigger = screen.getByRole("button", { name: "Choose project access. Current access: Auto-accept edits." });
-    fireEvent.click(trigger);
-    const access = screen.getByRole("menu", { name: "Project access" });
-    const supervised = within(access).getByRole("menuitemradio", { name: /Supervised/u });
-    expect(supervised).toBeDisabled();
-    expect(supervised).toHaveAttribute("aria-checked", "false");
-    expect(supervised).toHaveTextContent("Antigravity can't pause for approval");
-    expect(within(access).getByRole("menuitemradio", { name: /^Auto-accept edits/u })).toHaveAttribute("aria-checked", "true");
-    expect(within(access).getByRole("menuitemradio", { name: /Full access/u })).toBeEnabled();
-  });
-
-  it("keeps Supervised available for providers that can ask for approval", () => {
-    render(<Composer {...composerProps({ ...conversation("access-claude"), providerId: "claude", modelSelection: providerNativeModelSelection({ providerId: "claude" }) })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Choose project access. Current access: Supervised." }));
-    expect(within(screen.getByRole("menu", { name: "Project access" })).getByRole("menuitemradio", { name: /Supervised/u })).toBeEnabled();
+  it("keeps Supervised available for providers that can ask for approval, including Antigravity", () => {
+    for (const providerId of ["antigravity", "claude"] as const) {
+      const { unmount } = render(<Composer {...composerProps({
+        ...conversation(`access-${providerId}`),
+        providerId,
+        modelSelection: providerNativeModelSelection({ providerId }),
+        accessMode: "supervised",
+      })} />);
+      fireEvent.click(screen.getByRole("button", { name: "Choose project access. Current access: Supervised." }));
+      const access = screen.getByRole("menu", { name: "Project access" });
+      const supervised = within(access).getByRole("menuitemradio", { name: /Supervised/u });
+      expect(supervised).toBeEnabled();
+      expect(supervised).toHaveAttribute("aria-checked", "true");
+      expect(within(access).getByRole("menuitemradio", { name: /Full access/u })).toBeEnabled();
+      unmount();
+    }
   });
 
   it("leaves Standard speed without a description that repeats its label and without a dot", () => {

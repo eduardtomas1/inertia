@@ -23,7 +23,6 @@ import {
   MAX_CLAUDE_STREAM_CORRELATION_CHARS,
 } from "../../src/server/provider/claude-message-projector-support";
 import { claudeModelScopedWindows } from "../../src/server/provider/claude-rate-limit-windows";
-import { parseAntigravityLine } from "../../src/server/provider/antigravity-stream";
 import { parseGrokExitPlanRequest } from "../../src/server/provider/grok-acp-extensions";
 import { grokErrorDetail, grokStopFailure } from "../../src/server/provider/grok-acp-support";
 import { planSteps as grokPlanSteps } from "../../src/server/provider/grok-acp-projection";
@@ -145,9 +144,7 @@ describe("other providers' text truncation", () => {
       .toBe("x".repeat(199));
   });
 
-  it("cuts an Antigravity tool label and a Grok plan on a code point boundary", () => {
-    expect(parseAntigravityLine(JSON.stringify({ event: "step_update", step_update: { tool_name: crossing(199) } })))
-      .toEqual([expect.objectContaining({ kind: "tool", label: "x".repeat(199) })]);
+  it("cuts a Grok plan on a code point boundary", () => {
     expect(parseGrokExitPlanRequest({ sessionId: "session-1", toolCallId: "call-1", planContent: crossing(256 * 1024 - 1) }).plan)
       .toBe("x".repeat(256 * 1024 - 1));
   });

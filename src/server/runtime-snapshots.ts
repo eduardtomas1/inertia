@@ -48,7 +48,7 @@ function agentThreadManagement(
     cursor: "Cursor's scoped MCP session",
     kimi: "Kimi Code's scoped MCP session",
     opencode: "OpenCode's scoped MCP session",
-    antigravity: "Antigravity",
+    antigravity: "Antigravity's scoped MCP session",
     grok: "Grok's scoped MCP session",
     pi: "Pi",
   }[providerId];

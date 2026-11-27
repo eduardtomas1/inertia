@@ -22,8 +22,8 @@ export const PROVIDER_VERSION_FLOORS = {
   },
   antigravity: {
     product: "Antigravity",
-    minimumVersion: "1.2.2",
-    reason: "older versions have no headless stream-json mode",
+    minimumVersion: "1.5.17",
+    reason: "older versions lack required ACP fixes and security updates",
     remedy: "Run 'agy update' and refresh.",
   },
 } as const satisfies Partial<Record<ProviderId, ProviderVersionFloor>>;

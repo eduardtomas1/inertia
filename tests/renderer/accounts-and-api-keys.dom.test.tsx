@@ -195,7 +195,7 @@ describe("Accounts and API keys", () => {
 
     expect(within(card("Cursor")).getByText("Not installed")).toBeInTheDocument();
     expect(within(card("Cursor")).getByText(/Account only/u)).toBeInTheDocument();
-    expect(within(card("Antigravity")).getByText("Google says wrapping agy in another app isn't supported on consumer plans.")).toBeInTheDocument();
+    expect(within(card("Antigravity")).getByText("Official agy acp. Uses local agy sign-in, GEMINI_API_KEY, or ADC.")).toBeInTheDocument();
     expect(within(card("Antigravity")).getByText("Account only.")).toBeInTheDocument();
     expect(within(card("Antigravity")).queryByRole("button", { name: /Add API key/u })).not.toBeInTheDocument();
     expect(within(card("Cursor")).getByText("Account only, with usage not reported.")).toBeInTheDocument();

@@ -356,7 +356,7 @@ describe("useDraftConversation", () => {
       id: "55555555-5555-4555-8555-555555555555",
       providerId: "antigravity",
       modelSelection: {
-        harnessId: "antigravity-cli",
+        harnessId: "antigravity-acp",
         backendProfileId: "builtin:antigravity",
         modelId: "provider-default",
       },

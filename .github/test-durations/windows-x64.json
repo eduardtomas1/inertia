@@ -989,7 +989,6 @@
     "tests/server/agent-workflow-commands.test.ts": 31,
     "tests/server/agent-workflow-controller.test.ts": 613,
     "tests/server/agent-workflow-persistence.test.ts": 1119,
-    "tests/server/antigravity-cli-harness.test.ts": 7425,
     "tests/server/antigravity-models.test.ts": 6910,
     "tests/server/app-keybindings-settings.test.ts": 1563,
     "tests/server/app-update-candidate-viability-worker.test.ts": 8990,

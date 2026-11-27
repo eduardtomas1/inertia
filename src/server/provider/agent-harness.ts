@@ -208,19 +208,33 @@ export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabili
   };
 }
 
-export interface AntigravityCliHarnessCapabilities extends AgentHarnessCoreCapabilities {
-  extension: {
-    kind: "antigravity-cli";
-    protocol: "headless-stream-json";
-    approvals: "provider-policy";
-    questions: "unavailable-in-headless";
-    plans: "native-mode";
-    reasoning: "unavailable-in-headless";
-    usage: "result-usage";
-    images: "unavailable-in-current-harness";
-    authentication: "antigravity-cli";
-    modelMetadata: "cli-models";
+export interface AntigravityAcpHarnessExtensionCapabilities {
+  kind: "antigravity-acp";
+  protocol: "acp-v1-json-rpc";
+  approvals: "native";
+  questions: "permission-multiplexed";
+  plans: "native";
+  reasoning: "native";
+  usage: "optional-acp-v1";
+  images: "capability-negotiated";
+  authentication: "antigravity-cli";
+  modelMetadata: "session-config-options";
+}
+
+export interface AntigravityAcpHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  lifecycle: {
+    events: "push";
+    terminalStatuses: readonly ["completed", "failed", "cancelled"];
   };
+  session: {
+    resume: "native";
+    identity: "session";
+  };
+  cancellation: {
+    graceful: "protocol-interrupt";
+    forceFallback: "process-tree-kill";
+  };
+  extension: AntigravityAcpHarnessExtensionCapabilities;
 }
 
 export interface PiRpcHarnessCapabilities extends AgentHarnessCoreCapabilities {
@@ -256,7 +270,7 @@ export type AgentHarnessCapabilities =
   | KimiAcpHarnessCapabilities
   | GrokAcpHarnessCapabilities
   | OpenCodeSdkHarnessCapabilities
-  | AntigravityCliHarnessCapabilities;
+  | AntigravityAcpHarnessCapabilities;
 
 export type AgentHarnessCoreEvent =
   | ProviderTextEvent
@@ -321,7 +335,7 @@ export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "grok"; extension: "grok-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-cli" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "pi"; extension: "pi-rpc" });
 
 export type AgentHarnessEvent =
@@ -373,7 +387,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-sdk" | "cursor-acp" | "kimi-acp" | "grok-acp" | "opencode-sdk" | "antigravity-cli" | "pi-rpc";
+  kind: "claude-agent-sdk" | "cursor-sdk" | "cursor-acp" | "kimi-acp" | "grok-acp" | "opencode-sdk" | "antigravity-acp" | "pi-rpc";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -580,7 +594,7 @@ export function createAgentHarnessEmitter(
       else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
       else if (providerId === "grok") emit({ ...base, providerId, type: "extension", extension: "grok-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
-      else if (providerId === "antigravity") emit({ ...base, providerId, type: "extension", extension: "antigravity-cli", event });
+      else if (providerId === "antigravity") emit({ ...base, providerId, type: "extension", extension: "antigravity-acp", event });
       else if (providerId === "pi") emit({ ...base, providerId, type: "extension", extension: "pi-rpc", event });
     },
   };

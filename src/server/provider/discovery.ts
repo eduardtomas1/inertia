@@ -27,6 +27,7 @@ import type { PosixCleanupDiagnostic } from "../posix-cleanup-diagnostics";
 import type { ProviderAccountKind } from "../../shared/provider";
 import { providerAuthStatusArgs } from "./auth";
 import { probePiProtocol, type PiProtocolProbe } from "./pi-discovery";
+import { resolveManagedAntigravityExecutable } from "./antigravity-managed-install";
 import { grokCredentialPresence } from "./grok-acp-auth";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -116,6 +117,7 @@ function antigravityCandidateIsIdentified(executable: string): boolean {
 const ANCHORED_VERSION_LINES: Partial<Record<ProviderId, RegExp>> = {
   claude: /^(v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?) \(Claude Code\)$/mu,
   opencode: /^(?:opencode\s+)?(v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?)(?:\s.*)?$/mu,
+  antigravity: /^(?:(?:agy|antigravity)\s+)?(v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?)(?:\s.*)?$/mu,
 };
 
 function versionFromOutput(providerId: ProviderId, probe: Pick<ProbeResult, "output" | "stdout">): string | undefined {
@@ -343,9 +345,10 @@ function compareVersions(left: string | undefined, right: string | undefined): n
   return 0;
 }
 
-function antigravityVersionSupportsHeadless(version: string | undefined): boolean {
+function antigravityVersionSupported(version: string | undefined): boolean {
   return Boolean(version)
-    && compareVersions(version, PROVIDER_VERSION_FLOORS.antigravity.minimumVersion) >= 0;
+    && !/^v?0\.0\.0(?:[-+].*)?$/u.test(version!.trim())
+    && !providerVersionBelowFloor(version, PROVIDER_VERSION_FLOORS.antigravity.minimumVersion);
 }
 
 function openCodeVersionIsSupported(version: string | undefined): boolean {
@@ -565,6 +568,7 @@ async function detectProviderRecordingCleanup(
     env: {
       ...credentialFreeProviderEnvironment(discoveredEnvironment.env),
       ...(providerId === "grok" ? { GROK_DISABLE_AUTOUPDATER: "1" } : {}),
+      ...(providerId === "antigravity" ? { AGY_CLI_DISABLE_AUTO_UPDATE: "true" } : {}),
     },
     pathEntries: discoveredEnvironment.pathEntries,
   };
@@ -586,6 +590,13 @@ async function detectProviderRecordingCleanup(
         pathEntries: probeEnvironment.pathEntries,
       }
     : probeEnvironment;
+  const managedAntigravity = providerId === "antigravity"
+    && options.dataDirectory
+    && command === PROVIDER_INFO.antigravity.command
+    && dependencies.executableCandidates === undefined
+    && testProviderBinDirectory() === null
+    ? await resolveManagedAntigravityExecutable(options.dataDirectory)
+    : null;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "agent"]
     : [selectedCommand];
@@ -595,13 +606,16 @@ async function detectProviderRecordingCleanup(
     && dependencies.executableCandidates === undefined
     && testProviderBinDirectory() === null
     ? await windowsCodexExecutableCandidates(candidateEnvironment, cwd)
-    : [...new Set((await Promise.all(candidateCommands.map(
-      async (candidate) => await resolveCandidates(
-        candidate,
-        candidateEnvironment,
-        cwd,
-      ),
-    ))).flat())];
+    : [...new Set([
+        ...(await Promise.all(candidateCommands.map(
+          async (candidate) => await resolveCandidates(
+            candidate,
+            candidateEnvironment,
+            cwd,
+          ),
+        ))).flat(),
+        ...(managedAntigravity ? [managedAntigravity.executablePath] : []),
+      ])];
   requireActive();
   if (candidates.length === 0) {
     return {
@@ -623,7 +637,14 @@ async function detectProviderRecordingCleanup(
     const version = versionFromOutput(providerId, probe);
     const belowFloor = versionFloor !== null
       && providerVersionBelowFloor(version, versionFloor.minimumVersion);
-    const acpProbe = (providerId === "cursor" || providerId === "kimi" || providerId === "grok")
+    const antigravityVersionReady = providerId !== "antigravity"
+      || (antigravityCandidateIsIdentified(executable) && antigravityVersionSupported(version));
+    const acpProbe = (
+      providerId === "cursor"
+      || providerId === "kimi"
+      || providerId === "grok"
+      || (providerId === "antigravity" && antigravityVersionReady)
+    )
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
           executable,
@@ -644,11 +665,14 @@ async function detectProviderRecordingCleanup(
       && (providerId === "grok"
         ? grokAgentModeReady(acpProbe.output)
           && grokCandidateIsIdentified(executable, probe.output, acpProbe.output)
-        : /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
-          && (providerId === "cursor"
-            ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
-            : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output)
-              && !KIMI_LEGACY_CLI.test(`${probe.output}\n${acpProbe.output}`)))
+        : providerId === "antigravity"
+          ? /(?:agent client protocol|\bacp\b)/iu.test(acpProbe.output)
+            && antigravityCandidateIsIdentified(executable)
+          : /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
+            && (providerId === "cursor"
+              ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
+              : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output)
+                && !KIMI_LEGACY_CLI.test(`${probe.output}\n${acpProbe.output}`)))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, followUpTimeoutMs)
@@ -690,8 +714,7 @@ async function detectProviderRecordingCleanup(
                 : true
       ),
       versionReady: (providerId === "antigravity"
-        ? antigravityCandidateIsIdentified(executable)
-          && antigravityVersionSupportsHeadless(version)
+        ? antigravityVersionReady
         : providerId === "pi"
           ? (version ?? "").startsWith("1.")
         : providerId === "opencode"
@@ -753,9 +776,9 @@ async function detectProviderRecordingCleanup(
       return unresponsive();
     }
     const providerWithoutAcp =
-      (providerId === "cursor" || providerId === "kimi" || providerId === "grok") &&
+      (providerId === "cursor" || providerId === "kimi" || providerId === "grok" || providerId === "antigravity") &&
       versionProbes.some(
-        ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+        ({ probe, versionReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && versionReady,
       );
     const openCodeInstalls = providerId === "opencode"
       ? versionProbes.filter(
@@ -780,6 +803,9 @@ async function detectProviderRecordingCleanup(
           antigravityCandidateIsIdentified(executable)
           && probe.started && !probe.timedOut && probe.exitCode === 0)
       : undefined;
+    const antigravityBelowFloor = antigravityInstall && !antigravityInstall.versionReady
+      ? antigravityInstall
+      : undefined;
     const openCodeTwoOnly = providerWithoutPureServe
       && openCodeInstalls.every(({ version }) => !openCodeVersionIsSupported(version));
     const belowFloorVersion = versionFloor
@@ -787,9 +813,9 @@ async function detectProviderRecordingCleanup(
       && providerVersionBelowFloor(identifiedInstall.version, versionFloor.minimumVersion)
       ? identifiedInstall.version
       : undefined;
-    const updateRequired = antigravityInstall?.version
+    const updateRequired = antigravityBelowFloor?.version
       ? {
-          installedVersion: antigravityInstall.version,
+          installedVersion: antigravityBelowFloor.version,
           minimumVersion: PROVIDER_VERSION_FLOORS.antigravity.minimumVersion,
         }
       : versionFloor && belowFloorVersion
@@ -799,13 +825,13 @@ async function detectProviderRecordingCleanup(
       provider,
       available: providerWithoutAcp
         || providerWithoutPureServe
-        || Boolean(antigravityInstall)
+        || Boolean(antigravityBelowFloor)
         || Boolean(belowFloorVersion),
       ...(identifiedInstall?.version
         ? { executable: identifiedInstall.executable, version: identifiedInstall.version }
         : {}),
       installState:
-        providerWithoutAcp || providerWithoutPureServe || antigravityInstall || belowFloorVersion
+        providerWithoutAcp || providerWithoutPureServe || antigravityBelowFloor || belowFloorVersion
           ? "installed"
           : "error",
       authState: "unknown",
@@ -814,8 +840,8 @@ async function detectProviderRecordingCleanup(
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
-        : antigravityInstall
-          ? `Antigravity ${antigravityInstall.version ?? "with an unknown version"} is installed, but Inertia needs ${PROVIDER_VERSION_FLOORS.antigravity.minimumVersion} or newer. ${PROVIDER_VERSION_FLOORS.antigravity.remedy}`
+        : antigravityBelowFloor
+          ? `Antigravity ${antigravityBelowFloor.version ?? "with an unknown version"} is installed, but Inertia needs ${PROVIDER_VERSION_FLOORS.antigravity.minimumVersion} or newer. ${PROVIDER_VERSION_FLOORS.antigravity.remedy}`
         : versionFloor && belowFloorVersion
           ? providerVersionFloorMessage(versionFloor, belowFloorVersion)
         : kimiLegacyCli

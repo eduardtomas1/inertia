@@ -273,6 +273,7 @@ describe("backend profile views", () => {
     expect(backendProfileProviderId({ harnessId: "claude-agent-sdk", preset: "kimi-code" })).toBe("kimi");
     expect(backendProfileProviderId({ harnessId: "claude-agent-sdk", preset: "custom" })).toBe("claude");
     expect(backendProfileProviderId({ harnessId: "codex-app-server", preset: "openai-api-key" })).toBe("codex");
+    expect(backendProfileProviderId({ harnessId: "antigravity-acp", preset: "native" })).toBe("antigravity");
     expect(backendProfileProviderId({ harnessId: "antigravity-cli", preset: "native" })).toBe("antigravity");
   });
 

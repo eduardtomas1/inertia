@@ -4,6 +4,7 @@ import {
   mkdtemp,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -391,6 +392,7 @@ describe("provider install source classification", () => {
     ["claude", ".local/share/claude/versions/2.1.280", ".local/bin/claude", ["update"], "claude update"],
     ["cursor", ".local/share/cursor-agent/versions/2026.10.01-e373342/cursor-agent", ".local/bin/cursor-agent", ["update"], "cursor-agent update"],
     ["antigravity", ".local/bin/agy", null, ["update"], "agy update"],
+    ["antigravity", ".local/share/agy/versions/1.5.18/antigravity", ".local/bin/agy", ["update"], "agy update"],
   ] as const)("runs the %s vendor updater for its installer layout", async (providerId, installed, linked, args, manualCommand) => {
     const { home } = await layout();
     const executable = await file(join(home, installed));
@@ -402,6 +404,50 @@ describe("provider install source classification", () => {
       update: { executable: hit, args, lockKey: `native:${providerId}` },
     });
     expect(capabilities.update?.environment).toBeUndefined();
+  });
+
+  posixIt("wires only the active Inertia-managed Antigravity runtime in the configured data directory to the managed updater", async () => {
+    const { root, home } = await layout();
+    const releaseId = "a".repeat(64);
+    const dataDirectory = join(root, "data");
+    const targetDir = join(dataDirectory, "tools", "antigravity", "linux-x64");
+    const releaseDir = join(targetDir, "versions", releaseId);
+    const executable = await file(join(releaseDir, "antigravity"));
+    await writeFile(join(targetDir, "active.json"), JSON.stringify({ releaseId }));
+    const info = await stat(executable);
+    await writeFile(join(releaseDir, ".install-complete.json"), JSON.stringify({
+      releaseId,
+      version: "1.5.18",
+      executable: { name: "antigravity", bytes: info.size },
+    }));
+
+    const matching = await classify("antigravity", executable, home, environment([]), {
+      platform: "linux",
+      arch: "x64",
+      dataDirectory,
+    });
+    expect(matching).toMatchObject({
+      installMethod: "provider-managed",
+      updateAvailability: "available",
+      manualCommand: null,
+      update: {
+        executable,
+        args: [],
+        managedAction: "antigravity-managed-release",
+      },
+    });
+
+    const otherDataDir = join(root, "other-data");
+    const mismatched = await classify("antigravity", executable, home, environment([]), {
+      platform: "linux",
+      arch: "x64",
+      dataDirectory: otherDataDir,
+    });
+    expect(mismatched).toMatchObject({
+      installMethod: "manual",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
   });
 
   posixIt("pins the OpenCode curl updater to 1.x", async () => {
@@ -501,5 +547,16 @@ describe("provider install source classification", () => {
       manualCommand: null,
     });
     expect(capabilities.message).toMatch(/^Inertia could not tell /u);
+  });
+
+  posixIt("does not treat literal backslashes in POSIX paths as Antigravity install directories", async () => {
+    const { home } = await layout();
+    const executable = await file(join(home, ".local\\bin", "agy"));
+    const capabilities = await classify("antigravity", executable, home, environment([dirname(executable)]));
+    expect(capabilities).toMatchObject({
+      installMethod: "manual",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
   });
 });

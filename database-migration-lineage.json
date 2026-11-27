@@ -889,13 +889,18 @@
     },
     {
       "version": 123,
-      "name": "OrchestrationV2EventStore",
-      "digest": "ea10cdedb7d1facd6a777c7745ef33ad9ed6f51be0240754fec685fbecbef990"
+      "name": "SupportNativeAntigravityAcpHarness",
+      "digest": "02ae67f465b3f873a80a8c23101818074ea493c425c7cb30f4fb5d833f0ea875"
     },
     {
       "version": 124,
+      "name": "OrchestrationV2EventStore",
+      "digest": "fc2746afeb972932c1bb02330c6925a3f15fed3c81d2ca49c8f7464492575503"
+    },
+    {
+      "version": 125,
       "name": "SupportNativePiProvider",
-      "digest": "298be7bd045a5170290b9f683495a8a9c71d13ba8f2880423ff398eae5dd156f",
+      "digest": "d3453e9b9b0e5b036a6986312eabedca06d42591f2612c60c1f7bbe16f52e93c",
       "sources": [
         {
           "path": "src/server/persistence/migrations/native-pi-provider.ts",
@@ -910,9 +915,9 @@
       ]
     },
     {
-      "version": 125,
+      "version": 126,
       "name": "SupportCursorSdkHarness",
-      "digest": "1c218f0ea7da4e313df9f5773f4e356a0c485edbffd7e6db5b96723b17388f24",
+      "digest": "1cf4972c7e158b71b4b9e3eb6923c66fb76234e852f9d5ed083542ae85a23c66",
       "sources": [
         {
           "path": "src/server/persistence/migrations/cursor-sdk-provider.ts",
@@ -925,14 +930,14 @@
       ]
     },
     {
-      "version": 126,
+      "version": 127,
       "name": "RaiseConversationContextSupplementBound",
-      "digest": "0e60cc0df994a767b9489f07fc59447853306e702e5d7ca6660e3b87afc886eb"
+      "digest": "b2ce88e8e42a57968891c725fcf27c140fd9b56a24e89c27b11ed4187fcd3142"
     },
     {
-      "version": 127,
+      "version": 128,
       "name": "PersistDelegatedTasks",
-      "digest": "a64c1926c77303925cbb48b26b10f7a51ee56cc1b65ea7a616064713182d5821",
+      "digest": "142c71792f98bc1282c986afdd847eed5e77268876cc41cfc5d8a70fd081589f",
       "sources": [
         {
           "path": "src/server/persistence/migrations/delegated-tasks.ts",
@@ -949,19 +954,19 @@
       ]
     },
     {
-      "version": 128,
-      "name": "PersistDelegationAutomaticWakes",
-      "digest": "9890293bd60bbaa8ff0bc1dcb9f3b67b610a12486862de7fb0c4bdacc815beba"
-    },
-    {
       "version": 129,
-      "name": "OrchestrationV2ReceiptStatusAndProjectionMetadata",
-      "digest": "64e188bb6ee9d3b299faa732d7f3c8b5ed854d6894b896d8c07889d38f23a705"
+      "name": "PersistDelegationAutomaticWakes",
+      "digest": "a8451c85e7551c6d08b9d2fc1cede1b4f5c93983659445491aeff59d3b867688"
     },
     {
       "version": 130,
+      "name": "OrchestrationV2ReceiptStatusAndProjectionMetadata",
+      "digest": "115ce91dcc5ca389a203916a050ba8f94f8df5e8dd26e65381f0748bfd0c5fad"
+    },
+    {
+      "version": 131,
       "name": "PersistQueueItemOrderDeliveryAndSelection",
-      "digest": "73d3a571aa6d59e77424fa4e9aafd6229640605a6c5646fec0fef119b91cccf8"
+      "digest": "641300eb4154ee53601cede04d610113a59afae102cf5ed509e131a11fe15158"
     }
   ]
 }

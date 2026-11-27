@@ -53,7 +53,7 @@ async function releasedDatabase() {
   await copyFile(resolve("tests/fixtures/database/v0.0.6.sqlite"), path);
   const database = new Database(path);
   database.pragma("foreign_keys = ON");
-  migrateRuntimeDatabase(database, 125);
+  migrateRuntimeDatabase(database, 126);
   const columns = (database.pragma("table_info(conversations)") as { name: string }[]).map(({ name }) => name)
     .filter((name) => name !== "id").map((name) => `"${name}"`).join(", ");
   database.prepare(`INSERT INTO conversations (id, ${columns}) SELECT ?, ${columns} FROM conversations ORDER BY rowid LIMIT 1`)
@@ -71,8 +71,8 @@ describe("conversation context supplement bound migration", () => {
       const rows = tableData(database);
       const objects = schemaObjects(database);
       const keys = foreignKeys(database);
-      migrateRuntimeDatabase(database, 126);
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 126 });
+      migrateRuntimeDatabase(database, 127);
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 127 });
       expect(tableData(database)).toEqual(rows);
       expect(schemaObjects(database)).toEqual(objects);
       expect(foreignKeys(database)).toEqual(keys);
@@ -85,8 +85,8 @@ describe("conversation context supplement bound migration", () => {
       insertPacket(database, null);
       expect(() => insertPacket(database, null)).toThrow("conversation context draft limit reached");
       const widenedRows = tableData(database);
-      database.prepare("DELETE FROM schema_migrations WHERE version = 126").run();
-      migrateRuntimeDatabase(database, 126);
+      database.prepare("DELETE FROM schema_migrations WHERE version = 127").run();
+      migrateRuntimeDatabase(database, 127);
       expect(tableData(database)).toEqual(widenedRows);
       expect(schemaObjects(database)).toEqual(objects);
     } finally { database.close(); }
@@ -98,8 +98,8 @@ describe("conversation context supplement bound migration", () => {
       database.exec("CREATE TABLE conversation_context_packets_v110 (id TEXT)");
       const objects = schemaObjects(database);
       const rows = tableData(database);
-      expect(() => migrateRuntimeDatabase(database, 126)).toThrow();
-      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 125 });
+      expect(() => migrateRuntimeDatabase(database, 127)).toThrow();
+      expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()).toEqual({ version: 126 });
       expect(schemaObjects(database)).toEqual(objects);
       expect(tableData(database)).toEqual(rows);
       expect(() => insertPacket(database, 8_192)).toThrow(/CHECK/u);

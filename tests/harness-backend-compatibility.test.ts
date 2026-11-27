@@ -76,6 +76,7 @@ describe("harness-specific backend compatibility", () => {
       ["cursor-acp", "cursor", "cursor-managed"],
       ["kimi-acp", "kimi", "kimi-managed"],
       ["opencode-sdk", "opencode", "opencode-native-catalog"],
+      ["antigravity-acp", "antigravity", "antigravity-managed"],
       ["antigravity-cli", "antigravity", "antigravity-managed"],
       ["grok-acp", "grok", "grok-managed"],
     ];
@@ -93,6 +94,21 @@ describe("harness-specific backend compatibility", () => {
       "cursor-acp",
       providerNativeBackendProfile("cursor"),
     ).allowsModelSwitchWithinSession).toBe(false);
+    expect(resolveHarnessBackendCompatibility(
+      "antigravity-acp",
+      providerNativeBackendProfile("antigravity"),
+    ).allowsModelSwitchWithinSession).toBe(true);
+    expect(resolveHarnessBackendCompatibility(
+      "antigravity-cli",
+      providerNativeBackendProfile("antigravity"),
+    ).allowsModelSwitchWithinSession).toBe(false);
+    const customAntigravity = customProfile("antigravity-managed", "custom:antigravity");
+    for (const harnessId of ["antigravity-acp", "antigravity-cli"] as const) {
+      expect(resolveHarnessBackendCompatibility(harnessId, customAntigravity)).toMatchObject({
+        state: "unavailable",
+        reasonCode: "antigravity-managed",
+      });
+    }
   });
 
   it("enables only the exact probed Responses model for Codex", () => {

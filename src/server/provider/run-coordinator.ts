@@ -376,26 +376,23 @@ export class ProviderRunCoordinator {
     );
     const managerCallbacks: ProviderRunCallbacks = {
       ...callbacks,
-      onMetadata: (event) => {
-        if (event.metadata.commands && !isIsolatedProviderConversationId(conversationId)) this.options.learnSessionCommands?.({ conversationId, providerId, cwd: input.cwd }, event.metadata.commands);
-        if (!event.metadata.models && !event.metadata.rateLimits) return void callbacks.onMetadata?.(event);
-        this.options.metadataCache.learnScoped(
-          runMetadataScope,
-          event.metadata,
-          event.source,
-          { merge: !event.complete },
-        );
-        if (ownsLegacyProviderMetadata) {
-          this.options.metadataCache.learn(
-            event.providerId,
-            this.options.resolvedCommandFor(event.providerId)
-              ?? this.options.commandFor(event.providerId),
-            event.metadata,
-            event.source,
-            { merge: !event.complete },
-          );
+      onEvent: (event) => {
+        if (event.type === "metadata") {
+          if (event.metadata.commands && !isIsolatedProviderConversationId(conversationId)) this.options.learnSessionCommands?.({ conversationId, providerId, cwd: input.cwd }, event.metadata.commands);
+          if (event.metadata.models || event.metadata.rateLimits) {
+            this.options.metadataCache.learnScoped(runMetadataScope, event.metadata, event.source, { merge: !event.complete });
+            if (ownsLegacyProviderMetadata) {
+              this.options.metadataCache.learn(
+                event.providerId,
+                this.options.resolvedCommandFor(event.providerId) ?? this.options.commandFor(event.providerId),
+                event.metadata,
+                event.source,
+                { merge: !event.complete },
+              );
+            }
+          }
         }
-        callbacks.onMetadata?.(event);
+        callbacks.onEvent?.(event);
       },
     };
     let active!: ActiveRun;

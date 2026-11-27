@@ -28,7 +28,7 @@ const productionMappings = [
   ["cursor", "cursor-sdk"],
   ["kimi", "kimi-acp"],
   ["opencode", "opencode-sdk"],
-  ["antigravity", "antigravity-cli"],
+  ["antigravity", "antigravity-acp"],
   ["grok", "grok-acp"],
   ["pi", "pi-rpc"],
 ] as const;
@@ -119,6 +119,7 @@ describe("provider capability manifests", () => {
     expect(providerCapabilityManifest("claude-cli")).toBeNull();
     expect(providerCapabilityManifest("cursor-cli")).toBeNull();
     expect(providerCapabilityManifest("opencode-cli")).toBeNull();
+    expect(providerCapabilityManifest("antigravity-cli")).toBeNull();
     expect(providerCapabilityManifest("unknown" as never)).toBeNull();
     expect(providerCapabilityManifest(null as never)).toBeNull();
   });
@@ -133,6 +134,8 @@ describe("provider capability manifests", () => {
     expect(manifest("cursor-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
     expect(manifest("kimi-acp").bundledSdkVersion)
+      .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
+    expect(manifest("antigravity-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
     expect(manifest("grok-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
@@ -224,10 +227,21 @@ describe("provider capability manifests", () => {
     });
     expect(capability(grok, "model-discovery").support).toBe("negotiated");
 
-    const antigravity = manifest("antigravity-cli");
+    const antigravity = manifest("antigravity-acp");
+    expect(capability(antigravity, "approvals").support).toBe("native");
+    expect(capability(antigravity, "reasoning").support).toBe("native");
+    expect(capability(antigravity, "host-tool-bridge").support).toBe("host-exact-turn");
     expect(capability(antigravity, "model-discovery").support).toBe("native");
     expect(capability(antigravity, "auth-state-discovery").support).toBe("unavailable");
-    expect(capability(antigravity, "images").support).toBe("unavailable");
+    expect(capability(antigravity, "structured-input").support).toBe("native");
+    expect(capability(antigravity, "compaction")).toMatchObject({
+      support: "unavailable",
+      fallback: "reject-unsupported-operation",
+      unavailableReasonCode: "unsupported-operation",
+    });
+    expect(capability(antigravity, "images").support).toBe("negotiated");
+    expect(capability(antigravity, "session-resume").support).toBe("negotiated");
+    expect(capability(antigravity, "usage-tokens").support).toBe("negotiated");
     expect(capability(antigravity, "maintenance-update").support).toBe("negotiated");
 
     const openCode = manifest("opencode-sdk");

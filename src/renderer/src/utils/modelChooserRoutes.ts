@@ -56,7 +56,7 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
   cursor: "Cursor",
   kimi: "Kimi Code",
   opencode: "OpenCode",
-  antigravity: "Antigravity CLI",
+  antigravity: "Antigravity",
   grok: "Grok",
   pi: "Pi",
 };

@@ -351,6 +351,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     (record) => record.installationIdentity.providerId,
   ));
   const providers = ProviderManager.createProduction({
+    dataDirectory,
     cursorSdk: { stateRoot: join(dataDirectory, "providers"), credentials: options.backendCredentials },
     providerRecoveryPending: (providerId) => recoveryBlockedProviders.has(providerId),
     metadataCache,
@@ -618,6 +619,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     };
   };
   providerMaintenance = new ProviderMaintenanceController({
+    dataDirectory,
     installationLeases: providerInstallationLeases,
     maintenanceJournal: providerMaintenanceJournal,
     startupRecoveryOperationIds: new Set(providerMaintenanceRecovery.map(({ operationId }) => operationId)),

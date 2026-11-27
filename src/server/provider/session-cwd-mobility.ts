@@ -41,6 +41,7 @@ const SESSION_CWD_MOBILITY: Readonly<Record<AgentHarnessId, SessionCwdMobility>>
   "grok-acp": "fresh",
   "opencode-sdk": "fresh",
   "opencode-cli": "fresh",
+  "antigravity-acp": "fresh",
   "antigravity-cli": "fresh",
 };
 

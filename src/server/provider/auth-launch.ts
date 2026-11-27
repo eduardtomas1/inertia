@@ -3,6 +3,8 @@ import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import type { ProviderAuthMethod } from "../../shared/provider";
 import { providerAuthLaunchEnvironment, providerAuthLoginArgs } from "./auth";
+import { antigravityAcpProcessInvocation } from "./antigravity-acp-harness";
+import { probeAntigravityAuthentication } from "./antigravity-acp-auth";
 import { cursorAgentCommandArgs } from "./cursor-command";
 import { ProviderRuntimeError, type ProviderAuthLaunch, type ProviderId } from "./contracts";
 import { sameProviderInstallationIdentity } from "./installation-lease";
@@ -40,7 +42,9 @@ export async function prepareProviderAuthLaunch(options: {
   try {
     const method = providerId === "kimi"
       ? await probeKimiAuthentication(executable, cwd, environment, signal)
-      : undefined;
+      : providerId === "antigravity"
+        ? await probeAntigravityAuthentication(executable, cwd, environment, signal)
+        : undefined;
     signal.throwIfAborted();
     if (admission && !sameProviderInstallationIdentity(
       admission.identity, installationAuthority.identity(providerId, executable, backend),
@@ -52,7 +56,9 @@ export async function prepareProviderAuthLaunch(options: {
     const terminalMethod = method && "type" in method && method.type === "terminal" ? method : undefined;
     const childEnvironment = terminalMethod ? { ...environment, ...terminalMethod.env } : environment;
     const invocation = terminalMethod
-      ? kimiAcpProcessInvocation(executable, childEnvironment, process.platform, terminalMethod.args)
+      ? providerId === "antigravity"
+        ? antigravityAcpProcessInvocation(executable, childEnvironment, process.platform, terminalMethod.args)
+        : kimiAcpProcessInvocation(executable, childEnvironment, process.platform, terminalMethod.args)
       : providerProcessInvocation(
         executable,
         providerId === "cursor"

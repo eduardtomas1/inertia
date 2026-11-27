@@ -99,6 +99,29 @@ export type GrokPromptTerminalSurface = Pick<
   "stopReason" | "usage"
 >;
 
+export const antigravityClient: acp.ClientApp = acp.client({
+  name: "Inertia Antigravity provider drift",
+});
+export const antigravityPermissionMethod: "session/request_permission" =
+  acp.methods.client.session.requestPermission;
+export const antigravityCriticalMethods = {
+  initialize: acp.methods.agent.initialize,
+  authenticate: acp.methods.agent.authenticate,
+  sessionNew: acp.methods.agent.session.new,
+  sessionLoad: acp.methods.agent.session.load,
+  sessionResume: acp.methods.agent.session.resume,
+  sessionPrompt: acp.methods.agent.session.prompt,
+  sessionCancel: acp.methods.agent.session.cancel,
+  sessionSetMode: acp.methods.agent.session.setMode,
+  sessionSetConfigOption: acp.methods.agent.session.setConfigOption,
+  sessionUpdate: acp.methods.client.session.update,
+} as const;
+export type AntigravitySessionUpdateSurface = acp.SessionNotification["update"];
+export type AntigravityPromptTerminalSurface = Pick<
+  acp.PromptResponse,
+  "stopReason" | "usage"
+>;
+
 export const acpSessionUpdateDispositions = {
   user_message_chunk: "ignored",
   agent_message_chunk: "projected",

@@ -24,20 +24,20 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-function createSchema129Database() {
-  const directory = mkdtempSync(join(tmpdir(), "inertia-m130-"));
+function createSchema130Database() {
+  const directory = mkdtempSync(join(tmpdir(), "inertia-m131-"));
   directories.push(directory);
   const path = join(directory, "inertia.sqlite");
   const db = new Database(path);
   db.pragma("foreign_keys = ON");
   migrateRuntimeDatabase(db, QUEUE_ITEMS_SCHEMA_VERSION - 1);
-  expect((db.prepare("SELECT MAX(version) AS v FROM schema_migrations").get() as { v: number }).v).toBe(129);
+  expect((db.prepare("SELECT MAX(version) AS v FROM schema_migrations").get() as { v: number }).v).toBe(130);
   return { directory, path, db };
 }
 
-describe("Migration 130 (PersistQueueItemOrderDeliveryAndSelection) and boot adoption", () => {
+describe("Migration 131 (PersistQueueItemOrderDeliveryAndSelection) and boot adoption", () => {
   it("backfills legacy rows, purges orphan receipts, enforces constraints, adopts legacy rows, and rebuilds cleanly", () => {
-    const { directory, path, db } = createSchema129Database();
+    const { directory, path, db } = createSchema130Database();
     const now = "2026-11-01T10:00:00.000Z";
     const selection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
     const projectId = randomUUID();

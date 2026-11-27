@@ -1,6 +1,6 @@
 import type { DatabaseMigrationDefinition } from "./catalog";
 
-export const QUEUE_ITEMS_SCHEMA_VERSION = 130;
+export const QUEUE_ITEMS_SCHEMA_VERSION = 131;
 
 export const queueItemsMigration: DatabaseMigrationDefinition = {
   name: "PersistQueueItemOrderDeliveryAndSelection",

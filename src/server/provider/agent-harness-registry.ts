@@ -1,6 +1,6 @@
+import { createAntigravityAcpHarness } from "./antigravity-acp-harness";
 import { createCursorSdkHarness } from "./cursor-sdk-harness";
 import { createPiRpcHarness } from "./pi-rpc-harness";
-import { createAntigravityCliHarness } from "./antigravity-cli-harness";
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
@@ -33,6 +33,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "grok-acp": "grok",
   "opencode-sdk": "opencode",
   "antigravity-cli": "antigravity",
+  "antigravity-acp": "antigravity",
   "pi-rpc": "pi",
 };
 
@@ -154,7 +155,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createCursorSdkHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
-    createAntigravityCliHarness(),
+    createAntigravityAcpHarness(),
     createGrokAcpHarness(),
     createPiRpcHarness(),
   ]);

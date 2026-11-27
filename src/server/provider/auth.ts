@@ -23,7 +23,11 @@ const PROVIDER_AUTH: Readonly<Record<ProviderId, ProviderAuthCommands>> =
     cursor: { statusArgs: ["status"], loginArgs: ["login"] },
     kimi: { statusArgs: ["provider", "list", "--json"], loginArgs: ["login"] },
     opencode: { statusArgs: ["auth", "list"], loginArgs: ["auth", "login"] },
-    antigravity: { statusArgs: null, loginArgs: [] },
+    antigravity: {
+      statusArgs: null,
+      loginArgs: ["acp", "--login"],
+      environment: { AGY_CLI_DISABLE_AUTO_UPDATE: "true" },
+    },
     grok: {
       statusArgs: null,
       loginArgs: ["login"],

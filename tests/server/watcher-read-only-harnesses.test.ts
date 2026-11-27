@@ -29,10 +29,10 @@ import { INERTIA_HOST_MCP_NAME, INERTIA_WAIT_MCP_NAME } from "../../src/server/p
 import { openCodePermissions, openCodeWatcherCommandAllowed } from "../../src/server/provider/opencode-host-tools";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED } from "../../src/server/provider/acp-watcher";
-import { createAntigravityCliHarness } from "../../src/server/provider/antigravity-cli-harness";
-import { antigravityArguments, antigravityFileMutationTool } from "../../src/server/provider/antigravity-stream";
+import { createAntigravityAcpHarness } from "../../src/server/provider/antigravity-acp-harness";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
+import { watcherHarnessProfile } from "../../src/server/provider/watcher-harness-profile";
 import { watcherReplyDefersToPlan } from "../../src/server/runtime/watcher/watcher-outcome";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
@@ -45,7 +45,6 @@ import {
   portableNodeExecutable,
   removePortableFixture,
   waitFor,
-  writeNodeFlagExecutable,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput, resolveNativeModelRoute } from "./model-route-fixture";
@@ -1188,9 +1187,17 @@ describe("watcher turns on the OpenCode SDK harness", () => {
   });
 });
 
-function acpWatcherAgent(root: string, repo: string, provider: "cursor" | "kimi", prompt: string) {
-  const command = portableNodeExecutable(root, provider === "cursor" ? "cursor-agent" : "kimi");
+function acpWatcherAgent(root: string, repo: string, provider: "cursor" | "kimi" | "antigravity", prompt: string) {
+  const command = portableNodeExecutable(
+    root,
+    provider === "cursor" ? "cursor-agent" : provider === "antigravity" ? "agy" : "kimi",
+  );
   const capturePath = join(root, `${provider}-capture.json`);
+  const agentName = provider === "cursor"
+    ? "Cursor"
+    : provider === "antigravity"
+      ? "Antigravity ACP Server"
+      : "Kimi Code CLI";
   writeNodeSubcommand(repo, "acp", `
 const fs = require("node:fs");
 const readline = require("node:readline");
@@ -1205,7 +1212,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   captured.push(message);
   save();
-  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "${provider === "cursor" ? "Cursor" : "Kimi Code CLI"}", version: "test" } } });
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { mcpCapabilities: { http: true } }, agentInfo: { name: ${JSON.stringify(agentName)}, version: "test" } } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }, { id: "plan", name: "Plan" }] }, configOptions: [] } });
   if (message.method === "session/set_mode") return send({ jsonrpc: "2.0", id: message.id, result: {} });
   if (message.method === "session/cancel") return finish("cancelled");
@@ -1347,53 +1354,64 @@ describe("watcher turns on providers that enforce read-only through approvals", 
     expect(turn).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
     expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: "src/parser.ts", stopped: true })]);
   });
-});
 
-describe("watcher turns on a provider that enforces read-only itself", () => {
-  it("runs Antigravity in its plan mode and stops the check when a file-writing tool starts", async () => {
+  it("keeps Antigravity in its plan mode, declines its edit approval as a write, and keeps the checkout untouched", async () => {
     const root = portableFixtureRoot("watcher antigravity");
     roots.push(root);
-    const repo = repository(root, []);
-    const capturePath = join(root, "agy-capture.json");
-    const command = writeNodeFlagExecutable(root, "agy", `
-const fs = require("node:fs");
-fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ argv: process.argv.slice(2) }));
-const emit = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
-process.stdin.resume();
-process.stdin.on("end", () => {
-  emit({ event: "init", conversation_id: "4f2c8a8e-3b7d-4a51-9a39-5c2d7e1f0a11", init: { cwd: process.cwd(), tools: ["view_file", "write_to_file"], permission_mode: "plan" } });
-  emit({ event: "step_update", step_update: { step_index: 1, state: "ACTIVE", tool_name: "view_file" } });
-  emit({ event: "step_update", step_update: { step_index: 1, state: "DONE", tool_name: "view_file" } });
-  emit({ event: "step_update", step_update: { step_index: 2, state: "ACTIVE", tool_name: "write_to_file" } });
-  setInterval(() => undefined, 1000);
-});
-`);
-    const manager = ProviderManager.createForTests({ commands: { antigravity: command } }, new AgentHarnessRegistry([createAntigravityCliHarness()]));
+    const repo = repository(root, ["acp"]);
+    const agent = acpWatcherAgent(root, repo, "antigravity", `
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    update({ sessionUpdate: "tool_call", toolCallId: "read-1", title: "view_file", kind: "read", status: "completed" });
+    update({ sessionUpdate: "tool_call", toolCallId: "edit-1", title: "Edit parser", kind: "edit", status: "pending", rawInput: { path: "src/parser.ts" } });
+    return send({ jsonrpc: "2.0", id: 100, method: "session/request_permission", params: { sessionId, toolCall: { toolCallId: "edit-1", title: "Edit parser", kind: "edit", status: "pending", rawInput: { path: "src/parser.ts" } }, options: ${PERMISSION_OPTIONS} } });
+  }
+  if (message.id === 100) {
+    update({ sessionUpdate: "tool_call_update", toolCallId: "edit-1", status: "failed", rawOutput: "Permission denied" });
+    update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "SILENT" } });
+    return finish("end_turn");
+  }`);
+    const manager = ProviderManager.createForTests({ commands: { antigravity: agent.command } }, new AgentHarnessRegistry([createAntigravityAcpHarness()]));
     const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "antigravity", modelId: "provider-default" }));
     const before = await checkoutState(repo);
 
     const turn = await runtime.settled(runtime.startCheck().id);
 
     expectWatcherRunInput(runtime.inputs[0], "antigravity");
-    const argv = (JSON.parse(readFileSync(capturePath, "utf8")) as { argv: string[] }).argv;
-    expect(argv.join(" ")).toContain("--mode plan");
-    expect(argv).not.toContain("accept-edits");
-    expect(argv).not.toContain("--dangerously-skip-permissions");
-    expect(turn).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
-    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: "write_to_file", stopped: true })]);
+    expect(watcherHarnessProfile("antigravity-acp")).toEqual({
+      systemInstruction: false,
+      sessionInstruction: false,
+      sessionInstructionRecordedAtCompaction: false,
+      editsGatedBeforeStart: true,
+    });
+    expect(runtime.inputs[0]).not.toHaveProperty("systemInstruction");
+    expect(runtime.inputs[0]!.prompt).toContain(`[inertia-watcher]\n${WATCHER_ROLE}`);
+    expect(agent.captured().find(({ method }) => method === "session/set_mode")).toMatchObject({ params: { modeId: "plan" } });
+    expect(agent.response(100)).toEqual({ outcome: { outcome: "selected", optionId: "reject" } });
+    expect(runtime.violations.map(({ kind, stopped }) => [kind, stopped])).toEqual([["write-attempt", false]]);
+    expect(runtime.events.some((event) => event.type === "agent.approval.requested" || event.type === "agent.input.requested")).toBe(false);
+    expect(runtime.activities().map(({ title }) => title)).toContain(
+      "Needed permission: Edit parser — declined (watchers are read-only)",
+    );
+    expect(turn).toMatchObject({ status: "completed" });
     expect(await checkoutState(repo)).toEqual(before);
   });
 
-  it("maps a read-only watcher to plan mode whatever access its input names, and knows Antigravity's file-writing tools", () => {
-    const base = nativeProviderRunInput({ providerId: "antigravity", conversationId: "agy-args", cwd: process.cwd(), prompt: "Review.", interactionMode: "build", access: "full" });
-    expect(antigravityArguments({ ...base, readOnlyProfile: "watcher" }).join(" ")).toContain("--mode plan");
-    expect(antigravityArguments({ ...base, readOnlyProfile: "watcher" })).not.toContain("--dangerously-skip-permissions");
-    expect(antigravityArguments(base)).toContain("--dangerously-skip-permissions");
-    for (const tool of ["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "delete_file", "WRITE_TO_FILE"]) {
-      expect(antigravityFileMutationTool(tool)).toBe(true);
-    }
-    for (const tool of ["view_file", "run_command", "invoke_subagent", "grep_search"]) {
-      expect(antigravityFileMutationTool(tool)).toBe(false);
-    }
+  it("stops an Antigravity watcher check when an edit tool starts running without approval", async () => {
+    const root = portableFixtureRoot("watcher antigravity edit kind");
+    roots.push(root);
+    const repo = repository(root, ["acp"]);
+    const agent = acpWatcherAgent(root, repo, "antigravity", `
+  if (message.method === "session/prompt") {
+    promptId = message.id;
+    return update({ sessionUpdate: "tool_call", toolCallId: "tool-1", title: "src/parser.ts", kind: "edit", status: "in_progress", rawInput: { path: "src/parser.ts" } });
+  }`);
+    const manager = ProviderManager.createForTests({ commands: { antigravity: agent.command } }, new AgentHarnessRegistry([createAntigravityAcpHarness()]));
+    const runtime = watcherHarnessRuntime(root, repo, manager, providerNativeModelSelection({ providerId: "antigravity", modelId: "provider-default" }));
+
+    const turn = await runtime.settled(runtime.startCheck().id);
+
+    expect(turn).toMatchObject({ status: "failed", terminalReason: "unsupported-interaction" });
+    expect(runtime.violations).toEqual([expect.objectContaining({ kind: "write-attempt", detail: "src/parser.ts", stopped: true })]);
   });
 });

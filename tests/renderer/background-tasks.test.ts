@@ -288,7 +288,8 @@ describe("background task rows", () => {
   it("labels Antigravity routes like every other provider", () => {
     const trace = taskTrace({ providerId: "antigravity", providerName: null, providerRole: null });
     expect(subagentProviderLabel(trace)).toBe("Antigravity");
-    expect(subagentHarnessLabel(trace, [taskTurn({ providerId: "antigravity" })])).toBe("CLI");
+    expect(subagentHarnessLabel(trace, [taskTurn({ providerId: "antigravity" })])).toBe("ACP");
+    expect(subagentHarnessLabel(trace, [taskTurn({ providerId: "antigravity", harnessId: "antigravity-cli" })])).toBe("CLI");
   });
 
   it("names the Pi RPC and Cursor SDK harnesses", () => {

@@ -61,8 +61,8 @@ function emptyKeyCopy(providerId: ProviderId): string {
 }
 
 const ANTIGRAVITY_POLICY_NOTE = API_KEY_PRESET_FOR_PROVIDER.antigravity
-  ? "Google says wrapping agy in another app isn't supported on consumer plans. Use a Gemini API key."
-  : "Google says wrapping agy in another app isn't supported on consumer plans.";
+  ? "Official agy acp. Use a Gemini API key or Enterprise ADC."
+  : "Official agy acp. Uses local agy sign-in, GEMINI_API_KEY, or ADC.";
 
 function ProviderAccessCard({
   providerId,

@@ -110,6 +110,9 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
   antigravity: [
     /^GEMINI_API_KEY$/u,
     /^GOOGLE_GEMINI_BASE_URL$/u,
+    /^AGY_ADC_AUTH$/u,
+    /^GOOGLE_CLOUD_(?:PROJECT|QUOTA_PROJECT|LOCATION)$/u,
+    /^GOOGLE_APPLICATION_CREDENTIALS$/u,
   ],
   grok: [
     /^XAI_API_KEY$/u,

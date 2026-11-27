@@ -157,7 +157,7 @@ it.each(["chat-b", null])("keeps a late commit rejection silent after the destin
 });
 
 it("never lets a snapshot land in a draft whose route can't read images", async () => {
-  const reason = "Antigravity can't read images in Inertia.";
+  const reason = "This route can't read images in Inertia.";
   const value = fixture("ready", false, reason);
   value.deliver(); await value.settle();
   expect(value.options.attachmentsRef.current).toEqual([]);

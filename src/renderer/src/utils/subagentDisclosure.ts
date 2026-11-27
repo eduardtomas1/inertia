@@ -94,6 +94,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "kimi-acp": "ACP",
   "grok-acp": "ACP",
   "opencode-sdk": "SDK",
+  "antigravity-acp": "ACP",
   "antigravity-cli": "CLI",
   "pi-rpc": "RPC",
 };

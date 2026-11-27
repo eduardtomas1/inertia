@@ -298,7 +298,7 @@ describe("watcher attach dialog", () => {
       ready("opencode", "OpenCode", { authState: "unauthenticated", canRun: false }),
     ]));
     const chooser = await openChooser(dialog);
-    for (const [source, harnessId] of [["Codex", "codex-app-server"], ["Cursor", "cursor-acp"], ["Kimi Code", "kimi-acp"], ["Antigravity", "antigravity-cli"]] as const) {
+    for (const [source, harnessId] of [["Codex", "codex-app-server"], ["Cursor", "cursor-acp"], ["Kimi Code", "kimi-acp"], ["Antigravity", "antigravity-acp"]] as const) {
       fireEvent.click(await within(chooser).findByRole("button", { name: new RegExp(`^${source}, `, "u") }));
       const rows = [...chooser.querySelectorAll<HTMLElement>("[data-model-route-key]")];
       expect(rows.length).toBeGreaterThan(0);
@@ -526,14 +526,11 @@ describe("watcher attach dialog", () => {
       expect(within(dialog).queryByRole("radiogroup", { name: "Mode" })).not.toBeInTheDocument();
     });
 
-    it("says why Supervised can't pause for approval on a route that can't supervise", async () => {
+    it("keeps Supervised chat access available on Antigravity ACP", async () => {
       const { dialog } = await openDialog(snapshot([ready("antigravity", "Antigravity")], "antigravity"));
       fireEvent.click(within(dialog).getByRole("radio", { name: "Supervised" }));
-      expect(within(dialog).getByRole("radiogroup", { name: "Access" })).toHaveAccessibleDescription(
-        expect.stringContaining("can't pause for approval"),
-      );
-      fireEvent.click(within(dialog).getByRole("radio", { name: "Full access" }));
-      expect(within(dialog).queryByText(/can't pause for approval/u)).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("radiogroup", { name: "Access" })).toHaveAccessibleDescription(CHAT_ACCESS_NOTE);
+      expect(within(dialog).getByRole("radiogroup", { name: "Mode" })).toBeInTheDocument();
     });
   });
 
@@ -544,7 +541,7 @@ describe("watcher attach dialog", () => {
       ["opencode", "OpenCode", ALLOWLIST_TIER],
       ["cursor", "Cursor", "Inertia declines what Cursor reports and pauses the watcher if files change. Cursor controls its own reads and commands; there is no sandbox."],
       ["kimi", "Kimi Code", "Inertia declines what Kimi Code reports and pauses the watcher if files change. Kimi Code controls its own reads and commands; there is no sandbox."],
-      ["antigravity", "Antigravity", "Antigravity runs in its own plan mode. Inertia can't decline its actions; it stops a check after an edit it sees and pauses the watcher if files change. It can't read more of the main chat."],
+      ["antigravity", "Antigravity", "Inertia declines what Antigravity reports and pauses the watcher if files change. Antigravity controls its own reads and commands; there is no sandbox."],
     ] as const)("states how %s keeps a watcher read-only", async (providerId, label, statement) => {
       const { dialog } = await openDialog(snapshot([ready(providerId, label)], providerId));
       const group = within(dialog).getByRole("radiogroup", { name: "Access" });

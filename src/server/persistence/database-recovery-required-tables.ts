@@ -208,10 +208,10 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "expires_at",
   ]],
   [SENT_TO_USER_MESSAGES_SCHEMA_VERSION, "messages", ["sent_to_user"]],
-  [127, "agent_thread_operations", ["client_request_key"]],
-  [127, "queued_messages", ["delegated_completion_json"]],
-  [127, "messages", ["delegated_completion_json"]],
-  [127, "delegated_tasks", [
+  [128, "agent_thread_operations", ["client_request_key"]],
+  [128, "queued_messages", ["delegated_completion_json"]],
+  [128, "messages", ["delegated_completion_json"]],
+  [128, "delegated_tasks", [
     "task_id",
     "parent_conversation_id",
     "source_turn_id",
@@ -229,8 +229,8 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "created_at",
     "updated_at",
   ]],
-  [127, "delegated_task_turns", ["child_turn_id", "task_id"]],
-  [128, "app_state", ["delegation_automatic_wakes"]],
+  [128, "delegated_task_turns", ["child_turn_id", "task_id"]],
+  [129, "app_state", ["delegation_automatic_wakes"]],
   [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_receipts", ["status", "error", "command_type"]],
   [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_projection_metadata", [
     "projection_name",
@@ -306,7 +306,7 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
   [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
   [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, ["agent_secret_requests"]],
-  [127, ["delegated_tasks", "delegated_task_turns"]],
+  [128, ["delegated_tasks", "delegated_task_turns"]],
   [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, ["orchestration_v2_projection_metadata"]],
 ];
 
@@ -344,12 +344,12 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
     [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_status_expiry_idx"],
     [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_conversation_idx"],
-    [127, "agent_thread_operations_client_request_idx"],
-    [127, "queued_messages_delegated_delivery_idx"],
-    [127, "delegated_tasks_parent_delivery_idx"],
-    [127, "delegated_tasks_child_status_idx"],
-    [127, "delegated_tasks_source_turn_idx"],
-    [127, "delegated_task_turns_task_idx"],
+    [128, "agent_thread_operations_client_request_idx"],
+    [128, "queued_messages_delegated_delivery_idx"],
+    [128, "delegated_tasks_parent_delivery_idx"],
+    [128, "delegated_tasks_child_status_idx"],
+    [128, "delegated_tasks_source_turn_idx"],
+    [128, "delegated_task_turns_task_idx"],
     [QUEUE_ITEMS_SCHEMA_VERSION, "queued_messages_conversation_state_position_idx"],
   ],
   triggers: [

@@ -1,7 +1,7 @@
 # Inertia harness capabilities
 
 Inertia does not replace Codex App Server, the Claude Agent SDK, Cursor ACP,
-Kimi ACP, the OpenCode SDK, or Antigravity's headless CLI with a
+Kimi ACP, Grok ACP, Antigravity ACP, or the OpenCode SDK with a
 lowest-common-denominator agent loop. Each provider keeps its native protocol,
 approvals, plans, reasoning, usage, cancellation, and extensions. Native
 session continuity remains provider-specific: a harness may instead declare
@@ -785,7 +785,7 @@ own compaction.
 ## Minimum provider versions
 
 Discovery refuses a Claude Code or OpenCode installation older than its
-security floor. The floors, the reason each one exists, Antigravity's headless
+security floor. The floors, the reason each one exists, Antigravity's ACP
 floor and the OpenCode major-version ceiling are defined together in
 `src/server/provider/provider-version-floors.ts`.
 
@@ -793,7 +793,7 @@ floor and the OpenCode major-version ceiling are defined together in
 | --- | --- | --- |
 | Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks`, `disableSkillShellExecution` and `useAutoModeDuringPlan: false`, so plan-mode commands reach Inertia's approval instead of the auto mode classifier, which reviews them by default whenever auto mode is available; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
 | OpenCode | 1.18.22 or newer, below 3 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 3 is not supported yet. |
-| Antigravity | 1.2.2 or newer | First release with the headless stream-json contract below. |
+| Antigravity | 1.5.17 or newer | Built-in `agy acp` with project-cwd shell execution, specific turn errors, subagent approval and cleanup fixes, `session/load` replay fixes, proactive 1-hour OAuth refresh, and Enterprise non-workspace sensitive-file protection. |
 
 Below a security floor, discovery runs only the version probe. It never runs
 OpenCode's `serve --help` probe, never checks sign-in and never starts the
@@ -804,7 +804,7 @@ status message naming both versions, the reason and the fix, for example
 *Claude Code 2.1.150 is installed. Inertia needs 2.1.309 or newer because
 older versions ignore the restrictions Inertia sets and can write outside the
 project. Update Claude Code and refresh.*
-Antigravity below 1.2.2 reports `updateRequired` too when its version is
+Antigravity below 1.5.17 reports `updateRequired` too when its version is
 known, for the newest identified `agy` install, the same one whose executable
 and version the detection reports, and its message ends *Run 'agy update' and
 refresh.*
@@ -837,77 +837,110 @@ behaviour and is not blocked by a floor: a development build that prints
 such as an OpenCode snapshot build. Antigravity keeps its original comparison,
 which blocks an unknown version and `0.0.0` builds.
 
-## Antigravity headless contract
+## Antigravity ACP contract
 
 Antigravity is Inertia's only Google provider; the former Gemini CLI provider
-is removed. Database schema 76 moves its chats to Antigravity. Transcripts stay
-visible, while native Gemini session IDs and Gemini model and effort
-selections are dropped, so the next turn starts a fresh Antigravity
-conversation on the provider default. Gemini backend profiles, cached
-metadata, and identity labels are removed.
+is removed. Database schema 76 moved Gemini chats to Antigravity, and the
+upgrade from `antigravity-cli` to `antigravity-acp` preserves transcripts while
+starting fresh ACP sessions rather than reusing legacy headless session IDs.
 
-Inertia runs the user's own locally installed `agy` 1.2.2 or newer in its
-documented headless mode
-([headless contract](https://antigravity.google/docs/cli/headless/)). Every
-turn is one owned process started with
-`--input-format stream-json --output-format stream-json`. The prompt is written
-as one `user` event on stdin, and stdin is then closed. Inertia never passes
-`-p` or `--print`: without stream-json input, an unauthenticated `agy -p`
-prints a sign-in URL and waits, while stream-json input fails fast with
-"authentication required". A contract test asserts that no Antigravity
-invocation carries a prompt flag.
+Inertia connects to the user's own locally installed `agy` (`1.5.17` or newer)
+over its built-in Agent Client Protocol (ACP) v1 server:
+`agy acp --stdio --process-per-session`
+([ACP CLI reference](https://antigravity.google/docs/cli/acp),
+[Other ACP clients](https://antigravity.google/docs/ide/extensions/acp)).
+Built-in `agy acp` ships across all supported desktop platforms and
+architectures (macOS Intel `darwin_amd64`, macOS Apple Silicon `darwin_arm64`,
+Linux x64/ARM64 glibc/musl, and Windows x64/ARM64), superseding both the
+September 2026 standalone Python `antigravity-acp` 1.1.1 blocker and the
+temporary headless `stream-json` wrapper. See
+[the historical investigation](STABILIZATION_PROVIDERS_ANTIGRAVITY.md).
 
-Detection runs only `agy --version` and requires the selected executable to be
-named `agy` or `antigravity`. Model discovery runs that same executable's
-documented `agy models` command with closed stdin, a six-second deadline,
-a bounded stdout-only catalog parser, and confirmed process-tree cleanup.
-Only returned model slugs and labels are advertised; the listing does not
-establish a default, reasoning options, image support, or context windows.
-Failed or malformed reads retain the last catalog as stale and retry on refresh.
-Inertia never probes sign-in or directly reads or writes Antigravity settings,
-MCP configuration, or state under `~/.gemini/antigravity-cli/`. Sign-in belongs to
-Antigravity. When a turn reports that authentication is required, Inertia stops
-the process and shows Connect. Connect opens interactive `agy` inside
-Inertia's visible terminal, and only when the user clicks it. Inertia does not
-open a browser, read sign-in codes, or store tokens for Antigravity.
+### Compliance boundaries
 
-| Inertia | Antigravity CLI |
+Google's [Antigravity FAQ](https://antigravity.google/docs/faq) states that
+wrapping headless `agy -p` inside third-party coding agents or automating
+account rotation is not supported on consumer plans, whereas
+[IDE Extensions — Other clients](https://antigravity.google/docs/ide/extensions/acp)
+explicitly documents `agy acp` for any ACP client. Inertia enforces these
+compliance boundaries strictly:
+
+- **Official ACP transport only.** Inertia launches `agy acp --stdio
+  --process-per-session` and never passes `-p`, `--print`, `--prompt`, or
+  `--input-format stream-json`.
+- **Honest `clientInfo`.** Inertia identifies itself honestly as
+  `{ name: "inertia", version }` and never spoofs another IDE or passes
+  internal Google flags (`--override_user_agent_name`, `--cloud_code_endpoint`,
+  `--use_stubby_auth`, `--is_google3_workspace`).
+- **User-owned credentials and state.** Inertia never reads, copies, proxies,
+  rotates, or modifies `~/.gemini/antigravity-cli/`, `settings.json`,
+  `mcp_config.json`, or OS keyring tokens. Authentication stays owned by `agy`
+  via user-initiated `agy acp --login` (`terminal-login` when
+  `clientCapabilities.auth.terminal: true` is advertised), local `agy` OAuth,
+  `GEMINI_API_KEY`, or Gemini Enterprise ADC.
+
+### Discovery, modes, and protocol mapping
+
+Detection runs `agy --version` (requiring `>= 1.5.17`) and `agy acp --help` on
+the selected executable (`agy` or `antigravity`). Session initialization
+negotiates ACP v1, inspects `agentCapabilities` (including
+`promptCapabilities.image`, `mcpCapabilities.http`, and `sessionCapabilities`),
+and projects server-advertised `configOptions` (`model` and `thought_level`).
+Models that expose reasoning levels advertise `low`, `medium`, `high`, `xhigh`
+(Extra high), and `max`; fixed-effort or composite models such as Orchestrator
+advertise empty `reasoningOptions` and hide the reasoning selector
+automatically.
+
+| Inertia | Antigravity ACP (`agy acp`) |
 | --- | --- |
-| Supervised | Antigravity's own policy. Tools that need approval are declined in headless mode, and the timeline records that an action was declined. |
-| Auto-edit | `--mode accept-edits` |
-| Plan | `--mode plan` |
-| Full Access | `--dangerously-skip-permissions`, only when the user selects Full Access |
-| Resume | `--conversation <conversation_id>` from the previous result |
-| Model and effort | `--model` for safe identifiers, `--effort low\|medium\|high` |
+| Supervised | Session mode `default` (confirmed before sending the prompt); every `session/request_permission` callback reaches Inertia's approval UI. |
+| Auto-edit | Session mode `accept-edits` (`session/set_mode` / `mode` config option, confirmed before sending the prompt). |
+| Plan | Session mode `plan` (confirmed before sending the prompt). |
+| Full Access | `--dangerously-skip-permissions` only when the user explicitly selects Full Access; any remaining callbacks for protected commands or Enterprise admin policies are still honored. |
+| Resume | `session/resume` (no replay) when advertised, falling back to `session/load` with history replay suppressed. |
+| Model and effort | Server-advertised `configOptions` (`category: "model"` and `category: "thought_level"`, including `low`, `medium`, `high`, `xhigh`, `max`; omitted for fixed-effort models such as Orchestrator). |
+| Images | Native ACP image blocks gated on `promptCapabilities.image: true` via Inertia's descriptor-bound reader (20 MiB inline limit). |
+| Host tools & prompts | Inertia HTTP MCP server (`mcpCapabilities.http: true` enabled by `--process-per-session`), secret request cards, and turn prompts delivered over ACP `session/prompt` (no client-side `systemPrompt.append` injection). |
+| Streaming & lifecycle | `agent_thought_chunk` reasoning summaries, tool calls and diffs, plans, `available_commands_update` slash commands, `usage_update` context window tracking, native `interaction_*` questions mapped to Inertia input cards, `session/cancel`, `session/close`, and full owned process-tree termination covering `agy acp --worker`. |
 
-Structured questions, Inertia-mediated approvals, image input, Inertia host
-tools, explicit compaction, and reasoning text are unavailable
-in this harness and are declared that way in its capability manifest. A
-`step_update` text delta becomes assistant text, a `step_update` with a tool
-name becomes tool activity keyed by its step index, `conversation_id` becomes
-the native session, and the `result` event settles the turn. Only `SUCCESS`
-completes a turn; `ERROR`, `WAITING`, `INVALID`, `CANCELED`, and
-`INTERRUPTED` fail it, and an authentication error maps to Connect. Result
-usage is projected with session scope. After a result, a lingering process is
-stopped after a short grace period, and cancellation stops the whole process
-tree.
+Probes and Inertia-managed runs set `AGY_CLI_DISABLE_AUTO_UPDATE=true` so background self-updates never mutate an active binary. Provider maintenance checks Google's official per-target release manifests (`antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/<target>.json`), and updates Inertia-managed Antigravity runtimes under the provider installation lease by downloading only from Google's official GCS prefix (`storage.googleapis.com/antigravity-public/antigravity-cli/...`), enforcing a bounded download deadline, exact SHA-512 checksums, archive entry safety, executable health, and symlink-free containment anchored to the runtime data directory before atomic activation under `tools/antigravity/<platform>-<arch>/`. In the Connect dialog, Inertia exposes a clickable browser link only for official `https://accounts.google.com/o/oauth2/...` authorization URLs printed by `agy acp --login` whose `redirect_uri` targets loopback (`localhost:<port>` / `127.0.0.1:<port>`) or `https://antigravity.google/...`, without reading or storing OAuth codes or tokens.
 
-The following could not be verified without signing in, so the parser is
-deliberately tolerant and the behavior is covered by a fake `agy` in tests:
+Explicit context compaction (`/compact`) remains unavailable until Antigravity
+ACP exposes a confirmed compaction completion receipt.
 
-- whether `step_update` fields are nested under the event name or flat (both
-  are accepted);
-- the exact meaning of `text_delta` and `tool_name`, and whether a tool step
-  repeats while it runs;
-- the stderr wording of headless approval declines (matched conservatively);
-- whether result usage is cumulative across `--conversation` resumes;
-- that `--mode plan` never edits files;
-- how `--effort` interacts with `--model`;
-- how `agy` handles SIGINT (Inertia stops the process tree instead).
+### Verified locally vs. requiring authenticated smoke verification
 
-The official `antigravity-acp` server was not used: it can end a turn with
-`end_turn` after an error and has no macOS Intel artifact. See
-[the investigation](STABILIZATION_PROVIDERS_ANTIGRAVITY.md).
+Verified against live unauthenticated `/home/etomas/.local/bin/agy` (`1.5.18`)
+under isolated synthetic `HOME`/`XDG_*`, dead-end proxy, and disabled D-Bus
+keyring probing, plus live release manifests:
+
+- `agy --version` (`1.5.18`) and `agy acp --help` across all 9 desktop release
+  manifests (including `darwin_amd64` macOS Intel).
+- `initialize` wire response with honest `clientInfo`: protocol `1`,
+  `Antigravity ACP Server`, `promptCapabilities.image: true`,
+  `mcpCapabilities.http: true` (specifically enabled by
+  `--process-per-session`), `sessionCapabilities` (`resume`, `close`, `load`,
+  `list`, `additionalDirectories`), `_meta.antigravity.systemPrompt.append`,
+  `authMethods` (`oauth-personal`, `oauth-business`, `gemini-api-key`,
+  `agent-platform`), and `terminal-login` (`args: ["--login"]`) gated on
+  `clientCapabilities.auth.terminal: true`.
+- Unauthenticated `session/new`, `session/list`, `session/load`, and
+  `session/resume` returning JSON-RPC error `-32000` (`Authentication
+  required`), and clean worker retirement on stdin close.
+
+Covered by deterministic portable ACP fixtures, and still requiring a live
+authenticated human smoke test before claiming full GA confidence:
+
+- exact terminal mid-turn error wire shape on Go `agy acp` (whether quota,
+  model, or API errors return a JSON-RPC error, a non-`end_turn` `stopReason`,
+  or text plus `end_turn`);
+- authenticated `configOptions` payloads for consumer, `GEMINI_API_KEY`,
+  Enterprise ADC, and Orchestrator accounts;
+- interactive question delivery via ACP elicitation forms vs. multiplexed
+  `session/request_permission`;
+- live `usage_update` and per-turn usage fields;
+- end-to-end HTTP MCP host tool calls, `--process-per-session` worker cleanup
+  under cancellation/SIGKILL, and `gemini-api-key` child-env isolation.
 
 ## Watcher harness gate
 
@@ -927,8 +960,7 @@ before it stay read-only):
   `WATCHER_READ_ONLY_ENFORCEMENT`. A harness without a tier (`null`) can't be
   attached read-only; the attach, the repository and every turn refuse it.
 - **Chat access.** The watcher chat is created with the requested interaction
-  mode and access mode (passed through `effectiveAccessMode`, so Supervised on
-  Antigravity becomes Auto-accept edits as for any chat). It is an ordinary
+  mode and access mode (passed through `effectiveAccessMode`). It is an ordinary
   chat for `conversation.update`, mode, access, reasoning and fast mode;
   only the harness must stay in the list. Its checks have no read-only
   profile: approvals and questions become ordinary cards in the watcher
@@ -946,7 +978,8 @@ before it stay read-only):
 | `opencode-sdk` | `inertia` | The ordinary agent, not the native `plan` agent (which may edit `.opencode/plans` and call `plan_exit`), with the session ruleset `* deny`, `bash ask`, `read`, `glob`, `grep`, `list` and Inertia host tools `allow`, and `read` of `.env`, `*.env` and `*.env.*` denied. The question tool falls under `* deny`. A shell command reaches OpenCode's permission request with its full text; Inertia answers `once` when it passes the allowlist and declines it otherwise. OpenCode's own `bash` patterns are not used as the allowlist, because OpenCode 1.19.2 matches them against the text including redirections. |
 | `cursor-acp` | `approvals` | Cursor's native plan mode. Every permission request reaches Inertia, which declines it with ACP `reject_once`; edit, delete and move requests count as write attempts. `cursor/ask_question` is cancelled and `cursor/create_plan` answered `rejected` without counting, each with a status row in the watcher chat; the plan is recorded as a hand-off and becomes the finding when the reply only hands it off. An edit tool call announced as `pending` before its permission request does not stop the check; one reported `in_progress` does. |
 | `kimi-acp` | `approvals` | Kimi Code's native plan mode, with the same approval and edit handling. A question that arrives as a permission request is cancelled with a status row and not counted. A plan hand-off (`ExitPlanMode`) is recorded as a hand-off with the request's text first and then answered with its `plan_revise` reject option, with a status row and not counted. |
-| `antigravity-cli` | `provider` | `--mode plan`, never `--mode accept-edits` or `--dangerously-skip-permissions`. Antigravity has no approval channel and no host tools, so it can't read more of the watched chat than each check sends. |
+| `grok-acp` | `approvals` | Grok's native plan mode, with the same ACP approval and edit handling. |
+| `antigravity-acp` | `approvals` | Antigravity's native `plan` mode over `agy acp`, with ACP `reject_once` declines for write/command requests, edit/delete/move write-attempt tracking, cancelled question prompts, and HTTP MCP watcher context reads. |
 
 The read-only checks are made when a watcher is attached, when every watcher
 turn is prepared (including a message the person types into the watcher chat)
@@ -955,20 +988,16 @@ there a model change stays allowed and a mode or access change is refused.
 Per-harness facts live in one place per adapter: the broker decisions in
 `claude-watcher-permissions.ts`, the thread config in
 `codex/read-only-thread-config.ts`, the ruleset in `opencode-host-tools.ts`,
-the ACP decline rows in `acp-watcher.ts`, Antigravity's arguments and
-file-writing tool names in `antigravity-stream.ts`, and which harnesses take a
+the ACP decline rows in `acp-watcher.ts`, and which harnesses take a
 system-level instruction or gate edits before they start in
 `provider/watcher-harness-profile.ts`. An unknown harness falls back to the
 safe defaults there.
 
-What is not verified against live providers: whether Cursor and Kimi Code ask
-permission for plain reads in plan mode (each such request would be declined
-and count towards the five-request cap); Antigravity's tool names beyond the
-`view_file`, `run_command` and `invoke_subagent` its fixtures use (the
-file-writing names `write_to_file`, `write_file`, `create_file`, `edit_file`,
-`replace_file_content`, `multi_replace_file_content`, `delete_file`,
-`move_file` and `rename_file` are assumed); and whether Antigravity's plan
-mode refuses writes on its own. Codex App Server v2 accepts
+What is not verified against live providers: whether Cursor, Kimi Code, Grok,
+and Antigravity ask permission for plain reads in plan mode (each such request
+would be declined and count towards the five-request cap), and whether
+Antigravity's `plan` mode refuses writes on its own before sending an ACP
+permission request. Codex App Server v2 accepts
 `developerInstructions` on `thread/resume` as on `thread/start`.
 
 ### Read-only command allowlist
@@ -1111,18 +1140,19 @@ Each layer works on its own; none relies on the model following instructions.
    and OpenCode's is denied by its ruleset, so on those it should not occur.
 3. **Real-time activity guard.** An activity the adapter marks
    `fileMutation` because an edit is actually executing (an ACP tool call of
-   kind `edit`, `delete` or `move` reported `in_progress`, or an Antigravity
-   file-writing tool) cancels the provider run and settles the turn as
+   kind `edit`, `delete` or `move` reported `in_progress`) cancels the provider
+   run and settles the turn as
    failed with "Watchers are read-only. Inertia stopped this check." The
    outcome is `write-attempt`. On harnesses whose edits wait for an approval
    Inertia declines (`editsGatedBeforeStart` in `watcher-harness-profile.ts`:
-   Claude, Codex, Cursor and Kimi Code) that is the only trigger, because
+   Claude, Codex, Cursor, Kimi Code, Grok, and Antigravity ACP) that is the
+   only trigger, because
    those providers announce an edit before they ask for its approval: Claude
    streams an Edit tool's start before `canUseTool`, Codex sends
    `item/started` for a file change before its approval request, and ACP
    agents send a `pending` tool call first. A declined edit there is
    recorded as a `write-attempt` and the check continues; the fingerprint
-   guard backs it up. On OpenCode and Antigravity a started `file` activity
+   guard backs it up. On OpenCode a started `file` activity
    or an activity in the `coding` category also stops the check. Write
    attempts are counted per watched turn, whether declined or stopped: the
    second pauses the link with `write-attempts` and stops the check. A
@@ -1359,9 +1389,10 @@ the turn.
   as a write attempt and the check continues, a plan hand-off is recorded
   and answered `plan_revise`, and a tool call of kind `edit` reported
   `in_progress` whose title says nothing about editing stops the check.
-- Antigravity: a scripted `agy` receives `--mode plan` and neither
-  `accept-edits` nor `--dangerously-skip-permissions`, and a `write_to_file`
-  step stops the check.
+- Antigravity: a scripted `agy acp` agent is switched to `plan` mode (never
+  `accept-edits` or `--dangerously-skip-permissions`), a `pending` edit
+  followed by its permission request is declined with `reject_once` as a write
+  attempt, and an `in_progress` edit stops the check.
 
 Run it with `npm run test:portable`. Integration coverage lives in
 `tests/server/watcher-read-only-guard.test.ts` (the five-request cap, chat
@@ -1400,7 +1431,7 @@ that Inertia adds only where the harness has a documented way to receive one.
 | OpenCode | Its own provider sign-in and key store (`opencode auth login`). | OpenCode's own sign-in only. Keys stay in OpenCode's store; Inertia never passes a vault key to OpenCode and offers no key route for it. |
 | Cursor | Browser sign-in (`login`). | Account only. |
 | Kimi | Kimi Code sign-in through its ACP `authenticate` exchange. | Account route through Kimi ACP. A Kimi key runs through the Claude harness instead: the built-in Kimi preset sends the vault key to Kimi's Anthropic-compatible coding endpoint and is listed under Kimi. |
-| Antigravity | Google sign-in, checked when a turn starts. Google recommends a Gemini Enterprise or Google AI Studio key for third-party apps; `agy` uses `GEMINI_API_KEY` only when its own settings choose the Gemini model provider. | Account only. A Gemini key route is not offered yet: Inertia has no verified way to choose `agy`'s model provider for one launch without editing the person's own Antigravity settings, and a launch that ignored the key would silently use the Google account. |
+| Antigravity | Local `agy` sign-in (`oauth-personal` / `oauth-business` / `agy acp --login`), `GEMINI_API_KEY` (`gemini-api-key`), or Gemini Enterprise ADC (`agent-platform`) over official `agy acp`. | Native `antigravity-acp` route using the user's local `agy` sign-in, `GEMINI_API_KEY`, or Enterprise ADC configured in `agy`. Inertia does not store Gemini API keys yet and never reads or modifies `~/.gemini/antigravity-cli/`. |
 
 ### How a key reaches a provider
 
@@ -1666,7 +1697,7 @@ part of a step.
 | `codex-app-server` | Child threads from collaboration items and thread sources, with the model the spawn requested. Each child item (commands, file changes, MCP and dynamic tools, web searches, image views) becomes a step; thinking and messages do not. Collaboration items have no timeline row, so these traces show as compact rows under the turn. |
 | `opencode-sdk` | Child sessions, named by `Session.agent`, then the assistant message's `agent`, then the task's `subagent_type`. The model comes from `Session.model`, else the first assistant message. The trace links to the parent's task call by its `callID`, and child tool parts become steps. |
 | `cursor-acp` | One trace per `cursor/task` extension notification with its subagent type, description, model, result and duration. Cursor sends no live progress, steps, effort or background state, and its tasks cannot be stopped or moved. |
-| `kimi-acp`, `antigravity-cli` | No delegated-task traces: neither protocol reports subagents or background tasks to the host. |
+| `kimi-acp`, `antigravity-acp` | No delegated-task traces: neither ACP integration currently projects subagent traces to the host (historical `antigravity-cli` turns keep their `CLI` label). |
 | `grok-acp` | No delegated-task traces yet. Grok reports subagents and background commands through its own `x.ai` extensions, which Inertia does not read. |
 
 Background commands, monitors and MCP tasks never hold a turn open or count as

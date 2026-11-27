@@ -100,6 +100,7 @@ function cloneSelection(selection: ModelSelection): ModelSelection {
 
 function reasoningLabel(value: string): string {
   if (!value) return "Provider default";
+  if (value === "xhigh") return "Extra high";
   return value
     .split(/[-_]/u)
     .map((part) => part

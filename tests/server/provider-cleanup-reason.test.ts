@@ -44,7 +44,7 @@ import { createCodexAppServerHarness } from "../../src/server/provider/codex-app
 import { createGrokAcpHarness } from "../../src/server/provider/grok-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
-import { createAntigravityCliHarness } from "../../src/server/provider/antigravity-cli-harness";
+import { createAntigravityAcpHarness } from "../../src/server/provider/antigravity-acp-harness";
 import { providerCleanupIncident } from "../../src/server/provider/run-cleanup-settlement";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import { claudeSuccessResult, claudeSystem, fixtureClaudeQuery } from "../helpers/claude-agent-sdk-protocol";
@@ -231,16 +231,32 @@ const drivers: Record<Exclude<ProviderId, "cursor" | "pi">, (root: string) => {
     };
   },
   antigravity: () => {
-    const { close } = inMemoryChild(() => undefined, (send) => {
-      send({ event: "result", result: { status: "SUCCESS", response: "Done", error: "" } });
+    const { close } = inMemoryChild((message, send) => {
+      if (message.id === undefined) return;
+      if (message.method === "initialize") {
+        send({ jsonrpc: "2.0", id: message.id, result: {
+          protocolVersion: 1, agentInfo: { name: "Antigravity ACP Server", version: "1.5.18" },
+          agentCapabilities: { mcpCapabilities: { http: true } }, authMethods: [],
+        } });
+      } else if (message.method === "session/new") {
+        send({ jsonrpc: "2.0", id: message.id, result: {
+          sessionId: "cleanup-reason-session",
+          modes: { currentModeId: "default", availableModes: [{ id: "default", name: "Default" }] },
+          configOptions: [],
+        } });
+      } else if (message.method === "session/prompt") {
+        send({ jsonrpc: "2.0", method: "session/update", params: {
+          sessionId: "cleanup-reason-session",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done." } },
+        } });
+        send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+      } else {
+        send({ jsonrpc: "2.0", id: message.id, result: {} });
+      }
     });
     return {
       command: "/synthetic/agy",
-      harness: createAntigravityCliHarness({
-        resultExitGraceMs: 50,
-        terminationConfirmMs: 200,
-        terminateProcessTree: failingTermination(close),
-      }),
+      harness: createAntigravityAcpHarness({ terminateProcessTree: failingTermination(close) }),
     };
   },
 };

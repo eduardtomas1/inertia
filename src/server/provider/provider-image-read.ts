@@ -14,8 +14,8 @@ export const MAX_PROVIDER_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_PROVIDER_REQUEST_IMAGE_COUNT = 32;
 const MAX_IMAGE_BYTES = MAX_PROVIDER_REQUEST_IMAGE_BYTES;
 // Providers whose harness reads images inline through `readBoundedProviderImage`, capped at 20 MiB per request:
-// Claude Agent SDK, Cursor ACP, Kimi ACP, Grok ACP, Pi RPC and OpenCode 2 (the OpenCode harness on a 2.x server).
-const INLINE_IMAGE_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "cursor", "kimi", "grok", "pi", "opencode"]);
+// Claude Agent SDK, Cursor ACP, Kimi ACP, Antigravity ACP, Grok ACP, Pi RPC and OpenCode 2 (the OpenCode harness on a 2.x server).
+const INLINE_IMAGE_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "cursor", "kimi", "antigravity", "grok", "pi", "opencode"]);
 
 export function providerImageRequestLimitError(
   providerId: ProviderId,

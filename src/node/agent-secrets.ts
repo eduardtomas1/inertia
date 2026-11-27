@@ -46,7 +46,7 @@ export const SECRET_REQUEST_ROUTES: Readonly<Record<ProviderId, SecretRequestRou
   cursor: "acp-mcp",
   kimi: "acp-mcp",
   opencode: "remote-mcp",
-  antigravity: "prompt-fallback",
+  antigravity: "acp-mcp",
   grok: "acp-mcp",
   pi: "remote-mcp",
 });
@@ -57,7 +57,7 @@ export const SECRET_REQUEST_WAIT_MS_BY_PROVIDER: Readonly<Record<ProviderId, num
   cursor: 270_000,
   kimi: 270_000,
   opencode: SECRET_REQUEST_DEFAULT_WAIT_MS,
-  antigravity: 0,
+  antigravity: 270_000,
   grok: SECRET_REQUEST_DEFAULT_WAIT_MS,
   pi: 270_000,
 });

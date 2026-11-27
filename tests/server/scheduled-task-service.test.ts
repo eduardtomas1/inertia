@@ -157,7 +157,6 @@ class InMemoryScheduledTaskRepository implements ScheduledTaskRepositoryLike {
     return [...this.runs.values()]
       .reverse()
       .filter((run) => run.taskId === taskId)
-      .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt, "en"))
       .slice(0, limit)
       .map((run) => ({ ...run }));
   }

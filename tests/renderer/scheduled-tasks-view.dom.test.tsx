@@ -450,4 +450,36 @@ describe("ScheduledTasksView", () => {
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     expect(screen.getByText(/Last run Skipped/i)).toBeVisible();
   });
+
+  it("S82: renaming a task with a 90-second interval preserves its original schedule by omitting schedule from the update patch", async () => {
+    const user = userEvent.setup();
+    const { request } = mountView([{
+      task: makeTask({
+        title: "Sub-minute interval job",
+        schedule: { type: "interval", everyMs: 90_000 },
+      }),
+      recentRuns: [],
+    }]);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Sub-minute interval job" })).toBeVisible();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const titleInput = screen.getByLabelText("Title");
+    await user.clear(titleInput);
+    await user.type(titleInput, "Renamed 90s job");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(sent(request, "scheduled-task.update")).toHaveLength(1);
+    });
+    const updatePayload = sent(request, "scheduled-task.update")[0]?.payload as {
+      taskId: string;
+      patch: Record<string, unknown>;
+    };
+    expect(updatePayload.taskId).toBe(taskOneId);
+    expect(updatePayload.patch.title).toBe("Renamed 90s job");
+    expect("schedule" in updatePayload.patch).toBe(false);
+  });
 });

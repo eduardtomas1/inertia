@@ -46,6 +46,7 @@ interface FormDraft {
   specificFreshSession: boolean;
   accessMode: ScheduledTask["accessMode"];
   interactionMode: ScheduledTask["interactionMode"];
+  scheduleDirty: boolean;
 }
 
 const WEEKDAYS = [
@@ -107,7 +108,7 @@ function createBlankDraft(projectId: string): FormDraft {
     intervalValue: "30", intervalUnit: "minutes", timeOfDay: "09:00", weekdays: [...WORK_WEEKDAYS],
     onceLocal: toDateTimeLocal(new Date(Date.now() + 3_600_000)),
     threadTarget: "new", boundConversationId: "", specificFreshSession: false,
-    accessMode: "supervised", interactionMode: "build",
+    accessMode: "supervised", interactionMode: "build", scheduleDirty: true,
   };
 }
 
@@ -138,6 +139,7 @@ function draftFromTask(task: ScheduledTask): FormDraft {
     specificFreshSession: Boolean(task.boundConversationId && task.freshSession),
     accessMode: task.accessMode,
     interactionMode: task.interactionMode,
+    scheduleDirty: false,
   };
 }
 
@@ -290,6 +292,7 @@ export function ScheduledTasksView({
     setDraft((cur) => ({
       ...cur,
       weekdays: cur.weekdays.includes(day) ? cur.weekdays.filter((v) => v !== day) : [...cur.weekdays, day].sort((a, b) => a - b),
+      scheduleDirty: true,
     }));
   }, []);
 
@@ -301,14 +304,19 @@ export function ScheduledTasksView({
     if (!draft.projectId) { setFormError("Select a project before saving a schedule."); return; }
     if (!title) { setFormError("Enter a title for this schedule."); return; }
     if (!prompt) { setFormError("Enter the prompt instructions to run."); return; }
-    const built = buildSchedule(draft);
-    if ("error" in built) { setFormError(built.error); return; }
+    let schedule: ScheduledTaskSchedule | undefined;
+    if (!draft.editingTaskId || draft.scheduleDirty) {
+      const built = buildSchedule(draft);
+      if ("error" in built) { setFormError(built.error); return; }
+      schedule = built.schedule;
+    }
     if (draft.threadTarget === "specific" && !draft.boundConversationId) {
       setFormError("Select a chat in this project, or choose another thread target.");
       return;
     }
     const common: ScheduledTaskPatch = {
-      title, prompt, schedule: built.schedule,
+      title, prompt,
+      ...(schedule ? { schedule } : {}),
       boundConversationId: draft.threadTarget === "specific" ? draft.boundConversationId : null,
       freshSession: draft.threadTarget === "shared-fresh" ? true : draft.threadTarget === "specific" ? draft.specificFreshSession : false,
       accessMode: draft.accessMode, interactionMode: draft.interactionMode,
@@ -463,7 +471,7 @@ export function ScheduledTasksView({
                 <div className="scheduled-segmented" role="radiogroup" aria-labelledby={kindGroupId}>
                   {KIND_OPTIONS.map(([value, label]) => (
                     <label key={value} className={`scheduled-segment${draft.scheduleKind === value ? " is-active" : ""}`}>
-                      <input type="radio" name="scheduled-task-kind" value={value} checked={draft.scheduleKind === value} disabled={formDisabled} onChange={() => { patchDraft({ scheduleKind: value }); }} />
+                      <input type="radio" name="scheduled-task-kind" value={value} checked={draft.scheduleKind === value} disabled={formDisabled} onChange={() => { patchDraft({ scheduleKind: value, scheduleDirty: true }); }} />
                       <span>{label}</span>
                     </label>
                   ))}
@@ -474,11 +482,11 @@ export function ScheduledTasksView({
                 <div className="scheduled-field-grid">
                   <div className="scheduled-field">
                     <label htmlFor="scheduled-task-interval-value">Every</label>
-                    <input id="scheduled-task-interval-value" type="number" min={1} step={1} className="scheduled-control" disabled={formDisabled} value={draft.intervalValue} onChange={(e) => { patchDraft({ intervalValue: e.target.value }); }} />
+                    <input id="scheduled-task-interval-value" type="number" min={1} step={1} className="scheduled-control" disabled={formDisabled} value={draft.intervalValue} onChange={(e) => { patchDraft({ intervalValue: e.target.value, scheduleDirty: true }); }} />
                   </div>
                   <div className="scheduled-field">
                     <label htmlFor="scheduled-task-interval-unit">Unit</label>
-                    <select id="scheduled-task-interval-unit" className="scheduled-control" disabled={formDisabled} value={draft.intervalUnit} onChange={(e) => { patchDraft({ intervalUnit: e.target.value as IntervalUnit }); }}>
+                    <select id="scheduled-task-interval-unit" className="scheduled-control" disabled={formDisabled} value={draft.intervalUnit} onChange={(e) => { patchDraft({ intervalUnit: e.target.value as IntervalUnit, scheduleDirty: true }); }}>
                       <option value="minutes">Minutes</option>
                       <option value="hours">Hours</option>
                       <option value="days">Days</option>
@@ -491,13 +499,13 @@ export function ScheduledTasksView({
                 <div className="scheduled-field-grid">
                   <div className="scheduled-field">
                     <label htmlFor="scheduled-task-time">Time of day</label>
-                    <input id="scheduled-task-time" type="time" className="scheduled-control" required disabled={formDisabled} value={draft.timeOfDay} onChange={(e) => { patchDraft({ timeOfDay: e.target.value }); }} />
+                    <input id="scheduled-task-time" type="time" className="scheduled-control" required disabled={formDisabled} value={draft.timeOfDay} onChange={(e) => { patchDraft({ timeOfDay: e.target.value, scheduleDirty: true }); }} />
                   </div>
                   <div className="scheduled-field">
                     <div className="scheduled-weekdays-header">
                       <span className="scheduled-label">Days</span>
-                      <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...ALL_WEEKDAYS] }); }}>Every day</button>
-                      <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...WORK_WEEKDAYS] }); }}>Weekdays</button>
+                      <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...ALL_WEEKDAYS], scheduleDirty: true }); }}>Every day</button>
+                      <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...WORK_WEEKDAYS], scheduleDirty: true }); }}>Weekdays</button>
                     </div>
                     <div className="scheduled-weekday-row" role="group" aria-label="Weekdays">
                       {WEEKDAYS.map(([value, short, label]) => (
@@ -511,7 +519,7 @@ export function ScheduledTasksView({
               {draft.scheduleKind === "once" && (
                 <div className="scheduled-field scheduled-once-field">
                   <label htmlFor="scheduled-task-once">Run at (local time)</label>
-                  <input id="scheduled-task-once" type="datetime-local" className="scheduled-control" required disabled={formDisabled} value={draft.onceLocal} onChange={(e) => { patchDraft({ onceLocal: e.target.value }); }} />
+                  <input id="scheduled-task-once" type="datetime-local" className="scheduled-control" required disabled={formDisabled} value={draft.onceLocal} onChange={(e) => { patchDraft({ onceLocal: e.target.value, scheduleDirty: true }); }} />
                 </div>
               )}
 

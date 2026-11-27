@@ -1643,6 +1643,209 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(s77Summary?.lastTurnId).toBe(s77TurnId);
       expect(s77Summary?.lastError).toBeNull();
       expect(s77Summary?.consecutiveFailures).toBe(0);
+
+      // S78: Turn settlement commits run + task summary in ONE transaction; an injected failure on recordTaskOutcome
+      // rolls back the run state too so replay settles both cleanly!
+      const s78Conv = store.createConversation(project.id, "S78 Atomic settlement");
+      const s78Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s78Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const s78Task = s78Service.create({
+        projectId: project.id,
+        title: "Atomic turn settle",
+        prompt: "Check build",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s78Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const s78Run = await s78Service.runNow(s78Task.id);
+      const s78TurnId = randomUUID();
+      s78Service.bindRunTurn(s78Run.run.id, s78TurnId);
+      const s78OutcomeSpy = vi.spyOn(store.scheduledTasks, "recordTaskOutcome").mockImplementationOnce(() => {
+        throw new Error("Simulated SQLite summary failure");
+      });
+      expect(() => s78Service.onTurnSettled({
+        id: s78TurnId,
+        conversationId: s78Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })).toThrow("Simulated SQLite summary failure");
+      s78OutcomeSpy.mockRestore();
+      // Both rows rolled back together — run is still running, NOT drifted to completed!
+      expect(store.scheduledTasks.getRun(s78Run.run.id)?.state).toBe("running");
+      expect(store.scheduledTasks.get(s78Task.id)?.lastRunStatus).toBe("running");
+      // Replay now settles BOTH cleanly!
+      s78Service.onTurnSettled({
+        id: s78TurnId,
+        conversationId: s78Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      expect(store.scheduledTasks.getRun(s78Run.run.id)?.state).toBe("completed");
+      expect(store.scheduledTasks.get(s78Task.id)?.lastRunStatus).toBe("completed");
+
+      // S79: Editing prompt and target while a fresh-session run creates its chat dispatches from the consistent
+      // pre-edit snapshot AND does NOT overwrite the user's newly saved target!
+      const s79EditedTargetConv = store.createConversation(project.id, "S79 User edited target");
+      const s79CreatedFreshConv = store.createConversation(project.id, "S79 Created fresh chat");
+      let resolveCreateChat!: () => void;
+      const createChatGate = new Promise<void>((resolve) => { resolveCreateChat = resolve; });
+      const s79Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => {
+          await createChatGate;
+          return s79CreatedFreshConv;
+        },
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const s79Task = s79Service.create({
+        projectId: project.id,
+        title: "Fresh session race",
+        prompt: "Original prompt v1",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: null,
+        freshSession: true,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const s79RunPromise = s79Service.runNow(s79Task.id);
+      await Promise.resolve();
+      // While createConversation is pending, user edits prompt AND binds task to a different chat!
+      s79Service.update(s79Task.id, {
+        prompt: "Updated prompt v2",
+        boundConversationId: s79EditedTargetConv.id,
+        freshSession: false,
+      });
+      resolveCreateChat();
+      const s79Result = await s79RunPromise;
+      expect(s79Result.conversationId).toBe(s79CreatedFreshConv.id);
+      // Queued message in the created chat must contain the consistent v1 prompt, NOT v2!
+      const s79QueuedItem = store.orchestration.queue.listActive(s79CreatedFreshConv.id)[0]!;
+      expect(store.orchestration.queue.getContent(s79CreatedFreshConv.id, s79QueuedItem.id)?.content).toBe("Original prompt v1");
+      // Saved target must remain the user's edited target, NOT overwritten with s79CreatedFreshConv.id!
+      expect(store.scheduledTasks.get(s79Task.id)?.boundConversationId).toBe(s79EditedTargetConv.id);
+      expect(store.scheduledTasks.get(s79Task.id)?.prompt).toBe("Updated prompt v2");
+
+      // S80: Boot recovery for a missed one-shot persists a skipped run row so an older queued recurring run
+      // completing later cannot overwrite the missed-boot skip summary!
+      let s80NowMs = Date.parse("2030-08-01T10:00:00.000Z");
+      const s80Conv = store.createConversation(project.id, "S80 Missed boot run");
+      const s80FirstService = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s80Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(s80NowMs),
+      });
+      const s80Task = s80FirstService.create({
+        projectId: project.id,
+        title: "Missed boot vs older run",
+        prompt: "Check logs",
+        schedule: { type: "interval", everyMs: 600_000 },
+        boundConversationId: s80Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const s80OlderRun = await s80FirstService.runNow(s80Task.id);
+      // Edit task to a one-shot due at 10:05, then restart app at 10:10 (past the one-shot time!).
+      s80FirstService.update(s80Task.id, {
+        schedule: { type: "once", runAt: "2030-08-01T10:05:00.000Z" },
+        enabled: true,
+      });
+      s80NowMs = Date.parse("2030-08-01T10:10:00.000Z");
+      const s80BootService = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s80Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(s80NowMs),
+      });
+      s80BootService.start();
+      try {
+        const s80AfterBoot = store.scheduledTasks.get(s80Task.id)!;
+        expect(s80AfterBoot.enabled).toBe(false);
+        expect(s80AfterBoot.lastRunStatus).toBe("skipped");
+        expect(store.scheduledTasks.listRuns(s80Task.id)[0]?.state).toBe("skipped");
+        // Now the older queued recurring run starts and completes -> must NOT overwrite the missed-boot skip!
+        const s80OlderTurnId = randomUUID();
+        s80BootService.bindRunTurn(s80OlderRun.run.id, s80OlderTurnId);
+        s80BootService.onTurnSettled({
+          id: s80OlderTurnId,
+          conversationId: s80Conv.id,
+          status: "completed",
+          terminalReason: null,
+          completedAt: new Date(s80NowMs + 5_000).toISOString(),
+          updatedAt: new Date(s80NowMs + 5_000).toISOString(),
+        });
+        expect(store.scheduledTasks.getRun(s80OlderRun.run.id)?.state).toBe("completed");
+        expect(store.scheduledTasks.get(s80Task.id)?.lastRunStatus).toBe("skipped");
+      } finally {
+        s80BootService.dispose();
+      }
+
+      // S81: Backward clock adjustment still grants summary ownership to the newer durable claim (rowid DESC)!
+      let s81NowMs = Date.parse("2030-09-01T12:00:00.000Z");
+      const s81Conv = store.createConversation(project.id, "S81 Backward clock");
+      const s81Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s81Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(s81NowMs),
+      });
+      const s81Task = s81Service.create({
+        projectId: project.id,
+        title: "Clock jump test",
+        prompt: "Verify clock resilience",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s81Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const s81First = await s81Service.runNow(s81Task.id);
+      const s81Turn1 = randomUUID();
+      s81Service.bindRunTurn(s81First.run.id, s81Turn1);
+      s81Service.onTurnSettled({
+        id: s81Turn1,
+        conversationId: s81Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: new Date(s81NowMs + 1_000).toISOString(),
+        updatedAt: new Date(s81NowMs + 1_000).toISOString(),
+      });
+      // Jump wall clock BACKWARD by 1 hour before claiming and completing run 2!
+      s81NowMs -= 3_600_000;
+      const s81Second = await s81Service.runNow(s81Task.id);
+      const s81Turn2 = randomUUID();
+      s81Service.bindRunTurn(s81Second.run.id, s81Turn2);
+      s81Service.onTurnSettled({
+        id: s81Turn2,
+        conversationId: s81Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: new Date(s81NowMs + 1_000).toISOString(),
+        updatedAt: new Date(s81NowMs + 1_000).toISOString(),
+      });
+      expect(store.scheduledTasks.listRuns(s81Task.id)[0]?.id).toBe(s81Second.run.id);
+      expect(store.scheduledTasks.get(s81Task.id)?.lastRunStatus).toBe("completed");
+      expect(store.scheduledTasks.get(s81Task.id)?.lastTurnId).toBe(s81Turn2);
     } finally {
       store.close();
     }

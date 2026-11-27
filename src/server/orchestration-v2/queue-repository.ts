@@ -294,7 +294,7 @@ export function settleScheduledRunOnQueueCancel(
     SET state = 'skipped', error = COALESCE(error, ?), finished_at = COALESCE(finished_at, ?)
     WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, runId);
   const latestRun = database.prepare(`SELECT id FROM scheduled_task_runs
-    WHERE task_id = ? ORDER BY claimed_at DESC, rowid DESC LIMIT 1`).get(runRow.task_id) as { id: string } | undefined;
+    WHERE task_id = ? ORDER BY rowid DESC LIMIT 1`).get(runRow.task_id) as { id: string } | undefined;
   if (latestRun && latestRun.id !== runId) return;
   const claimedMs = Date.parse(runRow.claimed_at);
   const nowMs = Date.parse(nowIso);

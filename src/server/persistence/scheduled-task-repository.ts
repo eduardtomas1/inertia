@@ -495,7 +495,7 @@ export class ScheduledTaskRepository {
       SELECT ${RUN_COLUMNS}
       FROM scheduled_task_runs
       WHERE task_id = ?
-      ORDER BY claimed_at DESC, rowid DESC
+      ORDER BY rowid DESC
       LIMIT ?
     `).all(taskId, effectiveLimit) as ScheduledTaskRunRow[];
     return rows.flatMap((row) => {
@@ -516,7 +516,7 @@ export class ScheduledTaskRepository {
       SELECT ${RUN_COLUMNS}
       FROM scheduled_task_runs
       WHERE turn_id = ?
-      ORDER BY claimed_at DESC, id DESC
+      ORDER BY rowid DESC
       LIMIT 1
     `).get(turnId) as ScheduledTaskRunRow | undefined;
     return row ? runFromRow(row) : null;
@@ -527,7 +527,7 @@ export class ScheduledTaskRepository {
       SELECT ${RUN_COLUMNS}
       FROM scheduled_task_runs
       WHERE state IN ('claimed', 'queued', 'running')
-      ORDER BY claimed_at ASC, id ASC
+      ORDER BY rowid ASC
     `).all() as ScheduledTaskRunRow[];
     return rows.flatMap((row) => {
       const run = runFromRow(row);
@@ -629,7 +629,7 @@ export class ScheduledTaskRepository {
             SELECT id
             FROM scheduled_task_runs
             WHERE task_id = ?
-            ORDER BY claimed_at DESC, rowid DESC
+            ORDER BY rowid DESC
             LIMIT ?
           )
       `).run(run.taskId, run.taskId, MAX_SCHEDULED_TASK_RUN_HISTORY);

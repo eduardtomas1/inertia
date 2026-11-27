@@ -921,10 +921,13 @@ describe("ResponseMarkdown media linking and inline embeds", () => {
 
     const buttons = screen.getAllByRole("button");
     expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveAccessibleName("Preview docs/report.pdf (PDF)");
     expect(buttons[0]).toHaveTextContent("report.pdf");
     expect(buttons[0]).toHaveTextContent("PDF");
+    expect(buttons[1]).toHaveAccessibleName("Preview data/budget.xlsx (Excel)");
     expect(buttons[1]).toHaveTextContent("budget.xlsx");
     expect(buttons[1]).toHaveTextContent("Excel");
+    expect(buttons[2]).toHaveAccessibleName("Preview data/metrics.csv (CSV)");
     expect(buttons[2]).toHaveTextContent("metrics.csv");
     expect(buttons[2]).toHaveTextContent("CSV");
 

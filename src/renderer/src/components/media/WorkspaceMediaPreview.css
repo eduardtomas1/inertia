@@ -1,40 +1,8 @@
-.workspace-media-viewer,
-.workspace-media-dialog-badge,
-.files-panel-media-preview,
-.workspace-media-preview-dialog {
-  --workspace-media-kind: var(--text-muted);
-}
-
-:is(.workspace-media-viewer, .workspace-media-dialog-badge, .files-panel-media-preview)[data-media-kind="image"],
-.workspace-media-preview-dialog[data-preview-kind="image"] {
-  --workspace-media-kind: var(--blue);
-}
-
-:is(.workspace-media-viewer, .workspace-media-dialog-badge, .files-panel-media-preview)[data-media-kind="video"],
-.workspace-media-preview-dialog[data-preview-kind="video"] {
-  --workspace-media-kind: var(--syntax-meta);
-}
-
-:is(.workspace-media-viewer, .workspace-media-dialog-badge, .files-panel-media-preview)[data-media-kind="audio"],
-.workspace-media-preview-dialog[data-preview-kind="audio"] {
-  --workspace-media-kind: var(--warning);
-}
-
-:is(.workspace-media-viewer, .workspace-media-dialog-badge, .files-panel-media-preview)[data-media-kind="pdf"],
-.workspace-media-preview-dialog[data-preview-kind="pdf"] {
-  --workspace-media-kind: var(--danger);
-}
-
-:is(.workspace-media-viewer, .workspace-media-dialog-badge, .files-panel-media-preview)[data-media-kind="spreadsheet"],
-.workspace-media-preview-dialog[data-preview-kind="spreadsheet"] {
-  --workspace-media-kind: var(--status-completed);
-}
-
 .workspace-media-viewer {
   --workspace-media-canvas: color-mix(in srgb, var(--text) 4%, var(--bg));
   --workspace-media-checker: color-mix(in srgb, var(--text) 4.5%, transparent);
   --workspace-media-paper-edge: color-mix(in srgb, var(--text) 14%, transparent);
-  --workspace-media-row-hover: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+  --workspace-media-row-hover: var(--fill);
   position: relative;
   display: grid;
   width: 100%;
@@ -50,7 +18,7 @@
   --workspace-media-canvas: color-mix(in srgb, var(--surface) 72%, var(--surface-strong));
   --workspace-media-checker: color-mix(in srgb, var(--text) 3.5%, transparent);
   --workspace-media-paper-edge: color-mix(in srgb, var(--text) 10%, transparent);
-  --workspace-media-row-hover: color-mix(in srgb, var(--accent) 11%, var(--surface-raised));
+  --workspace-media-row-hover: var(--fill);
 }
 
 .workspace-media-viewer:focus:not(:focus-visible) {
@@ -87,26 +55,15 @@
   flex: 0 0 auto;
   box-sizing: border-box;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px 0 7px;
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--workspace-media-kind) 72%, var(--text));
-  background: color-mix(in srgb, var(--workspace-media-kind) 11%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--workspace-media-kind) 20%, transparent);
+  padding: 0 7px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
   font-size: var(--text-xs);
   font-weight: 500;
   line-height: 1;
   letter-spacing: 0.005em;
-}
-
-.workspace-media-dialog-badge::before {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--workspace-media-kind);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--workspace-media-kind) 18%, transparent);
-  content: "";
 }
 
 .workspace-media-dialog-stat {
@@ -301,20 +258,14 @@
 
 .workspace-media-audio-wrap {
   display: flex;
-  width: min(480px, calc(100% - 32px));
+  width: min(460px, calc(100% - 32px));
   box-sizing: border-box;
   flex-direction: column;
-  gap: 18px;
-  padding: 20px 20px 18px;
-  border: 1px solid var(--line-soft);
+  gap: 16px;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  background:
-    radial-gradient(
-      140% 120% at 0% 0%,
-      color-mix(in srgb, var(--workspace-media-kind) 7%, transparent) 0%,
-      transparent 55%
-    ),
-    var(--surface-raised);
+  background: var(--surface-raised);
   box-shadow: var(--shadow-float);
 }
 
@@ -329,31 +280,20 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .workspace-media-audio-icon {
   position: relative;
   display: grid;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--workspace-media-kind) 80%, var(--text));
-  background:
-    radial-gradient(
-      circle at 50% 50%,
-      var(--surface-raised) 0 9px,
-      color-mix(in srgb, var(--workspace-media-kind) 22%, var(--surface-raised)) 9.5px 10.5px,
-      color-mix(in srgb, var(--workspace-media-kind) 9%, var(--surface-raised)) 11px 15px,
-      color-mix(in srgb, var(--workspace-media-kind) 16%, var(--surface-raised)) 15.5px 16.5px,
-      color-mix(in srgb, var(--workspace-media-kind) 6%, var(--surface-raised)) 17px 100%
-    );
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--workspace-media-kind) 24%, transparent),
-    inset 0 1px 0 var(--raised-edge),
-    0 6px 14px -8px color-mix(in srgb, var(--workspace-media-kind) 60%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
 }
 
 .workspace-media-audio-icon > svg {
@@ -453,10 +393,8 @@
   place-items: center;
   border-radius: 999px;
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface-raised));
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--danger) 20%, transparent),
-    0 0 0 5px color-mix(in srgb, var(--danger) 5%, transparent);
+  background: var(--fill);
+  box-shadow: inset 0 0 0 1px var(--line-soft);
 }
 
 .workspace-media-error-copy {
@@ -572,17 +510,17 @@
 .workspace-media-viewer .spreadsheet-attachment-tabs button[aria-pressed="true"] {
   color: var(--text);
   background: var(--fill-strong);
-  box-shadow: inset 0 0 0 1px var(--line-soft);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
 
 .workspace-media-viewer .spreadsheet-attachment-tabs button[aria-pressed="true"]::after {
   position: absolute;
-  right: 10px;
-  bottom: 3px;
-  left: 10px;
+  right: 8px;
+  bottom: 2px;
+  left: 8px;
   height: 2px;
   border-radius: 999px;
-  background: var(--workspace-media-kind);
+  background: var(--text);
   content: "";
 }
 
@@ -673,7 +611,7 @@
 
 .workspace-media-viewer .spreadsheet-attachment-table-wrap tbody tr:hover th {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 9%, var(--fill-raised));
+  background: var(--fill-strong-raised);
 }
 
 .workspace-media-viewer .spreadsheet-attachment-limit-note {
@@ -683,17 +621,7 @@
   padding: 7px 12px;
   border-top-color: var(--line-soft);
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--warning) 6%, var(--surface-raised));
-}
-
-.workspace-media-viewer .spreadsheet-attachment-limit-note::before {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  background: var(--warning);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 16%, transparent);
-  content: "";
+  background: var(--fill);
 }
 
 .workspace-media-viewer .spreadsheet-attachment-empty strong {
@@ -747,7 +675,7 @@
 
 .files-panel-media-bar-info > .workspace-media-dialog-badge {
   min-height: 18px;
-  padding: 0 7px 0 6px;
+  padding: 0 6px;
 }
 
 .files-panel-media-bar-meta {

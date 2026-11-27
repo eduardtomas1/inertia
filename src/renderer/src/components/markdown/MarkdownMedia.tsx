@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
-  ChevronRight,
   CircleAlert,
   ExternalLink,
   FileAudio,
@@ -124,9 +123,7 @@ function MediaCardHeaderTitle({
   const folder = mediaFolder(target);
   return (
     <span className="response-markdown-media-title" title={target.relativePath}>
-      <span className="response-markdown-media-glyph" aria-hidden="true">
-        <Icon size={14} aria-hidden="true" />
-      </span>
+      <Icon className="response-markdown-media-icon" size={14} aria-hidden="true" />
       <span className="response-markdown-media-filename">{target.name}</span>
       {folder && (
         <span className="response-markdown-media-folder" aria-hidden="true">{folder}</span>
@@ -201,7 +198,7 @@ function MediaPlaybackFallback({
   return (
     <span className="response-markdown-media-error" role="status">
       <span className="response-markdown-media-error-message">
-        <CircleAlert size={16} aria-hidden="true" />
+        <CircleAlert size={14} aria-hidden="true" />
         <span>Couldn&apos;t play {kindLabel} {target.name}.</span>
       </span>
       <span className="response-markdown-media-error-actions">
@@ -251,6 +248,7 @@ export function MarkdownInlineVideoCard({
     return () => detachMediaElement(element);
   }, [interactive, target.url, failed]);
   if (!interactive) {
+    const folder = mediaFolder(target);
     return (
       <span
         className="response-markdown-media-card response-markdown-document-card"
@@ -258,15 +256,14 @@ export function MarkdownInlineVideoCard({
         data-markdown-media-ext={target.extension}
         data-markdown-media-alt={alt}
         data-markdown-media-source={target.relativePath}
-        title={title}
+        title={title ?? target.relativePath}
       >
         <span className="response-markdown-document-button">
-          <span className="response-markdown-document-tile" aria-hidden="true">
-            <Film className="response-markdown-document-icon" size={16} aria-hidden="true" />
-          </span>
-          <span className="response-markdown-document-meta">
-            <span className="response-markdown-document-name">{target.name}</span>
-          </span>
+          <Film className="response-markdown-document-icon" size={14} aria-hidden="true" />
+          <span className="response-markdown-document-name">{target.name}</span>
+          {folder && (
+            <span className="response-markdown-document-folder" aria-hidden="true">{folder}</span>
+          )}
           <span className="response-markdown-document-badge">Video</span>
         </span>
       </span>
@@ -344,6 +341,7 @@ export function MarkdownInlineAudioCard({
     return () => detachMediaElement(element);
   }, [interactive, target.url, failed]);
   if (!interactive) {
+    const folder = mediaFolder(target);
     return (
       <span
         className="response-markdown-media-card response-markdown-document-card"
@@ -351,15 +349,14 @@ export function MarkdownInlineAudioCard({
         data-markdown-media-ext={target.extension}
         data-markdown-media-alt={alt}
         data-markdown-media-source={target.relativePath}
-        title={title}
+        title={title ?? target.relativePath}
       >
         <span className="response-markdown-document-button">
-          <span className="response-markdown-document-tile" aria-hidden="true">
-            <FileAudio className="response-markdown-document-icon" size={16} aria-hidden="true" />
-          </span>
-          <span className="response-markdown-document-meta">
-            <span className="response-markdown-document-name">{target.name}</span>
-          </span>
+          <FileAudio className="response-markdown-document-icon" size={14} aria-hidden="true" />
+          <span className="response-markdown-document-name">{target.name}</span>
+          {folder && (
+            <span className="response-markdown-document-folder" aria-hidden="true">{folder}</span>
+          )}
           <span className="response-markdown-document-badge">Audio</span>
         </span>
       </span>
@@ -430,6 +427,7 @@ export function MarkdownInlineDocumentCard({
 }): React.JSX.Element {
   const Icon = target.kind === "pdf" ? FileText : FileSpreadsheet;
   const badge = documentBadgeLabel(target);
+  const folder = mediaFolder(target);
   const handleOpen = (): void => {
     if (onPreviewMedia) {
       onPreviewMedia(target);
@@ -448,19 +446,12 @@ export function MarkdownInlineDocumentCard({
   };
   const cardContent = (
     <>
-      <span className="response-markdown-document-tile" aria-hidden="true">
-        <Icon className="response-markdown-document-icon" size={16} aria-hidden="true" />
-      </span>
-      <span className="response-markdown-document-meta">
-        <span className="response-markdown-document-name">{target.name}</span>
-        {target.relativePath !== target.name && (
-          <span className="response-markdown-document-path">{target.relativePath}</span>
-        )}
-      </span>
-      <span className="response-markdown-document-badge">{badge}</span>
-      {interactive && (
-        <ChevronRight className="response-markdown-document-chevron" size={16} aria-hidden="true" />
+      <Icon className="response-markdown-document-icon" size={14} aria-hidden="true" />
+      <span className="response-markdown-document-name">{target.name}</span>
+      {folder && (
+        <span className="response-markdown-document-folder" aria-hidden="true">{folder}</span>
       )}
+      <span className="response-markdown-document-badge">{badge}</span>
     </>
   );
   return (
@@ -470,12 +461,13 @@ export function MarkdownInlineDocumentCard({
       data-markdown-media-ext={target.extension}
       data-markdown-media-alt={alt}
       data-markdown-media-source={target.relativePath}
-      title={title}
+      title={title ?? target.relativePath}
     >
       {interactive ? (
         <button
           type="button"
           className="response-markdown-document-button"
+          aria-label={`Preview ${target.relativePath} (${badge})`}
           onClick={handleOpen}
         >
           {cardContent}

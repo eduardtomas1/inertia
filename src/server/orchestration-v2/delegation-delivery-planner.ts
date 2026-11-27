@@ -105,8 +105,14 @@ export function deliveryContent(context: DelegationPlanContext, taskIds: readonl
     return task ? [task] : [];
   });
   const cohort = context.reads.cohort([...new Set(tasks.map(({ sourceTurnId }) => sourceTurnId))]);
-  return delegatedWakeText(tasks.map((task) => ({ taskId: task.taskId, title: task.title, status: task.status,
-    text: context.reads.resultView(task)?.text ?? null })), cohort);
+  return delegatedWakeText(tasks.map((task) => ({
+    taskId: task.taskId,
+    title: task.title,
+    status: task.status,
+    text: context.reads.resultView(task)?.text ?? null,
+    childConversationId: task.childConversationId,
+    originalTaskId: task.originalTaskId,
+  })), cohort);
 }
 
 function mailboxEvent(mailbox: Omit<DelegationMailbox, "parentConversationId" | "updatedAt">): DelegationEvent {

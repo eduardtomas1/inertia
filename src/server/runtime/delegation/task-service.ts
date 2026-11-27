@@ -50,6 +50,7 @@ export class DelegationTaskError extends Error {
 export interface DelegationQueue {
   offerDelegated(conversationId: string): Promise<void>;
   sendDelegated(conversationId: string): Promise<void>;
+  schedule?(conversationId: string): Promise<void>;
 }
 
 export interface DelegationTaskServiceDependencies {

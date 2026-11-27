@@ -1183,6 +1183,7 @@ export function createQueuedMessageRuntime(
     enqueueWatcherNote,
     enqueueManagedMessage,
     withdrawWatcherNote,
+    schedule,
     editedAttachmentConversations: (_attachmentId: string): string[] => [],
     editedAttachmentMetadata: (_attachmentId: string) => null,
     onTurnSettled(turn: AgentTurn): void {

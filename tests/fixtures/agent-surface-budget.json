@@ -278,6 +278,36 @@
       "cursorKimi": 600,
       "opencode": 599
     },
+    "inertia_fork_conversation": {
+      "claude": 836,
+      "codex": 730,
+      "cursorKimi": 836,
+      "opencode": 836
+    },
+    "inertia_merge_back_fork": {
+      "claude": 530,
+      "codex": 424,
+      "cursorKimi": 530,
+      "opencode": 530
+    },
+    "inertia_configure_conversation": {
+      "claude": 1177,
+      "codex": 1071,
+      "cursorKimi": 1177,
+      "opencode": 1177
+    },
+    "inertia_search_messages": {
+      "claude": 673,
+      "codex": 569,
+      "cursorKimi": 673,
+      "opencode": 673
+    },
+    "inertia_read_conversation": {
+      "claude": 591,
+      "codex": 487,
+      "cursorKimi": 591,
+      "opencode": 591
+    },
     "inertia_request_secret": {
       "claude": 1428,
       "codex": 1285,
@@ -350,24 +380,24 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 35001,
-      "withoutBrowser": 22004,
-      "withCad": 57365
+      "withBrowser": 38808,
+      "withoutBrowser": 25811,
+      "withCad": 61172
     },
     "codex": {
-      "withBrowser": 30211,
-      "withoutBrowser": 18996,
-      "withCad": 51426
+      "withBrowser": 33492,
+      "withoutBrowser": 22277,
+      "withCad": 54707
     },
     "cursorKimi": {
-      "withBrowser": 34936,
-      "withoutBrowser": 21929,
-      "withCad": 57301
+      "withBrowser": 38743,
+      "withoutBrowser": 25736,
+      "withCad": 61108
     },
     "opencode": {
-      "withBrowser": 34925,
-      "withoutBrowser": 21928,
-      "withCad": 57289
+      "withBrowser": 38732,
+      "withoutBrowser": 25735,
+      "withCad": 61096
     }
   }
 }

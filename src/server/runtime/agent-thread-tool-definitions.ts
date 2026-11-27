@@ -11,6 +11,7 @@ import { AGENT_THREAD_WAIT_TOOL_DEFINITION } from "./agent-thread-wait";
 import { DELEGATION_TOOL_DEFINITIONS } from "./delegation/task-tools";
 import { FORK_HISTORY_TOOL } from "./fork-history-tool";
 import { ANSWER_QUESTION_TOOL_DEFINITION, ANSWER_QUESTION_TOOL_NAME } from "./managed-child-questions";
+import { EXTENDED_MANAGED_TOOL_DEFINITIONS } from "./managed-extended-tools";
 import { MANAGED_QUEUE_TOOL_DEFINITION } from "./managed-queue-tools";
 import { SEND_MESSAGE_TOOL_DEFINITION } from "./managed-send-modes";
 
@@ -141,4 +142,5 @@ export const AGENT_THREAD_TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[
     readOnly: false,
   },
   ...DELEGATION_TOOL_DEFINITIONS,
+  ...EXTENDED_MANAGED_TOOL_DEFINITIONS,
 ] as const;

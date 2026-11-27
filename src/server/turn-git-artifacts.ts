@@ -35,7 +35,7 @@ import {
   type CheckpointRetentionPolicy,
   type PruneCheckpointRefsOptions,
 } from "./checkpoint-retention";
-import { CheckpointError, createCheckpoint, deleteCheckpoint } from "./checkpoints";
+import { CheckpointError, createCheckpoint, deleteCheckpoint, pruneOrphanedCheckpointRefs } from "./checkpoints";
 import {
   captureGitArtifactState,
   compareGitSnapshots,
@@ -595,6 +595,7 @@ export class TurnGitArtifactManager {
         createdAt: turn.completedAt ?? turn.updatedAt,
       }));
       await this.prune();
+      await this.#pruneOrphanedCheckpointRefs();
     }
     return this.store.turnGitArtifactRevision() !== beforeArtifacts
       || this.store.checkpointExpirationRevision() !== beforeCheckpoints;
@@ -977,6 +978,27 @@ export class TurnGitArtifactManager {
           outcome: "failed",
           context: { commandType: "checkpoint.prune" },
         });
+      }
+    }
+  }
+
+  async #pruneOrphanedCheckpointRefs(): Promise<void> {
+    if (this.#lifetime.signal.aborted) return;
+    const operation = this.#operationOptions(this.#finalizationTimeoutMs);
+    const existingConversationIds = new Set(this.store.conversationIds());
+    const visited = new Set<string>();
+    for (const project of this.store.projects()) {
+      if (this.#lifetime.signal.aborted || operation.signal.aborted) break;
+      const projectPath = project.path;
+      if (!projectPath || visited.has(projectPath) || !(await mayBeInsideGitRepository(projectPath))) continue;
+      visited.add(projectPath);
+      try {
+        await pruneOrphanedCheckpointRefs(projectPath, existingConversationIds, {
+          deadlineAt: operation.deadlineAt,
+          signal: operation.signal,
+        });
+      } catch (error) {
+        this.#recordCleanupFailure(error);
       }
     }
   }

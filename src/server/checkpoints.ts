@@ -3,6 +3,7 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  realpath,
   rm,
   stat,
   utimes,
@@ -17,6 +18,7 @@ import {
 } from "./git/runner";
 import { GitError, isGitProcessTreeTerminationFailure } from "./git/types";
 import { headCommit } from "./git/status";
+import { normalizeIdentityPath } from "./project-identity";
 import {
   CheckpointError,
   INERTIA_CHECKPOINT_REF_PREFIX,
@@ -44,11 +46,143 @@ export {
 
 type RunResult = { stdout: Buffer; stderr: Buffer };
 
+export const CHECKPOINT_DEFAULT_TIMEOUT_MS = 20_000;
+export const CHECKPOINT_SHORTENED_PRE_TURN_TIMEOUT_MS = 3_000;
+export const CHECKPOINT_TIMEOUT_STREAK_THRESHOLD = 2;
+export const CHECKPOINT_TIMEOUT_COOLDOWN_MS = 60_000;
+export const MAX_CHECKPOINT_WORKSPACE_STATE_ENTRIES = 256;
+export const DEFAULT_ORPHAN_CHECKPOINT_REF_MAX_DELETE = 200;
+
+const MAX_ORPHAN_CHECKPOINT_REF_DELETE = 10_000;
+const ORPHAN_CHECKPOINT_REF_PATTERN = /^refs\/inertia\/checkpoints\/([0-9a-f-]{36})\/[A-Za-z0-9._-]+$/u;
+const CHECKPOINT_TIMEOUT_MESSAGE = "Checkpoint operation timed out.";
+const CHECKPOINT_SKIPPED_AFTER_TIMEOUT_MESSAGE =
+  "Checkpoint capture skipped after a concurrent timeout on this workspace.";
 const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
 const CHECKPOINT_FAILURE = "Git could not create the checkpoint.";
 const RAW_CHECKPOINT_ATTRIBUTES =
   "* -crlf -filter -ident -text -working-tree-encoding -eol\n";
 const NUL_BYTE = Buffer.from([0]);
+
+export type CheckpointCapturePhase = "pre-turn" | "post-turn" | "other";
+export interface CreateCheckpointOptions extends CheckpointOperationOptions {
+  phase?: CheckpointCapturePhase;
+  now?: () => number;
+}
+export interface PruneOrphanedCheckpointRefsOptions extends CheckpointRepositoryOptions {
+  maxDelete?: number;
+}
+export interface WorkspaceCheckpointTimeoutState { streak: number; cooldownUntil: number }
+export class CheckpointUnavailableError extends CheckpointError {
+  readonly code = "unavailable-after-timeout";
+}
+
+type WorkspaceCaptureOutcome = "pending" | "succeeded" | "failed" | "timed-out";
+interface WorkspaceCaptureSlot { outcome: WorkspaceCaptureOutcome }
+interface WorkspaceCaptureLockState { current: WorkspaceCaptureSlot; tail: Promise<void> }
+
+const workspaceTimeoutStates = new Map<string, WorkspaceCheckpointTimeoutState>();
+const workspaceCaptureLocks = new Map<string, WorkspaceCaptureLockState>();
+
+export async function normalizeCheckpointWorkspaceKey(repositoryPath: string): Promise<string> {
+  const resolved = resolve(repositoryPath);
+  return normalizeIdentityPath(await realpath(resolved).catch(() => resolved));
+}
+
+export async function getWorkspaceCheckpointTimeoutState(
+  repositoryPath: string,
+): Promise<WorkspaceCheckpointTimeoutState> {
+  const state = workspaceTimeoutStates.get(await normalizeCheckpointWorkspaceKey(repositoryPath));
+  return state ? { ...state } : { streak: 0, cooldownUntil: 0 };
+}
+
+export function resetCheckpointWorkspaceState(): void {
+  workspaceTimeoutStates.clear();
+  workspaceCaptureLocks.clear();
+}
+
+function recordWorkspaceCaptureSuccess(workspaceKey: string): void {
+  workspaceTimeoutStates.delete(workspaceKey);
+}
+
+function recordWorkspacePreTurnTimeout(workspaceKey: string, nowMs: number): void {
+  const previous = workspaceTimeoutStates.get(workspaceKey);
+  if (previous) workspaceTimeoutStates.delete(workspaceKey);
+  while (workspaceTimeoutStates.size >= MAX_CHECKPOINT_WORKSPACE_STATE_ENTRIES) {
+    const oldest = workspaceTimeoutStates.keys().next().value;
+    if (oldest === undefined) break;
+    workspaceTimeoutStates.delete(oldest);
+  }
+  workspaceTimeoutStates.set(workspaceKey, {
+    streak: previous ? previous.streak + 1 : 1,
+    cooldownUntil: nowMs + CHECKPOINT_TIMEOUT_COOLDOWN_MS,
+  });
+}
+
+function preTurnTimeoutBudgetMs(workspaceKey: string, nowMs: number): number {
+  const state = workspaceTimeoutStates.get(workspaceKey);
+  return state && state.streak >= CHECKPOINT_TIMEOUT_STREAK_THRESHOLD && nowMs < state.cooldownUntil
+    ? CHECKPOINT_SHORTENED_PRE_TURN_TIMEOUT_MS
+    : CHECKPOINT_DEFAULT_TIMEOUT_MS;
+}
+
+function isCheckpointTimeoutError(error: unknown, signal?: AbortSignal): boolean {
+  return !signal?.aborted
+    && error instanceof CheckpointError
+    && error.message === CHECKPOINT_TIMEOUT_MESSAGE;
+}
+
+async function waitForLockTurn(waitFor: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) { await waitFor; return; }
+  if (signal.aborted) throw new CheckpointError(CHECKPOINT_TIMEOUT_MESSAGE);
+  let onAbort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      waitFor,
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(new CheckpointError(CHECKPOINT_TIMEOUT_MESSAGE));
+        signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+async function withWorkspaceCaptureLock<T>(
+  workspaceKey: string,
+  phase: CheckpointCapturePhase,
+  signal: AbortSignal | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const existing = workspaceCaptureLocks.get(workspaceKey);
+  const predecessor = existing?.current ?? null;
+  const waitFor = existing?.tail ?? null;
+  const slot: WorkspaceCaptureSlot = { outcome: "pending" };
+  let release!: () => void;
+  const done = new Promise<void>((resolveLock) => { release = resolveLock; });
+  workspaceCaptureLocks.set(workspaceKey, { current: slot, tail: done });
+  try {
+    if (waitFor) await waitForLockTurn(waitFor, signal);
+    if (phase === "pre-turn" && predecessor?.outcome === "timed-out") {
+      slot.outcome = "timed-out";
+      throw new CheckpointUnavailableError(CHECKPOINT_SKIPPED_AFTER_TIMEOUT_MESSAGE);
+    }
+    const result = await operation();
+    slot.outcome = "succeeded";
+    return result;
+  } catch (error) {
+    if (slot.outcome === "pending") {
+      slot.outcome = isCheckpointTimeoutError(error, signal) ? "timed-out" : "failed";
+    }
+    throw error;
+  } finally {
+    if (workspaceCaptureLocks.get(workspaceKey)?.tail === done) {
+      workspaceCaptureLocks.delete(workspaceKey);
+    }
+    release();
+  }
+}
 
 function selectTaggedCheckpointPaths(
   output: Buffer,
@@ -88,6 +222,7 @@ async function runGit(
   maxStdoutBytes = 1024 * 1024,
   deadlineAt?: number,
   signal?: AbortSignal,
+  timeoutMs = CHECKPOINT_DEFAULT_TIMEOUT_MS,
 ): Promise<RunResult> {
   try {
     const result = await runBoundedGit(cwd, args, {
@@ -96,7 +231,7 @@ async function runGit(
       environment,
       input,
       maxOutputBytes: maxStdoutBytes,
-      timeoutMs: 20_000,
+      timeoutMs,
       failureMessage: CHECKPOINT_FAILURE,
     });
     return { stdout: result.stdout, stderr: result.stderr };
@@ -104,7 +239,7 @@ async function runGit(
     if (isGitProcessTreeTerminationFailure(error)) throw error;
     if (error instanceof GitError) {
       if (error.code === "timeout") {
-        throw new CheckpointError("Checkpoint operation timed out.");
+        throw new CheckpointError(CHECKPOINT_TIMEOUT_MESSAGE);
       }
       if (error.code === "output-limit") {
         throw new CheckpointError(
@@ -692,7 +827,47 @@ export async function createCheckpoint(
   repositoryPath: string,
   storageDirectory: string,
   conversationId: string,
-  options: CheckpointOperationOptions = {},
+  options: CreateCheckpointOptions = {},
+): Promise<{ id: string; ref: string }> {
+  const phase: CheckpointCapturePhase = options.phase ?? "pre-turn";
+  const nowMs = options.now ?? Date.now;
+  const workspaceKey = await normalizeCheckpointWorkspaceKey(repositoryPath);
+  return await withWorkspaceCaptureLock(workspaceKey, phase, options.signal, async () => {
+    const timeoutMs = phase === "pre-turn"
+      ? preTurnTimeoutBudgetMs(workspaceKey, nowMs())
+      : CHECKPOINT_DEFAULT_TIMEOUT_MS;
+    const effectiveDeadlineAt = phase === "pre-turn" && timeoutMs < CHECKPOINT_DEFAULT_TIMEOUT_MS
+      ? Math.min(options.deadlineAt ?? Number.POSITIVE_INFINITY, nowMs() + timeoutMs)
+      : options.deadlineAt;
+    const scopedOptions: CheckpointOperationOptions = {
+      deadlineAt: effectiveDeadlineAt,
+      signal: options.signal,
+    };
+    try {
+      const created = await createCheckpointUnlocked(
+        repositoryPath,
+        storageDirectory,
+        conversationId,
+        scopedOptions,
+        timeoutMs,
+      );
+      recordWorkspaceCaptureSuccess(workspaceKey);
+      return created;
+    } catch (error) {
+      if (phase === "pre-turn" && isCheckpointTimeoutError(error, options.signal)) {
+        recordWorkspacePreTurnTimeout(workspaceKey, nowMs());
+      }
+      throw error;
+    }
+  });
+}
+
+async function createCheckpointUnlocked(
+  repositoryPath: string,
+  storageDirectory: string,
+  conversationId: string,
+  options: CheckpointOperationOptions,
+  timeoutMs: number,
 ): Promise<{ id: string; ref: string }> {
   const checkpointId = randomUUID();
   const ref = `refs/inertia/checkpoints/${conversationId}/${checkpointId}`;
@@ -718,10 +893,12 @@ export async function createCheckpoint(
           1024 * 1024,
           options.deadlineAt,
           options.signal,
+          timeoutMs,
         )
       ).stdout.toString("utf8").trim();
     } catch (error) {
       if (isGitProcessTreeTerminationFailure(error)) throw error;
+      if (isCheckpointTimeoutError(error, options.signal)) throw error;
       // Repositories without a first commit are supported. A spent aggregate
       // deadline is caught by the next bounded checkpoint operation.
     }
@@ -730,43 +907,23 @@ export async function createCheckpoint(
       options.deadlineAt,
       options.signal,
     );
-    const untrackedListing = (
-      await runGit(
-        repositoryPath,
-        checkpointGitArguments([
-          "ls-files",
-          "--others",
-          "--exclude-standard",
-          "-z",
-        ]),
-        {},
-        undefined,
-        MAX_CHECKPOINT_PATH_BYTES,
-        options.deadlineAt,
-        options.signal,
-      )
-    ).stdout;
-    const untrackedPaths = await withoutUnbornNestedRepositories(
+    const untrackedListing = (await runGit(
       repositoryPath,
-      untrackedListing,
-      options,
-    );
-    isolated = await checkpointEnvironment(
-      repositoryPath,
-      storageDirectory,
-      checkpointId,
-      baseEnvironment,
+      checkpointGitArguments(["ls-files", "--others", "--exclude-standard", "-z"]),
+      {},
+      undefined,
+      MAX_CHECKPOINT_PATH_BYTES,
       options.deadlineAt,
       options.signal,
+      timeoutMs,
+    )).stdout;
+    const untrackedPaths = await withoutUnbornNestedRepositories(repositoryPath, untrackedListing, options);
+    isolated = await checkpointEnvironment(
+      repositoryPath, storageDirectory, checkpointId, baseEnvironment, options.deadlineAt, options.signal,
     );
     const environment = isolated.environment;
     const reused = sourceIndexPath !== null && await reuseRepositoryIndex(
-      repositoryPath,
-      sourceIndexPath,
-      indexPath,
-      environment,
-      options.deadlineAt,
-      options.signal,
+      repositoryPath, sourceIndexPath, indexPath, environment, options.deadlineAt, options.signal,
     );
     if (!reused) {
       await rm(indexPath, { force: true });
@@ -774,85 +931,41 @@ export async function createCheckpoint(
       await writeIsolatedIndexEntries(
         repositoryPath,
         environment,
-        await readRepositoryIndexEntries(
-          repositoryPath,
-          options.deadlineAt,
-          options.signal,
-        ),
+        await readRepositoryIndexEntries(repositoryPath, options.deadlineAt, options.signal),
         options.deadlineAt,
         options.signal,
       );
     }
     await runGit(
-      repositoryPath,
-      durableCheckpointGitArguments(["add", "--update"]),
-      environment,
-      undefined,
-      1024 * 1024,
-      options.deadlineAt,
-      options.signal,
+      repositoryPath, durableCheckpointGitArguments(["add", "--update"]),
+      environment, undefined, 1024 * 1024, options.deadlineAt, options.signal, timeoutMs,
     );
     if (untrackedPaths.length > 0) {
       await runGit(
         repositoryPath,
-        durableCheckpointGitArguments([
-          "--literal-pathspecs",
-          "add",
-          "--force",
-          "--pathspec-from-file=-",
-          "--pathspec-file-nul",
-        ]),
-        environment,
-        untrackedPaths,
-        1024 * 1024,
-        options.deadlineAt,
-        options.signal,
+        durableCheckpointGitArguments(["--literal-pathspecs", "add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"]),
+        environment, untrackedPaths, 1024 * 1024, options.deadlineAt, options.signal, timeoutMs,
       );
     }
-    const tree = (
-      await runGit(
-        repositoryPath,
-        durableCheckpointGitArguments(["write-tree"]),
-        environment,
-        undefined,
-        1024 * 1024,
-        options.deadlineAt,
-        options.signal,
-      )
-    ).stdout.toString("utf8").trim();
+    const tree = (await runGit(
+      repositoryPath, durableCheckpointGitArguments(["write-tree"]),
+      environment, undefined, 1024 * 1024, options.deadlineAt, options.signal, timeoutMs,
+    )).stdout.toString("utf8").trim();
     const commitArgs = ["commit-tree", tree, "-m", "Inertia checkpoint"];
     if (head) commitArgs.push("-p", head);
-    const commit = (
-      await runGit(
-        repositoryPath,
-        durableCheckpointGitArguments(commitArgs),
-        environment,
-        undefined,
-        1024 * 1024,
-        options.deadlineAt,
-        options.signal,
-      )
-    ).stdout.toString("utf8").trim();
+    const commit = (await runGit(
+      repositoryPath, durableCheckpointGitArguments(commitArgs),
+      environment, undefined, 1024 * 1024, options.deadlineAt, options.signal, timeoutMs,
+    )).stdout.toString("utf8").trim();
     // The isolated metadata directory is temporary. Persist the checkpoint
     // reference through the real repository after the object is created.
     await runGit(
       repositoryPath,
-      durableCheckpointGitArguments([
-        "-c",
-        `core.hooksPath=${isolated.hooksDirectory}`,
-        "update-ref",
-        ref,
-        commit,
-      ]),
-      baseEnvironment,
-      undefined,
-      1024 * 1024,
-      options.deadlineAt,
-      options.signal,
+      durableCheckpointGitArguments(["-c", `core.hooksPath=${isolated.hooksDirectory}`, "update-ref", ref, commit]),
+      baseEnvironment, undefined, 1024 * 1024, options.deadlineAt, options.signal, timeoutMs,
     ).catch(async (error: unknown) => {
       if (isGitProcessTreeTerminationFailure(error)) throw error;
-      await deleteCheckpoint(repositoryPath, ref, conversationId)
-        .catch(() => undefined);
+      await deleteCheckpoint(repositoryPath, ref, conversationId).catch(() => undefined);
       throw error;
     });
     return { id: checkpointId, ref };
@@ -860,12 +973,8 @@ export async function createCheckpoint(
     await rm(indexPath, { force: true }).catch(() => undefined);
     await rm(`${indexPath}.lock`, { force: true }).catch(() => undefined);
     if (isolated) {
-      await rm(isolated.metadataDirectory, {
-        force: true,
-        recursive: true,
-      }).catch(() => undefined);
-      await rm(isolated.globalConfigPath, { force: true })
-        .catch(() => undefined);
+      await rm(isolated.metadataDirectory, { force: true, recursive: true }).catch(() => undefined);
+      await rm(isolated.globalConfigPath, { force: true }).catch(() => undefined);
     }
   }
 }
@@ -1017,5 +1126,59 @@ export async function deleteCheckpoint(
       force: true,
       recursive: true,
     }).catch(() => undefined);
+  }
+}
+
+export async function pruneOrphanedCheckpointRefs(
+  cwd: string,
+  existingConversationIds: ReadonlySet<string>,
+  options: PruneOrphanedCheckpointRefsOptions = {},
+): Promise<{ scanned: number; deleted: number }> {
+  const maxDelete = options.maxDelete === undefined
+    ? DEFAULT_ORPHAN_CHECKPOINT_REF_MAX_DELETE
+    : Math.max(0, Math.min(Math.floor(options.maxDelete), MAX_ORPHAN_CHECKPOINT_REF_DELETE));
+  const gitRoot = await resolveCheckpointRepository(cwd, options);
+  const listed = (
+    await runGit(
+      gitRoot,
+      checkpointGitArguments(["for-each-ref", "--format=%(refname)", INERTIA_CHECKPOINT_REF_PREFIX]),
+      {},
+      undefined,
+      MAX_CHECKPOINT_PATH_BYTES,
+      options.deadlineAt,
+      options.signal,
+    )
+  ).stdout.toString("utf8");
+  let scanned = 0;
+  const orphans: string[] = [];
+  for (const line of listed.split(/\r?\n/u)) {
+    const ref = line.trim();
+    if (!ref || ref.includes("..")) continue;
+    const match = ORPHAN_CHECKPOINT_REF_PATTERN.exec(ref);
+    if (!match) continue;
+    scanned += 1;
+    if (!existingConversationIds.has(match[1]!) && orphans.length < maxDelete) {
+      orphans.push(ref);
+    }
+  }
+  if (orphans.length === 0) return { scanned, deleted: 0 };
+  const hooksDirectory = await mkdtemp(join(tmpdir(), "inertia-checkpoint-hooks-"));
+  let deleted = 0;
+  try {
+    for (const ref of orphans) {
+      await runGit(
+        gitRoot,
+        checkpointGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "-d", ref]),
+        {},
+        undefined,
+        1024 * 1024,
+        options.deadlineAt,
+        options.signal,
+      );
+      deleted += 1;
+    }
+    return { scanned, deleted };
+  } finally {
+    await rm(hooksDirectory, { force: true, recursive: true }).catch(() => undefined);
   }
 }

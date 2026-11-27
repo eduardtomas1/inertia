@@ -80,6 +80,26 @@ import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 
 const MAX_PRIOR_COMPLETED_TURN_IDS = 4_096;
 
+export const CODEX_REASONING_SUMMARIES = ["auto", "concise", "detailed", "none"] as const;
+export type CodexReasoningSummary = (typeof CODEX_REASONING_SUMMARIES)[number];
+
+export type CodexAppServerRunOptions = CodexAppServerOptions & {
+  reasoningSummary?: unknown;
+  modelSelection?: {
+    providerOptions?: Readonly<Record<string, unknown>>;
+  };
+};
+
+export function validatedCodexReasoningSummary(
+  value: unknown,
+): CodexReasoningSummary | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim().toLowerCase();
+  return (CODEX_REASONING_SUMMARIES as readonly string[]).includes(trimmed)
+    ? (trimmed as CodexReasoningSummary)
+    : undefined;
+}
+
 const SUBSTANTIVE_PROGRESS_METHODS = new Set([
   "turn/started",
   "turn/completed",
@@ -107,8 +127,21 @@ interface PendingClientRequest {
 }
 
 export function startCodexAppServerRun(
-  options: CodexAppServerOptions,
+  options: CodexAppServerRunOptions,
 ): CodexAppServerRun {
+  const requestedReasoningSummary = options.reasoningSummary !== undefined
+    ? options.reasoningSummary
+    : options.modelSelection?.providerOptions?.reasoningSummary;
+  const validatedReasoningSummary = validatedCodexReasoningSummary(requestedReasoningSummary);
+  const {
+    reasoningSummary: _rawReasoningSummary,
+    modelSelection: _modelSelection,
+    ...baseTurnOptions
+  } = options;
+  const turnOptions: CodexAppServerOptions & { reasoningSummary?: CodexReasoningSummary } = {
+    ...baseTurnOptions,
+    ...(validatedReasoningSummary !== undefined ? { reasoningSummary: validatedReasoningSummary } : {}),
+  };
   const modelProvider = validateCodexModelProvider(options);
   const protocolLimits = codexProtocolLimits(options.protocolLimits);
   const invocation = providerProcessInvocation(
@@ -804,7 +837,7 @@ export function startCodexAppServerRun(
   child.once("spawn", () => {
     spawned = true;
     void openCodexTurn({
-      options,
+      options: turnOptions,
       modelProvider,
       request,
       notify,

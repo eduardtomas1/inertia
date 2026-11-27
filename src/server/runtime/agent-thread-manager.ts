@@ -100,6 +100,10 @@ import {
   managedQueueApprovalDetail, managedQueueInputChars, managedQueueSchema, shouldAutoApproveManagedMutation,
 } from "./managed-queue-tools";
 import {
+  EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS, executeExtendedManagedTool, extendedManagedInputChars,
+  extendedManagedOperationTool, isExtendedManagedReadTool, isExtendedManagedTool, preflightExtendedManagedTool,
+} from "./managed-extended-tools";
+import {
   ANSWER_QUESTION_TOOL_NAME,
   answerApprovalDetail,
   answerQuestionSchema,
@@ -118,6 +122,7 @@ const MAX_CANCELLED_DELEGATE_WAITS = 64;
 const STORED_CONTENT_TOOLS = new Set([
   HTML_RENDER_TOOL_NAME, SEND_TO_USER_TOOL_NAME, SECRET_REQUEST_TOOL_NAME, "inertia_create_conversation", "inertia_send_message",
   MANAGED_QUEUE_TOOL_NAME, ANSWER_QUESTION_TOOL_NAME, DELEGATE_TASK_TOOL, CANCEL_TASK_TOOL,
+  ...EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS,
 ]);
 const LATEST_RESULT_RUNNING_NEXT = "Still running; wait for it with inertia_wait_for_conversation, then call inertia_get_latest_result again.";
 const TERMINAL_TURN_STATUSES = new Set([
@@ -388,6 +393,21 @@ export class AgentThreadManager {
           turnId: source.turn.id,
         }, imagesAccepted(source.turn, this.dependencies.providerInfo()));
       }
+      if (isExtendedManagedTool(call.tool)) {
+        const extendedTool = call.tool;
+        const deps = { ...this.dependencies, now: this.now, assertSource: () => this.assertSource(source),
+          managedTarget: (c: Conversation, id: string) => this.managedTarget(c, id),
+          resolveSelection: (c: Conversation, route: z.infer<typeof routeSchema> | undefined) => this.resolveSelection(c, route),
+          assertRouteReady: (selection: ModelSelection) => this.assertRouteReady(selection),
+          activeManagedChildren: (id: string) => this.activeManagedChildren(id) };
+        if (isExtendedManagedReadTool(extendedTool)) return await executeExtendedManagedTool(deps, source, extendedTool, call.arguments, "", call.signal);
+        const approval = await preflightExtendedManagedTool(deps, extendedTool, call.arguments);
+        return await this.mutate(source, call, extendedManagedOperationTool(extendedTool),
+          (operationId, signal) => executeExtendedManagedTool(deps, source, extendedTool, call.arguments, operationId, signal),
+          undefined, approval,
+          { fingerprintToolName: extendedTool, inputChars: extendedManagedInputChars(extendedTool, call.arguments),
+            autoApproveToolName: extendedTool, skipPreflight: true });
+      }
       switch (call.tool) {
         case "inertia_fork_history":
           return readForkHistoryTool(this.dependencies.store, current, call.arguments);
@@ -402,6 +422,8 @@ export class AgentThreadManager {
             ...this.dependencies,
             assertSource: () => this.assertSource(source),
             managedTarget: (caller, conversationId) => this.managedTarget(caller, conversationId),
+            hasArmedDelegationWake: (conversationId) => this.dependencies.store.appSettings().delegationAutomaticWakes
+              && this.dependencies.store.orchestration.delegation.reads.tasks("child_conversation_id = ? AND wake_armed = 1 AND status = 'running'", conversationId).length > 0,
           }, call.arguments, call.signal);
         case "inertia_get_latest_result":
           return this.latestResult(current, call.arguments);
@@ -678,7 +700,9 @@ export class AgentThreadManager {
       reserved.operation.id, ["approval-pending"], "approval-pending", target, this.now(),
     );
     const liveSource = this.dependencies.store.conversation(source.conversation.id);
-    if (!shouldAutoApproveManagedMutation(liveSource.accessMode, options?.autoApproveToolName ?? toolName)) {
+    const autoApproveTool = options?.autoApproveToolName ?? toolName;
+    if (!shouldAutoApproveManagedMutation(liveSource.accessMode, autoApproveTool)
+      && !(liveSource.accessMode === "full" && EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS.has(autoApproveTool))) {
       const detail = approval ?? this.approvalDetail(source, toolName, call.arguments);
       const decision = await call.requestApproval({
         title: detail.title, detail: detail.detail,

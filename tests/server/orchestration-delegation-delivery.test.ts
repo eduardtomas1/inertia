@@ -36,7 +36,7 @@ describe("delegated result delivery", () => {
       expect(generationOne).toMatchObject({ id: delegatedDeliveryId(fixture.parentId, 1), state: "waiting",
         delegatedCompletion: { parentConversationId: fixture.parentId, generation: 1, taskIds: [first!.task.taskId] } });
       expect(generationOne!.content.split("\n")[0]).toBe('Delegated task "Alpha" finished');
-      expect(generationOne!.content).toContain(`Delegated task ${first!.task.taskId} (Alpha) [completed]:\nAlpha result`);
+      expect(generationOne!.content).toContain(`Delegated task ${first!.task.taskId} (Alpha, chat ${first!.childId}) [completed]:\nAlpha result`);
       const wake = fixture.wake(fixture.parentId, 1);
       await complete(fixture, second!, "Beta result");
       await complete(fixture, third!, "Gamma result");
@@ -315,7 +315,7 @@ describe("delegated result delivery", () => {
       const [delivery] = queuedDeliveries(fixture);
       expect(delivery!.delegatedCompletion!.taskIds).toEqual([second!.task.taskId, third!.task.taskId]);
       expect(delivery!.content.split("\n")[0]).toBe("2 of 3 delegated tasks (1 failed, 1 finished): Beta, Gamma");
-      expect(delivery!.content).toContain(`Delegated task ${second!.task.taskId} (Beta) [failed]:`);
+      expect(delivery!.content).toContain(`Delegated task ${second!.task.taskId} (Beta, chat ${second!.childId}) [failed]:`);
     } finally { fixture.close(); }
   });
 });

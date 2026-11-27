@@ -110,7 +110,7 @@ export async function createDelegationFixture(): Promise<DelegationFixture> {
         AND json_extract(delegated_completion_json, '$.generation') = ? AND state IN ('waiting','blocked')`)
         .get(parentId, generation) as { id: string; content: string; delegated_completion_json: string };
       // Admitted as the queue runtime admits a delivery: the queued row is claimed, then accepted with the turn.
-      database.prepare("UPDATE queued_messages SET state = 'dispatching' WHERE id = ?").run(row.id);
+      runtime.store.orchestration.queue.claim({ conversationId: parentId, itemId: row.id, mode: "run" });
       return runtime.controller.queue({ conversationId: parentId, content: row.content, queuedMessageId: row.id,
         delegatedCompletion: JSON.parse(row.delegated_completion_json) as DelegatedCompletionAttribution }).turn;
     },

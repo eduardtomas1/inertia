@@ -7,6 +7,7 @@ import {
   type OrchestrationDomainEvent,
 } from "../../shared/orchestration-v2";
 import {
+  MAX_RUN_INTERRUPT_REASON_CHARS,
   runInterruptSchema,
   runSteerSchema,
   type RunInterrupt,
@@ -115,14 +116,22 @@ export class RunControlRepository {
     target: RunControlTarget,
     expectedTurnId: string | null,
     cause: RunInterruptCause,
-    extra?: { events?: readonly OrchestrationDomainEvent[]; afterCommit?: () => void },
+    extra?: { reason?: string | null; events?: readonly OrchestrationDomainEvent[]; afterCommit?: () => void },
   ): string {
     const effectId = `interrupt:${commandFingerprint({ actorId: ticket.identity.actorId,
       commandId: ticket.identity.commandId, attemptId: target.attemptId })}`;
+    const normalizedReason = normalizeInterruptReason(extra?.reason);
     const events: OrchestrationDomainEvent[] = [
       { type: "attempt.interrupt-requested", payload: { runId: target.runId, attemptId: target.attemptId } },
-      { type: "run-control.interrupt-recorded", payload: { runId: target.runId, attemptId: target.attemptId,
-        effectId, requestedAt: this.clock(), expectedTurnId, cause } },
+      { type: "run-control.interrupt-recorded", payload: {
+        runId: target.runId,
+        attemptId: target.attemptId,
+        effectId,
+        requestedAt: this.clock(),
+        expectedTurnId,
+        cause,
+        ...(normalizedReason !== undefined ? { reason: normalizedReason } : {}),
+      } },
       ...(extra?.events ?? []),
     ];
     const start = this.startIntent(target.runId);
@@ -372,4 +381,12 @@ export class RunControlRepository {
       this.effects.retirePending(effectId, failureCode ?? "control-settled");
     }
   }
+}
+
+function normalizeInterruptReason(reason: string | null | undefined): string | null | undefined {
+  if (reason === undefined) return undefined;
+  if (reason === null) return null;
+  const cleaned = reason.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim();
+  if (!cleaned) return null;
+  return Array.from(cleaned).slice(0, MAX_RUN_INTERRUPT_REASON_CHARS).join("");
 }

@@ -16,10 +16,10 @@ import {
   type ProviderHostToolResult,
 } from "../provider/contracts";
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
+import { withAgentSenderNote } from "./agent-sender-note";
 import { MULTILINE_PATTERN, idSchema, safeMultilineSchema } from "./managed-chat-schemas";
 import {
   assertFreshManagedDispatchAuthority,
-  withAgentSenderNote,
   type ManagedMessageQueue,
 } from "./managed-send-modes";
 import { executeSteerViaEffectRuntime } from "./run-control-effect-handlers";
@@ -490,7 +490,10 @@ export async function executeManagedQueueMutation(
           [],
           () => { acknowledged = true; },
           signal,
-          { providerContent: withAgentSenderNote(content, freshSource), queuedMessageId: itemId },
+          {
+            providerContent: withAgentSenderNote(content, { conversationId: freshSource.id, title: freshSource.title }),
+            queuedMessageId: itemId,
+          },
         ),
       );
     if (steered.kind === "accepted" && steered.message.turnId) {

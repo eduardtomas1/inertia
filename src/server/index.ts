@@ -755,7 +755,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       systemBootId: options.systemBootId,
     },
   );
-  delegation = createDelegationRuntime({ store, turns, pendingApprovals, pendingInputs, broadcast, queue: () => queuedMessages });
+  delegation = createDelegationRuntime({ store, turns, pendingApprovals, pendingInputs, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, isCompacting: (id) => compactions.isCompacting(id), queue: () => queuedMessages });
   agentThreads = createAgentThreadRuntime({
     store, providers, backendProfileController, workspaceRuns, dataDirectory, agentSecretDirectory: options.agentSecretDirectory, turns, providerTerminalResumes, turnGitArtifacts,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,

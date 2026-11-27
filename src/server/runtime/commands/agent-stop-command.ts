@@ -42,6 +42,8 @@ export interface AgentStopRequest {
   expectedRunId?: string | null;
   /** Recorded on the interrupt so an agent's Stop never reads as the user's. */
   cause: RunInterruptCause;
+  /** Optional bounded reason recorded on `run-control.interrupt-recorded` (`009c9e6bd`). */
+  reason?: string | null;
   source: CommandSource;
   rejection: CommandRejectionPolicy | null;
   /** Optional extra events & SQL callback committed atomically in the same Stop transaction (e.g. stop-and-send). */
@@ -137,6 +139,7 @@ export async function requestAgentStop(dependencies: StopDependencies, request: 
     }
     if (!target.interruptRequested) {
       const effectId = runControl.recordInterrupt(ticket, target, expectedTurnId, request.cause, {
+        ...(request.reason !== undefined ? { reason: request.reason } : {}),
         events: combinedEvents,
         afterCommit: runAfterCommit,
       });

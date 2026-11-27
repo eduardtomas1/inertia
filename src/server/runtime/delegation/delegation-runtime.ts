@@ -9,6 +9,7 @@ import type { RuntimeStore } from "../../database";
 import type { DelegatedQueueHooks } from "../queued-message-runtime";
 import type { TurnController } from "../turns/turn-controller";
 import { DelegationTaskService, type DelegationQueue } from "./task-service";
+import { ChildQuestionWakeCoordinator } from "./child-question-wake";
 
 export interface DelegationRuntimeDependencies {
   store: RuntimeStore;
@@ -17,6 +18,9 @@ export interface DelegationRuntimeDependencies {
   pendingInputs: ReadonlyMap<string, AgentInputRequest>;
   queue(): DelegationQueue | undefined;
   broadcast(event: RuntimeMutationEvent): void;
+  broadcastSnapshot?(): void;
+  broadcastConversationShell?(conversationId: string): void;
+  isCompacting?(conversationId: string): boolean;
   pollMs?: number;
 }
 
@@ -76,6 +80,16 @@ export function createDelegationRuntime(dependencies: DelegationRuntimeDependenc
       await service.dismiss(entry.conversationId, entry.delegatedCompletion.taskIds, requestId);
     },
   };
+  const childQuestionWake = new ChildQuestionWakeCoordinator({
+    store,
+    turns: dependencies.turns,
+    pendingInputs: dependencies.pendingInputs,
+    messageQueue: dependencies.queue,
+    automaticWakes: () => store.appSettings().delegationAutomaticWakes,
+    isCompacting: dependencies.isCompacting,
+    broadcastSnapshot: dependencies.broadcastSnapshot,
+    broadcastConversationShell: dependencies.broadcastConversationShell,
+  });
   const deferNotify = (): void => {
     if (service.signals.size > 0) setImmediate(() => service.signals.notify());
   };
@@ -83,6 +97,11 @@ export function createDelegationRuntime(dependencies: DelegationRuntimeDependenc
     service,
     queueHooks,
     observe(event) {
+      if (event.type === "agent.input.requested") {
+        void childQuestionWake.onChildQuestion(event.request).catch(() => undefined);
+      } else if (event.type === "agent.input.resolved") {
+        childQuestionWake.forget(event.conversationId, event.requestId);
+      }
       if (WAIT_SIGNAL_EVENTS.has(event.type)) {
         deferNotify();
       } else if (event.type === "agent.subagent.updated") {
@@ -92,6 +111,7 @@ export function createDelegationRuntime(dependencies: DelegationRuntimeDependenc
           deferNotify();
         }
       } else if (event.type === "conversation.shell.updated" && event.conversation.archivedAt !== null) {
+        childQuestionWake.forget(event.conversation.id);
         void service.onArchived(event.conversation.id).catch(() => undefined);
       }
     },

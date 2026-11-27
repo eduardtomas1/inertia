@@ -24,6 +24,13 @@ import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../prov
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import type { ProviderManager } from "../providers";
 import { RuntimeRequestError } from "../runtime-errors";
+import {
+  agentSenderNoteLine,
+  hasAgentSenderNote,
+  isLeadingCommandOrSkill,
+  withAgentSenderNote as applyAgentSenderNote,
+  type AgentSenderNoteSource,
+} from "./agent-sender-note";
 import { requestAgentStop, SUPERSEDED_STOP_CODE } from "./commands/agent-stop-command";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 import { assertInteractionWithinParent, ModeEscalationError } from "./delegation/task-tools";
@@ -38,13 +45,11 @@ import type { HiddenProviderInstruction } from "./turns/request-context";
 import { liveProviderRunOwnership } from "./turns/turn-checkout-activity";
 import type { TurnController } from "./turns/turn-controller";
 import { sameTurnOwner, type TurnOwnerIdentity } from "./turns/turn-ownership";
-import { neutralizeUntrustedAgentText } from "./untrusted-agent-text";
 
 /** Maximum queued user + agent items per managed chat (Phase 5 Decision 4.1). */
 export const MAX_QUEUED_USER_MESSAGES = MAX_QUEUED_USER_AND_AGENT_ITEMS;
 /** The queued-message store keeps at most this many characters per message. */
 const MAX_QUEUED_CONTENT_CHARS = 20_000;
-const LEADING_COMMAND_OR_SKILL_PATTERN = /^(?:\/|\$)[\w:-]+(?:\s|$)/u;
 
 export const STEER_IDLE = "The managed chat has no running turn to steer; send with mode auto or queue.";
 export const RESTART_IDLE = "The managed chat has no running turn to restart; send with mode auto.";
@@ -180,19 +185,25 @@ export function deterministicAgentQueueItemId(operationId: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function agentSenderLine(source: Pick<Conversation, "id" | "title">): string {
-  const safeTitle = neutralizeUntrustedAgentText(source.title).replace(/\s+/gu, " ").trim().slice(0, 120) || "Untitled chat";
-  return `[Inertia: the agent in chat "${safeTitle}" (${source.id}) sent this message, not the user.]`;
+function toAgentSenderSource(
+  source: Pick<Conversation, "id" | "title"> | AgentSenderNoteSource,
+): AgentSenderNoteSource {
+  return "conversationId" in source
+    ? source
+    : { conversationId: source.id, title: source.title };
 }
 
 /**
  * T3 `b0b2c4f95` (`withMessageSenderNote`): attributes agent-sent messages in
  * provider-visible text while leaving leading `/command` and `$skill` mentions
- * untouched and never altering the user-visible persisted message text.
+ * untouched, never double-prefixing, and never altering the user-visible
+ * persisted message text.
  */
-export function withAgentSenderNote(content: string, source: Pick<Conversation, "id" | "title">): string {
-  if (LEADING_COMMAND_OR_SKILL_PATTERN.test(content.trimStart())) return content;
-  return `${agentSenderLine(source)}\n\n${content}`;
+export function withAgentSenderNote(
+  content: string,
+  source: Pick<Conversation, "id" | "title"> | AgentSenderNoteSource,
+): string {
+  return applyAgentSenderNote(content, toAgentSenderSource(source));
 }
 
 /**
@@ -202,10 +213,10 @@ export function withAgentSenderNote(content: string, source: Pick<Conversation, 
  */
 export function agentSenderHiddenInstruction(
   content: string,
-  source: Pick<Conversation, "id" | "title">,
+  source: Pick<Conversation, "id" | "title"> | AgentSenderNoteSource,
 ): HiddenProviderInstruction[] {
-  if (LEADING_COMMAND_OR_SKILL_PATTERN.test(content.trimStart())) return [];
-  return [{ label: "inertia-agent-sender", text: agentSenderLine(source) }];
+  if (hasAgentSenderNote(content) || isLeadingCommandOrSkill(content)) return [];
+  return [{ label: "inertia-agent-sender", text: agentSenderNoteLine(toAgentSenderSource(source)) }];
 }
 
 function dispatching(dependencies: ManagedDispatchDependencies, operationId: string, target: Conversation): void {

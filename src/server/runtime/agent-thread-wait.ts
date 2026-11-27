@@ -12,6 +12,8 @@ import type { TurnController } from "./turns/turn-controller";
 import { pendingQuestionStatus } from "./managed-child-questions";
 
 export const AGENT_THREAD_WAIT_TOOL_NAME = "inertia_wait_for_conversation";
+export const DELEGATED_WAIT_TIMEOUT_NEXT =
+  "This delegated task will wake you automatically when it finishes. Do not poll in a loop; end your turn and wait for its completion message.";
 
 /**
  * OpenCode's MCP client gives each host-tool call 30 seconds
@@ -107,6 +109,8 @@ export interface AgentThreadWaitDependencies extends ManagedConversationStatusDe
   assertSource(): Conversation;
   /** Resolves a chat this caller manages directly; throws otherwise. */
   managedTarget(source: Conversation, conversationId: string): Conversation;
+  /** Whether the managed child currently has an armed automatic completion wake (`83edd5e72`). */
+  hasArmedDelegationWake?: (childConversationId: string) => boolean;
 }
 
 type WaitOutcome = "settled" | "needs-input";
@@ -169,6 +173,10 @@ export async function waitForManagedConversation(
     const outcome = outcomeFor(dependencies, target);
     const remaining = deadline - performance.now();
     if (outcome !== null || remaining <= 0) {
+      const timedOut = outcome === null;
+      const delegatedWakeHint = timedOut && dependencies.hasArmedDelegationWake?.(target.id) === true
+        ? DELEGATED_WAIT_TIMEOUT_NEXT
+        : undefined;
       // Polling a long-running child must not use up the caller's allowance,
       // so only a wait that observed a change is charged.
       return withHostToolAllowance({
@@ -176,9 +184,10 @@ export async function waitForManagedConversation(
         text: JSON.stringify({
           ...managedConversationStatus(dependencies, target),
           outcome: outcome ?? "timeout",
-          timedOut: outcome === null,
+          timedOut,
+          ...(delegatedWakeHint ? { next: delegatedWakeHint } : {}),
         }),
-      }, outcome === null ? "uncharged" : "charged");
+      }, timedOut ? "uncharged" : "charged");
     }
     await pause(Math.min(AGENT_THREAD_WAIT_POLL_MS, remaining), signal);
   }

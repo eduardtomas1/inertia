@@ -13,6 +13,8 @@ export interface DelegatedWakeEntry {
   title: string;
   status: DelegatedTaskStatus;
   text: string | null;
+  childConversationId?: string;
+  originalTaskId?: string | null;
 }
 
 export interface DelegatedWakeCohort {
@@ -90,6 +92,17 @@ export function delegatedWakeText(entries: readonly DelegatedWakeEntry[], cohort
   return truncateUtf8(parts.join("\n\n"), MAX_DELEGATED_WAKE_BYTES).text;
 }
 
+function sanitizeHeaderToken(value: string | null | undefined): string {
+  if (!value) return "";
+  const cleaned = neutralizeUntrustedAgentText(value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim());
+  return truncateUtf8(cleaned, 128).text;
+}
+
 function header(entry: DelegatedWakeEntry): string {
-  return `Delegated task ${entry.taskId} (${delegatedTaskLabel(entry.title)}) [${entry.status}]:`;
+  const details = [delegatedTaskLabel(entry.title)];
+  const childId = sanitizeHeaderToken(entry.childConversationId);
+  if (childId) details.push(`chat ${childId}`);
+  const originalTaskId = sanitizeHeaderToken(entry.originalTaskId);
+  if (originalTaskId) details.push(`follow-up of ${originalTaskId}`);
+  return `Delegated task ${entry.taskId} (${details.join(", ")}) [${entry.status}]:`;
 }

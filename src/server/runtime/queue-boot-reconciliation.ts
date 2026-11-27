@@ -5,11 +5,17 @@ import {
   QUEUE_ITEM_PROJECTION,
   QUEUE_STATE_PROJECTION,
   queueUnreadFollowUpCommandId,
+  type QueueCreatedBy,
+  type QueueCreationSource,
+  type QueueItemProjection,
 } from "../../shared/orchestration-queue";
 import type { QueueContentMismatch } from "../orchestration-v2/event-store";
 import { UNKNOWN_FOLLOW_UP_DELIVERY } from "./turns/turn-follow-up-coordinator";
 
 export const QUEUE_TEXT_LOST_DETAIL = "This queued message's text was lost; remove it";
+export const MAX_UNATTENDED_RESENDS = 3;
+const UNATTENDED_RESEND_COMMAND_PREFIX = "queue-unattended-resend:";
+const MAX_PARENT_STOP_DEPTH = 3;
 
 export interface QueueBootReconciliationReport {
   adoptedLegacy: number;
@@ -20,6 +26,8 @@ export interface QueueBootReconciliationReport {
   requeuedUndelivered: string[];
   requeuedUnreadSteers: string[];
   heldConversations: string[];
+  resendsScheduled: string[];
+  resendsExhausted: string[];
 }
 
 function deterministicUuid(seed: string): string {
@@ -30,6 +38,396 @@ function deterministicUuid(seed: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+type OrchestrationDatabase = RuntimeStore["orchestration"]["effects"]["connection"];
+
+/**
+ * True when any durable provider-turn observation exists for `runId` (native
+ * boundary entity/event, attempt `nativeTurnId`, terminal assistant message, or
+ * a terminal run without `delivery = 'not-delivered'`). Never decides by status alone.
+ */
+export function hasProviderTurnObservation(
+  db: OrchestrationDatabase,
+  conversationId: string,
+  runId: string,
+): boolean {
+  const observed = db.prepare(`
+    SELECT 1 WHERE
+      EXISTS (
+        SELECT 1 FROM orchestration_v2_entities
+        WHERE kind = 'native-boundary' AND thread_id = ?
+          AND json_extract(payload_json, '$.runId') = ?
+      )
+      OR EXISTS (
+        SELECT 1 FROM orchestration_v2_entities
+        WHERE kind = 'attempt' AND thread_id = ?
+          AND json_extract(payload_json, '$.runId') = ?
+          AND json_extract(payload_json, '$.nativeTurnId') IS NOT NULL
+      )
+      OR EXISTS (
+        SELECT 1 FROM orchestration_v2_events
+        WHERE thread_id = ? AND type = 'provider.native-boundary'
+          AND json_extract(payload_json, '$.runId') = ?
+      )
+      OR EXISTS (
+        SELECT 1 FROM orchestration_v2_entities
+        WHERE kind = 'run' AND thread_id = ? AND id = ?
+          AND (
+            json_extract(payload_json, '$.terminalMessageId') IS NOT NULL
+            OR (
+              json_extract(payload_json, '$.status') IN ('completed', 'failed', 'cancelled', 'interrupted')
+              AND COALESCE(json_extract(payload_json, '$.delivery'), '') <> 'not-delivered'
+            )
+          )
+      )
+  `).get(
+    conversationId, runId,
+    conversationId, runId,
+    conversationId, runId,
+    conversationId, runId,
+  );
+  return observed !== undefined;
+}
+
+/**
+ * Counts cumulative durable process losses for an item across boots from
+ * `orchestration_v2_events` (requeued undelivered runs, `runtime-lost` claim
+ * releases, and unattended boot-resend releases for waiting items).
+ */
+export function countDurableProcessLosses(
+  db: OrchestrationDatabase,
+  conversationId: string,
+  itemId: string,
+  userMessageId: string | null,
+): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM orchestration_v2_events
+    WHERE thread_id = ?
+      AND (
+        (type = 'queue.item-requeued' AND (
+          json_extract(payload_json, '$.itemId') = ?
+          OR (? IS NOT NULL AND json_extract(payload_json, '$.userMessageId') = ?)
+        ))
+        OR (type = 'queue.item-released'
+          AND json_extract(payload_json, '$.itemId') = ?
+          AND json_extract(payload_json, '$.reason') = 'runtime-lost')
+        OR (type = 'queue.items-released'
+          AND command_id LIKE ?
+          AND EXISTS (
+            SELECT 1 FROM json_each(payload_json, '$.itemIds')
+            WHERE value = ?
+          ))
+      )
+  `).get(
+    conversationId,
+    itemId,
+    userMessageId,
+    userMessageId,
+    itemId,
+    `${UNATTENDED_RESEND_COMMAND_PREFIX}%`,
+    itemId,
+  ) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
+
+function hasRecordedStopOnThread(
+  store: RuntimeStore,
+  db: OrchestrationDatabase,
+  conversationId: string,
+  runId: string | null,
+  itemId: string | null,
+  since: string,
+): boolean {
+  const runControl = store.orchestration.runControl;
+  if (runId !== null) {
+    const target = runControl.target(runId);
+    if (target && (target.interruptRequested || runControl.attemptInterrupt(target.attemptId) !== null)) {
+      return true;
+    }
+    const runInterruptEvent = db.prepare(`
+      SELECT 1 FROM orchestration_v2_events
+      WHERE type IN ('run-control.interrupt-recorded', 'attempt.interrupt-requested')
+        AND json_extract(payload_json, '$.runId') = ?
+      LIMIT 1
+    `).get(runId);
+    if (runInterruptEvent !== undefined) return true;
+  }
+  if (itemId !== null) {
+    const itemStopHold = db.prepare(`
+      SELECT 1 FROM orchestration_v2_events
+      WHERE thread_id = ? AND type = 'queue.items-held'
+        AND json_extract(payload_json, '$.cause') = 'H1-stop'
+        AND EXISTS (
+          SELECT 1 FROM json_each(payload_json, '$.itemIds')
+          WHERE value = ?
+        )
+      LIMIT 1
+    `).get(conversationId, itemId);
+    if (itemStopHold !== undefined) return true;
+  }
+  const threadStopEvent = db.prepare(`
+    SELECT 1 FROM orchestration_v2_events
+    WHERE thread_id = ? AND created_at >= ?
+      AND (
+        type = 'run-control.interrupt-recorded'
+        OR type = 'attempt.interrupt-requested'
+        OR (type = 'queue.items-held' AND json_extract(payload_json, '$.cause') = 'H1-stop')
+      )
+    LIMIT 1
+  `).get(conversationId, since);
+  if (threadStopEvent !== undefined) return true;
+  const stopReceipt = db.prepare(`
+    SELECT 1 FROM orchestration_v2_receipts
+    WHERE thread_id = ? AND command_type = 'agent.stop' AND created_at >= ?
+    LIMIT 1
+  `).get(conversationId, since);
+  return stopReceipt !== undefined;
+}
+
+function hasRecordedStopForRunOrParent(
+  store: RuntimeStore,
+  db: OrchestrationDatabase,
+  conversationId: string,
+  runId: string | null,
+  itemId: string | null,
+  since: string,
+): boolean {
+  if (hasRecordedStopOnThread(store, db, conversationId, runId, itemId, since)) return true;
+
+  let currentId = conversationId;
+  const visited = new Set<string>([conversationId]);
+  for (let depth = 0; depth < MAX_PARENT_STOP_DEPTH; depth += 1) {
+    const parent = db.prepare(`
+      SELECT source_conversation_id, source_run_id, created_at
+      FROM agent_managed_conversations
+      WHERE child_conversation_id = ?
+    `).get(currentId) as {
+      source_conversation_id: string | null;
+      source_run_id: string;
+      created_at: string;
+    } | undefined;
+    if (!parent) break;
+
+    const parentRun = db.prepare(`
+      SELECT json_extract(payload_json, '$.requestedAt') AS requested_at
+      FROM orchestration_v2_entities
+      WHERE kind = 'run' AND id = ?
+      LIMIT 1
+    `).get(parent.source_run_id) as { requested_at: string | null } | undefined;
+    const parentSince = typeof parentRun?.requested_at === "string" && parentRun.requested_at.length > 0
+      ? parentRun.requested_at
+      : parent.created_at;
+
+    if (parent.source_conversation_id) {
+      if (hasRecordedStopOnThread(
+        store,
+        db,
+        parent.source_conversation_id,
+        parent.source_run_id,
+        null,
+        parentSince,
+      )) return true;
+      if (visited.has(parent.source_conversation_id)) break;
+      visited.add(parent.source_conversation_id);
+      currentId = parent.source_conversation_id;
+    } else {
+      const target = store.orchestration.runControl.target(parent.source_run_id);
+      if (target && (target.interruptRequested || store.orchestration.runControl.attemptInterrupt(target.attemptId) !== null)) {
+        return true;
+      }
+      const parentInterrupt = db.prepare(`
+        SELECT 1 FROM orchestration_v2_events
+        WHERE type IN ('run-control.interrupt-recorded', 'attempt.interrupt-requested')
+          AND json_extract(payload_json, '$.runId') = ?
+        LIMIT 1
+      `).get(parent.source_run_id);
+      if (parentInterrupt !== undefined) return true;
+      break;
+    }
+  }
+  return false;
+}
+
+function isUnattendedMessageCreationSource(source: string): boolean {
+  return source === "mcp" || source === "scheduled" || source === "server";
+}
+
+function isUnattendedQueueItem(
+  store: RuntimeStore,
+  db: OrchestrationDatabase,
+  conversationId: string,
+  item: QueueItemProjection,
+): boolean {
+  if (item.kind !== "message") return false;
+  if (item.attribution !== undefined) return false;
+  if (item.steerFollowUpOfRunId !== undefined) return false;
+  if (!isUnattendedMessageCreationSource(item.creationSource)) return false;
+
+  const row = db.prepare(`
+    SELECT watcher_note_json, delegated_completion_json
+    FROM queued_messages
+    WHERE id = ? AND conversation_id = ?
+  `).get(item.id, conversationId) as {
+    watcher_note_json: string | null;
+    delegated_completion_json: string | null;
+  } | undefined;
+  if (row && (row.watcher_note_json !== null || row.delegated_completion_json !== null)) {
+    return false;
+  }
+  if (item.userMessageId !== null) {
+    try {
+      const message = store.message(item.userMessageId);
+      if (message.watcherNote || message.delegatedCompletion) return false;
+    } catch {
+      // Message absent; fall back to queue item metadata above.
+    }
+  }
+  return true;
+}
+
+interface TurnCreationProvenance {
+  createdBy: QueueCreatedBy;
+  creationSource: QueueCreationSource;
+  deviceId?: string;
+  reusableDeliveredItemId: string | null;
+  isUnattended: boolean;
+  isExcluded: boolean;
+}
+
+function resolveTurnCreationProvenance(
+  store: RuntimeStore,
+  db: OrchestrationDatabase,
+  conversationId: string,
+  turn: { id: string; runId: string; userMessageId: string },
+  message: { id: string; privateConnectDeviceId?: string | null; watcherNote?: unknown; delegatedCompletion?: unknown },
+): TurnCreationProvenance {
+  if (message.watcherNote || message.delegatedCompletion) {
+    return { createdBy: "system", creationSource: "server", reusableDeliveredItemId: null, isUnattended: false, isExcluded: true };
+  }
+
+  const queue = store.orchestration.queue;
+  const runRow = db.prepare(`
+    SELECT json_extract(payload_json, '$.queueItemId') AS queue_item_id
+    FROM orchestration_v2_entities
+    WHERE kind = 'run' AND thread_id = ? AND id = ?
+    LIMIT 1
+  `).get(conversationId, turn.runId) as { queue_item_id: string | null } | undefined;
+  const runQueueItemId = typeof runRow?.queue_item_id === "string" && runRow.queue_item_id.length > 0
+    ? runRow.queue_item_id
+    : null;
+
+  let sourceItem: QueueItemProjection | null = runQueueItemId ? queue.getItem(runQueueItemId) : null;
+  if (!sourceItem) {
+    const priorItemRow = db.prepare(`
+      SELECT id FROM orchestration_v2_entities
+      WHERE kind = ? AND thread_id = ? AND json_extract(payload_json, '$.userMessageId') = ?
+      ORDER BY revision DESC
+      LIMIT 1
+    `).get(QUEUE_ITEM_PROJECTION, conversationId, message.id) as { id: string } | undefined;
+    if (priorItemRow) sourceItem = queue.getItem(priorItemRow.id);
+  }
+
+  const reusableDeliveredItemId = sourceItem?.state === "delivered" ? sourceItem.id : null;
+
+  if (sourceItem) {
+    if (sourceItem.kind !== "message" || sourceItem.attribution !== undefined) {
+      return { createdBy: "system", creationSource: "server", reusableDeliveredItemId: null, isUnattended: false, isExcluded: true };
+    }
+    return {
+      createdBy: sourceItem.createdBy,
+      creationSource: sourceItem.creationSource,
+      ...(sourceItem.deviceId !== undefined ? { deviceId: sourceItem.deviceId } : {}),
+      reusableDeliveredItemId,
+      isUnattended: isUnattendedMessageCreationSource(sourceItem.creationSource),
+      isExcluded: false,
+    };
+  }
+
+  const legacyRow = db.prepare(`
+    SELECT kind, created_by, creation_source, device_id, watcher_note_json, delegated_completion_json
+    FROM queued_messages
+    WHERE conversation_id = ? AND (turn_id = ? OR run_id = ?)
+    ORDER BY sequence DESC
+    LIMIT 1
+  `).get(conversationId, turn.id, turn.runId) as {
+    kind: string;
+    created_by: QueueCreatedBy;
+    creation_source: QueueCreationSource;
+    device_id: string | null;
+    watcher_note_json: string | null;
+    delegated_completion_json: string | null;
+  } | undefined;
+
+  if (legacyRow) {
+    if (legacyRow.kind !== "message" || legacyRow.watcher_note_json !== null || legacyRow.delegated_completion_json !== null) {
+      return { createdBy: "system", creationSource: "server", reusableDeliveredItemId: null, isUnattended: false, isExcluded: true };
+    }
+    return {
+      createdBy: legacyRow.created_by,
+      creationSource: legacyRow.creation_source,
+      ...(legacyRow.device_id ? { deviceId: legacyRow.device_id } : {}),
+      reusableDeliveredItemId,
+      isUnattended: isUnattendedMessageCreationSource(legacyRow.creation_source),
+      isExcluded: false,
+    };
+  }
+
+  const isScheduledPlan = db.prepare(`
+    SELECT 1 WHERE
+      EXISTS (SELECT 1 FROM usage_limit_resume_plans WHERE conversation_id = ? AND turn_id = ?)
+      OR EXISTS (SELECT 1 FROM restart_continuation_plans WHERE conversation_id = ? AND turn_id = ?)
+  `).get(conversationId, turn.id, conversationId, turn.id) !== undefined;
+  if (isScheduledPlan) {
+    return {
+      createdBy: "system",
+      creationSource: "server",
+      reusableDeliveredItemId,
+      isUnattended: true,
+      isExcluded: false,
+    };
+  }
+
+  const acceptedEvent = db.prepare(`
+    SELECT command_id FROM orchestration_v2_events
+    WHERE thread_id = ? AND type = 'run.accepted'
+      AND json_extract(payload_json, '$.run.id') = ?
+    ORDER BY sequence DESC
+    LIMIT 1
+  `).get(conversationId, turn.runId) as { command_id: string } | undefined;
+  const commandId = acceptedEvent?.command_id ?? "";
+  if (
+    commandId.startsWith("limit-reset:")
+    || commandId.startsWith("restart-continuation:")
+    || commandId.startsWith("scheduled:")
+  ) {
+    return {
+      createdBy: "system",
+      creationSource: "server",
+      reusableDeliveredItemId,
+      isUnattended: true,
+      isExcluded: false,
+    };
+  }
+  if (commandId.startsWith("agent-") || commandId.startsWith("mcp:")) {
+    return {
+      createdBy: "agent",
+      creationSource: "mcp",
+      reusableDeliveredItemId,
+      isUnattended: true,
+      isExcluded: false,
+    };
+  }
+
+  return {
+    createdBy: "user",
+    creationSource: message.privateConnectDeviceId ? "mobile" : "web",
+    ...(message.privateConnectDeviceId ? { deviceId: message.privateConnectDeviceId } : {}),
+    reusableDeliveredItemId,
+    isUnattended: false,
+    isExcluded: false,
+  };
+}
+
 /**
  * Per-chat durable boot reconciliation for the V2 queue (Phase 5 §2.9).
  * Runs inside each chat's orchestration lane before any command or auto-dispatch:
@@ -38,9 +436,9 @@ function deterministicUuid(seed: string): string {
  * 3. Blocks items whose `queued_messages` row is missing or mismatched (`text-lost`).
  * 4. Retires orphaned `dispatching` steers / blocks items whose `provider.steer` effect retired `runtime-lost`.
  * 5. Releases any `dispatching -> waiting` claims (`runtime-lost`) and clears stale `steerWhenReadyRunId`.
- * 6. Requeues interrupted runs that never reached a provider turn (`delivery = 'not-delivered'`, zero native boundaries) at the front, held.
+ * 6. Requeues interrupted runs that never reached a provider turn (`!hasProviderTurnObservation`, `delivery = 'not-delivered'`) at the front, preserving `creationSource` and releasing unattended MCP/scheduled prompts when `< MAX_UNATTENDED_RESENDS` and no Stop was recorded on the run or its delegating parent.
  * 7. Requeues accepted unread steers (`listUnreadAcceptedSteers`) at their N2 position, held.
- * 8. Applies the H5 restart hold to all active unheld items (`H5-restart`).
+ * 8. Applies the H5 restart hold to remaining unheld items, while allowing eligible never-started unattended prompts (within the cumulative `MAX_UNATTENDED_RESENDS` cap and without a recorded Stop) to resend automatically.
  */
 export async function reconcileQueueOnBoot(store: RuntimeStore): Promise<QueueBootReconciliationReport> {
   const report: QueueBootReconciliationReport = {
@@ -52,6 +450,8 @@ export async function reconcileQueueOnBoot(store: RuntimeStore): Promise<QueueBo
     requeuedUndelivered: [],
     requeuedUnreadSteers: [],
     heldConversations: [],
+    resendsScheduled: [],
+    resendsExhausted: [],
   };
 
   const adoption = store.orchestration.queue.adoptLegacyRows();
@@ -231,6 +631,7 @@ function reconcileConversationQueueOnBoot(
   }
 
   // 3. Release any still-dispatching claims (`runtime-lost`) and clear stale `steerWhenReadyRunId`.
+  const releasedDispatchingIds = new Set<string>();
   for (const item of queue.listActive(conversationId)) {
     if (item.state === "dispatching") {
       queue.releaseClaim({
@@ -239,6 +640,7 @@ function reconcileConversationQueueOnBoot(
         reason: "runtime-lost",
         detail: "The runtime restarted before dispatch finished.",
       });
+      releasedDispatchingIds.add(item.id);
       report.releasedDispatching.push(item.id);
     }
   }
@@ -247,39 +649,71 @@ function reconcileConversationQueueOnBoot(
   db.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE conversation_id = ? AND steer_when_ready_run_id IS NOT NULL")
     .run(conversationId);
 
-  // 4. Requeue interrupted runs that never observed a provider turn (`delivery = 'not-delivered'`, zero native boundaries).
+  // 4. Requeue interrupted runs that never observed a provider turn (`!hasProviderTurnObservation`, `delivery = 'not-delivered'`).
+  const autoResentThisBoot = new Set<string>();
   const latestTurn = store.latestAgentTurnForConversation(conversationId);
   if (latestTurn && latestTurn.status === "interrupted" && !queue.getSupersededTurn(latestTurn.id)) {
-    const undeliveredEligible = db.prepare(`
-      SELECT 1 FROM agent_turns AS turn
-      JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.thread_id = turn.conversation_id AND run.id = turn.run_id
-      WHERE turn.id = ? AND turn.conversation_id = ?
-        AND json_extract(run.payload_json, '$.delivery') = 'not-delivered'
-        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS rb WHERE rb.kind = 'rolled-back-turn' AND rb.thread_id = turn.conversation_id AND rb.id = turn.id)
-        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS b WHERE b.kind = 'native-boundary' AND b.thread_id = turn.conversation_id AND json_extract(b.payload_json, '$.runId') = turn.run_id)
-        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS a WHERE a.kind = 'attempt' AND a.thread_id = turn.conversation_id AND json_extract(a.payload_json, '$.runId') = turn.run_id AND json_extract(a.payload_json, '$.nativeTurnId') IS NOT NULL)
-    `).get(latestTurn.id, conversationId);
+    const rolledBack = db.prepare(`
+      SELECT 1 FROM orchestration_v2_entities
+      WHERE kind = 'rolled-back-turn' AND thread_id = ? AND id = ?
+      LIMIT 1
+    `).get(conversationId, latestTurn.id) !== undefined;
+    const hasRunRecord = db.prepare(`
+      SELECT 1 FROM orchestration_v2_entities
+      WHERE kind = 'run' AND thread_id = ? AND id = ?
+        AND json_extract(payload_json, '$.delivery') = 'not-delivered'
+      LIMIT 1
+    `).get(conversationId, latestTurn.runId) !== undefined;
+    const undeliveredEligible = !rolledBack
+      && hasRunRecord
+      && !hasProviderTurnObservation(db, conversationId, latestTurn.runId);
     const alreadyQueued = queue.listActive(conversationId).some((item) => item.userMessageId === latestTurn.userMessageId);
     if (undeliveredEligible && !alreadyQueued) {
       try {
         const message = store.message(latestTurn.userMessageId);
-        if (message.conversationId === conversationId && message.role === "user" && message.turnId === latestTurn.id
-          && !message.watcherNote && !message.delegatedCompletion) {
-          const itemId = deterministicUuid(`requeue-undelivered:${latestTurn.runId}`);
-          queue.requeueUndelivered({
-            conversationId,
-            itemId,
-            fromRunId: latestTurn.runId,
-            fromTurnId: latestTurn.id,
-            userMessageId: message.id,
-            content: message.content,
-            attachments: message.attachments,
-            modelSelection: latestTurn.modelSelection,
-            requestedAt: latestTurn.requestedAt,
-            queueHeld: true,
-            placement: "front",
-          });
-          report.requeuedUndelivered.push(itemId);
+        if (message.conversationId === conversationId && message.role === "user" && message.turnId === latestTurn.id) {
+          const provenance = resolveTurnCreationProvenance(store, db, conversationId, latestTurn, message);
+          if (!provenance.isExcluded) {
+            const itemId = provenance.reusableDeliveredItemId
+              ?? deterministicUuid(`requeue-undelivered:${latestTurn.runId}`);
+            const stopBlocksResend = provenance.isUnattended && hasRecordedStopForRunOrParent(
+              store,
+              db,
+              conversationId,
+              latestTurn.runId,
+              itemId,
+              latestTurn.requestedAt,
+            );
+            let queueHeld = true;
+            if (provenance.isUnattended && !stopBlocksResend) {
+              const totalProcessLosses = countDurableProcessLosses(db, conversationId, itemId, message.id) + 1;
+              if (totalProcessLosses < MAX_UNATTENDED_RESENDS) {
+                queueHeld = false;
+                autoResentThisBoot.add(itemId);
+                report.resendsScheduled.push(itemId);
+              } else {
+                queueHeld = true;
+                report.resendsExhausted.push(itemId);
+              }
+            }
+            queue.requeueUndelivered({
+              conversationId,
+              itemId,
+              fromRunId: latestTurn.runId,
+              fromTurnId: latestTurn.id,
+              userMessageId: message.id,
+              content: message.content,
+              attachments: message.attachments,
+              createdBy: provenance.createdBy,
+              creationSource: provenance.creationSource,
+              ...(provenance.deviceId !== undefined ? { deviceId: provenance.deviceId } : {}),
+              modelSelection: latestTurn.modelSelection,
+              requestedAt: latestTurn.requestedAt,
+              queueHeld,
+              placement: "front",
+            });
+            report.requeuedUndelivered.push(itemId);
+          }
         }
       } catch {
         // Message no longer present; skip.
@@ -338,14 +772,68 @@ function reconcileConversationQueueOnBoot(
     }
   }
 
-  // 6. H5 restart hold: hold every unheld active item at boot (no automatic dispatch after restart).
+  // 6. H5 restart hold: hold unheld active items at boot, while allowing eligible
+  // never-started unattended prompts (`mcp` / `scheduled`, excluding delegated deliveries
+  // and watcher notes) to resend up to `MAX_UNATTENDED_RESENDS` when no Stop was recorded.
   const active = queue.listActive(conversationId);
-  const unheld = active.filter((item) => !item.queueHeld);
-  if (unheld.length > 0) {
+  const toHold: string[] = [];
+  for (const item of active) {
+    if (item.queueHeld || autoResentThisBoot.has(item.id)) continue;
+    const eligibleUnattended = item.state === "waiting"
+      && isUnattendedQueueItem(store, db, conversationId, item)
+      && (item.requeuedFromRunId === undefined
+        || !hasProviderTurnObservation(db, conversationId, item.requeuedFromRunId))
+      && !hasRecordedStopForRunOrParent(
+        store,
+        db,
+        conversationId,
+        item.requeuedFromRunId ?? null,
+        item.id,
+        item.requestedAt,
+      );
+    if (!eligibleUnattended) {
+      toHold.push(item.id);
+      continue;
+    }
+    const existingLosses = countDurableProcessLosses(db, conversationId, item.id, item.userMessageId);
+    const totalProcessLosses = releasedDispatchingIds.has(item.id)
+      ? existingLosses
+      : existingLosses + 1;
+    if (totalProcessLosses < MAX_UNATTENDED_RESENDS) {
+      if (!releasedDispatchingIds.has(item.id)) {
+        queue.hold({
+          conversationId,
+          cause: "H5-restart",
+          itemIds: [item.id],
+        });
+        queue.release({
+          conversationId,
+          cause: "R4-preparation-retry",
+          itemIds: [item.id],
+          commandType: "queue.unattended-boot-resend",
+          source: {
+            actorId: "runtime",
+            commandId: `${UNATTENDED_RESEND_COMMAND_PREFIX}${item.id}:${totalProcessLosses}`,
+            command: {
+              type: "queue.unattended-boot-resend",
+              conversationId,
+              itemId: item.id,
+              processLossCount: totalProcessLosses,
+            },
+          },
+        });
+      }
+      report.resendsScheduled.push(item.id);
+    } else {
+      toHold.push(item.id);
+      report.resendsExhausted.push(item.id);
+    }
+  }
+  if (toHold.length > 0) {
     queue.hold({
       conversationId,
       cause: "H5-restart",
-      itemIds: unheld.map(({ id }) => id),
+      itemIds: toHold,
     });
     report.heldConversations.push(conversationId);
   }

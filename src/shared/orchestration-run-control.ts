@@ -9,6 +9,7 @@ export const RUN_INTERRUPT_ESCALATION_CAUSES = ["grace-expired", "user", "agent"
 export const RUN_INTERRUPT_CAUSES = ["user", "agent", "runtime"] as const;
 export const RUN_STEER_OUTCOMES = ["accepted", "refused", "turn-ended", "unconfirmed", "unavailable"] as const;
 export const RUN_STEER_STATES = ["dispatching", "settled"] as const;
+export const MAX_RUN_INTERRUPT_REASON_CHARS = 400;
 
 export type RunInterruptOutcome = (typeof RUN_INTERRUPT_OUTCOMES)[number];
 export type RunInterruptEscalationCause = (typeof RUN_INTERRUPT_ESCALATION_CAUSES)[number];
@@ -16,6 +17,7 @@ export type RunInterruptCause = (typeof RUN_INTERRUPT_CAUSES)[number];
 export type RunSteerOutcome = (typeof RUN_STEER_OUTCOMES)[number];
 
 const timestamp = z.iso.datetime();
+const interruptReasonSchema = z.string().max(MAX_RUN_INTERRUPT_REASON_CHARS).nullable().optional();
 
 export const runInterruptSchema = z.strictObject({
   runId: id,
@@ -24,6 +26,7 @@ export const runInterruptSchema = z.strictObject({
   requestedAt: timestamp.nullable(),
   expectedTurnId: id.nullable(),
   cause: z.enum(RUN_INTERRUPT_CAUSES).nullable().optional(),
+  reason: interruptReasonSchema,
   unresponsiveAt: timestamp.nullable(),
   escalations: z.number().int().nonnegative(),
   outcome: z.enum(RUN_INTERRUPT_OUTCOMES).nullable(),
@@ -47,6 +50,7 @@ export const runControlEventSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("run-control.interrupt-recorded"), payload: z.strictObject({
     runId: id, attemptId: id, effectId: id, requestedAt: timestamp, expectedTurnId: id.nullable(),
     cause: z.enum(RUN_INTERRUPT_CAUSES).optional(),
+    reason: interruptReasonSchema,
   }) }),
   z.strictObject({ type: z.literal("run-control.interrupt-escalated"), payload: z.strictObject({
     runId: id, attemptId: id, cause: z.enum(RUN_INTERRUPT_ESCALATION_CAUSES), at: timestamp,

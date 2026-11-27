@@ -380,7 +380,8 @@ describe("chat rollback with file restore", () => {
   it("refuses the file restore when a staged rename destination is edited afterwards", async () => {
     const runtime = await gitRuntime();
     try {
-      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      const multiline = "retained line 1\nretained line 2\nretained line 3\nretained line 4\nretained line 5\n";
+      const first = await finish(runtime, "first", { "notes.txt": multiline });
       const runs = runtime.provider.runCount;
       const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "rename request", turnCheckpoint: true });
       runtime.controller.start(queued.turn.id);
@@ -389,13 +390,50 @@ describe("chat rollback with file restore", () => {
       runtime.provider.resolve({ text: "rename answer", sessionId: "source-native" });
       await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), wait);
       await vi.waitFor(() => expect(runtime.store.turnGitArtifact(queued.turn.id)?.status).toBe("ready"), wait);
-      writeFileSync(join(runtime.workspace, "renamed.txt"), "retained plus user edit\n");
+      const edited = `${multiline}user edit line\n`;
+      writeFileSync(join(runtime.workspace, "renamed.txt"), edited);
       const restore = vi.fn(restoreConversationCheckpoint);
       const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
       expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 1, files: { outcome: "refused" } });
       expect(result.files.message).toContain("renamed.txt");
       expect(restore).not.toHaveBeenCalled();
-      expect(read(runtime, "renamed.txt")).toBe("retained plus user edit\n");
+      expect(read(runtime, "renamed.txt")).toBe(edited);
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it("keeps an untracked file created by a rolled-back turn when edited between rolled-back turns", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      await finish(runtime, "second", { "made.txt": "agent created\n" });
+      writeFileSync(join(runtime.workspace, "made.txt"), "agent created plus user edit\n");
+      await finish(runtime, "third", { "base.txt": "turn three\n" });
+      const result = await rollback(dependencies(runtime, unsupported), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 2, files: { outcome: "restored" } });
+      expect(read(runtime, "base.txt")).toBe("base\n");
+      expect(read(runtime, "made.txt")).toBe("agent created plus user edit\n");
+      expect(result.files.message).toContain("made.txt");
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it("refuses with the unrecorded wording when an untracked-only turn's post-turn snapshot was pruned before a no-op turn", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      const second = await finish(runtime, "second", { "made.txt": "agent created\n" });
+      writeFileSync(join(runtime.workspace, "made.txt"), "agent created plus user edit\n");
+      await finish(runtime, "third", {});
+      const originalStorage = runtime.store.turnGitArtifactStorage.bind(runtime.store);
+      vi.spyOn(runtime.store, "turnGitArtifactStorage").mockImplementation((turnId) => {
+        const stored = originalStorage(turnId);
+        return turnId === second.id ? { ...stored, afterRef: null } : stored;
+      });
+      const restore = vi.fn(restoreConversationCheckpoint);
+      const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 2, files: { outcome: "refused" } });
+      expect(result.files.message).toContain("could not establish every file");
+      expect(restore).not.toHaveBeenCalled();
+      expect(read(runtime, "made.txt")).toBe("agent created plus user edit\n");
     } finally { runtime.store.close(); }
   }, 120_000);
 

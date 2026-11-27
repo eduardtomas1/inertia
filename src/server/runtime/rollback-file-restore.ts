@@ -175,16 +175,7 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
       finalMissing: false,
       finalTruncated: false,
       editedAfter: [] as string[],
-    };
-  }
-  const overwriteTargets = await restoredTargets(repositoryPath, comparison.files, deadlineAt);
-  if (overwriteTargets.length === 0) {
-    return {
-      truncated: false,
-      files: comparison.files,
-      finalMissing: false,
-      finalTruncated: false,
-      editedAfter: [] as string[],
+      changedAfter: new Set<string>(),
     };
   }
   if (!scope.finalRef || scope.unrecordedAfter) {
@@ -194,8 +185,10 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
       finalMissing: true,
       finalTruncated: false,
       editedAfter: [] as string[],
+      changedAfter: new Set<string>(),
     };
   }
+  const overwriteTargets = await restoredTargets(repositoryPath, comparison.files, deadlineAt);
   const intervals = [...scope.gaps, { afterRef: scope.finalRef, beforeRef: ref }];
   const changedAfter = new Set<string>();
   for (const interval of intervals) {
@@ -207,6 +200,7 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
         finalMissing: false,
         finalTruncated: true,
         editedAfter: [] as string[],
+        changedAfter,
       };
     }
     for (const file of diff.files) {
@@ -214,25 +208,37 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
       if (file.previousPath) changedAfter.add(file.previousPath);
     }
   }
+  const changedList = [...changedAfter];
   return {
     truncated: false,
     files: comparison.files,
     finalMissing: false,
     finalTruncated: false,
-    editedAfter: overwriteTargets.filter((path) => changedAfter.has(path)),
+    editedAfter: overwriteTargets.filter((target) =>
+      changedAfter.has(target) || changedList.some((path) => path.startsWith(`${target}/`))),
+    changedAfter,
   };
 }
 
-async function leftovers(repositoryPath: string, scope: RecordedScope, ref: string, deadlineAt: number) {
+async function leftovers(
+  repositoryPath: string,
+  scope: RecordedScope,
+  ref: string,
+  deadlineAt: number,
+  priorChangedAfter: ReadonlySet<string>,
+) {
   const remaining = await compareGitSnapshots(repositoryPath, scope.target.beforeRef, ref, { deadlineAt, maxBytes: 1_024 });
   const kept = remaining.files.map(({ path }) => path);
   const created = remaining.files.filter(({ path, status }) => status === "added" && scope.additions.has(path)).map(({ path }) => path);
-  if (!scope.finalRef || created.length === 0 || created.length > MAX_DIFF_FILES || remaining.summaryTruncated) {
+  if (!scope.finalRef || scope.unrecordedAfter || created.length === 0 || created.length > MAX_DIFF_FILES || remaining.summaryTruncated) {
     return { kept, removable: [] as string[] };
   }
   const edited = await compareGitSnapshots(repositoryPath, scope.finalRef, ref, { deadlineAt, maxBytes: 1_024, paths: created });
   if (edited.summaryTruncated) return { kept, removable: [] as string[] };
-  const changed = new Set(edited.files.flatMap(({ path, previousPath }) => previousPath ? [path, previousPath] : [path]));
+  const changed = new Set([
+    ...priorChangedAfter,
+    ...edited.files.flatMap(({ path, previousPath }) => previousPath ? [path, previousPath] : [path]),
+  ]);
   return { kept, removable: created.filter((path) => !changed.has(path)) };
 }
 
@@ -257,11 +263,12 @@ async function removeCreated(repositoryPath: string, paths: readonly string[], d
 }
 
 async function settleRestored(repositoryPath: string, conversationId: string, storage: string, scope: RecordedScope,
-  restoredCount: number, deadlineAt: number, recoveryId: string | null): Promise<RollbackFileRestoreResult> {
+  restoredCount: number, deadlineAt: number, recoveryId: string | null,
+  priorChangedAfter: ReadonlySet<string>): Promise<RollbackFileRestoreResult> {
   const restored = `Restored ${plural(restoredCount, "file")} changed by the rolled-back turns. A recovery checkpoint was saved first.`;
   try {
     const { kept, removable } = await withSnapshot(repositoryPath, conversationId, storage, deadlineAt,
-      (ref) => leftovers(repositoryPath, scope, ref, deadlineAt));
+      (ref) => leftovers(repositoryPath, scope, ref, deadlineAt, priorChangedAfter));
     const removed = new Set(await removeCreated(repositoryPath, removable, deadlineAt));
     const remaining = kept.filter((path) => !removed.has(path));
     const parts = [restored];
@@ -319,7 +326,7 @@ async function restoreClaimed(store: RuntimeStore, input: RollbackFileRestoreInp
     await (input.restoreCheckpoint ?? restoreConversationCheckpoint)(store, checkpoint, (saved) => { recovery = saved; },
       { turnId: input.recoveryTurnId, label: "Before file restore" });
     return await settleRestored(repositoryPath, input.conversationId, storage, scope, before.files.length, deadlineAt,
-      recovery?.id ?? null);
+      recovery?.id ?? null, before.changedAfter);
   } catch (error) {
     return failed(error, recovery);
   } finally {

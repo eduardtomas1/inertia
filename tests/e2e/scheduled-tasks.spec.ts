@@ -94,7 +94,7 @@ test("creates, pauses, resumes, runs now, and deletes a scheduled task from the 
     await expect(taskCard).toContainText("Active", { timeout: 10_000 });
 
     await taskCard.getByRole("button", { name: "Run now" }).click();
-    await expect(page.getByText("Scheduled task completed cleanly.")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator("main").getByText("Scheduled task completed cleanly.")).toBeVisible({ timeout: 20_000 });
     await schedulesNav.click();
     await expect(taskCard).toBeVisible({ timeout: 15_000 });
     const recentRunsButton = taskCard.getByRole("button", { name: /Recent runs \(1\)/i });

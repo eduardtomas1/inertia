@@ -300,13 +300,16 @@ export async function exerciseComposerQueue({
   }
   const itemId = randomUUID();
   const originalStatus = store.conversation(conversationId).status;
-  store.updateConversation(conversationId, { status: "running" });
-  store.orchestration.queue.enqueue({
-    conversationId,
-    itemId,
-    content: "After this pass, update the release notes and run the full gate",
-  });
-  store.close();
+  try {
+    store.updateConversation(conversationId, { status: "running" });
+    store.orchestration.queue.enqueue({
+      conversationId,
+      itemId,
+      content: "After this pass, update the release notes and run the full gate",
+    });
+  } finally {
+    store.close();
+  }
   await page.reload();
   try {
     const dock = page.getByRole("region", { name: "Message composer" });
@@ -330,13 +333,18 @@ export async function exerciseComposerQueue({
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,
     });
-    cleanup.orchestration.queue.cancel({
-      conversationId,
-      itemId,
-      reason: "user",
-    });
-    cleanup.updateConversation(conversationId, { status: originalStatus });
-    cleanup.close();
+    try {
+      try {
+        cleanup.orchestration.queue.cancel({
+          conversationId,
+          itemId,
+          reason: "user",
+        });
+      } catch {}
+      cleanup.updateConversation(conversationId, { status: originalStatus });
+    } finally {
+      cleanup.close();
+    }
     await page.reload();
   }
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();

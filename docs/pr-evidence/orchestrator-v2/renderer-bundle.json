@@ -927,5 +927,20 @@
         "headroom": 512
       }
     }
+  },
+  "visualCraftAndFinalHardeninga9e9b084": {
+    "date": "2026-11-27",
+    "checkpoint": "Claude Opus 5.5 visual craft pass (81a841c7) + final hardening (a9e9b084)",
+    "platform": "Linux x64, Node 22.23.2",
+    "measurement": "Zero budget caps raised; all 60 renderer bundle budgets pass with deferredScheduledTasksJavaScript reduced from 23,906 B to 22,426 B (limit 24,418 B), deferredComposerQueueJavaScript at 20,816 B (limit 21,029 B), entryCss at 259,481 B (limit 259,805 B), and coreJavaScript at 2,854,884 B (limit 2,855,028 B).",
+    "unchangedLimitsMeasured": {
+      "deferredScheduledTasksJavaScript": { "bytes": 22426, "limit": 24418 },
+      "deferredComposerQueueJavaScript": { "bytes": 20816, "limit": 21029 },
+      "mainWorkbenchFirstLoadJavaScript": { "bytes": 1014529, "limit": 1014856 },
+      "detachedChatFirstLoadJavaScript": { "bytes": 896092, "limit": 896419 },
+      "entryCss": { "bytes": 259481, "limit": 259805 },
+      "detachedChatCss": { "bytes": 1448, "limit": 1612 },
+      "coreJavaScript": { "bytes": 2854884, "limit": 2855028 }
+    }
   }
 }

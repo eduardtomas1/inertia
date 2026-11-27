@@ -6028,3 +6028,38 @@ Rounds 2–3 (`S36–S42`):
   and `delegation-wake.spec.ts` (`5/5`) — **8/8 passed**.
 - **Unexercised locally:** Windows/macOS runners (verified via PR #686 CI matrix), live
   Codex/Claude/Pi/Cursor/Kimi/OpenCode provider accounts, and packaged installer artifacts.
+
+## Polish Wave, Claude Opus 5.5 Visual Craft Pass & Adversarial Review Sign-off (`a9e9b084`) — 2026-11-27
+
+Completed a full pre-merge polish, visual craft, and multi-round adversarial review pass on
+`orchestrator-v2` (PR #686):
+
+- **Command-only steer guard (`c38537754` parity, `2c1e1599`):** Refuses steering slash-command-only
+  prompts across desktop, managed send, and `inertia_queue` `promote_to_steer` (both pre-lease and
+  post-claim after `lease.ready`), clearing `steerWhenReadyRunId` on edits into slash commands,
+  reordering safely in stored order while respecting `delegated-results` and `dispatching` barriers,
+  and reporting accurate `movedFirst` (`S53`, `S60`, `S64`, `S73`).
+- **Claude Opus 5.5 (`high`) Visual Craft Pass (`81a841c7`):** Refined all PR #686 UI surfaces to
+  match Inertia's quiet monochrome native aesthetic (flat hairline rows, dot + word status, muted
+  icon actions, tucked composer queue tray, fixed Private Connect 2-column sidebar layout for
+  Schedules, WCAG 1.4.11 high-contrast selected weekdays with hover preservation, WCAG 2.4.3 inline
+  delete focus management, non-alert rendering of persisted errors, local formatting of one-shot
+  schedules, and `pendingOpenConversationId` for `New chat each run` `Run now`), visually verified
+  across light, dark, and narrow desktop + Private Connect screenshots while shrinking
+  `deferredScheduledTasksJavaScript` from `23,906` B to `22,426` B (`< 24,418` B cap).
+- **Adversarial Hardening (`S39–S91` + Opus 5.5 High `R1–R2`):**
+  - Final-admission revalidation of Private Connect prompt safety, `childQuestionWake` (composite
+    owner key), and deleted scheduled tasks; atomic SQLite transactions for turn/run settlement,
+    boot requeue, missed-boot one-shot recording, and delete+withdraw with deferred cancel listeners;
+    durable `rowid DESC` claim order for summary ownership & terminal-only history pruning; single
+    consistent task revision dispatch & conditional auto-bind; atomic duplicate-claim schedule
+    advance / one-shot disable; `ScheduledTaskRetryQueue` with exponential backoff (`500 ms`–`60 s`),
+    preserved boot cutoff, bounded 8-attempt settlement fallback, and boot-hook isolation from shared
+    queue startup; distinct Private Connect audit event types (`scheduled-task.accepted`,
+    `scheduled-task.deleted`), pre-claim `forbidden` prompt-safety checks, `socketRef` active
+    transport resolution, transport/authority freshness guards, silent live-poll refresh without
+    stuck loading, and preserving non-whole-minute intervals on non-schedule edits (`S82`).
+- **Independent Review Sign-off:** Reviewed across `sol-loop` (`gpt-6.2-sol` high, `S1–S91`) and
+  two independent parallel Claude Opus 5.5 (`effort: high`) reviewers through Round 3 on `a9e9b084`
+  — **both Opus 5.5 High reviewers returned `VERDICT: APPROVE`** with zero remaining blockers or
+  shoulds.

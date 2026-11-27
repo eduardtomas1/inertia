@@ -34,6 +34,7 @@ import {
   ChildQuestionWakeCoordinator,
   MAX_CHILD_QUESTION_WAKE_BYTES,
 } from "../../src/server/runtime/delegation/child-question-wake";
+import { createDelegationRuntime } from "../../src/server/runtime/delegation/delegation-runtime";
 import { delegateTaskSchema } from "../../src/server/runtime/delegation/task-tools";
 import { executeManagedQueueMutation } from "../../src/server/runtime/managed-queue-tools";
 import {
@@ -541,6 +542,13 @@ describe("5. Persisted child-question wake to parent (e2bb9e63e, 86c379d07)", ()
 
       const items = env.store.orchestration.queue.listActive(env.parent.id);
       expect(items).toHaveLength(1);
+      expect(items[0]?.attribution).toEqual({
+        childQuestionWake: {
+          childConversationId: env.child.id,
+          childRunId: env.childTurn.runId,
+          requestId: request.id,
+        },
+      });
       const stored = env.store.orchestration.queue.getContent(env.parent.id, items[0]!.id)?.content ?? "";
       expect(Buffer.byteLength(stored, "utf8")).toBeLessThanOrEqual(MAX_CHILD_QUESTION_WAKE_BYTES);
       expect(stored).toContain(env.child.id);
@@ -548,6 +556,7 @@ describe("5. Persisted child-question wake to parent (e2bb9e63e, 86c379d07)", ()
       expect(stored).toContain("inertia_answer_question");
       expect(stored).toContain("<\\system-reminder>");
       expect(stored).not.toContain("<system-reminder>");
+      expect(env.store.orchestration.events.verify({ readable: true }).valid).toBe(true);
 
       // Duplicate call for the same (childId, requestId) never wakes twice.
       const duplicate = await coordinator.onChildQuestion(request);
@@ -712,6 +721,159 @@ describe("5. Persisted child-question wake to parent (e2bb9e63e, 86c379d07)", ()
       env.store.archiveConversation(env.parent.id, true);
       expect(await coordinator.onChildQuestion(validReq)).toEqual({ kind: "skipped", reason: "parent-unavailable" });
       expect(env.store.orchestration.queue.listActive(env.parent.id)).toEqual([]);
+    } finally {
+      env.store.close();
+    }
+  });
+
+  it("withdraws queued child-question wakes on resolution/settlement/archive and cancels stale wakes before dispatch (S28)", async () => {
+    const env = await createRuntimeEnv();
+    try {
+      const pendingApprovals = new Map();
+      const pendingInputs = new Map<string, AgentInputRequest>();
+      const broadcastSnapshot = vi.fn();
+      const broadcastConversationShell = vi.fn();
+      const schedule = vi.fn();
+      const delegationRuntime = createDelegationRuntime({
+        store: env.store,
+        turns: {
+          isActive: (id: string) => id === env.child.id,
+          activeIdentity: (id: string) => id === env.child.id
+            ? { turnId: env.childTurn.id, runId: env.childTurn.runId }
+            : null,
+          acquireFollowUpAdmission: vi.fn(() => null),
+          steer: vi.fn(),
+        } as never,
+        pendingApprovals,
+        pendingInputs,
+        queue: () => ({ offerDelegated: vi.fn(), sendDelegated: vi.fn(), schedule }),
+        broadcast: vi.fn(),
+        broadcastSnapshot,
+        broadcastConversationShell,
+      });
+
+      // 1. Live question enqueues with childQuestionWake attribution; cancelStaleChildQuestionWake returns false while live.
+      const req1 = makeQuestionRequest(env.child.id, env.childTurn.id, env.childTurn.runId);
+      registerPendingInteraction(pendingInputs, req1);
+      delegationRuntime.observe({ type: "agent.input.requested", request: req1 });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+
+      const active1 = env.store.orchestration.queue.listActive(env.parent.id);
+      expect(active1).toHaveLength(1);
+      const wake1 = {
+        childConversationId: env.child.id,
+        childRunId: env.childTurn.runId,
+        requestId: req1.id,
+      };
+      expect(active1[0]?.attribution).toEqual({ childQuestionWake: wake1 });
+      expect(delegationRuntime.cancelStaleChildQuestionWake(env.parent.id, active1[0]!.id, wake1)).toBe(false);
+      expect(env.store.orchestration.queue.getItem(active1[0]!.id)?.state).toBe("waiting");
+
+      // 2. Resolving the child question withdraws the waiting parent queue item immediately.
+      broadcastSnapshot.mockClear();
+      broadcastConversationShell.mockClear();
+      pendingInputs.clear();
+      delegationRuntime.observe({
+        type: "agent.input.resolved",
+        conversationId: env.child.id,
+        runId: env.childTurn.runId,
+        turnId: env.childTurn.id,
+        requestId: req1.id,
+      });
+      expect(env.store.orchestration.queue.listActive(env.parent.id)).toEqual([]);
+      expect(env.store.orchestration.queue.getItem(active1[0]!.id)).toMatchObject({
+        state: "cancelled",
+        cancelReason: "withdrawn",
+      });
+      expect(broadcastConversationShell).toHaveBeenCalledWith(env.parent.id);
+      expect(broadcastSnapshot).toHaveBeenCalled();
+
+      // 3. cancelStaleChildQuestionWake cancels a queued item when the request closed before dispatch (and ignores repeated calls).
+      const req2 = makeQuestionRequest(env.child.id, env.childTurn.id, env.childTurn.runId);
+      registerPendingInteraction(pendingInputs, req2);
+      delegationRuntime.observe({ type: "agent.input.requested", request: req2 });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+
+      const active2 = env.store.orchestration.queue.listActive(env.parent.id);
+      expect(active2).toHaveLength(1);
+      const wake2 = {
+        childConversationId: env.child.id,
+        childRunId: env.childTurn.runId,
+        requestId: req2.id,
+      };
+      pendingInputs.clear();
+      expect(delegationRuntime.cancelStaleChildQuestionWake(env.parent.id, active2[0]!.id, wake2)).toBe(true);
+      expect(env.store.orchestration.queue.getItem(active2[0]!.id)).toMatchObject({
+        state: "cancelled",
+        cancelReason: "withdrawn",
+      });
+      // Already cancelled -> ignores OrchestrationConflict cleanly and still returns true.
+      expect(delegationRuntime.cancelStaleChildQuestionWake(env.parent.id, active2[0]!.id, wake2)).toBe(true);
+
+      // 4. Turning off delegationAutomaticWakes before dispatch cancels the queued wake via cancelIfStale.
+      const req3 = makeQuestionRequest(env.child.id, env.childTurn.id, env.childTurn.runId);
+      registerPendingInteraction(pendingInputs, req3);
+      delegationRuntime.observe({ type: "agent.input.requested", request: req3 });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+
+      const active3 = env.store.orchestration.queue.listActive(env.parent.id);
+      expect(active3).toHaveLength(1);
+      const wake3 = {
+        childConversationId: env.child.id,
+        childRunId: env.childTurn.runId,
+        requestId: req3.id,
+      };
+      env.store.updateSettings({ delegationAutomaticWakes: false });
+      expect(delegationRuntime.cancelStaleChildQuestionWake(env.parent.id, active3[0]!.id, wake3)).toBe(true);
+      expect(env.store.orchestration.queue.getItem(active3[0]!.id)).toMatchObject({
+        state: "cancelled",
+        cancelReason: "withdrawn",
+      });
+      pendingInputs.clear();
+
+      // 5. Child turn settlement withdraws queued wakes immediately.
+      env.store.updateSettings({ delegationAutomaticWakes: true });
+      const req4 = makeQuestionRequest(env.child.id, env.childTurn.id, env.childTurn.runId);
+      registerPendingInteraction(pendingInputs, req4);
+      delegationRuntime.observe({ type: "agent.input.requested", request: req4 });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      const active4 = env.store.orchestration.queue.listActive(env.parent.id);
+      expect(active4).toHaveLength(1);
+      await delegationRuntime.onTurnSettled(env.childTurn);
+      expect(env.store.orchestration.queue.listActive(env.parent.id)).toEqual([]);
+      expect(env.store.orchestration.queue.getItem(active4[0]!.id)).toMatchObject({
+        state: "cancelled",
+        cancelReason: "withdrawn",
+      });
+      pendingInputs.clear();
+
+      // 6. Archiving the child withdraws queued wakes immediately.
+      const req5 = makeQuestionRequest(env.child.id, env.childTurn.id, env.childTurn.runId);
+      registerPendingInteraction(pendingInputs, req5);
+      delegationRuntime.observe({ type: "agent.input.requested", request: req5 });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      const active5 = env.store.orchestration.queue.listActive(env.parent.id);
+      expect(active5).toHaveLength(1);
+      env.store.archiveConversation(env.child.id, true);
+      const archivedChild = env.store.conversation(env.child.id);
+      delegationRuntime.observe({
+        type: "conversation.shell.updated",
+        conversation: {
+          ...archivedChild,
+          hasHistory: false,
+          latestTurn: null,
+          pendingApproval: false,
+          pendingInput: false,
+        },
+        runs: [],
+      });
+      expect(env.store.orchestration.queue.listActive(env.parent.id)).toEqual([]);
+      expect(env.store.orchestration.queue.getItem(active5[0]!.id)).toMatchObject({
+        state: "cancelled",
+        cancelReason: "withdrawn",
+      });
+
+      expect(env.store.orchestration.events.verify({ readable: true }).valid).toBe(true);
     } finally {
       env.store.close();
     }

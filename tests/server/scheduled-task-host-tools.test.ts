@@ -141,6 +141,12 @@ class MockScheduledTaskRepo implements ScheduledTaskRepositoryLike {
     return [...this.runs.values()].filter((run) => run.taskId === taskId).slice(0, limit);
   }
 
+  listActiveRuns(): ScheduledTaskRun[] {
+    return [...this.runs.values()].filter(
+      (run) => run.state === "claimed" || run.state === "queued" || run.state === "running",
+    );
+  }
+
   getRun(runId: string): ScheduledTaskRun | null {
     return this.runs.get(runId) ?? null;
   }
@@ -569,6 +575,42 @@ describe("scheduled-task-host-tools", () => {
       scheduledTaskId: allowedTask.id,
     });
     expect(runAllowed.success).toBe(true);
+
+    // S26: a supervised/plan caller CANNOT trigger or update a supervised/plan task bound to a full/build chat
+    const privilegedTargetChat = makeCaller({
+      projectId: PROJECT_A,
+      accessMode: "full",
+      interactionMode: "build",
+    });
+    const boundToPrivilegedChat = service.create({
+      projectId: PROJECT_A,
+      title: "Low-mode task bound to full/build chat",
+      prompt: "Inspect status",
+      schedule: { type: "interval", everyMs: 60_000 },
+      boundConversationId: privilegedTargetChat.id,
+      accessMode: "supervised",
+      interactionMode: "plan",
+    });
+
+    expect(() => scheduledTaskApprovalDetail(deps, supervisedPlanCaller, RUN_SCHEDULED_TASK_NOW_TOOL_NAME, {
+      scheduledTaskId: boundToPrivilegedChat.id,
+    })).toThrow(ModeEscalationError);
+    await expect(
+      executeScheduledTaskTool(deps, supervisedPlanCaller, RUN_SCHEDULED_TASK_NOW_TOOL_NAME, {
+        scheduledTaskId: boundToPrivilegedChat.id,
+      }),
+    ).rejects.toThrow(ModeEscalationError);
+
+    expect(() => scheduledTaskApprovalDetail(deps, supervisedPlanCaller, SCHEDULE_TASK_TOOL_NAME, {
+      scheduledTaskId: boundToPrivilegedChat.id,
+      prompt: "Escalated via bound full/build chat",
+    })).toThrow(ModeEscalationError);
+    await expect(
+      executeScheduledTaskTool(deps, supervisedPlanCaller, SCHEDULE_TASK_TOOL_NAME, {
+        scheduledTaskId: boundToPrivilegedChat.id,
+        prompt: "Escalated via bound full/build chat",
+      }),
+    ).rejects.toThrow(ModeEscalationError);
   });
 
   it("neutralizes untrusted instruction-shaped text in list output", async () => {

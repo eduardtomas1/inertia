@@ -2,9 +2,13 @@ import { createHash } from "node:crypto";
 
 import type { AgentInputRequest, Conversation } from "../../../shared/contracts";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
-import { queueContentCharCount } from "../../../shared/orchestration-queue";
+import {
+  queueContentCharCount,
+  type ChildQuestionWakeAttribution,
+} from "../../../shared/orchestration-queue";
 import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import type { RuntimeStore } from "../../database";
+import { OrchestrationConflict } from "../../orchestration-v2/types";
 import {
   ANSWER_QUESTION_TOOL_NAME,
   agentAnswerable,
@@ -205,6 +209,13 @@ export class ChildQuestionWakeCoordinator {
       followsThreadSelection: true,
       origin: "automatic",
       requestedAt,
+      attribution: {
+        childQuestionWake: {
+          childConversationId: request.conversationId,
+          childRunId: request.runId,
+          requestId: request.id,
+        },
+      },
       commandType: "message.queue.enqueue",
       source: {
         actorId: "runtime",
@@ -228,6 +239,84 @@ export class ChildQuestionWakeCoordinator {
       requestId: request.id,
       itemId,
     };
+  }
+
+  cancelIfStale(
+    parentConversationId: string,
+    itemId: string,
+    wake: ChildQuestionWakeAttribution,
+  ): boolean {
+    const pending = this.findPendingChildRequest(wake);
+    const live = this.automaticWakesEnabled()
+      && this.readActiveParent(parentConversationId) !== null
+      && pending !== undefined
+      && this.readLiveChildRequest(pending) !== null;
+    if (live) return false;
+
+    try {
+      this.dependencies.store.orchestration.queue.cancel({
+        conversationId: parentConversationId,
+        itemId,
+        reason: "withdrawn",
+      });
+      this.dependencies.broadcastConversationShell?.(parentConversationId);
+      this.dependencies.broadcastSnapshot?.();
+    } catch (error) {
+      if (!(error instanceof OrchestrationConflict)) throw error;
+    }
+    return true;
+  }
+
+  withdrawQueuedWake(childConversationId: string, requestId?: string): void {
+    const managed = this.dependencies.store.agentThreadManagement.managed(childConversationId);
+    const parentConversationId = managed?.sourceConversationId;
+    if (!parentConversationId) return;
+
+    const active = this.dependencies.store.orchestration.queue.listActive(parentConversationId);
+    let withdrew = false;
+    for (const item of active) {
+      if (item.state !== "waiting" && item.state !== "blocked") continue;
+      if (!item.attribution || !("childQuestionWake" in item.attribution)) continue;
+      const wake = item.attribution.childQuestionWake;
+      if (wake.childConversationId !== childConversationId) continue;
+      if (requestId !== undefined && wake.requestId !== requestId) continue;
+      try {
+        this.dependencies.store.orchestration.queue.cancel({
+          conversationId: parentConversationId,
+          itemId: item.id,
+          reason: "withdrawn",
+        });
+        withdrew = true;
+      } catch (error) {
+        if (!(error instanceof OrchestrationConflict)) throw error;
+      }
+    }
+    if (withdrew) {
+      this.dependencies.broadcastConversationShell?.(parentConversationId);
+      this.dependencies.broadcastSnapshot?.();
+    }
+  }
+
+  private findPendingChildRequest(wake: ChildQuestionWakeAttribution): AgentInputRequest | undefined {
+    const direct = this.dependencies.pendingInputs.get(wake.requestId);
+    if (
+      direct
+      && direct.id === wake.requestId
+      && direct.conversationId === wake.childConversationId
+      && direct.runId === wake.childRunId
+    ) {
+      return direct;
+    }
+    for (const candidate of this.dependencies.pendingInputs.values()) {
+      if (
+        candidate.id === wake.requestId
+        && candidate.conversationId === wake.childConversationId
+        && candidate.runId === wake.childRunId
+      ) {
+        return candidate;
+      }
+    }
+    return undefined;
   }
 
   private automaticWakesEnabled(): boolean {

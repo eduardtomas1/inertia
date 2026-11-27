@@ -140,7 +140,8 @@ export function projectQueueEvent(
         && !(payload.attribution && "delegatedCompletion" in payload.attribution)) {
         throw new OrchestrationConflict("scope-conflict");
       }
-      if (payload.kind === "message" && payload.attribution !== undefined) {
+      if (payload.kind === "message" && payload.attribution !== undefined
+        && !("scheduledTask" in payload.attribution) && !("childQuestionWake" in payload.attribution)) {
         throw new OrchestrationConflict("scope-conflict");
       }
       const activeItems = readActiveItems(read, envelope, state.activeItemIds);
@@ -204,6 +205,7 @@ export function projectQueueEvent(
         queueHeld,
         ...(payload.steerWhenReadyRunId !== undefined ? { steerWhenReadyRunId: payload.steerWhenReadyRunId } : {}),
         ...(payload.freshContext !== undefined ? { freshContext: payload.freshContext } : {}),
+        ...(payload.bootAutoResend !== undefined ? { bootAutoResend: payload.bootAutoResend } : {}),
         requestedAt: payload.requestedAt,
         editedAt: null,
         state: initialState,
@@ -319,12 +321,16 @@ export function projectQueueEvent(
       for (const itemId of itemIds) {
         if (!activeSet.has(itemId)) throw new OrchestrationConflict("revision-conflict");
         const item = readItem(read, envelope, itemId);
-        if (!item.queueHeld) {
+        if (!item.queueHeld || (cause === "H1-stop" && item.bootAutoResend)) {
           transitioned += 1;
+          const { bootAutoResend: _clearedResend, ...withoutResend } = item;
           writes.push({
             kind: QUEUE_ITEM_PROJECTION,
             id: item.id,
-            value: queueItemProjectionSchema.parse({ ...item, queueHeld: true }),
+            value: queueItemProjectionSchema.parse({
+              ...(cause === "H1-stop" ? withoutResend : item),
+              queueHeld: true,
+            }),
           });
         }
       }
@@ -337,19 +343,23 @@ export function projectQueueEvent(
     }
 
     case "queue.items-released": {
-      const { itemIds } = event.payload;
+      const { itemIds, bootAutoResend } = event.payload;
       const activeSet = new Set(state.activeItemIds);
       const writes: ProjectionWrite[] = [];
       let transitioned = 0;
       for (const itemId of itemIds) {
         if (!activeSet.has(itemId)) throw new OrchestrationConflict("revision-conflict");
         const item = readItem(read, envelope, itemId);
-        if (item.queueHeld) {
+        if (item.queueHeld || (bootAutoResend === true && item.bootAutoResend !== true)) {
           transitioned += 1;
           writes.push({
             kind: QUEUE_ITEM_PROJECTION,
             id: item.id,
-            value: queueItemProjectionSchema.parse({ ...item, queueHeld: false }),
+            value: queueItemProjectionSchema.parse({
+              ...item,
+              queueHeld: false,
+              ...(bootAutoResend === true ? { bootAutoResend: true } : {}),
+            }),
           });
         }
       }
@@ -507,6 +517,7 @@ export function projectQueueEvent(
         ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
         queuePosition: null,
         queueHeld: payload.queueHeld,
+        ...(payload.bootAutoResend !== undefined ? { bootAutoResend: payload.bootAutoResend } : {}),
         requestedAt: payload.requestedAt,
         editedAt: existing?.editedAt ?? null,
         state: "waiting",

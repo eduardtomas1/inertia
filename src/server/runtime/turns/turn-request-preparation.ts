@@ -73,6 +73,7 @@ import {
   type PromptInstructionDeliveries,
 } from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
+import { withAgentSenderNote } from "../agent-sender-note";
 import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
 import {
@@ -430,12 +431,35 @@ export function claudeSpendLimitApplies(route: {
     );
 }
 
+const ACCESS_RANK: Record<Conversation["accessMode"], number> = {
+  supervised: 0,
+  "auto-edit": 1,
+  full: 2,
+};
+
+function applyScheduledModes(
+  conversation: Conversation,
+  scheduled: QueueTurnRequest["scheduledDelivery"],
+): Conversation {
+  if (!scheduled) return conversation;
+  const accessMode = ACCESS_RANK[scheduled.accessMode] < ACCESS_RANK[conversation.accessMode]
+    ? scheduled.accessMode
+    : conversation.accessMode;
+  const interactionMode = conversation.interactionMode === "plan" || scheduled.interactionMode === "plan"
+    ? "plan"
+    : "build";
+  return { ...conversation, accessMode, interactionMode };
+}
+
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
   replacedBacking?: ReplacedBacking,
 ): ResolvedTurnRequest {
-  const conversation = dependencies.store.conversation(request.conversationId);
+  const conversation = applyScheduledModes(
+    dependencies.store.conversation(request.conversationId),
+    request.scheduledDelivery,
+  );
   const attachments = [...(request.attachments ?? [])];
   const providerInfo = dependencies.hooks.providerInfo();
   const hasSelectionOverride = request.modelSelectionOverride !== undefined
@@ -670,18 +694,19 @@ export function resolveTurnRequest(
     )
     ? staleProviderSessionDecision()
     : resolvedContinuation;
+  const forceFreshContext = request.scheduledDelivery?.freshContext === true;
   // Only a turn that would resume the backing's native session (T3 checks at the native resume). A goal start
   // withholds its prompt and a fresh session gets no history without one, so it resumes, as with exhaustion.
-  if (route.providerId === "codex" && continuation.action === "resume-session" && reusableBacking
+  if (!forceFreshContext && route.providerId === "codex" && continuation.action === "resume-session" && reusableBacking
     && replacedBacking === undefined && request.goalStart === undefined
     && resumeSessionId === reusableBacking.nativeSessionId
     && dependencies.store.orchestration.rejectedNativeHistorySession(conversation.id, reusableBacking.providerInstanceId)
       === reusableBacking.nativeSessionId) {
     return replaceRejectedHistorySession(dependencies, request, reusableBacking);
   }
-  const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
+  const resumesImportedCodex = !forceFreshContext && continuation.action === "resume-session" && route.providerId === "codex"
     && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) !== null;
-  const canResume = continuation.action === "resume-session";
+  const canResume = !forceFreshContext && continuation.action === "resume-session";
   const sessionOrigin = canResume
     ? dependencies.store.orchestration.backings.sessionOriginWorkspaceKey(conversation.id, resumeSessionId!) : null;
   const nativeContinuation = canResume ? dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
@@ -867,6 +892,7 @@ export function resolveTurnRequest(
     ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) !== null)
     : null;
   const startsFreshInEstablishedChat = !canResume
+    && !forceFreshContext
     && (continuation.reasonCode !== "first-turn"
       || (dependencies.store.orchestration.forks.get(conversation.id)?.inheritedItems ?? 0) > 0)
     && request.goalStart === undefined;
@@ -940,9 +966,21 @@ export function resolveTurnRequest(
   ) {
     throw new ProviderSwitchBackgroundWorkError();
   }
+  const applyScheduledSenderNote = (assembledTurn: ReturnType<typeof assembleOnFreshSession>) => {
+    const scheduled = request.scheduledDelivery;
+    if (!scheduled) return assembledTurn;
+    const source = { conversationId: scheduled.taskId, title: scheduled.title, kind: "scheduled" as const };
+    return {
+      ...assembledTurn,
+      executionPrompt: withAgentSenderNote(assembledTurn.executionPrompt, source),
+      ...(assembledTurn.nativeHistory
+        ? { nativeHistory: { ...assembledTurn.nativeHistory, prompt: withAgentSenderNote(assembledTurn.nativeHistory.prompt, source) } }
+        : {}),
+    };
+  };
   let assembled: ReturnType<typeof assembleOnFreshSession>;
   try {
-    assembled = startsFreshInEstablishedChat ? assembleOnFreshSession() : assembleOnResumedSession();
+    assembled = applyScheduledSenderNote(startsFreshInEstablishedChat ? assembleOnFreshSession() : assembleOnResumedSession());
   } catch (error) {
     if (error instanceof PortableHistoryBudgetError && deliversDelta && !startsFreshInEstablishedChat
       && replacedBacking === undefined) {
@@ -958,6 +996,7 @@ export function resolveTurnRequest(
     movedBacking?.nativeSessionId,
     localBacking?.status === "retired" ? localBacking.nativeSessionId : undefined,
     continuation.reasonCode === "stale-provider-session" ? resumeSessionId : undefined,
+    forceFreshContext ? resumeSessionId : undefined,
   ].filter((sessionId): sessionId is string => typeof sessionId === "string"))];
   const providerSessionInvalidation = !canResume
     && conversationSessionForRoute
@@ -1161,7 +1200,7 @@ export function resolveTurnRequest(
           sessionAfter: canResume ? resumeSessionId : null,
           nativeHistory: contextHandoff ? assembled.nativeHistory ?? null : null,
           freshSessionRequest: canResume && request.goalStart === undefined && !providerCommand
-            ? assembleOnFreshSession
+            ? (excludedMessageId) => applyScheduledSenderNote(assembleOnFreshSession(excludedMessageId))
             : null,
           ...(replacedSessionIds.length > 0 ? { replacedSessionIds } : {}),
           lastUsage: null,

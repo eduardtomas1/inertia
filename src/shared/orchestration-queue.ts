@@ -127,9 +127,27 @@ export const queueItemDeliverySchema = z.strictObject({
   deliveredAt: timestamp,
 });
 
+export const scheduledTaskQueueAttributionSchema = z.strictObject({
+  taskId: id,
+  runId: id,
+  title: z.string().trim().min(1).max(160),
+  interactionMode: z.enum(["build", "plan"]),
+  accessMode: z.enum(["supervised", "auto-edit", "full"]),
+});
+export type ScheduledTaskQueueAttribution = z.infer<typeof scheduledTaskQueueAttributionSchema>;
+
+export const childQuestionWakeAttributionSchema = z.strictObject({
+  childConversationId: id,
+  childRunId: id,
+  requestId: id,
+});
+export type ChildQuestionWakeAttribution = z.infer<typeof childQuestionWakeAttributionSchema>;
+
 export const queueItemAttributionSchema = z.union([
   z.strictObject({ watcherNote: watcherNoteAttributionSchema }),
   z.strictObject({ delegatedCompletion: delegatedCompletionAttributionSchema }),
+  z.strictObject({ scheduledTask: scheduledTaskQueueAttributionSchema }),
+  z.strictObject({ childQuestionWake: childQuestionWakeAttributionSchema }),
 ]);
 
 export const queueItemProjectionSchema = z.strictObject({
@@ -153,6 +171,7 @@ export const queueItemProjectionSchema = z.strictObject({
   queueHeld: z.boolean(),
   steerWhenReadyRunId: id.optional(),
   freshContext: z.literal(true).optional(),
+  bootAutoResend: z.literal(true).optional(),
   requestedAt: timestamp,
   editedAt: timestamp.nullable(),
   state: z.enum(QUEUE_ITEM_STATES),
@@ -215,6 +234,7 @@ export const queueEventSchema = z.discriminatedUnion("type", [
       skipHoldInheritance: z.literal(true).optional(),
       steerWhenReadyRunId: id.optional(),
       freshContext: z.literal(true).optional(),
+      bootAutoResend: z.literal(true).optional(),
       requestedAt: timestamp,
       attribution: queueItemAttributionSchema.optional(),
       origin: z.enum(QUEUE_ITEM_ORIGINS).optional(),
@@ -262,6 +282,7 @@ export const queueEventSchema = z.discriminatedUnion("type", [
     payload: z.strictObject({
       itemIds: uniqueIdList(1, MAX_QUEUED_ACTIVE_ITEMS),
       cause: z.enum(QUEUE_RELEASE_CAUSES),
+      bootAutoResend: z.literal(true).optional(),
     }),
   }),
   z.strictObject({
@@ -315,6 +336,7 @@ export const queueEventSchema = z.discriminatedUnion("type", [
       deviceId: id.optional(),
       requestedAt: timestamp,
       queueHeld: z.boolean(),
+      bootAutoResend: z.literal(true).optional(),
       placement: queueEnqueuePlacementSchema.optional(),
     }),
   }),

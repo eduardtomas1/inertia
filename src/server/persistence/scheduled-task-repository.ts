@@ -518,6 +518,19 @@ export class ScheduledTaskRepository {
     return row ? runFromRow(row) : null;
   }
 
+  listActiveRuns(): ScheduledTaskRun[] {
+    const rows = this.database.prepare(`
+      SELECT ${RUN_COLUMNS}
+      FROM scheduled_task_runs
+      WHERE state IN ('claimed', 'queued', 'running')
+      ORDER BY claimed_at ASC, id ASC
+    `).all() as ScheduledTaskRunRow[];
+    return rows.flatMap((row) => {
+      const run = runFromRow(row);
+      return run ? [run] : [];
+    });
+  }
+
   hasActiveQueuedOrRunningOccurrence(taskId: string): boolean {
     const row = this.database.prepare(`
       SELECT 1

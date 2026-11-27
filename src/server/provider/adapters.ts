@@ -29,6 +29,12 @@ import {
 
 const MAX_PROMPT_CHARS = 256 * 1024;
 const MAX_SKILL_COUNT = 8;
+const CODEX_REASONING_SUMMARIES = ["auto", "concise", "detailed", "none"] as const;
+
+function isCodexReasoningSummary(value: unknown): boolean {
+  return typeof value === "string"
+    && (CODEX_REASONING_SUMMARIES as readonly string[]).includes(value);
+}
 
 function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
@@ -84,7 +90,16 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError("invalid_input", "The continuation identity is invalid.");
   }
   const providerOptionKeys = Object.keys(input.modelSelection.providerOptions);
+  const hasFastModeKey = Object.prototype.hasOwnProperty.call(
+    input.modelSelection.providerOptions,
+    "fastMode",
+  );
+  const hasReasoningSummaryKey = Object.prototype.hasOwnProperty.call(
+    input.modelSelection.providerOptions,
+    "reasoningSummary",
+  );
   const fastMode = input.modelSelection.providerOptions.fastMode;
+  const reasoningSummary = input.modelSelection.providerOptions.reasoningSummary;
   const expectedFastMode = input.providerId === "codex"
     ? "priority"
     : input.providerId === "claude"
@@ -95,10 +110,12 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     && input.harnessId === (input.providerId === "codex"
       ? "codex-app-server"
       : "claude-agent-sdk");
+  const nativeCodexRoute = input.providerId === "codex"
+    && input.harnessId === "codex-app-server"
+    && input.backendProfile.id === providerNativeBackendProfile("codex").id;
   if (
-    providerOptionKeys.length > 1
-    || (providerOptionKeys.length === 1 && providerOptionKeys[0] !== "fastMode")
-    || (providerOptionKeys.length === 1 && typeof fastMode !== "string")
+    providerOptionKeys.some((key) => key !== "fastMode" && key !== "reasoningSummary")
+    || (hasFastModeKey && typeof fastMode !== "string")
     || (
       fastMode !== undefined
       && (
@@ -120,6 +137,15 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The provider-native Fast mode route is invalid.",
+    );
+  }
+  if (
+    hasReasoningSummaryKey
+    && (!nativeCodexRoute || !isCodexReasoningSummary(reasoningSummary))
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The Codex reasoning summary option is invalid.",
     );
   }
   if (

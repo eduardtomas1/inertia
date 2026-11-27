@@ -377,7 +377,7 @@ function routeMessageSend(
     );
   }
   if (dependencies.turns.isActive(conversation.id)) {
-    if (scheduledDispatch || dependencies.watcherDelivery || dependencies.delegatedDelivery) {
+    if (scheduledDispatch || dependencies.watcherDelivery || dependencies.delegatedDelivery || dependencies.scheduledDelivery) {
       throw new RuntimeRequestError("This chat is busy. Resume it manually when it is ready.");
     }
     enterStage("follow-up-preparation");
@@ -870,6 +870,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
           ...(dependencies.watcherDelivery ? { watcherNote: dependencies.watcherDelivery.note, internalInstructions: [dependencies.watcherDelivery.instruction] } : {}),
           ...(dependencies.delegatedDelivery ? { delegatedCompletion: dependencies.delegatedDelivery.attribution,
             internalInstructions: [dependencies.delegatedDelivery.instruction] } : {}),
+          ...(dependencies.scheduledDelivery ? { scheduledDelivery: dependencies.scheduledDelivery } : {}),
         }, () => {
           durableTurnPersisted = true;
           acceptRetainedAttachments();

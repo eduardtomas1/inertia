@@ -4,13 +4,16 @@ import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 
+import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import type {
+  AgentTurn,
   ClientCommand,
   Conversation,
   Project,
   RuntimeMutationEvent,
   ServerEvent,
 } from "../../src/shared/contracts";
+import type { QueueItemProjection } from "../../src/shared/orchestration-queue";
 import { modelSelectionSchema, providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS,
@@ -24,6 +27,8 @@ import {
 import { RecordNotFoundError } from "../../src/server/persistence/errors";
 import { RuntimeRequestError, USER_CORRECTABLE_REQUEST } from "../../src/server/runtime-errors";
 import { createScheduledTaskCommandHandler } from "../../src/server/runtime/commands/scheduled-task-commands";
+import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
 import {
   SCHEDULED_TASK_MISSED_BOOT_ERROR,
   ScheduledTaskService,
@@ -32,6 +37,13 @@ import {
   type ScheduledTaskStoreLike,
 } from "../../src/server/runtime/scheduled-tasks/scheduled-task-service";
 import { hold, release, UPDATE_HOLD_MESSAGE } from "../../src/server/runtime/update-hold";
+import {
+  cleanupTurnControllerTestDirectories,
+  createTurnControllerTestRuntime,
+  flushTurnControllerTestPromises,
+  turnControllerTestIdentity,
+  turnControllerTestProviderInfo,
+} from "../support/turn-controller-runtime";
 
 const PROJECT_ID = "proj-1";
 const OTHER_PROJECT_ID = "proj-2";
@@ -146,6 +158,13 @@ class InMemoryScheduledTaskRepository implements ScheduledTaskRepositoryLike {
       .filter((run) => run.taskId === taskId)
       .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt, "en"))
       .slice(0, limit)
+      .map((run) => ({ ...run }));
+  }
+
+  listActiveRuns(): ScheduledTaskRun[] {
+    return [...this.runs.values()]
+      .filter((run) => run.state === "claimed" || run.state === "queued" || run.state === "running")
+      .sort((left, right) => left.claimedAt.localeCompare(right.claimedAt, "en"))
       .map((run) => ({ ...run }));
   }
 
@@ -401,6 +420,7 @@ function createHarness(initialIso = "2026-05-10T10:00:00.000Z") {
 
 afterEach(() => {
   release();
+  return cleanupTurnControllerTestDirectories();
 });
 
 describe("ScheduledTaskService", () => {
@@ -587,7 +607,7 @@ describe("ScheduledTaskService", () => {
   it("handles bound, bound+freshSession, unbound+freshSession, and unbound+new-per-run thread modes", async () => {
     const h = createHarness("2026-05-10T10:00:00.000Z");
 
-    // 1) Bound + freshSession: reuses conversation, calls resetConversationSession, sets freshContext: true
+    // 1) Bound + freshSession: reuses conversation, does NOT prematurely reset session at enqueue, sets freshContext: true
     const boundConv = h.addConversation();
     const boundFresh = h.service.create({
       projectId: PROJECT_ID,
@@ -599,10 +619,10 @@ describe("ScheduledTaskService", () => {
     });
     const r1 = await h.service.runNow(boundFresh.id);
     expect(r1.conversationId).toBe(boundConv.id);
-    expect(h.resetCalls).toEqual([boundConv.id]);
+    expect(h.resetCalls).toEqual([]);
     expect(h.dispatched[0]?.freshContext).toBe(true);
 
-    // 2) Unbound + freshSession: first run creates conversation and binds it; second run reuses and resets it
+    // 2) Unbound + freshSession: first run creates conversation and binds it; second run reuses with freshContext: true
     const unboundFresh = h.service.create({
       projectId: PROJECT_ID,
       title: "Dedicated fresh",
@@ -615,7 +635,8 @@ describe("ScheduledTaskService", () => {
     expect(h.repository.get(unboundFresh.id)?.boundConversationId).toBe(r2a.conversationId);
     expect(h.dispatched[1]?.freshContext).toBe(true);
 
-    // Finish first run so second run can execute
+    // Bind turn and finish first run so second run can execute
+    h.service.bindRunTurn(r2a.run.id, "turn-2a");
     h.service.onTurnSettled({
       id: "turn-2a",
       conversationId: r2a.conversationId,
@@ -627,7 +648,8 @@ describe("ScheduledTaskService", () => {
 
     const r2b = await h.service.runNow(unboundFresh.id);
     expect(r2b.conversationId).toBe(r2a.conversationId);
-    expect(h.resetCalls).toContain(r2a.conversationId);
+    expect(h.resetCalls).toEqual([]);
+    expect(h.dispatched[2]?.freshContext).toBe(true);
 
     // 3) Unbound + freshSession=false: creates a fresh conversation on every run
     const perRun = h.service.create({
@@ -639,6 +661,7 @@ describe("ScheduledTaskService", () => {
       freshSession: false,
     });
     const r3a = await h.service.runNow(perRun.id);
+    h.service.bindRunTurn(r3a.run.id, "turn-3a");
     h.service.onTurnSettled({
       id: "turn-3a",
       conversationId: r3a.conversationId,
@@ -978,5 +1001,458 @@ describe("ScheduledTaskService", () => {
     expect(onSettledSpy).toHaveBeenCalledTimes(1);
     expect(h.repository.get(task.id)?.lastRunStatus).toBe("completed");
     expect(h.service.providerContentForQueueItem(queueItemId)).toBeNull();
+  });
+
+  it("S24: unrelated turn completing on a bound chat does not settle a waiting scheduled run or free its slot", async () => {
+    const h = createHarness("2026-05-10T10:00:00.000Z");
+    const conv = h.addConversation();
+    const task = h.service.create({
+      projectId: PROJECT_ID,
+      title: "Bound hourly check",
+      prompt: "Check build",
+      schedule: { type: "interval", everyMs: 60_000 },
+      boundConversationId: conv.id,
+    });
+
+    const ran = await h.service.runNow(task.id);
+    expect(ran.run.state).toBe("queued");
+
+    // An unrelated user turn completes on the same conversation while scheduled run is still waiting
+    h.service.onTurnSettled({
+      id: "unrelated-turn-1",
+      conversationId: conv.id,
+      status: "completed",
+      terminalReason: null,
+      completedAt: "2026-05-10T10:00:05.000Z",
+      updatedAt: "2026-05-10T10:00:05.000Z",
+    });
+
+    // Scheduled run remains queued and its occurrence slot is still occupied
+    expect(h.repository.getRun(ran.run.id)?.state).toBe("queued");
+    expect(h.repository.hasActiveQueuedOrRunningOccurrence(task.id)).toBe(true);
+    await expect(h.service.runNow(task.id)).rejects.toThrow(/active queued or running/i);
+
+    // Binding the real turnId and settling it completes the run and frees the slot
+    h.service.bindRunTurn(ran.run.id, "scheduled-turn-1");
+    expect(h.repository.getRun(ran.run.id)?.state).toBe("running");
+    h.service.onTurnSettled({
+      id: "scheduled-turn-1",
+      conversationId: conv.id,
+      status: "completed",
+      terminalReason: null,
+      completedAt: "2026-05-10T10:00:15.000Z",
+      updatedAt: "2026-05-10T10:00:15.000Z",
+    });
+    expect(h.repository.getRun(ran.run.id)?.state).toBe("completed");
+    expect(h.repository.hasActiveQueuedOrRunningOccurrence(task.id)).toBe(false);
+  });
+
+  it("S25: boot recovery reconciles stranded claimed, orphaned/cancelled/blocked/delivered queued, and terminal running runs", () => {
+    const now = new Date("2026-05-10T12:00:00.000Z");
+    const repo = new InMemoryScheduledTaskRepository();
+    const queueItems = new Map<string, QueueItemProjection>();
+    const turnsById = new Map<string, Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">>();
+    const convId = randomUUID();
+
+    const store: ScheduledTaskStoreLike = {
+      project: () => ({ id: PROJECT_ID, name: "Alpha" }),
+      conversation: () => ({
+        id: convId,
+        projectId: PROJECT_ID,
+        title: "Bound",
+        archivedAt: null,
+        accessMode: "full",
+        interactionMode: "build",
+        modelSelection: MODEL_SELECTION,
+      }),
+      agentTurn: (turnId) => {
+        const found = turnsById.get(turnId);
+        if (!found) throw new RecordNotFoundError(`Turn ${turnId} not found`);
+        return found;
+      },
+      orchestration: {
+        queue: {
+          enqueue: () => { throw new Error("not used"); },
+          getItem: (itemId) => queueItems.get(itemId) ?? null,
+        },
+      },
+    };
+
+    const service = new ScheduledTaskService({
+      repository: repo,
+      store,
+      now: () => now,
+      broadcast: () => undefined,
+      createConversation: async () => ({ id: convId, projectId: PROJECT_ID, title: "New", archivedAt: null }),
+    });
+
+    const mkTask = (title: string) => repo.create({
+      id: randomUUID(),
+      projectId: PROJECT_ID,
+      title,
+      prompt: "Check",
+      schedule: { type: "interval", everyMs: 60_000 },
+      nextRunAt: "2026-05-10T12:05:00.000Z",
+      now: "2026-05-10T11:00:00.000Z",
+    });
+
+    const mkQueueItem = (itemId: string, state: QueueItemProjection["state"], turnId?: string): QueueItemProjection => ({
+      id: itemId,
+      threadId: convId,
+      projectId: PROJECT_ID,
+      kind: "message",
+      userMessageId: null,
+      createdBy: "system",
+      creationSource: "server",
+      contentRef: { chars: 5, editRevision: 0 },
+      attachmentIds: [],
+      queuePosition: state === "waiting" ? 1 : null,
+      queueHeld: false,
+      requestedAt: "2026-05-10T11:50:00.000Z",
+      editedAt: null,
+      state,
+      ...(state === "cancelled" ? { cancelReason: "user" as const } : {}),
+      ...(state === "blocked" ? { blockedReason: "dispatch-failed", detail: "Provider offline" } : {}),
+      dispatchOrdinal: state === "delivered" ? 1 : 0,
+      ...(turnId ? {
+        delivery: {
+          mode: "run" as const,
+          runId: randomUUID(),
+          attemptId: randomUUID(),
+          turnId,
+          messageId: randomUUID(),
+          deliveredAt: "2026-05-10T11:51:00.000Z",
+        },
+      } : {}),
+    });
+
+    // 1. Stranded claimed (no queueItemId)
+    const tClaimed = mkTask("Claimed");
+    const rClaimed = repo.claimRun({
+      runId: randomUUID(), taskId: tClaimed.id, claimKey: "c1", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tClaimed.nextRunAt,
+    })!;
+
+    // 2. Orphaned queued (queueItem missing)
+    const tOrphan = mkTask("Orphan");
+    const rOrphan = repo.claimRun({
+      runId: randomUUID(), taskId: tOrphan.id, claimKey: "c2", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tOrphan.nextRunAt,
+    })!;
+    repo.updateRun(rOrphan.id, { state: "queued", conversationId: convId, queueItemId: "missing-q", updatedAt: "2026-05-10T11:50:00.000Z" });
+
+    // 3. Cancelled queued
+    const tCancelled = mkTask("Cancelled");
+    const rCancelled = repo.claimRun({
+      runId: randomUUID(), taskId: tCancelled.id, claimKey: "c3", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tCancelled.nextRunAt,
+    })!;
+    const qCancelledId = randomUUID();
+    queueItems.set(qCancelledId, mkQueueItem(qCancelledId, "cancelled"));
+    repo.updateRun(rCancelled.id, { state: "queued", conversationId: convId, queueItemId: qCancelledId, updatedAt: "2026-05-10T11:50:00.000Z" });
+
+    // 4. Blocked queued
+    const tBlocked = mkTask("Blocked");
+    const rBlocked = repo.claimRun({
+      runId: randomUUID(), taskId: tBlocked.id, claimKey: "c4", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tBlocked.nextRunAt,
+    })!;
+    const qBlockedId = randomUUID();
+    queueItems.set(qBlockedId, mkQueueItem(qBlockedId, "blocked"));
+    repo.updateRun(rBlocked.id, { state: "queued", conversationId: convId, queueItemId: qBlockedId, updatedAt: "2026-05-10T11:50:00.000Z" });
+
+    // 5. Delivered queued whose turn already completed
+    const tDelivered = mkTask("Delivered");
+    const rDelivered = repo.claimRun({
+      runId: randomUUID(), taskId: tDelivered.id, claimKey: "c5", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tDelivered.nextRunAt,
+    })!;
+    const qDeliveredId = randomUUID();
+    const deliveredTurnId = randomUUID();
+    queueItems.set(qDeliveredId, mkQueueItem(qDeliveredId, "delivered", deliveredTurnId));
+    turnsById.set(deliveredTurnId, {
+      id: deliveredTurnId, conversationId: convId, status: "completed",
+      terminalReason: null, completedAt: "2026-05-10T11:52:00.000Z", updatedAt: "2026-05-10T11:52:00.000Z",
+    });
+    repo.updateRun(rDelivered.id, { state: "queued", conversationId: convId, queueItemId: qDeliveredId, updatedAt: "2026-05-10T11:50:00.000Z" });
+
+    // 6. Running run whose turn is already interrupted
+    const tRunning = mkTask("Running");
+    const rRunning = repo.claimRun({
+      runId: randomUUID(), taskId: tRunning.id, claimKey: "c6", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tRunning.nextRunAt,
+    })!;
+    const runningTurnId = randomUUID();
+    turnsById.set(runningTurnId, {
+      id: runningTurnId, conversationId: convId, status: "interrupted",
+      terminalReason: "Runtime restarted", completedAt: "2026-05-10T11:55:00.000Z", updatedAt: "2026-05-10T11:55:00.000Z",
+    });
+    repo.updateRun(rRunning.id, { state: "running", conversationId: convId, turnId: runningTurnId, updatedAt: "2026-05-10T11:51:00.000Z" });
+
+    // 7. Live queue-item cancellation via onRunQueueCancelled
+    const tLiveCancel = mkTask("LiveCancel");
+    const rLiveCancel = repo.claimRun({
+      runId: randomUUID(), taskId: tLiveCancel.id, claimKey: "c7", trigger: "manual",
+      scheduledFor: null, claimedAt: "2026-05-10T11:50:00.000Z", nextRunAtAfterClaim: tLiveCancel.nextRunAt,
+    })!;
+    const qWaitingId = randomUUID();
+    queueItems.set(qWaitingId, mkQueueItem(qWaitingId, "waiting"));
+    repo.updateRun(rLiveCancel.id, { state: "queued", conversationId: convId, queueItemId: qWaitingId, updatedAt: "2026-05-10T11:50:00.000Z" });
+
+    service.start();
+    try {
+      expect(repo.getRun(rClaimed.id)?.state).toBe("failed");
+      expect(repo.getRun(rOrphan.id)?.state).toBe("failed");
+      expect(repo.getRun(rCancelled.id)?.state).toBe("skipped");
+      expect(repo.getRun(rBlocked.id)?.state).toBe("failed");
+      expect(repo.getRun(rDelivered.id)?.state).toBe("completed");
+      expect(repo.getRun(rDelivered.id)?.turnId).toBe(deliveredTurnId);
+      expect(repo.get(tDelivered.id)?.lastRunStatus).toBe("completed");
+      expect(repo.getRun(rRunning.id)?.state).toBe("failed");
+      expect(repo.get(tRunning.id)?.lastRunStatus).toBe("failed");
+      expect(repo.get(tRunning.id)?.consecutiveFailures).toBe(1);
+      // Waiting item stays queued across boot until cancelled or dispatched
+      expect(repo.getRun(rLiveCancel.id)?.state).toBe("queued");
+
+      // Cancelling the queue item immediately reconciles the run and frees the slot
+      queueItems.set(qWaitingId, mkQueueItem(qWaitingId, "cancelled"));
+      service.onRunQueueCancelled(rLiveCancel.id, "Removed from the chat queue.");
+      expect(repo.getRun(rLiveCancel.id)?.state).toBe("skipped");
+      expect(repo.hasActiveQueuedOrRunningOccurrence(tLiveCancel.id)).toBe(false);
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("S23 + S25 + S26 + S32: dispatches scheduled tasks in a new chat, enforces min(task, chat) modes, applies sender note and freshContext at dispatch, and respects stop/update hold", async () => {
+    let queue: ReturnType<typeof createQueuedMessageRuntime> | undefined;
+    let service: ScheduledTaskService | undefined;
+    const runtime = await createTurnControllerTestRuntime({
+      onTurnSettled: (turn) => {
+        queue?.onTurnSettled(turn);
+        service?.onTurnSettled(turn);
+      },
+    });
+    const attachments = await ConversationAttachmentStore.open(runtime.directory);
+    const abort = new AbortController();
+    const tasks = new Set<Promise<unknown>>();
+    try {
+      const dependencies: TurnInteractionCommandDependencies = {
+        store: runtime.store,
+        turns: runtime.controller,
+        conversationAttachments: attachments,
+        backendProfileController: {
+          validateSelection: (selection: unknown) => selection,
+          isExternalSelection: () => false,
+          readiness: async () => null,
+        } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+        isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+        workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+        pendingApprovals: new Map(),
+        pendingInputs: new Map(),
+        dataDirectory: runtime.directory,
+        enableProviders: true,
+        attachmentResolver: null,
+        generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+        workflows: {
+          resolveTurnSkills: async () => ({ inputs: [], routeKey: null }),
+          assertTurnSkillsCurrent: () => undefined,
+        } as unknown as TurnInteractionCommandDependencies["workflows"],
+        providerTerminalResumes: {
+          isActive: () => false,
+          acquireWhenAvailable: async () => true,
+          release: () => undefined,
+        } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+        providerInfo: () => [turnControllerTestProviderInfo()],
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        send: () => undefined,
+      };
+
+      queue = createQueuedMessageRuntime(dependencies, {
+        signal: abort.signal,
+        track: (operation) => {
+          const op = operation();
+          tasks.add(op);
+          void op.finally(() => tasks.delete(op));
+          return op;
+        },
+        onScheduledDispatched: (runId, turnId) => service?.bindRunTurn(runId, turnId),
+        onScheduledCancelled: (runId, reason) => service?.onRunQueueCancelled(runId, reason),
+      });
+
+      service = new ScheduledTaskService({
+        repository: runtime.store.scheduledTasks,
+        store: runtime.store,
+        createConversation: async (input) => runtime.store.createConversation(input.projectId, input.title, {
+          interactionMode: input.interactionMode,
+          accessMode: input.accessMode,
+          activate: false,
+        }),
+        messageQueue: () => queue,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+
+      const drain = async () => {
+        await flushTurnControllerTestPromises();
+        while (tasks.size > 0) await Promise.allSettled(tasks);
+        await flushTurnControllerTestPromises();
+      };
+
+      const projectId = runtime.store.conversation(runtime.conversationId).projectId;
+
+      // 1) S23 + S25 + S32: scheduled task on a brand-new chat (no prior turns) dispatches automatically!
+      const newChatTask = service.create({
+        projectId,
+        title: "Fresh chat schedule",
+        prompt: "Report repo health",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: null,
+        accessMode: "supervised",
+        interactionMode: "plan",
+      });
+      const newChatRun = await service.runNow(newChatTask.id);
+      // S25: queue item persisted atomically with scheduledTask attribution
+      const qItem = runtime.store.orchestration.queue.getItem(newChatRun.run.queueItemId!);
+      expect(qItem?.attribution && "scheduledTask" in qItem.attribution ? qItem.attribution.scheduledTask.runId : null)
+        .toBe(newChatRun.run.id);
+
+      await drain();
+      expect(runtime.provider.runCount).toBe(1);
+      const firstProviderInput = runtime.provider.input!;
+      expect(firstProviderInput.conversationId).toBe(newChatRun.conversationId);
+      // S32: execution prompt carries scheduled sender note while persisted user message stays clean
+      expect(firstProviderInput.prompt).toContain("[Inertia: scheduled task \"Fresh chat schedule\"");
+      expect(firstProviderInput.prompt).toContain("Report repo health");
+      const persistedMessages = runtime.store.conversationDetail(newChatRun.conversationId)?.messages ?? [];
+      expect(persistedMessages.find((m) => m.role === "user")?.content).toBe("Report repo health");
+      expect(runtime.store.scheduledTasks.getRun(newChatRun.run.id)?.state).toBe("running");
+
+      // Complete the turn -> scheduled run settles to completed
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      runtime.provider.resolve({ sessionId: "sched-session-1" });
+      await drain();
+      expect(runtime.store.scheduledTasks.getRun(newChatRun.run.id)?.state).toBe("completed");
+      expect(runtime.store.scheduledTasks.get(newChatTask.id)?.lastRunStatus).toBe("completed");
+
+      // 2) S26 + S32: bound chat (full/build with existing providerSessionId) + task (auto-edit/plan, freshSession: true)
+      // executes at min(task, chat) = (auto-edit, plan) and suppresses native continuation (no sessionId)!
+      runtime.store.updateConversation(runtime.conversationId, {
+        accessMode: "full",
+        interactionMode: "build",
+      });
+      const initialTurn = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Seed session" });
+      runtime.controller.start(initialTurn.turn.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      runtime.provider.resolve({ sessionId: "prior-session-42" });
+      await drain();
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("prior-session-42");
+
+      const restrictedFreshTask = service.create({
+        projectId,
+        title: "Restricted fresh task",
+        prompt: "Review recent diff",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: runtime.conversationId,
+        accessMode: "auto-edit",
+        interactionMode: "plan",
+        freshSession: true,
+      });
+
+      // Hold updates before enqueueing to prove update hold blocks dispatch AND session is NOT prematurely reset at enqueue!
+      hold();
+      const restrictedRun = await service.runNow(restrictedFreshTask.id).catch(() => null);
+      expect(restrictedRun).toBeNull(); // runNow itself rejects under update hold
+      release();
+
+      // Enqueue while conversation is held via H1-stop -> Stop blocks dispatch and session stays intact
+      const dummyId = randomUUID();
+      runtime.store.orchestration.queue.enqueue({
+        conversationId: runtime.conversationId,
+        itemId: dummyId,
+        content: "Held user item",
+        queueHeld: true,
+      });
+      const heldSchedRun = await service.runNow(restrictedFreshTask.id);
+      // Session was NOT prematurely cleared at enqueue time (S32)
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("prior-session-42");
+      await drain();
+      // Still blocked because H1-stop hold was inherited
+      expect(runtime.provider.runCount).toBe(2); // only first scheduled + seed turn
+      expect(runtime.store.scheduledTasks.getRun(heldSchedRun.run.id)?.state).toBe("queued");
+
+      // Removing the queued scheduled item immediately cancels/skips the scheduled run (S25)
+      await queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.remove",
+        requestId: randomUUID(),
+        payload: { conversationId: runtime.conversationId, id: heldSchedRun.run.queueItemId! },
+      });
+      expect(runtime.store.scheduledTasks.getRun(heldSchedRun.run.id)?.state).toBe("skipped");
+
+      // Cancel the held dummy item, then run the restricted fresh task for real!
+      runtime.store.orchestration.queue.cancel({ conversationId: runtime.conversationId, itemId: dummyId, reason: "user" });
+      const liveRestrictedRun = await service.runNow(restrictedFreshTask.id);
+      await drain();
+      expect(runtime.provider.runCount).toBe(3);
+      const restrictedProviderInput = runtime.provider.input!;
+      // S26: executed at min(chat=full/build, task=auto-edit/plan) => auto-edit + plan!
+      expect(restrictedProviderInput.access).toBe("auto-edit");
+      expect(restrictedProviderInput.interactionMode).toBe("plan");
+      // S32: freshContext suppressed native continuation!
+      expect(restrictedProviderInput.sessionId).toBeUndefined();
+      expect(restrictedProviderInput.nativeContinuation).toBeUndefined();
+      expect(restrictedProviderInput.prompt).toContain("[Inertia: scheduled task \"Restricted fresh task\"");
+
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      runtime.provider.resolve({ sessionId: "fresh-session-99" });
+      await drain();
+      expect(runtime.store.scheduledTasks.getRun(liveRestrictedRun.run.id)?.state).toBe("completed");
+
+      // 3) S32: leading $skill stays verbatim in execution prompt (not prefixed with sender note)
+      const skillTask = service.create({
+        projectId,
+        title: "Skill task",
+        prompt: "$deploy check canary",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: runtime.conversationId,
+        accessMode: "full",
+        interactionMode: "build",
+      });
+      const skillRun = await service.runNow(skillTask.id);
+      await drain();
+      expect(runtime.provider.runCount).toBe(4);
+      const skillProviderInput = runtime.provider.input!;
+      expect(skillProviderInput.prompt.startsWith("$deploy check canary")).toBe(true);
+      expect(skillProviderInput.prompt).not.toContain("[Inertia: scheduled task");
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      runtime.provider.resolve({ sessionId: "fresh-session-99" });
+      await drain();
+      expect(runtime.store.scheduledTasks.getRun(skillRun.run.id)?.state).toBe("completed");
+
+      // 4) S23: bootAutoResend=true dispatches automatically on a brand-new chat when unheld
+      const bootResendConv = runtime.store.createConversation(projectId, "Boot resend chat", { activate: false });
+      const bootItemId = randomUUID();
+      runtime.store.orchestration.queue.enqueue({
+        conversationId: bootResendConv.id,
+        itemId: bootItemId,
+        content: "Resend after boot",
+        bootAutoResend: true,
+        queueHeld: false,
+      });
+      await queue.schedule(bootResendConv.id);
+      await drain();
+      expect(runtime.provider.runCount).toBe(5);
+      expect(runtime.provider.input!.conversationId).toBe(bootResendConv.id);
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
+      runtime.provider.resolve({ sessionId: "boot-resend-session" });
+      await drain();
+    } finally {
+      abort.abort();
+      service?.dispose();
+      await runtime.controller.dispose();
+      await attachments.close();
+      runtime.store.close();
+    }
   });
 });

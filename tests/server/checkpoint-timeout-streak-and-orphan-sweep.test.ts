@@ -314,4 +314,71 @@ describe("checkpoint timeout streak, shared-folder contention, and orphaned ref 
       pruneOrphanedCheckpointRefs(root, new Set([liveConvId]), { allowedRoot: outsideRoot }),
     ).rejects.toBeInstanceOf(CheckpointError);
   });
+
+  it("pruneOrphanedCheckpointRefs deletes a symbolic checkpoint ref without dereferencing or deleting its target branch (S30)", async () => {
+    const { root } = createRepo();
+    const liveConvId = randomUUID();
+    const orphanConvId = randomUUID();
+    const mainSha = git(root, "rev-parse", "refs/heads/main");
+    const symRef = `refs/inertia/checkpoints/${orphanConvId}/sym-test`;
+
+    git(root, "symbolic-ref", symRef, "refs/heads/main");
+    expect(git(root, "symbolic-ref", symRef)).toBe("refs/heads/main");
+
+    const sweep = await pruneOrphanedCheckpointRefs(root, new Set([liveConvId]));
+    expect(sweep).toEqual({ scanned: 1, deleted: 1 });
+    expect(refExists(root, symRef)).toBe(false);
+    expect(git(root, "for-each-ref", "--format=%(refname)", symRef)).toBe("");
+    expect(refExists(root, "refs/heads/main")).toBe(true);
+    expect(git(root, "rev-parse", "refs/heads/main")).toBe(mainSha);
+  });
+
+  it("keeps later waiters serialized behind an active capture when a queued waiter aborts (S31)", async () => {
+    const { root, indexes } = createRepo();
+    const convA = randomUUID();
+    const convB = randomUUID();
+    const convC = randomUUID();
+
+    let releaseFirst!: () => void;
+    let firstEntered!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const enteredPromise = new Promise<void>((resolve) => { firstEntered = resolve; });
+
+    let blockedOnce = false;
+    gitControls.onRunGit = async () => {
+      if (!blockedOnce) {
+        blockedOnce = true;
+        firstEntered();
+        await firstGate;
+      }
+    };
+
+    const captureA = createCheckpoint(root, indexes, convA, { phase: "pre-turn" });
+    await enteredPromise;
+    const callsWhileABlocked = gitControls.calls.length;
+
+    const abortB = new AbortController();
+    const captureB = createCheckpoint(root, indexes, convB, {
+      phase: "pre-turn",
+      signal: abortB.signal,
+    });
+    // Ensure B has resolved its workspace key and queued behind A before C queues behind B.
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+
+    const captureC = createCheckpoint(root, indexes, convC, { phase: "pre-turn" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+    expect(gitControls.calls.length).toBe(callsWhileABlocked);
+
+    // Abort B while A is still active: B fails promptly, but C must NOT start while A still holds the workspace lock.
+    abortB.abort();
+    await expect(captureB).rejects.toThrow("Checkpoint operation timed out.");
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(gitControls.calls.length).toBe(callsWhileABlocked);
+
+    // Once A finishes, C proceeds sequentially and succeeds.
+    releaseFirst();
+    const [resultA, resultC] = await Promise.all([captureA, captureC]);
+    expect(refExists(root, resultA.ref)).toBe(true);
+    expect(refExists(root, resultC.ref)).toBe(true);
+  });
 });

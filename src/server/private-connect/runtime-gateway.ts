@@ -24,10 +24,12 @@ import { isTurnCheckpointUnavailableActivity } from "../../shared/turn-checkpoin
 import { htmlRenderContextLine } from "../../shared/html-render-reference";
 import { secretRequestRemoteLine } from "../../node/agent-secrets";
 import {
+  privateConnectPromptSafetyForHarness,
   privateConnectPromptSafetyIsUsable,
   UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
   type PrivateConnectPromptSafety,
 } from "../../shared/private-connect/prompt-safety";
+import type { ScheduledTask } from "../../shared/scheduled-tasks";
 import {
   sanitizePrivateConnectContent,
   sanitizePrivateConnectLabel,
@@ -203,7 +205,17 @@ export class PrivateConnectRuntimeGateway {
       if (!this.dependencies.scheduledTasks) {
         return failedResponse(request.requestId, "unavailable", "Scheduled tasks are not available while the local runtime is restarting.");
       }
-      return await handlePrivateConnectScheduledTaskRequest(subject, request, this.dependencies.scheduledTasks);
+      return await handlePrivateConnectScheduledTaskRequest(
+        subject,
+        request,
+        this.dependencies.scheduledTasks,
+        {
+          conversation: (conversationId) => this.dependencies.conversation(conversationId),
+          isConversationAuthorized: (auth, conversation) => this.authorized(auth, conversation),
+          promptSafetyRejection: (requestId, conversation) => this.promptSafetyRejection(requestId, conversation),
+          promptSafetyForUnboundTask: (requestId, task) => this.unboundScheduledTaskPromptSafetyRejection(requestId, task),
+        },
+      );
     }
     return failedResponse(
       request.requestId,
@@ -682,6 +694,26 @@ export class PrivateConnectRuntimeGateway {
         "forbidden",
         safety.explanation,
       );
+    }
+    return null;
+  }
+
+  private unboundScheduledTaskPromptSafetyRejection(
+    requestId: string,
+    task: ScheduledTask,
+  ): PrivateConnectRuntimeResponse | null {
+    if (task.accessMode !== "supervised") {
+      return failedResponse(
+        requestId,
+        "forbidden",
+        "PrivateConnect prompting requires Supervised access on the desktop.",
+      );
+    }
+    if (task.modelSelection !== null) {
+      const safety = privateConnectPromptSafetyForHarness(task.modelSelection.harnessId);
+      if (!privateConnectPromptSafetyIsUsable(safety)) {
+        return failedResponse(requestId, "forbidden", safety.explanation);
+      }
     }
     return null;
   }

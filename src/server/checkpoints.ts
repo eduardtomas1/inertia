@@ -162,8 +162,16 @@ async function withWorkspaceCaptureLock<T>(
   let release!: () => void;
   const done = new Promise<void>((resolveLock) => { release = resolveLock; });
   workspaceCaptureLocks.set(workspaceKey, { current: slot, tail: done });
+  let acquired = false;
+  const finishLock = (): void => {
+    if (workspaceCaptureLocks.get(workspaceKey)?.tail === done) {
+      workspaceCaptureLocks.delete(workspaceKey);
+    }
+    release();
+  };
   try {
     if (waitFor) await waitForLockTurn(waitFor, signal);
+    acquired = true;
     if (phase === "pre-turn" && predecessor?.outcome === "timed-out") {
       slot.outcome = "timed-out";
       throw new CheckpointUnavailableError(CHECKPOINT_SKIPPED_AFTER_TIMEOUT_MESSAGE);
@@ -177,10 +185,17 @@ async function withWorkspaceCaptureLock<T>(
     }
     throw error;
   } finally {
-    if (workspaceCaptureLocks.get(workspaceKey)?.tail === done) {
-      workspaceCaptureLocks.delete(workspaceKey);
+    if (acquired || !waitFor) {
+      finishLock();
+    } else {
+      const releaseAfterPredecessor = (): void => {
+        if (predecessor?.outcome === "timed-out") {
+          slot.outcome = "timed-out";
+        }
+        finishLock();
+      };
+      void waitFor.then(releaseAfterPredecessor, releaseAfterPredecessor);
     }
-    release();
   }
 }
 
@@ -1165,17 +1180,19 @@ export async function pruneOrphanedCheckpointRefs(
   const hooksDirectory = await mkdtemp(join(tmpdir(), "inertia-checkpoint-hooks-"));
   let deleted = 0;
   try {
-    for (const ref of orphans) {
+    const batchSize = 500;
+    for (let offset = 0; offset < orphans.length; offset += batchSize) {
+      const batch = orphans.slice(offset, offset + batchSize);
       await runGit(
         gitRoot,
-        checkpointGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "-d", ref]),
+        checkpointGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "--stdin"]),
         {},
-        undefined,
+        Buffer.from(`option no-deref\n${batch.map((ref) => `delete ${ref}\n`).join("")}`, "utf8"),
         1024 * 1024,
         options.deadlineAt,
         options.signal,
       );
-      deleted += 1;
+      deleted += batch.length;
     }
     return { scanned, deleted };
   } finally {

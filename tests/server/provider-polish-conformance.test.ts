@@ -16,6 +16,16 @@ import {
   startCodexAppServerRun,
   validatedCodexReasoningSummary,
 } from "../../src/server/codex/app-server-run";
+import { validateProviderRunInput } from "../../src/server/provider/adapters";
+import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
+import {
+  CODEX_REASONING_SUMMARY_VALUES,
+  validateNativeProviderOptions,
+} from "../../src/server/runtime/backends/native-provider-options";
+import {
+  continuationIdentityForSelection,
+  providerNativeModelSelection,
+} from "../../src/shared/model-routing";
 import { acpStopReasonMessage } from "../../src/server/provider/acp-stop-reasons";
 import { isInertiaHostMcpPermissionRequest } from "../../src/server/provider/acp-host-tool-permission";
 import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
@@ -537,6 +547,171 @@ describe("Provider polish conformance fixtures (C4, 0072f66ec, 12b29eb71, ddc4f5
         expect(turnStart?.params.summary).toBe(expectedSummary);
       },
     );
+
+    it("routes reasoningSummary end-to-end through validateNativeProviderOptions, adapters.ts, and codex-app-server-harness (S34)", async () => {
+      expect(CODEX_REASONING_SUMMARY_VALUES).toEqual(["auto", "concise", "detailed", "none"]);
+
+      const codexModel = {
+        id: "gpt-5.4",
+        label: "GPT-5.4",
+        description: "Test GPT-5.4",
+        inputModalities: ["text" as const],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+        isDefault: true,
+        fastMode: {
+          label: "Fast",
+          description: "Fast mode",
+          providerValue: "priority",
+          isDefault: false,
+        },
+      };
+
+      for (const summary of CODEX_REASONING_SUMMARY_VALUES) {
+        const selection = providerNativeModelSelection({
+          providerId: "codex",
+          modelId: "gpt-5.4",
+          providerOptions: { reasoningSummary: summary },
+        });
+        expect(() => validateNativeProviderOptions("codex", codexModel, selection)).not.toThrow();
+      }
+
+      const combinedSelection = providerNativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-5.4",
+        providerOptions: { fastMode: "priority", reasoningSummary: "detailed" },
+      });
+      expect(() => validateNativeProviderOptions("codex", codexModel, combinedSelection)).not.toThrow();
+
+      // Rejects invalid values, non-strings, unknown keys, and non-Codex providers.
+      expect(() => validateNativeProviderOptions("codex", codexModel, providerNativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-5.4",
+        providerOptions: { reasoningSummary: "verbose" },
+      }))).toThrow("native provider options are invalid");
+      expect(() => validateNativeProviderOptions("codex", codexModel, providerNativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-5.4",
+        providerOptions: { reasoningSummary: 42 },
+      }))).toThrow("native provider options are invalid");
+      expect(() => validateNativeProviderOptions("codex", codexModel, providerNativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-5.4",
+        providerOptions: { reasoningSummary: "concise", unknownKey: true },
+      }))).toThrow("native provider options are invalid");
+      expect(() => validateNativeProviderOptions("claude", undefined, providerNativeModelSelection({
+        providerId: "claude",
+        modelId: "claude-sonnet",
+        providerOptions: { reasoningSummary: "concise" },
+      }))).toThrow("native provider options are invalid");
+
+      const fake = createFakeAppServer(roots);
+      process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+
+      const codexSelection = providerNativeModelSelection({
+        providerId: "codex",
+        modelId: "gpt-5.4",
+        providerOptions: { reasoningSummary: "concise" },
+      });
+      const baseInput = nativeProviderRunInput({
+        providerId: "codex",
+        conversationId: "codex-reasoning-summary-e2e",
+        cwd: fake.root,
+        prompt: "Check production route reasoningSummary",
+        model: "gpt-5.4",
+        interactionMode: "build",
+        access: "supervised",
+      });
+      const productionInput = {
+        ...baseInput,
+        modelSelection: codexSelection,
+        continuationIdentity: {
+          ...baseInput.continuationIdentity,
+          ...continuationIdentityForSelection(codexSelection, null, false),
+        },
+      };
+
+      expect(validateProviderRunInput(productionInput)).toBe("codex-reasoning-summary-e2e");
+
+      // Also accepts reasoningSummary paired with Codex Fast mode.
+      const fastAndSummaryInput = {
+        ...baseInput,
+        supportedFastMode: "priority" as const,
+        modelSelection: combinedSelection,
+        continuationIdentity: {
+          ...baseInput.continuationIdentity,
+          ...continuationIdentityForSelection(combinedSelection, null, false),
+        },
+      };
+      expect(validateProviderRunInput(fastAndSummaryInput)).toBe("codex-reasoning-summary-e2e");
+
+      // Rejects invalid reasoningSummary values and non-native-Codex routes in adapters.ts.
+      expect(() => validateProviderRunInput({
+        ...productionInput,
+        modelSelection: {
+          ...codexSelection,
+          providerOptions: { reasoningSummary: "verbose" },
+        },
+      })).toThrow("Codex reasoning summary option is invalid");
+      expect(() => validateProviderRunInput({
+        ...productionInput,
+        modelSelection: {
+          ...codexSelection,
+          providerOptions: { reasoningSummary: 123 },
+        },
+      })).toThrow("Codex reasoning summary option is invalid");
+      expect(() => validateProviderRunInput({
+        ...productionInput,
+        backendProfile: { ...productionInput.backendProfile, id: "custom:openai" },
+      })).toThrow("Codex reasoning summary option is invalid");
+      expect(() => validateProviderRunInput({
+        ...productionInput,
+        harnessId: "codex-cli",
+      })).toThrow("Codex reasoning summary option is invalid");
+      const claudeBase = nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-no-codex-summary",
+        cwd: fake.root,
+        prompt: "Claude should reject reasoningSummary",
+        interactionMode: "build",
+        access: "supervised",
+      });
+      expect(() => validateProviderRunInput({
+        ...claudeBase,
+        modelSelection: {
+          ...claudeBase.modelSelection,
+          providerOptions: { reasoningSummary: "concise" },
+        },
+      })).toThrow("Codex reasoning summary option is invalid");
+
+      // Execute through createCodexAppServerHarness -> startCodexAppServerRun -> fake App Server.
+      const harness = createCodexAppServerHarness();
+      const harnessRun = harness.start({
+        input: productionInput,
+        executable: fake.command,
+        environment: { ...process.env, INERTIA_APP_SERVER_CAPTURE: fake.capturePath },
+        providerNativeToolsAvailable: true,
+        callbacks: {
+          onEvent: (event) => {
+            if (event.type === "extension" && event.extension === "codex-app-server") {
+              if (event.event.type === "approval" && harnessRun.extension.kind === "codex-app-server") {
+                harnessRun.extension.respondToApproval(event.event.request.requestId, "approve");
+              }
+              if (event.event.type === "input" && harnessRun.extension.kind === "codex-app-server") {
+                harnessRun.extension.respondToInput(event.event.request.requestId, { choice: ["Safe"] });
+              }
+            }
+          },
+        },
+      });
+
+      const harnessResult = await harnessRun.result;
+      expect(harnessResult).toMatchObject({ status: "completed", cleanupConfirmed: true });
+
+      const messages = captured(fake.capturePath);
+      const turnStart = messages.find(({ method }) => method === "turn/start") as { params: Record<string, unknown> } | undefined;
+      expect(turnStart?.params.summary).toBe("concise");
+    });
   });
 
   describe("ACP conformance fixtures (C4)", () => {

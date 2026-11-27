@@ -68,13 +68,6 @@ export function createScheduledTaskRuntime(
       dependencies.broadcastSnapshot();
       return created;
     },
-    resetConversationSession: (conversationId) => {
-      store.updateConversation(conversationId, {
-        providerSessionId: null,
-        continuationIdentity: null,
-      });
-      dependencies.broadcastConversationShell(conversationId);
-    },
     messageQueue: dependencies.messageQueue,
     isUpdateHeld: dependencies.isUpdateHeld,
     broadcast: (event) => {

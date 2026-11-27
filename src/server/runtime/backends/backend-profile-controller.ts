@@ -88,6 +88,7 @@ import {
   sameNormalizedBaseUrl,
 } from "./backend-profile-rules";
 import { BackendProfileRuntime, backendKeyVerified } from "./backend-profile-runtime";
+import { validateNativeProviderOptions } from "./native-provider-options";
 import {
   BackendProfileControllerError,
   type BackendProfileControllerOptions,
@@ -738,39 +739,6 @@ export class BackendProfileController {
     return submitted;
   }
 
-  private validateNativeProviderOptions(
-    providerId: ProviderInfo["id"],
-    model: ProviderInfo["models"][number] | undefined,
-    selection: ModelSelection,
-  ): void {
-    const keys = Object.keys(selection.providerOptions);
-    if (keys.length === 0) return;
-    if (
-      keys.length !== 1
-      || keys[0] !== "fastMode"
-      || typeof selection.providerOptions.fastMode !== "string"
-    ) {
-      throw new BackendProfileControllerError(
-        "The native provider options are invalid.",
-      );
-    }
-    if (providerId !== "codex" && providerId !== "claude") {
-      throw new BackendProfileControllerError(
-        "This provider does not expose a supported Fast mode.",
-      );
-    }
-    const expectedProviderValue = providerId === "codex" ? "priority" : "fast";
-    if (
-      !model?.fastMode
-      || model.fastMode.providerValue !== expectedProviderValue
-      || selection.providerOptions.fastMode !== model.fastMode.providerValue
-    ) {
-      throw new BackendProfileControllerError(
-        `${model?.label ?? selection.modelId} does not currently advertise Fast mode. Choose Standard or refresh provider models.`,
-      );
-    }
-  }
-
   private rejectUnsupportedProviderOptions(selection: ModelSelection): void {
     if (Object.keys(selection.providerOptions).length === 0) return;
     throw new BackendProfileControllerError(
@@ -823,7 +791,7 @@ export class BackendProfileController {
           "That model is no longer offered by the native harness.",
         );
       }
-      this.validateNativeProviderOptions(
+      validateNativeProviderOptions(
         nativeProvider,
         selectedModel,
         submitted,

@@ -798,6 +798,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork,
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
     cancelStaleWatcherNote: (conversationId, itemId) => watchers?.delivery.cancelIfStale(conversationId, itemId) ?? false,
+    cancelStaleChildQuestionWake: (conversationId, itemId, wake) => delegation?.cancelStaleChildQuestionWake(conversationId, itemId, wake) ?? false,
+    onScheduledDispatched: (runId, turnId) => scheduledTasks?.service.bindRunTurn(runId, turnId),
+    onScheduledCancelled: (runId, reason) => scheduledTasks?.service.onRunQueueCancelled(runId, reason),
     compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
     usageLimitHold: createCachedAccountUsageLimitHold(store, (providerId, model, cwd) => usageRuntime?.service.cachedNativeAccount(providerId, model, cwd) ?? null),
   });

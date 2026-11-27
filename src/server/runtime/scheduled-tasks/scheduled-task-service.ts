@@ -51,6 +51,7 @@ export interface ScheduledTaskRepositoryLike {
   delete(taskId: string): boolean;
   listDue(nowIso: string, limit?: number): ScheduledTask[];
   listRuns(taskId: string, limit?: number): ScheduledTaskRun[];
+  listActiveRuns(): ScheduledTaskRun[];
   getRun(runId: string): ScheduledTaskRun | null;
   findRunByTurnId(turnId: string): ScheduledTaskRun | null;
   hasActiveQueuedOrRunningOccurrence(taskId: string): boolean;
@@ -64,7 +65,8 @@ export interface ScheduledTaskRepositoryLike {
 export interface ScheduledTaskStoreLike {
   project(projectId: string): Pick<Project, "id" | "name">;
   conversation(conversationId: string): Pick<Conversation, "id" | "projectId" | "title" | "archivedAt" | "accessMode" | "interactionMode" | "modelSelection">;
-  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> };
+  agentTurn?(turnId: string): Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">;
+  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> & Partial<Pick<OrchestrationQueueRepository, "getItem">> };
 }
 
 export interface ScheduledTaskConversationCreateInput {
@@ -92,6 +94,8 @@ export interface ScheduledTaskEnqueuePromptInput {
 export interface ScheduledTaskEnqueuePromptResult {
   queueItemId: string;
   turnId?: string | null;
+  linkedRun?: ScheduledTaskRun | null;
+  linkedTask?: ScheduledTask | null;
 }
 
 export interface ScheduledTaskMessageQueueLike {
@@ -196,6 +200,17 @@ export class ScheduledTaskService {
 
   listRuns(taskId: string, limit = MAX_SCHEDULED_TASK_RUN_HISTORY): ScheduledTaskRun[] {
     return this.dependencies.repository.listRuns(taskId, limit);
+  }
+
+  getBoundConversation(
+    conversationId: string,
+  ): Pick<Conversation, "id" | "projectId" | "accessMode" | "interactionMode" | "archivedAt"> | null {
+    try {
+      return this.dependencies.store.conversation(conversationId);
+    } catch (error) {
+      if (error instanceof RecordNotFoundError) return null;
+      throw error;
+    }
   }
 
   providerContentForQueueItem(queueItemId: string): string | null {
@@ -315,25 +330,48 @@ export class ScheduledTaskService {
     }
   }
 
-  bindRunTurn(queueItemId: string, turnId: string): ScheduledTaskRun | null {
-    const runId = this.trackedByQueueItemId.get(queueItemId);
-    const tracked = runId ? this.trackedByRunId.get(runId) : undefined;
-    if (!runId || !tracked) return null;
+  bindRunTurn(runIdOrQueueItemId: string, turnId: string): ScheduledTaskRun | null {
+    const resolvedRunId = this.trackedByQueueItemId.get(runIdOrQueueItemId) ?? runIdOrQueueItemId;
+    const existing = this.dependencies.repository.getRun(resolvedRunId);
+    if (!existing || existing.state === "completed" || existing.state === "failed" || existing.state === "skipped") {
+      return null;
+    }
 
     const nowIso = this.now().toISOString();
-    tracked.turnId = turnId;
-    this.trackedByTurnId.set(turnId, runId);
-    const updatedRun = this.dependencies.repository.updateRun(runId, {
+    const tracked = this.trackedByRunId.get(existing.id);
+    if (tracked) tracked.turnId = turnId;
+    this.trackedByTurnId.set(turnId, existing.id);
+    const updatedRun = this.dependencies.repository.updateRun(existing.id, {
       state: "running", turnId, updatedAt: nowIso,
     });
-    const task = this.dependencies.repository.get(tracked.taskId);
+    const task = this.dependencies.repository.get(existing.taskId);
     if (task) {
       this.dependencies.repository.update(task.id, {
-        now: nowIso, lastRunStatus: "running", lastConversationId: tracked.conversationId, lastTurnId: turnId,
+        now: nowIso,
+        lastRunStatus: "running",
+        ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
+        lastTurnId: turnId,
       });
       this.broadcastChanged(task.projectId);
     }
+    const existingTurn = this.readTurnOrNull(turnId);
+    if (existingTurn && isTerminalTurnStatus(existingTurn.status)) {
+      this.onTurnSettled(existingTurn);
+      return this.dependencies.repository.getRun(existing.id) ?? updatedRun;
+    }
     return updatedRun;
+  }
+
+  onRunQueueCancelled(runId: string, reason: string): void {
+    const run = this.dependencies.repository.getRun(runId);
+    if (!run || run.state === "completed" || run.state === "failed" || run.state === "skipped" || run.state === "running") {
+      return;
+    }
+    const queueItem = run.queueItemId
+      ? this.dependencies.store.orchestration?.queue?.getItem?.(run.queueItemId) ?? null
+      : null;
+    const nextState: ScheduledTaskRunStatus = queueItem?.state === "blocked" ? "failed" : "skipped";
+    this.settleNonTurnRun(run, nextState, reason, this.now());
   }
 
   onTurnSettled(
@@ -392,9 +430,9 @@ export class ScheduledTaskService {
     const nowIso = now.toISOString();
     const affectedProjects = new Set<string>();
 
-    for (const run of this.dependencies.repository.reconcileStrandedRuns(nowIso, SCHEDULED_TASK_STRANDED_BOOT_ERROR)) {
-      const task = this.dependencies.repository.get(run.taskId);
-      if (task) affectedProjects.add(task.projectId);
+    for (const run of this.dependencies.repository.listActiveRuns()) {
+      const projectId = this.reconcileActiveRunOnBoot(run, now);
+      if (projectId) affectedProjects.add(projectId);
     }
     for (const taskId of this.dependencies.repository.disableTasksForMissingOrArchivedTarget(nowIso)) {
       const task = this.dependencies.repository.get(taskId);
@@ -558,26 +596,29 @@ export class ScheduledTaskService {
       });
 
       const updatedAt = this.now().toISOString();
-      const updatedRun = this.dependencies.repository.updateRun(claimed.id, {
-        state: "queued",
-        conversationId: resolved.conversationId,
-        queueItemId: dispatched.queueItemId,
-        ...(dispatched.turnId ? { turnId: dispatched.turnId } : {}),
-        updatedAt,
-      }) ?? {
-        ...claimed,
-        state: "queued" as const,
-        conversationId: resolved.conversationId,
-        queueItemId: dispatched.queueItemId,
-        turnId: dispatched.turnId ?? null,
-      };
-      const updatedTask = this.dependencies.repository.update(freshTask.id, {
-        now: updatedAt,
-        lastRunAt: updatedAt,
-        lastRunStatus: "queued",
-        lastConversationId: resolved.conversationId,
-        ...(dispatched.turnId ? { lastTurnId: dispatched.turnId } : {}),
-      });
+      const updatedRun = dispatched.linkedRun
+        ?? this.dependencies.repository.updateRun(claimed.id, {
+          state: "queued",
+          conversationId: resolved.conversationId,
+          queueItemId: dispatched.queueItemId,
+          ...(dispatched.turnId ? { turnId: dispatched.turnId } : {}),
+          updatedAt,
+        })
+        ?? {
+          ...claimed,
+          state: "queued" as const,
+          conversationId: resolved.conversationId,
+          queueItemId: dispatched.queueItemId,
+          turnId: dispatched.turnId ?? null,
+        };
+      const updatedTask = dispatched.linkedTask
+        ?? this.dependencies.repository.update(freshTask.id, {
+          now: updatedAt,
+          lastRunAt: updatedAt,
+          lastRunStatus: "queued",
+          lastConversationId: resolved.conversationId,
+          ...(dispatched.turnId ? { lastTurnId: dispatched.turnId } : {}),
+        });
       this.trackRun({
         runId: updatedRun.id,
         taskId: freshTask.id,
@@ -634,7 +675,6 @@ export class ScheduledTaskService {
   ): Promise<{ conversationId: string; freshContext: boolean }> {
     if (task.boundConversationId !== null) {
       const conversation = this.readBoundConversationOrThrow(task.boundConversationId, task.projectId);
-      if (task.freshSession) await this.dependencies.resetConversationSession?.(conversation.id);
       return { conversationId: conversation.id, freshContext: task.freshSession };
     }
     const created = await this.dependencies.createConversation({
@@ -659,6 +699,8 @@ export class ScheduledTaskService {
     }
     const queue = this.dependencies.store.orchestration?.queue;
     if (!queue) throw new RuntimeRequestError("Message queue is unavailable for scheduled task dispatch.");
+    let linkedRun: ScheduledTaskRun | null = null;
+    let linkedTask: ScheduledTask | null = null;
     queue.enqueue({
       conversationId: input.conversationId,
       itemId: input.queueItemId,
@@ -671,6 +713,15 @@ export class ScheduledTaskService {
         : { modelSelection: input.modelSelection }),
       ...(input.freshContext ? { freshContext: true as const } : {}),
       requestedAt: input.requestedAt,
+      attribution: {
+        scheduledTask: {
+          taskId: input.task.id,
+          runId: input.run.id,
+          title: boundedConversationTitle(input.task.title),
+          interactionMode: input.task.interactionMode,
+          accessMode: input.task.accessMode,
+        },
+      },
       origin: "automatic",
       commandType: "scheduled-task.dispatch",
       source: {
@@ -685,9 +736,27 @@ export class ScheduledTaskService {
           content: { chars: queueContentCharCount(input.content.trim()) },
         },
       },
+      afterInsert: () => {
+        linkedRun = this.dependencies.repository.updateRun(input.run.id, {
+          state: "queued",
+          conversationId: input.conversationId,
+          queueItemId: input.queueItemId,
+          updatedAt: input.requestedAt,
+        });
+        linkedTask = this.dependencies.repository.update(input.task.id, {
+          now: input.requestedAt,
+          lastRunAt: input.requestedAt,
+          lastRunStatus: "queued",
+          lastConversationId: input.conversationId,
+        });
+      },
     });
     void Promise.resolve(this.dependencies.messageQueue?.()?.schedule?.(input.conversationId)).catch(() => undefined);
-    return { queueItemId: input.queueItemId };
+    return {
+      queueItemId: input.queueItemId,
+      ...(linkedRun ? { linkedRun } : {}),
+      ...(linkedTask ? { linkedTask } : {}),
+    };
   }
 
   private assertProjectExists(projectId: string): void {
@@ -730,19 +799,117 @@ export class ScheduledTaskService {
     return conversation;
   }
 
-  private resolveRunForTurn(turn: Pick<AgentTurn, "id" | "conversationId">): ScheduledTaskRun | null {
+  private readTurnOrNull(
+    turnId: string,
+  ): Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt"> | null {
+    if (!this.dependencies.store.agentTurn) return null;
+    try {
+      return this.dependencies.store.agentTurn(turnId);
+    } catch (error) {
+      if (error instanceof RecordNotFoundError) return null;
+      throw error;
+    }
+  }
+
+  private settleNonTurnRun(
+    run: ScheduledTaskRun,
+    state: "failed" | "skipped",
+    reason: string,
+    now: Date,
+    broadcast = true,
+  ): string | null {
+    const nowIso = now.toISOString();
+    const errorMessage = normalizeScheduledTaskError(reason);
+    this.dependencies.repository.updateRun(run.id, {
+      state,
+      error: errorMessage,
+      finishedAt: nowIso,
+      updatedAt: nowIso,
+    });
+    this.untrackRun(run.id);
+    const task = this.dependencies.repository.get(run.taskId);
+    if (!task) return null;
+    const claimedMs = Date.parse(run.claimedAt);
+    const withinWindow = Number.isFinite(claimedMs)
+      && (now.getTime() - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS;
+    if (withinWindow) {
+      this.dependencies.repository.recordTaskOutcome(task.id, {
+        lastRunAt: nowIso,
+        lastRunStatus: state,
+        lastConversationId: run.conversationId,
+        lastTurnId: run.turnId,
+        lastError: errorMessage,
+        consecutiveFailures: state === "failed" ? task.consecutiveFailures + 1 : task.consecutiveFailures,
+        updatedAt: nowIso,
+      });
+    }
+    if (broadcast) this.broadcastChanged(task.projectId);
+    return task.projectId;
+  }
+
+  private reconcileActiveRunOnBoot(run: ScheduledTaskRun, now: Date): string | null {
+    const getQueueItem = this.dependencies.store.orchestration?.queue?.getItem;
+    const queueItem = run.queueItemId && getQueueItem ? getQueueItem.call(this.dependencies.store.orchestration!.queue, run.queueItemId) : null;
+    if (run.state === "claimed") {
+      if (!run.queueItemId || (getQueueItem && !queueItem)) {
+        return this.settleNonTurnRun(run, "failed", SCHEDULED_TASK_STRANDED_BOOT_ERROR, now, false);
+      }
+      return null;
+    }
+    if (run.state === "queued") {
+      if (!run.queueItemId) {
+        return this.settleNonTurnRun(run, "failed", "The queued scheduled prompt is missing its queue reference.", now, false);
+      }
+      if (!getQueueItem) return null;
+      if (!queueItem) {
+        return this.settleNonTurnRun(run, "failed", "The queued scheduled prompt is no longer in the chat queue.", now, false);
+      }
+      if (queueItem.state === "cancelled") {
+        return this.settleNonTurnRun(run, "skipped", queueItem.detail ?? "The queued scheduled prompt was cancelled.", now, false);
+      }
+      if (queueItem.state === "blocked") {
+        return this.settleNonTurnRun(run, "failed", queueItem.detail ?? "The queued scheduled prompt was blocked.", now, false);
+      }
+      if (queueItem.state === "delivered" && queueItem.delivery?.turnId) {
+        const bound = this.bindRunTurn(run.id, queueItem.delivery.turnId);
+        if (!bound) return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
+        if (bound.state === "completed" || bound.state === "failed" || bound.state === "skipped") {
+          return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
+        }
+        return this.reconcileRunningRunOnBoot(bound, now);
+      }
+      return null;
+    }
+    if (run.state === "running") {
+      return this.reconcileRunningRunOnBoot(run, now);
+    }
+    return null;
+  }
+
+  private reconcileRunningRunOnBoot(run: ScheduledTaskRun, now: Date): string | null {
+    if (!run.turnId) {
+      return this.settleNonTurnRun(run, "failed", "The scheduled run is missing its turn reference after restart.", now, false);
+    }
+    if (!this.dependencies.store.agentTurn) return null;
+    const turn = this.readTurnOrNull(run.turnId);
+    if (!turn) {
+      return this.settleNonTurnRun(run, "failed", "The scheduled run's turn no longer exists.", now, false);
+    }
+    if (isTerminalTurnStatus(turn.status)) {
+      this.onTurnSettled(turn);
+      return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
+    }
+    this.trackedByTurnId.set(run.turnId, run.id);
+    return null;
+  }
+
+  private resolveRunForTurn(turn: Pick<AgentTurn, "id">): ScheduledTaskRun | null {
     const byTurn = this.dependencies.repository.findRunByTurnId(turn.id);
     if (byTurn) return byTurn;
     const trackedRunId = this.trackedByTurnId.get(turn.id);
     if (trackedRunId) {
       const found = this.dependencies.repository.getRun(trackedRunId);
-      if (found) return found;
-    }
-    for (const tracked of this.trackedByRunId.values()) {
-      if (tracked.conversationId === turn.conversationId && tracked.turnId === null) {
-        const found = this.dependencies.repository.getRun(tracked.runId);
-        if (found && (found.state === "queued" || found.state === "running")) return found;
-      }
+      if (found && found.turnId === turn.id) return found;
     }
     return null;
   }

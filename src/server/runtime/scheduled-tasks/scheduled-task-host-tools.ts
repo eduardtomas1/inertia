@@ -194,7 +194,8 @@ export interface ScheduledTaskHostToolDependencies {
   scheduledTasks: Pick<
     ScheduledTaskService,
     "listSummaries" | "get" | "getSummary" | "create" | "update" | "delete" | "runNow"
-  >;
+  > & Partial<Pick<ScheduledTaskService, "getBoundConversation">>;
+  conversation?(conversationId: string): Pick<Conversation, "id" | "projectId" | "accessMode" | "interactionMode" | "archivedAt"> | null;
   conversationPath(conversationId: string): string;
 }
 
@@ -282,6 +283,24 @@ function assertScheduledTaskCeilings(
   assertInteractionWithinParent(interactionMode, caller.interactionMode);
 }
 
+function assertScheduledTaskAndTargetCeilings(
+  deps: ScheduledTaskHostToolDependencies,
+  caller: ScheduledTaskCaller,
+  accessMode: ScheduledTask["accessMode"],
+  interactionMode: ScheduledTask["interactionMode"],
+  boundConversationId: string | null,
+): void {
+  assertScheduledTaskCeilings(caller, accessMode, interactionMode);
+  if (boundConversationId !== null) {
+    const bound = deps.conversation?.(boundConversationId)
+      ?? deps.scheduledTasks.getBoundConversation?.(boundConversationId)
+      ?? null;
+    if (bound) {
+      assertScheduledTaskCeilings(caller, bound.accessMode, bound.interactionMode);
+    }
+  }
+}
+
 export function scheduledTaskApprovalDetail(
   deps: ScheduledTaskHostToolDependencies,
   caller: ScheduledTaskCaller,
@@ -295,7 +314,11 @@ export function scheduledTaskApprovalDetail(
       const existing = requireProjectTask(deps, caller, input.scheduledTaskId);
       const effectiveAccess = input.accessMode ?? existing.accessMode;
       const effectiveInteraction = input.interactionMode ?? existing.interactionMode;
-      assertScheduledTaskCeilings(caller, effectiveAccess, effectiveInteraction);
+      const effectiveBoundId = input.bindToCurrentThread === undefined
+        ? existing.boundConversationId
+        : (input.bindToCurrentThread ? caller.id : null);
+      assertScheduledTaskAndTargetCeilings(deps, caller, existing.accessMode, existing.interactionMode, existing.boundConversationId);
+      assertScheduledTaskAndTargetCeilings(deps, caller, effectiveAccess, effectiveInteraction, effectiveBoundId);
       return {
         title: `Update scheduled task “${input.title ?? existing.title}”`,
         detail: `Task ${existing.id} · ${formatScheduledTaskSchedule(input.schedule ?? existing.schedule)} · ${effectiveInteraction} · ${effectiveAccess}`,
@@ -304,7 +327,7 @@ export function scheduledTaskApprovalDetail(
     }
     const effectiveAccess = input.accessMode ?? caller.accessMode;
     const effectiveInteraction = input.interactionMode ?? caller.interactionMode;
-    assertScheduledTaskCeilings(caller, effectiveAccess, effectiveInteraction);
+    assertScheduledTaskAndTargetCeilings(deps, caller, effectiveAccess, effectiveInteraction, (input.bindToCurrentThread ?? true) ? caller.id : null);
     const targetMode = (input.bindToCurrentThread ?? true)
       ? (input.freshSession ? "this chat (fresh session)" : "this chat")
       : (input.freshSession ? "dedicated chat (fresh session)" : "new chat per run");
@@ -324,7 +347,7 @@ export function scheduledTaskApprovalDetail(
   }
   if (toolName === RUN_SCHEDULED_TASK_NOW_TOOL_NAME) {
     const existing = requireProjectTask(deps, caller, runScheduledTaskNowSchema.parse(args).scheduledTaskId);
-    assertScheduledTaskCeilings(caller, existing.accessMode, existing.interactionMode);
+    assertScheduledTaskAndTargetCeilings(deps, caller, existing.accessMode, existing.interactionMode, existing.boundConversationId);
     return {
       title: `Run scheduled task “${existing.title}” now`,
       detail: `Task ${existing.id} · ${existing.interactionMode} · ${existing.accessMode}`,
@@ -370,7 +393,13 @@ function executeScheduleTask(
   const input = scheduleTaskSchema.parse(args);
   if (input.scheduledTaskId !== undefined) {
     const existing = requireProjectTask(deps, caller, input.scheduledTaskId);
-    assertScheduledTaskCeilings(caller, input.accessMode ?? existing.accessMode, input.interactionMode ?? existing.interactionMode);
+    const effectiveAccess = input.accessMode ?? existing.accessMode;
+    const effectiveInteraction = input.interactionMode ?? existing.interactionMode;
+    const effectiveBoundId = input.bindToCurrentThread === undefined
+      ? existing.boundConversationId
+      : (input.bindToCurrentThread ? caller.id : null);
+    assertScheduledTaskAndTargetCeilings(deps, caller, existing.accessMode, existing.interactionMode, existing.boundConversationId);
+    assertScheduledTaskAndTargetCeilings(deps, caller, effectiveAccess, effectiveInteraction, effectiveBoundId);
     const updated = deps.scheduledTasks.update(existing.id, {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
@@ -386,7 +415,7 @@ function executeScheduleTask(
 
   const effectiveAccess = input.accessMode ?? caller.accessMode;
   const effectiveInteraction = input.interactionMode ?? caller.interactionMode;
-  assertScheduledTaskCeilings(caller, effectiveAccess, effectiveInteraction);
+  assertScheduledTaskAndTargetCeilings(deps, caller, effectiveAccess, effectiveInteraction, (input.bindToCurrentThread ?? true) ? caller.id : null);
   const created = deps.scheduledTasks.create({
     projectId: caller.projectId,
     title: input.title!,
@@ -420,7 +449,7 @@ export async function executeScheduledTaskTool(
     }
     case RUN_SCHEDULED_TASK_NOW_TOOL_NAME: {
       const existing = requireProjectTask(deps, caller, runScheduledTaskNowSchema.parse(args).scheduledTaskId);
-      assertScheduledTaskCeilings(caller, existing.accessMode, existing.interactionMode);
+      assertScheduledTaskAndTargetCeilings(deps, caller, existing.accessMode, existing.interactionMode, existing.boundConversationId);
       const ran = await deps.scheduledTasks.runNow(existing.id);
       return json({ started: true, task: serializeTask(ran.task), run: serializeRun(ran.run), conversationId: ran.conversationId });
     }

@@ -2,9 +2,11 @@ import type WebSocket from "ws";
 
 import type { ConversationAttachmentStore } from "../../../node/conversation-attachment-store";
 import type {
+  AccessMode,
   AgentApprovalRequest,
   AgentInputRequest,
   ChatAttachment,
+  InteractionMode,
   ProviderInfo,
   RuntimeMutationEvent,
   ServerEvent,
@@ -38,6 +40,15 @@ export interface UndeliveredFollowUp {
 
 export type QueuedMessagePersistence = (insert: () => void) => Promise<void>;
 
+export interface ScheduledDelivery {
+  taskId: string;
+  runId: string;
+  title: string;
+  accessMode: AccessMode;
+  interactionMode: InteractionMode;
+  freshContext?: boolean;
+}
+
 export interface TurnInteractionCommandDependencies {
   queuedMessage?: QueuedMessage;
   undeliveredFollowUps?: {
@@ -48,6 +59,7 @@ export interface TurnInteractionCommandDependencies {
   limitResetDispatch?: { planId: string; assertCurrent(): void };
   watcherDelivery?: WatcherNoteDelivery;
   delegatedDelivery?: DelegatedDelivery;
+  scheduledDelivery?: ScheduledDelivery;
   restartContinuationDispatch?: { planId: string; assertCurrent(): void };
   compactionHandoff?: CompactionHandoff;
   store: RuntimeStore;

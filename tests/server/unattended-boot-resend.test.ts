@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { Conversation } from "../../src/shared/contracts";
 import type { DelegatedCompletionAttribution } from "../../src/shared/orchestration-delegation";
+import { nextAutoDispatchItem } from "../../src/shared/orchestration-queue";
 import type { WatcherNoteAttribution } from "../../src/shared/watcher";
 import { RuntimeStore } from "../../src/server/database";
 import {
@@ -181,21 +182,68 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       expect(mcpItem).toMatchObject({
         state: "waiting",
         queueHeld: false,
+        bootAutoResend: true,
         creationSource: "mcp",
         createdBy: "agent",
       });
+      expect(nextAutoDispatchItem(fixture.store.orchestration.queue.listActive(fixture.conversation.id))).toMatchObject({
+        id: mcpItemId,
+        bootAutoResend: true,
+      });
+      expect(countDurableProcessLosses(
+        fixture.store.orchestration.effects.connection,
+        fixture.conversation.id,
+        mcpItemId,
+        mcpStarted.message.id,
+      )).toBe(1);
 
       const scheduledItems = fixture.store.orchestration.queue.listActive(scheduledConv.id);
       expect(scheduledItems).toHaveLength(1);
       expect(scheduledItems[0]).toMatchObject({
         state: "waiting",
         queueHeld: false,
+        bootAutoResend: true,
         createdBy: "system",
       });
+      expect(nextAutoDispatchItem(scheduledItems)).toMatchObject({
+        id: scheduledItems[0]!.id,
+        bootAutoResend: true,
+      });
       expect(report.resendsScheduled).toContain(scheduledItems[0]!.id);
+      expect(countDurableProcessLosses(
+        fixture.store.orchestration.effects.connection,
+        scheduledConv.id,
+        scheduledItems[0]!.id,
+        scheduledStarted.message.id,
+      )).toBe(1);
       expect(fixture.store.orchestration.events.verify({ readable: true }).valid).toBe(true);
-    } finally {
+
+      // Reopen from disk and rebuild projections: bootAutoResend and processLossCount remain durable.
       fixture.store.close();
+      const reopened = fixture.reopen();
+      try {
+        reopened.orchestration.delegation.rebuildProjections();
+        expect(reopened.orchestration.queue.getItem(mcpItemId)).toMatchObject({
+          state: "waiting",
+          queueHeld: false,
+          bootAutoResend: true,
+        });
+        expect(reopened.orchestration.queue.getItem(scheduledItems[0]!.id)).toMatchObject({
+          state: "waiting",
+          queueHeld: false,
+          bootAutoResend: true,
+        });
+        expect(countDurableProcessLosses(
+          reopened.orchestration.effects.connection,
+          fixture.conversation.id,
+          mcpItemId,
+          mcpStarted.message.id,
+        )).toBe(1);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      try { fixture.store.close(); } catch { /* already closed */ }
     }
   });
 
@@ -309,16 +357,22 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       const report = await reconcileQueueOnBoot(fixture.store);
       expect(report.resendsScheduled).toEqual([]);
       expect(report.resendsExhausted).toEqual([]);
-      expect(fixture.store.orchestration.queue.getItem(stoppedRunItemId)).toMatchObject({
+      const stoppedRunItem = fixture.store.orchestration.queue.getItem(stoppedRunItemId);
+      expect(stoppedRunItem).toMatchObject({
         state: "waiting",
         queueHeld: true,
         creationSource: "mcp",
       });
-      expect(fixture.store.orchestration.queue.getItem(h1ItemId)).toMatchObject({
+      expect(stoppedRunItem?.bootAutoResend).toBeUndefined();
+      expect(nextAutoDispatchItem(fixture.store.orchestration.queue.listActive(fixture.conversation.id))).toBeNull();
+      const h1Item = fixture.store.orchestration.queue.getItem(h1ItemId);
+      expect(h1Item).toMatchObject({
         state: "waiting",
         queueHeld: true,
         creationSource: "mcp",
       });
+      expect(h1Item?.bootAutoResend).toBeUndefined();
+      expect(nextAutoDispatchItem(fixture.store.orchestration.queue.listActive(h1Conv.id))).toBeNull();
     } finally {
       fixture.store.close();
     }
@@ -381,11 +435,14 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       expect(report.releasedDispatching).toContain(childItemId);
       expect(report.resendsScheduled).not.toContain(childItemId);
       expect(report.heldConversations).toContain(child.id);
-      expect(fixture.store.orchestration.queue.getItem(childItemId)).toMatchObject({
+      const childItem = fixture.store.orchestration.queue.getItem(childItemId);
+      expect(childItem).toMatchObject({
         state: "waiting",
         queueHeld: true,
         creationSource: "mcp",
       });
+      expect(childItem?.bootAutoResend).toBeUndefined();
+      expect(nextAutoDispatchItem(fixture.store.orchestration.queue.listActive(child.id))).toBeNull();
     } finally {
       fixture.store.close();
     }
@@ -413,7 +470,7 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       });
       currentStore.close();
 
-      // Boot 1 (fresh RuntimeStore from SQLite): processLossCount = 1 < 3 -> released for resend.
+      // Boot 1 (fresh RuntimeStore from SQLite): processLossCount = 1 < 3 -> released for resend with bootAutoResend.
       currentStore = fixture.reopen();
       const boot1 = await reconcileQueueOnBoot(currentStore);
       expect(boot1.releasedDispatching).toEqual([itemId]);
@@ -422,7 +479,12 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       expect(currentStore.orchestration.queue.getItem(itemId)).toMatchObject({
         state: "waiting",
         queueHeld: false,
+        bootAutoResend: true,
         creationSource: "mcp",
+      });
+      expect(nextAutoDispatchItem(currentStore.orchestration.queue.listActive(fixture.conversation.id))).toMatchObject({
+        id: itemId,
+        bootAutoResend: true,
       });
       expect(countDurableProcessLosses(
         currentStore.orchestration.effects.connection,
@@ -444,7 +506,7 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       interruptNeverStartedTurn(currentStore, turn2.turn.id);
       currentStore.close();
 
-      // Boot 2 (fresh RuntimeStore from SQLite): cumulative processLossCount = 2 < 3 -> released for resend.
+      // Boot 2 (fresh RuntimeStore from SQLite): cumulative processLossCount = 2 < 3 -> released for resend with bootAutoResend.
       currentStore = fixture.reopen();
       const boot2 = await reconcileQueueOnBoot(currentStore);
       expect(boot2.requeuedUndelivered).toEqual([itemId]);
@@ -453,7 +515,12 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
       expect(currentStore.orchestration.queue.getItem(itemId)).toMatchObject({
         state: "waiting",
         queueHeld: false,
+        bootAutoResend: true,
         creationSource: "mcp",
+      });
+      expect(nextAutoDispatchItem(currentStore.orchestration.queue.listActive(fixture.conversation.id))).toMatchObject({
+        id: itemId,
+        bootAutoResend: true,
       });
       expect(countDurableProcessLosses(
         currentStore.orchestration.effects.connection,
@@ -482,12 +549,133 @@ describe("D.6 unattended never-started prompt resend & durable processLossCount"
         queueHeld: true,
         creationSource: "mcp",
       });
+      expect(nextAutoDispatchItem(currentStore.orchestration.queue.listActive(fixture.conversation.id))).toBeNull();
       expect(countDurableProcessLosses(
         currentStore.orchestration.effects.connection,
         fixture.conversation.id,
         itemId,
         turn2.message.id,
       )).toBe(3);
+      expect(currentStore.orchestration.events.verify({ readable: true }).valid).toBe(true);
+    } finally {
+      currentStore?.close();
+    }
+  });
+
+  it("handles consecutive dispatching-claim losses, marks waiting unattended items with bootAutoResend, and clears bootAutoResend under Stop precedence (S29)", async () => {
+    const fixture = createFixture();
+    let currentStore: RuntimeStore | null = fixture.store;
+    try {
+      // Branch A: consecutive dispatching-claim crashes across boots do not conflict when bootAutoResend is already true.
+      const dispatchItemId = randomUUID();
+      currentStore.orchestration.queue.enqueue({
+        conversationId: fixture.conversation.id,
+        itemId: dispatchItemId,
+        content: "Consecutive dispatch-claim crash",
+        kind: "message",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      currentStore.orchestration.queue.claim({
+        conversationId: fixture.conversation.id,
+        itemId: dispatchItemId,
+        mode: "run",
+      });
+      currentStore.close();
+
+      // Boot 1: loss 1 -> bootAutoResend: true
+      currentStore = fixture.reopen();
+      const boot1 = await reconcileQueueOnBoot(currentStore);
+      expect(boot1.resendsScheduled).toEqual([dispatchItemId]);
+      expect(currentStore.orchestration.queue.getItem(dispatchItemId)).toMatchObject({
+        state: "waiting",
+        queueHeld: false,
+        bootAutoResend: true,
+      });
+      expect(countDurableProcessLosses(
+        currentStore.orchestration.effects.connection,
+        fixture.conversation.id,
+        dispatchItemId,
+        null,
+      )).toBe(1);
+
+      // Crash 2: claimed again while bootAutoResend is already true, crashes before beginTurn.
+      currentStore.orchestration.queue.claim({
+        conversationId: fixture.conversation.id,
+        itemId: dispatchItemId,
+        mode: "run",
+      });
+      currentStore.close();
+
+      // Boot 2: loss 2 -> keeps bootAutoResend: true cleanly without revision conflict
+      currentStore = fixture.reopen();
+      const boot2 = await reconcileQueueOnBoot(currentStore);
+      expect(boot2.releasedDispatching).toEqual([dispatchItemId]);
+      expect(boot2.resendsScheduled).toEqual([dispatchItemId]);
+      expect(currentStore.orchestration.queue.getItem(dispatchItemId)).toMatchObject({
+        state: "waiting",
+        queueHeld: false,
+        bootAutoResend: true,
+      });
+      expect(countDurableProcessLosses(
+        currentStore.orchestration.effects.connection,
+        fixture.conversation.id,
+        dispatchItemId,
+        null,
+      )).toBe(2);
+
+      // Branch B: waiting unattended MCP item gets bootAutoResend: true on Boot 1, then Stop clears bootAutoResend and refuses dispatch.
+      const waitingConv = currentStore.createConversation(fixture.projectId, "Waiting MCP chat", {
+        accessMode: "full",
+      });
+      const waitingItemId = randomUUID();
+      currentStore.orchestration.queue.enqueue({
+        conversationId: waitingConv.id,
+        itemId: waitingItemId,
+        content: "Waiting unattended prompt",
+        kind: "message",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      currentStore.close();
+
+      currentStore = fixture.reopen();
+      const waitingBoot1 = await reconcileQueueOnBoot(currentStore);
+      expect(waitingBoot1.resendsScheduled).toContain(waitingItemId);
+      expect(currentStore.orchestration.queue.getItem(waitingItemId)).toMatchObject({
+        state: "waiting",
+        queueHeld: false,
+        bootAutoResend: true,
+      });
+      expect(nextAutoDispatchItem(currentStore.orchestration.queue.listActive(waitingConv.id))).toMatchObject({
+        id: waitingItemId,
+        bootAutoResend: true,
+      });
+      expect(countDurableProcessLosses(
+        currentStore.orchestration.effects.connection,
+        waitingConv.id,
+        waitingItemId,
+        null,
+      )).toBe(1);
+
+      // Record Stop (H1-stop) on the waiting item -> clears bootAutoResend and holds; next boot keeps it refused.
+      currentStore.orchestration.queue.hold({
+        conversationId: waitingConv.id,
+        cause: "H1-stop",
+        itemIds: [waitingItemId],
+      });
+      currentStore.close();
+
+      currentStore = fixture.reopen();
+      const waitingBoot2 = await reconcileQueueOnBoot(currentStore);
+      expect(waitingBoot2.resendsScheduled).not.toContain(waitingItemId);
+      const stoppedWaitingItem = currentStore.orchestration.queue.getItem(waitingItemId);
+      expect(stoppedWaitingItem).toMatchObject({
+        state: "waiting",
+        queueHeld: true,
+      });
+      expect(stoppedWaitingItem?.bootAutoResend).toBeUndefined();
+      expect(nextAutoDispatchItem(currentStore.orchestration.queue.listActive(waitingConv.id))).toBeNull();
       expect(currentStore.orchestration.events.verify({ readable: true }).valid).toBe(true);
     } finally {
       currentStore?.close();

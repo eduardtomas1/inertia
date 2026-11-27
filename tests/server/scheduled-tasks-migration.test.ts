@@ -473,6 +473,57 @@ describe("Migration 132 (PersistScheduledTasks) and ScheduledTaskRepository", ()
       expect(store.scheduledTasks.delete(task2.id)).toBe(false);
       expect(store.scheduledTasks.listRuns(task2.id)).toEqual([]);
 
+      // S33: deleting a bound chat disables its schedules instead of turning them into new-chat schedules
+      const boundForDelete = store.createConversation(projectA.id, "Soon deleted chat");
+      const deletedBoundTask = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: projectA.id,
+        title: "Bound to deleted chat",
+        prompt: "Check deleted chat",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: boundForDelete.id,
+        nextRunAt: t2,
+        now: t1,
+      });
+      const unboundTask = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: projectA.id,
+        title: "Unbound stays active",
+        prompt: "Check project",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: null,
+        nextRunAt: t2,
+        now: t1,
+      });
+      store.deleteConversation(boundForDelete.id);
+      expect(store.scheduledTasks.get(deletedBoundTask.id)).toMatchObject({
+        enabled: false,
+        nextRunAt: null,
+        boundConversationId: null,
+        lastError: "The bound chat was deleted.",
+      });
+      expect(store.scheduledTasks.get(unboundTask.id)).toMatchObject({
+        enabled: true,
+        nextRunAt: t2,
+        boundConversationId: null,
+        lastError: null,
+      });
+
+      // listActiveRuns returns claimed/queued/running runs across tasks
+      const activeRunId = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: activeRunId,
+        taskId: unboundTask.id,
+        claimKey: `active-check:${activeRunId}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: t3,
+        nextRunAtAfterClaim: t2,
+      });
+      expect(store.scheduledTasks.listActiveRuns().map((r) => r.id)).toContain(activeRunId);
+      store.scheduledTasks.updateRun(activeRunId, { state: "completed", finishedAt: t3, updatedAt: t3 });
+      expect(store.scheduledTasks.listActiveRuns().map((r) => r.id)).not.toContain(activeRunId);
+
       // Repository enforces 100-task per-project limit with ScheduledTaskRepositoryError("limit")
       const gammaDir = join(directory, "gamma");
       mkdirSync(gammaDir);

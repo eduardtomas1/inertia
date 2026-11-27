@@ -5,6 +5,7 @@ import type {
   RuntimeMutationEvent,
 } from "../../../shared/contracts";
 import type { DelegatedCompletionAttribution } from "../../../shared/orchestration-delegation";
+import type { ChildQuestionWakeAttribution } from "../../../shared/orchestration-queue";
 import type { RuntimeStore } from "../../database";
 import type { DelegatedQueueHooks } from "../queued-message-runtime";
 import type { TurnController } from "../turns/turn-controller";
@@ -27,6 +28,11 @@ export interface DelegationRuntimeDependencies {
 export interface DelegationRuntime {
   readonly service: DelegationTaskService;
   readonly queueHooks: DelegatedQueueHooks;
+  cancelStaleChildQuestionWake(
+    conversationId: string,
+    itemId: string,
+    wake: ChildQuestionWakeAttribution,
+  ): boolean;
   observe(event: RuntimeMutationEvent): void;
   onTurnSettled(turn: AgentTurn): Promise<void>;
   automaticWakesTurnedOff(trigger: string): Promise<void>;
@@ -96,11 +102,15 @@ export function createDelegationRuntime(dependencies: DelegationRuntimeDependenc
   return {
     service,
     queueHooks,
+    cancelStaleChildQuestionWake(conversationId, itemId, wake) {
+      return childQuestionWake.cancelIfStale(conversationId, itemId, wake);
+    },
     observe(event) {
       if (event.type === "agent.input.requested") {
         void childQuestionWake.onChildQuestion(event.request).catch(() => undefined);
       } else if (event.type === "agent.input.resolved") {
         childQuestionWake.forget(event.conversationId, event.requestId);
+        childQuestionWake.withdrawQueuedWake(event.conversationId, event.requestId);
       }
       if (WAIT_SIGNAL_EVENTS.has(event.type)) {
         deferNotify();
@@ -112,10 +122,13 @@ export function createDelegationRuntime(dependencies: DelegationRuntimeDependenc
         }
       } else if (event.type === "conversation.shell.updated" && event.conversation.archivedAt !== null) {
         childQuestionWake.forget(event.conversation.id);
+        childQuestionWake.withdrawQueuedWake(event.conversation.id);
         void service.onArchived(event.conversation.id).catch(() => undefined);
       }
     },
     async onTurnSettled(turn) {
+      childQuestionWake.forget(turn.conversationId);
+      childQuestionWake.withdrawQueuedWake(turn.conversationId);
       await service.onTurnSettled(turn);
     },
     automaticWakesTurnedOff: (trigger) => service.automaticWakesTurnedOff(trigger),

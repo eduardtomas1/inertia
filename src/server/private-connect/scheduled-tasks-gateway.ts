@@ -1,7 +1,12 @@
+import type { Conversation } from "../../shared/contracts";
 import {
   formatScheduledTaskSchedule,
   type ScheduledTask,
 } from "../../shared/scheduled-tasks";
+import {
+  privateConnectPromptSafetyForHarness,
+  privateConnectPromptSafetyIsUsable,
+} from "../../shared/private-connect/prompt-safety";
 import type {
   PrivateConnectRuntimeAuthorization,
   PrivateConnectRuntimeRequest,
@@ -41,6 +46,22 @@ export interface PrivateConnectScheduledTaskGatewayHandlers {
   toggle(taskId: string, enabled: boolean): Promise<ScheduledTask> | ScheduledTask;
   runNow(taskId: string): Promise<{ task: ScheduledTask; conversationId: string | null }>;
   remove(taskId: string): Promise<boolean> | boolean;
+}
+
+export interface PrivateConnectScheduledTaskGatewayContext {
+  conversation(conversationId: string): Conversation | null;
+  isConversationAuthorized(
+    subject: PrivateConnectRuntimeAuthorization,
+    conversation: Conversation,
+  ): boolean;
+  promptSafetyRejection(
+    requestId: string,
+    conversation: Conversation,
+  ): PrivateConnectRuntimeResponse | null;
+  promptSafetyForUnboundTask?(
+    requestId: string,
+    task: ScheduledTask,
+  ): PrivateConnectRuntimeResponse | null;
 }
 
 export function isPrivateConnectRuntimeScheduledTaskCommand(
@@ -128,10 +149,86 @@ function mapScheduledTaskError(
   return fail(requestId, "unavailable", DEFAULT_ERROR_MESSAGE);
 }
 
+type AuthorizedScheduledTaskTarget =
+  | { authorized: false }
+  | { authorized: true; boundConversation: Conversation | null };
+
+function projectGrantAllowsFutureConversations(
+  subject: PrivateConnectRuntimeAuthorization,
+  projectId: string,
+): boolean {
+  const grant = subject.grants.find((candidate) => candidate.projectId === projectId);
+  return Boolean(grant && (grant.includeFutureConversations || grant.legacyProjectWide));
+}
+
+function authorizeScheduledTask(
+  subject: PrivateConnectRuntimeAuthorization,
+  task: ScheduledTask,
+  context: PrivateConnectScheduledTaskGatewayContext,
+): AuthorizedScheduledTaskTarget {
+  if (!subject.projectIds.includes(task.projectId)) {
+    return { authorized: false };
+  }
+  if (task.boundConversationId !== null) {
+    const bound = context.conversation(task.boundConversationId);
+    if (
+      bound === null
+      || bound.projectId !== task.projectId
+      || bound.archivedAt !== null
+      || !context.isConversationAuthorized(subject, bound)
+    ) {
+      return { authorized: false };
+    }
+    return { authorized: true, boundConversation: bound };
+  }
+  if (!projectGrantAllowsFutureConversations(subject, task.projectId)) {
+    return { authorized: false };
+  }
+  return { authorized: true, boundConversation: null };
+}
+
+function scheduledTaskPromptSafetyRejection(
+  requestId: string,
+  task: ScheduledTask,
+  boundConversation: Conversation | null,
+  context: PrivateConnectScheduledTaskGatewayContext,
+): PrivateConnectRuntimeResponse | null {
+  if (boundConversation !== null) {
+    const boundRejection = context.promptSafetyRejection(requestId, boundConversation);
+    if (boundRejection) return boundRejection;
+    if (task.modelSelection !== null) {
+      const safety = privateConnectPromptSafetyForHarness(task.modelSelection.harnessId);
+      if (!privateConnectPromptSafetyIsUsable(safety)) {
+        return fail(requestId, "forbidden", safety.explanation);
+      }
+    }
+    return null;
+  }
+  if (task.accessMode !== "supervised") {
+    return fail(
+      requestId,
+      "forbidden",
+      "PrivateConnect prompting requires Supervised access on the desktop.",
+    );
+  }
+  if (context.promptSafetyForUnboundTask) {
+    const customRejection = context.promptSafetyForUnboundTask(requestId, task);
+    if (customRejection) return customRejection;
+  }
+  if (task.modelSelection !== null) {
+    const safety = privateConnectPromptSafetyForHarness(task.modelSelection.harnessId);
+    if (!privateConnectPromptSafetyIsUsable(safety)) {
+      return fail(requestId, "forbidden", safety.explanation);
+    }
+  }
+  return null;
+}
+
 export async function handlePrivateConnectScheduledTaskRequest(
   subject: PrivateConnectRuntimeAuthorization,
   request: PrivateConnectRuntimeScheduledTaskCommand,
   handlers: PrivateConnectScheduledTaskGatewayHandlers,
+  context: PrivateConnectScheduledTaskGatewayContext,
 ): Promise<PrivateConnectRuntimeResponse> {
   if (request.type === "scheduled-tasks.list") {
     if (!subject.scopes.includes("view")) {
@@ -145,8 +242,8 @@ export async function handlePrivateConnectScheduledTaskRequest(
       const tasks = handlers
         .list(request.projectId)
         .filter((task) => (
-          grantedProjectIds.has(task.projectId)
-          && (request.projectId === undefined || task.projectId === request.projectId)
+          (request.projectId === undefined || task.projectId === request.projectId)
+          && authorizeScheduledTask(subject, task, context).authorized
         ))
         .slice(0, MAX_PROJECTED_SCHEDULED_TASKS)
         .map((task) => projectPrivateConnectScheduledTask(
@@ -172,17 +269,30 @@ export async function handlePrivateConnectScheduledTaskRequest(
   }
 
   let existing: ScheduledTask | null;
+  let targetAuth: AuthorizedScheduledTaskTarget;
   try {
     existing = handlers.get(request.taskId);
+    targetAuth = existing
+      ? authorizeScheduledTask(subject, existing, context)
+      : { authorized: false };
   } catch (error) {
     return mapScheduledTaskError(request.requestId, error);
   }
-  if (!existing || !subject.projectIds.includes(existing.projectId)) {
+  if (!existing || !targetAuth.authorized) {
     return fail(request.requestId, "not-found", "That scheduled task was not found.");
   }
 
   try {
     if (request.type === "scheduled-task.toggle") {
+      if (request.enabled) {
+        const safetyRejection = scheduledTaskPromptSafetyRejection(
+          request.requestId,
+          existing,
+          targetAuth.boundConversation,
+          context,
+        );
+        if (safetyRejection) return safetyRejection;
+      }
       const updated = await handlers.toggle(existing.id, request.enabled);
       return {
         type: "response",
@@ -199,6 +309,13 @@ export async function handlePrivateConnectScheduledTaskRequest(
     }
 
     if (request.type === "scheduled-task.run-now") {
+      const safetyRejection = scheduledTaskPromptSafetyRejection(
+        request.requestId,
+        existing,
+        targetAuth.boundConversation,
+        context,
+      );
+      if (safetyRejection) return safetyRejection;
       const ran = await handlers.runNow(existing.id);
       return {
         type: "response",

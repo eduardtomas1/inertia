@@ -1,6 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
 
 import { startCodexAppServerRun } from "../codex-app-server";
+import {
+  CODEX_REASONING_SUMMARIES,
+  type CodexReasoningSummary,
+} from "../codex/app-server-run";
 import { withCodexControlClient } from "../codex/control-client";
 import {
   codexModelProviderLaunchArguments,
@@ -126,6 +130,20 @@ function codexServiceTier(
     : undefined;
 }
 
+function codexReasoningSummary(
+  input: AgentHarnessStartOptions["input"],
+): CodexReasoningSummary | undefined {
+  const reasoningSummary = input.modelSelection.providerOptions.reasoningSummary;
+  if (reasoningSummary === undefined) return undefined;
+  if (
+    typeof reasoningSummary !== "string"
+    || !(CODEX_REASONING_SUMMARIES as readonly string[]).includes(reasoningSummary)
+  ) {
+    throw new Error("Codex received an invalid reasoning summary option.");
+  }
+  return reasoningSummary as CodexReasoningSummary;
+}
+
 export interface CodexAppServerHarnessDependencies {
   compactionTimeoutMs?: number;
   withControlClient?: typeof withCodexControlClient;
@@ -177,6 +195,7 @@ function startCodexRun(
   const promptCacheClock = createCodexPromptCacheClock();
   try {
     const serviceTier = codexServiceTier(options.input);
+    const reasoningSummary = codexReasoningSummary(options.input);
     if (
       options.harnessConfiguration
       && options.harnessConfiguration.kind !== "codex-responses"
@@ -190,6 +209,7 @@ function startCodexRun(
       prompt: options.input.prompt,
       ...(options.input.model ? { model: options.input.model } : {}),
       ...(serviceTier !== undefined ? { serviceTier } : {}),
+      ...(reasoningSummary !== undefined ? { reasoningSummary } : {}),
       ...(options.harnessConfiguration
         ? { modelProvider: options.harnessConfiguration }
         : {}),

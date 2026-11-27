@@ -345,6 +345,15 @@ export interface QueueTurnRequest {
    * a mid-chat provider switch without an existing backing row.
    */
   resumeSessionId?: string | null;
+  /** Server-only scheduled task attribution, ceilings, and fresh-session flag. */
+  scheduledDelivery?: {
+    taskId: string;
+    runId: string;
+    title: string;
+    accessMode: Conversation["accessMode"];
+    interactionMode: Conversation["interactionMode"];
+    freshContext?: boolean;
+  };
 }
 
 export interface QueuedTurn {

@@ -84,11 +84,13 @@ export interface QueueEnqueueInput {
   skipHoldInheritance?: true;
   steerWhenReadyRunId?: string;
   freshContext?: true;
+  bootAutoResend?: true;
   requestedAt?: string;
   attribution?: QueueItemAttribution;
   origin?: QueueItemOrigin;
   source?: CommandSource;
   commandType?: string;
+  afterInsert?: () => void;
 }
 
 export interface QueueEditInput {
@@ -133,6 +135,7 @@ export interface QueueReleaseInput {
   conversationId: string;
   cause: QueueReleaseCause;
   itemIds?: readonly string[];
+  bootAutoResend?: true;
   source?: CommandSource;
   commandType?: string;
 }
@@ -196,6 +199,7 @@ export interface QueueRequeueUndeliveredInput {
   modelSelection?: ModelSelection | null;
   requestedAt?: string;
   queueHeld?: boolean;
+  bootAutoResend?: true;
   placement?: QueueEnqueuePlacement;
   source?: CommandSource;
   commandType?: string;
@@ -391,6 +395,7 @@ export class OrchestrationQueueRepository {
           ...(input.skipHoldInheritance !== undefined ? { skipHoldInheritance: input.skipHoldInheritance } : {}),
           ...(input.steerWhenReadyRunId !== undefined ? { steerWhenReadyRunId: input.steerWhenReadyRunId } : {}),
           ...(input.freshContext !== undefined ? { freshContext: input.freshContext } : {}),
+          ...(input.bootAutoResend !== undefined ? { bootAutoResend: input.bootAutoResend } : {}),
           requestedAt,
           ...(input.attribution !== undefined ? { attribution: input.attribution } : {}),
           ...(input.origin !== undefined ? { origin: input.origin } : {}),
@@ -418,6 +423,7 @@ export class OrchestrationQueueRepository {
           projected.steerWhenReadyRunId ?? null, modelSelection ? JSON.stringify(modelSelection) : null,
           projected.followsThreadSelection ? 1 : 0,
         );
+        input.afterInsert?.();
         this.syncActiveRowsToTable(conversation.id);
         if (supersededWatcherId !== null) this.pruneTerminal(conversation.id);
       });
@@ -578,7 +584,7 @@ export class OrchestrationQueueRepository {
       }
       const committed = this.events.commit({
         ...identity, command, commandType, expectedRevision: this.events.revision(conversation.id),
-        events: [{ type: "queue.items-released", payload: { itemIds: targetIds, cause: input.cause } }],
+        events: [{ type: "queue.items-released", payload: { itemIds: targetIds, cause: input.cause, ...(input.bootAutoResend ? { bootAutoResend: true } : {}) } }],
         result: { releasedItemIds: targetIds },
       }, () => this.syncActiveRowsToTable(conversation.id));
       return { replayed: committed.replayed, value: this.listActive(conversation.id), events: committed.events };
@@ -742,7 +748,7 @@ export class OrchestrationQueueRepository {
             attachmentIds: attachments.map(({ id }) => id), routeIdentity,
             ...(modelSelection !== undefined ? { modelSelection } : {}),
             createdBy, creationSource, ...(input.deviceId !== undefined ? { deviceId: input.deviceId } : {}),
-            requestedAt, queueHeld, placement: input.placement ?? "front",
+            requestedAt, queueHeld, ...(input.bootAutoResend ? { bootAutoResend: true } : {}), placement: input.placement ?? "front",
           },
         }],
         result: { itemId: input.itemId },

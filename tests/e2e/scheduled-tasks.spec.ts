@@ -80,9 +80,14 @@ test("creates, pauses, resumes, runs now, and deletes a scheduled task from the 
     await taskCard.getByRole("button", { name: "Resume" }).click();
     await expect(taskCard).toContainText("Active", { timeout: 10_000 });
 
-    // Run now and verify it launches a real run and records recent history
+    // Run now and verify the provider actually completes the turn (not stuck in queued)
     await taskCard.getByRole("button", { name: "Run now" }).click();
-    await expect(taskCard.getByRole("button", { name: /Recent runs/i })).toBeVisible({ timeout: 15_000 });
+    const recentRunsButton = taskCard.getByRole("button", { name: /Recent runs \(1\)/i });
+    await expect(recentRunsButton).toBeVisible({ timeout: 15_000 });
+    await recentRunsButton.click();
+    const runsPanel = taskCard.locator(".scheduled-runs-panel");
+    await expect(runsPanel).toBeVisible({ timeout: 10_000 });
+    await expect(runsPanel.locator(".scheduled-run-state")).toContainText(/completed/i, { timeout: 20_000 });
 
     // Inline 2-step delete confirmation
     await taskCard.getByRole("button", { name: "Delete" }).click();

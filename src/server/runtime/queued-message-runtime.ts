@@ -3,7 +3,7 @@ import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ClientCommand, ModelSelection, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
 import { providerIdForHarness } from "../../shared/model-routing";
-import { MAX_QUEUED_USER_AND_AGENT_ITEMS, queueDeferredSteerCommandId } from "../../shared/orchestration-queue";
+import { MAX_QUEUED_USER_AND_AGENT_ITEMS, queueDeferredSteerCommandId, type ChildQuestionWakeAttribution } from "../../shared/orchestration-queue";
 import { QUEUED_ROUTE_CHANGED_ERROR, type MessageQueueResult, type QueuedMessage } from "../../shared/queued-messages";
 import type { DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import type { WatcherNoteAttribution } from "../../shared/watcher";
@@ -88,6 +88,9 @@ interface QueuedMessageRuntimeOptions {
   track<T>(operation: () => Promise<T>): Promise<T>;
   onWatcherNoteUndelivered?(note: WatcherNoteAttribution, reason: string): void;
   cancelStaleWatcherNote?(conversationId: string, itemId: string): boolean;
+  cancelStaleChildQuestionWake?(conversationId: string, itemId: string, wake: ChildQuestionWakeAttribution): boolean;
+  onScheduledDispatched?(runId: string, turnId: string): void;
+  onScheduledCancelled?(runId: string, reason: string): void;
   compacting?(conversationId: string): boolean;
   delegated?(): DelegatedQueueHooks | undefined;
   usageLimitHold?: UsageLimitHoldCheck;
@@ -158,6 +161,13 @@ export function createQueuedMessageRuntime(
     try { options.onWatcherNoteUndelivered?.(entry.watcherNote, reason); } catch { /* ignore */ }
   };
 
+  const scheduledCancelled = (itemId: string, reason: string): void => {
+    const attr = queue.getItem(itemId)?.attribution;
+    if (attr && "scheduledTask" in attr) {
+      try { options.onScheduledCancelled?.(attr.scheduledTask.runId, reason); } catch { /* ignore */ }
+    }
+  };
+
   const blockItem = (
     conversationId: string,
     entry: { id: string; watcherNote?: WatcherNoteAttribution },
@@ -170,6 +180,7 @@ export function createQueuedMessageRuntime(
       store.queuedMessages.block(conversationId, entry.id, detail);
     }
     undelivered(entry, detail);
+    scheduledCancelled(entry.id, detail);
   };
 
   const claimItem = (
@@ -335,6 +346,9 @@ export function createQueuedMessageRuntime(
       throw new RuntimeRequestError(PRIVATE_CONNECT_ATTACHMENT_SEND_ERROR);
     }
 
+    const v2Item = queue.getItem(first.id);
+    const scheduledTaskAttr = v2Item?.attribution && "scheduledTask" in v2Item.attribution
+      ? v2Item.attribution.scheduledTask : undefined;
     const effectiveSelection = resolveEffectiveQueuedSelection(first, conversation);
     const effectiveProviderId = providerIdForHarness(effectiveSelection.harnessId) ?? conversation.providerId;
     if (!isManual && isUsageLimitHeld(conversationId, effectiveSelection)) return false;
@@ -349,17 +363,24 @@ export function createQueuedMessageRuntime(
         && store.limitResets.usageLimited(latestTurn.id)
         && effectiveProviderId !== latestTurn.providerId;
       const explicitSendAuthority = first.deliveryMode === "after-stop"
+        || scheduledTaskAttr !== undefined
+        || v2Item?.bootAutoResend === true
         || (sendIntentKey !== null && !retriedManualSend.has(sendIntentKey))
         || pendingResume !== null
         || differentProviderAfterUsageLimit
         || hasWorktreeRetryReleaseAuthority(store, conversationId, latestTurn);
       if (!explicitSendAuthority && !releasesQueue(latestTurn)) return false;
-      if (!releasesQueue(latestTurn) && first.deliveryMode !== "after-stop") {
+      if (!releasesQueue(latestTurn) && first.deliveryMode !== "after-stop" && !scheduledTaskAttr && v2Item?.bootAutoResend !== true) {
         if (sendIntentKey !== null) manualSendRetryKey = sendIntentKey;
         else if (pendingResume !== null) manualSendRetryKey = pendingResume.retryKey;
       }
     }
     if (!isManual && first.watcherNote && options.cancelStaleWatcherNote?.(conversationId, first.id)) {
+      changed(conversationId);
+      return true;
+    }
+    if (v2Item?.attribution && "childQuestionWake" in v2Item.attribution
+      && options.cancelStaleChildQuestionWake?.(conversationId, first.id, v2Item.attribution.childQuestionWake)) {
       changed(conversationId);
       return true;
     }
@@ -425,6 +446,7 @@ export function createQueuedMessageRuntime(
       queuedMessage: claimedEntry,
       ...(watcherNote ? { watcherDelivery: watcherNoteDelivery(watcherNote) } : {}),
       ...(delegatedCompletion ? { delegatedDelivery: delegatedDelivery(delegatedCompletion) } : {}),
+      ...(scheduledTaskAttr ? { scheduledDelivery: { ...scheduledTaskAttr, ...(v2Item?.freshContext ? { freshContext: true } : {}) } } : {}),
       send: (_socket, _event) => undefined,
     });
     let progressed = false;
@@ -434,8 +456,9 @@ export function createQueuedMessageRuntime(
         requestId: fresh.id,
         payload: { conversationId, content, attachments: [], activate: false },
       });
-      const turnId = attribution ? (queue.getItem(fresh.id)?.delivery?.turnId ?? store.queuedMessages.get(conversationId, fresh.id)?.turnId) : null;
+      const turnId = queue.getItem(fresh.id)?.delivery?.turnId ?? store.queuedMessages.get(conversationId, fresh.id)?.turnId ?? null;
       if (attribution && turnId) hooks?.dispatched(attribution, turnId);
+      if (scheduledTaskAttr && turnId) options.onScheduledDispatched?.(scheduledTaskAttr.runId, turnId);
       progressed = true;
     } catch (error) {
       handleQueuedDispatchErrorOperation(operationsContext, {
@@ -485,7 +508,10 @@ export function createQueuedMessageRuntime(
         if (head && !isHeld() && !hasIncompleteWorktreeSetup(db, conversationId) && !isUsageLimitHeld(conversationId, headSelection)) {
           const latest = store.latestAgentTurnForConversation(conversationId);
           const pendingSend = queue.getState(conversationId)?.pendingSendIntent;
+          const headV2 = queue.getItem(head.id);
           const explicit = head.deliveryMode === "after-stop"
+            || Boolean(headV2?.attribution && "scheduledTask" in headV2.attribution)
+            || headV2?.bootAutoResend === true
             || (pendingSend?.kind === "send-now" && pendingSend.itemId === head.id)
             || pendingResumeIntent(conversationId) !== null
             || hasWorktreeRetryReleaseAuthority(store, conversationId, latest);
@@ -644,6 +670,9 @@ export function createQueuedMessageRuntime(
     const target = entries.find((entry) => entry.id === id);
     if (!target) throw new RuntimeRequestError("This queued message is no longer in the queue.");
     if (target.delegatedCompletion) throw new RuntimeRequestError("Delegated results continue this chat after the current turn ends.");
+    if (queue.getItem(target.id)?.attribution && "scheduledTask" in queue.getItem(target.id)!.attribution!) {
+      throw new RuntimeRequestError("Scheduled tasks run as their own turn when the current turn ends.");
+    }
     if (target.userMessageId) throw new RuntimeRequestError("This follow-up sends as its own turn when the current turn ends.");
     const first = entries.find((entry) => !entry.delegatedCompletion);
     if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
@@ -972,6 +1001,7 @@ export function createQueuedMessageRuntime(
       } else if (intake.kind === "removed") {
         const removed = intake.removed;
         undelivered(removed, WATCHER_NOTE_REMOVED_REASON);
+        scheduledCancelled(removed.id, "Removed from the chat queue.");
         const candidates = removed.attachments.map(({ id }) => id);
         const referenced = store.referencedAttachmentIds(candidates);
         await conversationAttachments.release(candidates.filter((id) => !referenced.has(id)));

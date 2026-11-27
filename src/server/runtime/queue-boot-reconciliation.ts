@@ -15,6 +15,7 @@ import { UNKNOWN_FOLLOW_UP_DELIVERY } from "./turns/turn-follow-up-coordinator";
 export const QUEUE_TEXT_LOST_DETAIL = "This queued message's text was lost; remove it";
 export const MAX_UNATTENDED_RESENDS = 3;
 const UNATTENDED_RESEND_COMMAND_PREFIX = "queue-unattended-resend:";
+const UNATTENDED_RESEND_MARK_COMMAND_PREFIX = "queue-unattended-resend-mark:";
 const MAX_PARENT_STOP_DEPTH = 3;
 
 export interface QueueBootReconciliationReport {
@@ -685,10 +686,13 @@ function reconcileConversationQueueOnBoot(
               latestTurn.requestedAt,
             );
             let queueHeld = true;
+            let bootAutoResend = false;
+            let totalProcessLosses: number | undefined;
             if (provenance.isUnattended && !stopBlocksResend) {
-              const totalProcessLosses = countDurableProcessLosses(db, conversationId, itemId, message.id) + 1;
+              totalProcessLosses = countDurableProcessLosses(db, conversationId, itemId, message.id) + 1;
               if (totalProcessLosses < MAX_UNATTENDED_RESENDS) {
                 queueHeld = false;
+                bootAutoResend = true;
                 autoResentThisBoot.add(itemId);
                 report.resendsScheduled.push(itemId);
               } else {
@@ -710,7 +714,24 @@ function reconcileConversationQueueOnBoot(
               modelSelection: latestTurn.modelSelection,
               requestedAt: latestTurn.requestedAt,
               queueHeld,
+              ...(bootAutoResend ? { bootAutoResend: true } : {}),
               placement: "front",
+              ...(totalProcessLosses !== undefined ? {
+                commandType: bootAutoResend ? "queue.unattended-boot-resend" : "queue.requeue",
+                source: {
+                  actorId: "runtime",
+                  commandId: `queue-requeue:${latestTurn.runId}:${itemId}`,
+                  command: {
+                    type: bootAutoResend ? "queue.unattended-boot-resend" : "queue.requeue",
+                    conversationId,
+                    itemId,
+                    fromRunId: latestTurn.runId,
+                    fromTurnId: latestTurn.id,
+                    userMessageId: message.id,
+                    processLossCount: totalProcessLosses,
+                  },
+                },
+              } : {}),
             });
             report.requeuedUndelivered.push(itemId);
           }
@@ -777,22 +798,31 @@ function reconcileConversationQueueOnBoot(
   // and watcher notes) to resend up to `MAX_UNATTENDED_RESENDS` when no Stop was recorded.
   const active = queue.listActive(conversationId);
   const toHold: string[] = [];
+  const toHoldStopped: string[] = [];
   for (const item of active) {
-    if (item.queueHeld || autoResentThisBoot.has(item.id)) continue;
+    if (autoResentThisBoot.has(item.id)) continue;
+    const stopBlocksResend = hasRecordedStopForRunOrParent(
+      store,
+      db,
+      conversationId,
+      item.requeuedFromRunId ?? null,
+      item.id,
+      item.requestedAt,
+    );
+    if (item.queueHeld) {
+      if (stopBlocksResend && item.bootAutoResend === true) {
+        toHoldStopped.push(item.id);
+      }
+      continue;
+    }
     const eligibleUnattended = item.state === "waiting"
       && isUnattendedQueueItem(store, db, conversationId, item)
       && (item.requeuedFromRunId === undefined
         || !hasProviderTurnObservation(db, conversationId, item.requeuedFromRunId))
-      && !hasRecordedStopForRunOrParent(
-        store,
-        db,
-        conversationId,
-        item.requeuedFromRunId ?? null,
-        item.id,
-        item.requestedAt,
-      );
+      && !stopBlocksResend;
     if (!eligibleUnattended) {
-      toHold.push(item.id);
+      if (stopBlocksResend) toHoldStopped.push(item.id);
+      else toHold.push(item.id);
       continue;
     }
     const existingLosses = countDurableProcessLosses(db, conversationId, item.id, item.userMessageId);
@@ -810,10 +840,29 @@ function reconcileConversationQueueOnBoot(
           conversationId,
           cause: "R4-preparation-retry",
           itemIds: [item.id],
+          bootAutoResend: true,
           commandType: "queue.unattended-boot-resend",
           source: {
             actorId: "runtime",
             commandId: `${UNATTENDED_RESEND_COMMAND_PREFIX}${item.id}:${totalProcessLosses}`,
+            command: {
+              type: "queue.unattended-boot-resend",
+              conversationId,
+              itemId: item.id,
+              processLossCount: totalProcessLosses,
+            },
+          },
+        });
+      } else if (item.bootAutoResend !== true) {
+        queue.release({
+          conversationId,
+          cause: "R4-preparation-retry",
+          itemIds: [item.id],
+          bootAutoResend: true,
+          commandType: "queue.unattended-boot-resend",
+          source: {
+            actorId: "runtime",
+            commandId: `${UNATTENDED_RESEND_MARK_COMMAND_PREFIX}${item.id}:${totalProcessLosses}`,
             command: {
               type: "queue.unattended-boot-resend",
               conversationId,
@@ -829,12 +878,21 @@ function reconcileConversationQueueOnBoot(
       report.resendsExhausted.push(item.id);
     }
   }
+  if (toHoldStopped.length > 0) {
+    queue.hold({
+      conversationId,
+      cause: "H1-stop",
+      itemIds: toHoldStopped,
+    });
+  }
   if (toHold.length > 0) {
     queue.hold({
       conversationId,
       cause: "H5-restart",
       itemIds: toHold,
     });
+  }
+  if (toHoldStopped.length > 0 || toHold.length > 0) {
     report.heldConversations.push(conversationId);
   }
 }

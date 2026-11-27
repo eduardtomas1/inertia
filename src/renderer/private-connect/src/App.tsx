@@ -53,6 +53,7 @@ export default function App({
   const [detail, setDetail] = useState<ConversationDetailWithQueue | null>(null);
   const [scheduledTasks, setScheduledTasks] = useState<PrivateConnectScheduledTask[]>([]);
   const [scheduledTasksLoading, setScheduledTasksLoading] = useState(false);
+  const [scheduledTasksError, setScheduledTasksError] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, PromptDraft>>({});
   const promptDraft = selectedConversation ? promptDrafts[selectedConversation] : undefined;
@@ -68,11 +69,14 @@ export default function App({
   const conversationValidatorsRef = useRef(new Map<string, string>());
   const authorizedConversationIdsRef = useRef(new Set<string>());
   const selectedConversationRef = useRef<string | null>(null);
+  const scheduledTasksLoadedForCsrfRef = useRef<string | null>(null);
 
   const clearWorkspace = useCallback((): void => {
     setShell(null);
     setDetail(null);
     setScheduledTasks([]);
+    setScheduledTasksError(null);
+    scheduledTasksLoadedForCsrfRef.current = null;
     setPromptDrafts({});
     setSelectedConversation(null);
     selectedConversationRef.current = null;
@@ -507,12 +511,12 @@ export default function App({
     mutateQueue({ type: "queue.resume" }, "The queue could not be resumed.").then(() => undefined);
 
   const refreshScheduledTasks = useCallback(async (): Promise<void> => {
-    if (hostUnavailable || pair.kind !== "ready") return;
+    if (hostUnavailable || !readyCsrf) return;
     setScheduledTasksLoading(true);
     try {
       const response = await request(
         { protocolVersion: 1, type: "scheduled-tasks.list", requestId: crypto.randomUUID() },
-        pair.csrf,
+        readyCsrf,
       );
       if (!response.ok) throw new Error(response.message);
       const raw = response.result as { kind?: unknown; tasks?: unknown };
@@ -523,20 +527,26 @@ export default function App({
         });
         setScheduledTasks(parsed);
       }
+      setScheduledTasksError(null);
     } catch (error) {
-      setPair((current) => current.kind === "ready"
-        ? { ...current, error: error instanceof Error ? error.message : "Scheduled tasks could not be loaded." }
-        : current);
+      setScheduledTasksError(
+        error instanceof Error ? error.message : "Scheduled tasks could not be loaded.",
+      );
     } finally {
       setScheduledTasksLoading(false);
     }
-  }, [hostUnavailable, pair, request]);
+  }, [hostUnavailable, readyCsrf, request]);
 
   useEffect(() => {
-    if (pair.kind === "ready" && shell && !hostUnavailable) {
-      void refreshScheduledTasks();
+    if (!readyCsrf) {
+      scheduledTasksLoadedForCsrfRef.current = null;
+      return;
     }
-  }, [hostUnavailable, pair.kind, refreshScheduledTasks, shell]);
+    if (!shell || hostUnavailable) return;
+    if (scheduledTasksLoadedForCsrfRef.current === readyCsrf) return;
+    scheduledTasksLoadedForCsrfRef.current = readyCsrf;
+    void refreshScheduledTasks();
+  }, [hostUnavailable, readyCsrf, refreshScheduledTasks, shell]);
 
   const mutateScheduledTask = async (
     payload:
@@ -545,16 +555,15 @@ export default function App({
       | { type: "scheduled-task.delete"; taskId: string },
     fallbackError: string,
   ): Promise<void> => {
-    if (hostUnavailable || pair.kind !== "ready" || !shell?.capabilities.scopes.includes("private:prompt")) return;
+    if (hostUnavailable || !readyCsrf || !shell?.capabilities.scopes.includes("private:prompt")) return;
     setBusy(true);
+    setScheduledTasksError(null);
     try {
-      const response = await request({ protocolVersion: 1, requestId: crypto.randomUUID(), ...payload }, pair.csrf);
+      const response = await request({ protocolVersion: 1, requestId: crypto.randomUUID(), ...payload }, readyCsrf);
       if (!response.ok) throw new Error(response.message);
       await refreshScheduledTasks();
     } catch (error) {
-      setPair((current) => current.kind === "ready"
-        ? { ...current, error: error instanceof Error ? error.message : fallbackError }
-        : current);
+      setScheduledTasksError(error instanceof Error ? error.message : fallbackError);
     } finally {
       setBusy(false);
     }
@@ -596,7 +605,7 @@ export default function App({
       detail={detail}
       scheduledTasks={scheduledTasks}
       scheduledTasksLoading={scheduledTasksLoading}
-      error={pair.error ?? promptDraft?.error ?? null}
+      error={pair.error ?? scheduledTasksError ?? promptDraft?.error ?? null}
       prompt={prompt}
       busy={busy}
       offline={hostUnavailable}

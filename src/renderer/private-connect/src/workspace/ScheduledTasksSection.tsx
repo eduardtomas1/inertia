@@ -88,7 +88,7 @@ export function ScheduledTasksSection({
 
   return (
     <section className="queue-section scheduled-tasks-section" aria-label="Scheduled tasks">
-      <div className="queue-section-status" role="status" aria-live="polite">
+      <div className="queue-section-status" aria-live="polite">
         {liveSummary}
       </div>
       <div className="queue-item scheduled-tasks-header">

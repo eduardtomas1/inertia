@@ -318,13 +318,19 @@ export class ScheduledTaskService {
       queuedItems.set(entry.itemId, entry.conversationId);
     }
     const notifiedConversations = new Set<string>();
+    const deferredNotifications: Array<() => void> = [];
     const runTx = this.dependencies.repository.runInTransaction
       ? <T>(work: () => T): T => this.dependencies.repository.runInTransaction!(work)
       : <T>(work: () => T): T => work();
     runTx(() => {
       for (const [queueItemId, conversationId] of queuedItems) {
-        if (this.cancelQueuedScheduledItem(conversationId, queueItemId, { throwOnUnexpectedError: true })) {
+        const result = this.cancelQueuedScheduledItem(conversationId, queueItemId, {
+          throwOnUnexpectedError: true,
+          deferCancelListeners: true,
+        });
+        if (result.cancelled) {
           notifiedConversations.add(conversationId);
+          if (result.notifyCancelled) deferredNotifications.push(result.notifyCancelled);
         }
       }
       if (!this.dependencies.repository.delete(taskId)) {
@@ -334,6 +340,7 @@ export class ScheduledTaskService {
     for (const [runId, tracked] of this.trackedByRunId) {
       if (tracked.taskId === taskId) this.untrackRun(runId);
     }
+    for (const notify of deferredNotifications) notify();
     for (const conversationId of notifiedConversations) {
       this.dependencies.messageQueue?.()?.onExternalQueueChanged?.(conversationId);
     }
@@ -371,30 +378,35 @@ export class ScheduledTaskService {
       || run.state === "skipped";
     if (!stale) return false;
     this.untrackRun(scheduledTask.runId);
-    return this.cancelQueuedScheduledItem(conversationId, itemId);
+    return this.cancelQueuedScheduledItem(conversationId, itemId).cancelled;
   }
 
   private cancelQueuedScheduledItem(
     conversationId: string,
     itemId: string,
-    options?: { throwOnUnexpectedError?: boolean },
-  ): boolean {
+    options?: { throwOnUnexpectedError?: boolean; deferCancelListeners?: boolean },
+  ): { cancelled: boolean; notifyCancelled?: () => void } {
     const queue = this.dependencies.store.orchestration?.queue;
-    if (!queue?.cancel) return false;
+    if (!queue?.cancel) return { cancelled: false };
     const item = queue.getItem?.(itemId);
-    if (item && item.state !== "waiting" && item.state !== "blocked") return false;
+    if (item && item.state !== "waiting" && item.state !== "blocked") return { cancelled: false };
     try {
-      queue.cancel({ conversationId, itemId, reason: "withdrawn" });
-      return true;
+      const outcome = queue.cancel({
+        conversationId,
+        itemId,
+        reason: "withdrawn",
+        ...(options?.deferCancelListeners ? { deferCancelListeners: true } : {}),
+      });
+      return { cancelled: true, ...(outcome?.notifyCancelled ? { notifyCancelled: outcome.notifyCancelled } : {}) };
     } catch (error) {
       if (options?.throwOnUnexpectedError) {
         const after = queue.getItem?.(itemId);
         if (error instanceof OrchestrationConflict && (!after || after.state === "cancelled" || after.state === "delivered")) {
-          return false;
+          return { cancelled: false };
         }
         throw error;
       }
-      return false;
+      return { cancelled: false };
     }
   }
 

@@ -252,7 +252,8 @@ describe("Private Connect browser lifecycle", () => {
     });
     expect(countListCalls()).toBeGreaterThan(beforeReconnect);
 
-    // 2. S58: Disconnect socket so Refresh uses HTTP apiRequest; reject stale HTTP after replacement socket connects -> workspace stays online.
+    // 2. S58 + S65: Disconnect socket so Refresh uses HTTP apiRequest; accept a DISTINCT replacement socket
+    // while state.get is still pending (before the replacement list starts!), then reject the old HTTP list -> workspace stays online!
     let rejectStaleHttp!: (err: unknown) => void;
     const staleHttpRejectPromise = new Promise((_, reject) => { rejectStaleHttp = reject; });
     vi.mocked(apiRequest).mockImplementation((req) => {
@@ -265,14 +266,39 @@ describe("Private Connect browser lifecycle", () => {
     act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
     fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
     expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(httpCallsBefore + 1);
+
+    // Distinct replacement socket with one-shot close listener & pending state.get (so replacement list has NOT started yet).
+    const replacementCloseListeners = new Set<(code: number) => void>();
+    let replacementNotifyClose: ((code: number) => void) | null = null;
+    const baseSocketImpl = socket.request.getMockImplementation()!;
+    const replacementSocket = {
+      request: vi.fn((req: { type: string; requestId?: string }) => {
+        if (req.type === "state.get") return new Promise<unknown>(() => undefined) as ReturnType<typeof socket.request>;
+        return baseSocketImpl(req);
+      }),
+      onClose: vi.fn((listener: (code: number) => void) => {
+        replacementCloseListeners.add(listener);
+        replacementNotifyClose = (code: number) => {
+          const snapshot = [...replacementCloseListeners];
+          replacementCloseListeners.clear();
+          for (const fn of snapshot) fn(code);
+        };
+        return () => replacementCloseListeners.delete(listener);
+      }),
+      close: vi.fn(),
+    };
+    vi.mocked(connectPrivateConnectSocket).mockResolvedValueOnce(replacementSocket as never);
+    // Clear workspace via authorityChanged on next socket ONLY AFTER verifying S65 while shell is empty:
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    // Now reject the old HTTP request BEFORE replacement list starts -> transportGeneration guard keeps workspace online!
     await act(async () => {
-      rejectStaleHttp(new TypeError("Old HTTP transport failed"));
+      rejectStaleHttp(new TypeError("Old HTTP transport failed before replacement list"));
       await Promise.resolve();
     });
     expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
 
-    // 3. S59: Start a deferred HTTP list while disconnected, trigger authorityChanged, then resolve stale HTTP -> discarded.
+    // 3. S59 + S66: Start a deferred HTTP list while disconnected, establish a distinct replacement socket with one-shot close,
+    // close THAT replacement socket with authorityChanged while HTTP response is pending, then resolve stale HTTP -> discarded!
     let resolveStaleAuth!: (value: unknown) => void;
     const staleAuthPromise = new Promise((resolve) => { resolveStaleAuth = resolve; });
     vi.mocked(apiRequest).mockImplementation((req) => {
@@ -281,11 +307,28 @@ describe("Private Connect browser lifecycle", () => {
       }
       return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof apiRequest>;
     });
-    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
+    act(() => replacementNotifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
     const authHttpBefore = vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
     fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
     expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(authHttpBefore + 1);
-    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged));
+    const authCloseListeners = new Set<(code: number) => void>();
+    let authNotifyClose: ((code: number) => void) | null = null;
+    const authSocket = {
+      request: vi.fn((req: { type: string; requestId?: string }) => baseSocketImpl(req)),
+      onClose: vi.fn((listener: (code: number) => void) => {
+        authCloseListeners.add(listener);
+        authNotifyClose = (code: number) => {
+          const snapshot = [...authCloseListeners];
+          authCloseListeners.clear();
+          for (const fn of snapshot) fn(code);
+        };
+        return () => authCloseListeners.delete(listener);
+      }),
+      close: vi.fn(),
+    };
+    vi.mocked(connectPrivateConnectSocket).mockResolvedValueOnce(authSocket as never);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    act(() => authNotifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged));
     await act(async () => {
       resolveStaleAuth({
         type: "response",

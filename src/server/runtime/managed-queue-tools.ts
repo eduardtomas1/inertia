@@ -269,25 +269,24 @@ function mapQueueConflictError(action: ManagedQueueAction, error: unknown): neve
 }
 
 function earliestLegalCommandReorderTarget(
-  activeItems: readonly QueueItemProjection[],
+  queue: Pick<RuntimeStore["orchestration"]["queue"], "getState" | "getItem">,
+  threadId: string,
   itemId: string,
 ): string | null {
-  const currentIndex = activeItems.findIndex((item) => item.id === itemId);
+  const state = queue.getState(threadId);
+  if (!state) return null;
+  const storedIds = state.activeItemIds;
+  const currentIndex = storedIds.indexOf(itemId);
   if (currentIndex <= 0) return null;
   let startIndex = 0;
   for (let i = currentIndex - 1; i >= 0; i -= 1) {
-    if (activeItems[i]!.kind === "delegated-results") {
+    const candidate = queue.getItem(storedIds[i]!);
+    if (!candidate || candidate.kind === "delegated-results" || candidate.state === "dispatching") {
       startIndex = i + 1;
       break;
     }
   }
-  for (let i = startIndex; i < currentIndex; i += 1) {
-    const candidate = activeItems[i]!;
-    if (candidate.kind !== "delegated-results" && candidate.state !== "dispatching") {
-      return candidate.id;
-    }
-  }
-  return null;
+  return startIndex < currentIndex ? storedIds[startIndex]! : null;
 }
 
 export async function executeManagedQueueMutation(
@@ -413,8 +412,7 @@ export async function executeManagedQueueMutation(
   const promoteContent = dependencies.store.orchestration.queue.getContent(target.id, itemId)?.content ?? "";
   if (isCommandOnlyPrompt(promoteContent, currentItem.attachmentIds.length)) {
     assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source);
-    const activeItems = dependencies.store.orchestration.queue.listActive(target.id);
-    const beforeItemId = earliestLegalCommandReorderTarget(activeItems, itemId);
+    const beforeItemId = earliestLegalCommandReorderTarget(dependencies.store.orchestration.queue, target.id, itemId);
     if (beforeItemId !== null) {
       dependencies.store.orchestration.queue.reorder({
         conversationId: target.id,
@@ -512,8 +510,7 @@ export async function executeManagedQueueMutation(
     if (isCommandOnlyPrompt(content, claimedItemAttachmentCount)) {
       queue.releaseClaim({ conversationId: target.id, itemId, reason: "steer-declined" });
       claimed = false;
-      const activeItems = queue.listActive(target.id);
-      const beforeItemId = earliestLegalCommandReorderTarget(activeItems, itemId);
+      const beforeItemId = earliestLegalCommandReorderTarget(queue, target.id, itemId);
       if (beforeItemId !== null) {
         queue.reorder({
           conversationId: target.id,

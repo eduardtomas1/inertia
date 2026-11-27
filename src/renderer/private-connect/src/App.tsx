@@ -73,6 +73,7 @@ export default function App({
   const scheduledTasksLoadedKeyRef = useRef<string | null>(null);
   const scheduledTasksAuthorityGenRef = useRef(0);
   const scheduledTasksRequestSeqRef = useRef(0);
+  const transportGenerationRef = useRef(0);
 
   const clearWorkspace = useCallback((): void => {
     scheduledTasksAuthorityGenRef.current += 1;
@@ -259,6 +260,7 @@ export default function App({
             retry();
           }
         });
+        transportGenerationRef.current += 1;
         setSocket(next);
         setConnectionGeneration((current) => current + 1);
       } catch (error) {
@@ -287,14 +289,17 @@ export default function App({
     isFresh?: () => boolean,
   ) => {
     const currentSocket = socket;
+    const transportGen = transportGenerationRef.current;
+    const transportFresh = (): boolean =>
+      transportGen === transportGenerationRef.current && (!isFresh || isFresh());
     try {
       const response = currentSocket
         ? await currentSocket.request(value)
         : await apiRequest(value, csrf);
-      if (!isFresh || isFresh()) setHostUnavailable(false);
+      if (transportFresh()) setHostUnavailable(false);
       return response;
     } catch (error) {
-      if (!isFresh || isFresh()) {
+      if (transportFresh()) {
         if (currentSocket) demoteSocket(currentSocket, error);
         noteRequestFailure(error);
       }

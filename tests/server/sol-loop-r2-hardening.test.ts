@@ -788,7 +788,10 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       const project = store.createProject("R3 Hardening Project", workspace);
       const conv = store.createConversation(project.id, "Main chat");
 
-      // S48: Desktop message.queue.remove atomically settles scheduled_task_runs inside the same transaction (even without callback)!
+      // S48 + S63 + S68 + S69: Desktop message.queue.remove atomically settles BOTH scheduled_task_runs AND scheduled_tasks summary (clearing prior lastTurnId) inside the same transaction, using current clock!
+      const s48Now = new Date();
+      const s48NowIso = s48Now.toISOString();
+      const s48NextIso = new Date(s48Now.getTime() + 3_600_000).toISOString();
       const s48Task = store.scheduledTasks.create({
         id: randomUUID(),
         projectId: project.id,
@@ -800,8 +803,15 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         accessMode: "supervised",
         interactionMode: "build",
         modelSelection: null,
-        nextRunAt: "2026-11-27T13:00:00.000Z",
-        now: "2026-11-27T12:00:00.000Z",
+        nextRunAt: s48NextIso,
+        now: s48NowIso,
+      });
+      const priorTurnId = randomUUID();
+      store.scheduledTasks.update(s48Task.id, {
+        now: s48NowIso,
+        lastRunStatus: "completed",
+        lastTurnId: priorTurnId,
+        lastConversationId: conv.id,
       });
       const s48RunId = randomUUID();
       store.scheduledTasks.claimRun({
@@ -810,8 +820,8 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         claimKey: `manual:${s48Task.id}:${s48RunId}`,
         trigger: "manual",
         scheduledFor: null,
-        claimedAt: "2026-11-27T12:00:00.000Z",
-        nextRunAtAfterClaim: "2026-11-27T13:00:00.000Z",
+        claimedAt: s48NowIso,
+        nextRunAtAfterClaim: s48NextIso,
       });
       const s48ItemId = randomUUID();
       store.orchestration.queue.enqueue({
@@ -836,7 +846,7 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         state: "queued",
         conversationId: conv.id,
         queueItemId: s48ItemId,
-        updatedAt: "2026-11-27T12:00:01.000Z",
+        updatedAt: s48NowIso,
       });
 
       const dummyDeps = {
@@ -883,6 +893,7 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(store.orchestration.queue.getItem(s48ItemId)?.state).toBe("cancelled");
       expect(store.scheduledTasks.getRun(s48RunId)?.state).toBe("skipped");
       expect(store.scheduledTasks.get(s48Task.id)?.lastRunStatus).toBe("skipped");
+      expect(store.scheduledTasks.get(s48Task.id)?.lastTurnId).toBeNull();
       expect(store.scheduledTasks.get(s48Task.id)?.lastError).toContain("Removed from the chat queue");
 
       // S49 + S57: Private Connect projection advertises editable: false AND queue.edit refuses editing a scheduled-task item!
@@ -977,25 +988,34 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       });
       store.orchestration.queue.block({ conversationId: conv.id, itemId: s50ItemId, blockedReason: "dispatch-failed", detail: "Provider error" });
       store.scheduledTasks.updateRun(s50RunId, { state: "failed", error: "Provider error", finishedAt: "2026-11-27T12:01:00.000Z", updatedAt: "2026-11-27T12:01:00.000Z" });
+      const s50Broadcasts: unknown[] = [];
+      const s50CancelListener = vi.fn();
+      const unsubS50 = store.orchestration.queue.onCancel(s50CancelListener);
       const s50Service = new ScheduledTaskService({
         repository: store.scheduledTasks,
         store,
         createConversation: async () => conv,
-        broadcast: () => undefined,
+        broadcast: (event) => s50Broadcasts.push(event),
       });
-      // S62: if queue cancellation fails, delete surfaces the error and rolls back atomically so the task stays intact for retry!
-      const cancelSpy = vi.spyOn(store.orchestration.queue, "cancel").mockImplementationOnce(() => {
-        throw new Error("Simulated SQLite busy error during withdraw");
+      // S62 + S67: let real queue.cancel withdrawal SUCCEED inside delete transaction, then fail repository.delete ->
+      // SQLite rolls back BOTH queue withdrawal and task row, AND zero cancel-listener or broadcast notifications fire!
+      const deleteSpy = vi.spyOn(store.scheduledTasks, "delete").mockImplementationOnce(() => {
+        throw new Error("Simulated SQLite delete failure after withdraw");
       });
-      expect(() => s50Service.delete(s50Task.id)).toThrow("Simulated SQLite busy error during withdraw");
-      cancelSpy.mockRestore();
+      expect(() => s50Service.delete(s50Task.id)).toThrow("Simulated SQLite delete failure after withdraw");
+      deleteSpy.mockRestore();
       expect(store.scheduledTasks.get(s50Task.id)).not.toBeNull();
       expect(store.orchestration.queue.getItem(s50ItemId)?.state).toBe("blocked");
+      expect(s50CancelListener).not.toHaveBeenCalled();
+      expect(s50Broadcasts).toHaveLength(0);
 
-      // Retry succeeds atomically: both blocked item is cancelled and task is deleted.
+      // Retry succeeds atomically: both blocked item is cancelled, task is deleted, and listener/broadcast fire AFTER commit.
       s50Service.delete(s50Task.id);
+      unsubS50();
       expect(store.scheduledTasks.get(s50Task.id)).toBeNull();
       expect(store.orchestration.queue.getItem(s50ItemId)?.state).toBe("cancelled");
+      expect(s50CancelListener).toHaveBeenCalledTimes(1);
+      expect(s50Broadcasts.length).toBeGreaterThanOrEqual(1);
 
       // S51: Stale claim withdrawal after async prep marks progressed=true so a second unheld waiting item wakes immediately!
       const s51Conv = store.createConversation(project.id, "S51 two-item chat");
@@ -1167,31 +1187,17 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         sourceHarnessId: s53Parent.modelSelection.harnessId,
         now: "2026-11-27T12:00:00.000Z",
       });
-      // S53 + S60: promote_to_steer rechecks locked content after lease.ready AND never crosses a delegated-results boundary!
+      // S53 + S60 + S64: stored order [A, delegated-results, /cmd] vs delivery order [A, /cmd, delegated-results],
+      // plus dispatching barrier — cover BOTH pre-lease and post-claim slash-command fallbacks!
       const s53OrdinaryId = randomUUID();
       store.orchestration.queue.enqueue({
         conversationId: s53Child.id,
         itemId: s53OrdinaryId,
-        content: "Ordinary item before delegated results",
+        content: "Ordinary item A",
         kind: "message",
         createdBy: "user",
         creationSource: "web",
-      });
-      const s53DelegatedId = randomUUID();
-      store.orchestration.queue.enqueue({
-        conversationId: s53Child.id,
-        itemId: s53DelegatedId,
-        content: "Delegated child summary",
-        kind: "delegated-results",
-        createdBy: "system",
-        creationSource: "server",
-        attribution: {
-          delegatedCompletion: {
-            parentConversationId: s53Child.id,
-            generation: 1,
-            taskIds: ["a".repeat(64)],
-          },
-        },
+        requestedAt: "2026-11-27T12:00:01.000Z",
       });
       const s53ItemId = randomUUID();
       store.orchestration.queue.enqueue({
@@ -1201,7 +1207,27 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         kind: "message",
         createdBy: "agent",
         creationSource: "mcp",
+        requestedAt: "2026-11-27T12:00:02.000Z",
       });
+      const s53DelegatedId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s53Child.id,
+        itemId: s53DelegatedId,
+        content: "Delegated child summary",
+        kind: "delegated-results",
+        createdBy: "system",
+        creationSource: "server",
+        requestedAt: "2026-11-27T12:00:03.000Z",
+        attribution: {
+          delegatedCompletion: {
+            parentConversationId: s53Child.id,
+            generation: 1,
+            taskIds: ["a".repeat(64)],
+          },
+        },
+      });
+      // Reorder s53ItemId to the end so stored order is [A, delegated-results, s53ItemId] while timestamp order is A < s53ItemId < delegated!
+      store.orchestration.queue.reorder({ conversationId: s53Child.id, itemId: s53ItemId, beforeItemId: null });
       const steerSpy = vi.fn();
       const s53Res = await executeManagedQueueMutation(
         {
@@ -1242,11 +1268,77 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(s53Parsed.disposition).toBe("queued");
       expect(s53Parsed.message).toContain("Commands must run as a separate turn.");
       expect(store.orchestration.queue.getItem(s53ItemId)?.state).toBe("waiting");
-      expect(store.orchestration.queue.listActive(s53Child.id).map(({ id }) => id)).toEqual([
+      expect(store.orchestration.queue.getState(s53Child.id)?.activeItemIds).toEqual([
         s53OrdinaryId,
         s53DelegatedId,
         s53ItemId,
       ]);
+      // Now test the PRE-LEASE fallback with stored order [A, delegated-results, /context] AND with a dispatching barrier!
+      const s64PreLeaseRes = await executeManagedQueueMutation(
+        {
+          store,
+          turns: {
+            isActive: (id: string) => id === s53Child.id,
+            activeIdentity: () => ({ turnId: "active-turn", runId: "active-run" }),
+            acquireFollowUpAdmission: vi.fn(),
+            steer: steerSpy,
+          } as never,
+          broadcastConversationShell: vi.fn(),
+          broadcastSnapshot: vi.fn(),
+          broadcast: vi.fn(),
+          now: () => "2026-11-27T12:00:00.000Z",
+        } as never,
+        s53Parent,
+        s53Child,
+        { conversationId: s53Child.id, action: "promote_to_steer", itemId: s53ItemId },
+        randomUUID(),
+        new AbortController().signal,
+      );
+      expect(JSON.parse(s64PreLeaseRes.text).disposition).toBe("queued");
+      expect(store.orchestration.queue.getState(s53Child.id)?.activeItemIds).toEqual([
+        s53OrdinaryId,
+        s53DelegatedId,
+        s53ItemId,
+      ]);
+      // Dispatching barrier test: [A, dispatchingItem, /cmd2] -> /cmd2 must NOT cross dispatchingItem!
+      const s64DispConv = store.createConversation(project.id, "S64 Dispatching barrier");
+      store.agentThreadManagement.attachManaged({
+        childConversationId: s64DispConv.id,
+        sourceConversationId: s53Parent.id,
+        sourceTurnId: s53ParentTurn.id,
+        sourceRunId: s53ParentTurn.runId,
+        sourceHarnessId: s53Parent.modelSelection.harnessId,
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s64A = randomUUID();
+      const s64Disp = randomUUID();
+      const s64Cmd = randomUUID();
+      store.orchestration.queue.enqueue({ conversationId: s64DispConv.id, itemId: s64A, content: "Item A", kind: "message", createdBy: "user", creationSource: "web" });
+      store.orchestration.queue.enqueue({ conversationId: s64DispConv.id, itemId: s64Disp, content: "Dispatching B", kind: "message", createdBy: "user", creationSource: "web" });
+      store.orchestration.queue.enqueue({ conversationId: s64DispConv.id, itemId: s64Cmd, content: "/compact", kind: "message", createdBy: "agent", creationSource: "mcp" });
+      store.orchestration.queue.claim({ conversationId: s64DispConv.id, itemId: s64Disp, mode: "run" });
+      const s64BarrierRes = await executeManagedQueueMutation(
+        {
+          store,
+          turns: {
+            isActive: (id: string) => id === s64DispConv.id,
+            activeIdentity: () => ({ turnId: "active-turn", runId: "active-run" }),
+            acquireFollowUpAdmission: vi.fn(),
+            steer: steerSpy,
+          } as never,
+          broadcastConversationShell: vi.fn(),
+          broadcastSnapshot: vi.fn(),
+          broadcast: vi.fn(),
+          now: () => "2026-11-27T12:00:00.000Z",
+        } as never,
+        s53Parent,
+        s64DispConv,
+        { conversationId: s64DispConv.id, action: "promote_to_steer", itemId: s64Cmd },
+        randomUUID(),
+        new AbortController().signal,
+      );
+      expect(JSON.parse(s64BarrierRes.text).disposition).toBe("queued");
+      expect(store.orchestration.queue.getState(s64DispConv.id)?.activeItemIds).toEqual([s64A, s64Disp, s64Cmd]);
 
       // S61: Boot requeue updates scheduled_task_runs + scheduled_tasks atomically and rolls back both if the second write fails!
       const s61Conv = store.createConversation(project.id, "S61 Rollback");

@@ -66,6 +66,7 @@ export interface QueueMutationResult<T> {
   replayed: boolean;
   value: T;
   events: readonly OrchestrationEvent[];
+  notifyCancelled?: () => void;
 }
 
 export interface QueueEnqueueInput {
@@ -124,6 +125,7 @@ export interface QueueCancelInput {
   itemId: string;
   reason: QueueCancelReason;
   detail?: string;
+  deferCancelListeners?: boolean;
   source?: CommandSource;
   commandType?: string;
 }
@@ -296,8 +298,8 @@ export function settleScheduledRunOnQueueCancel(
   if (Number.isFinite(claimedMs) && Number.isFinite(nowMs) && (nowMs - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS) {
     database.prepare(`UPDATE scheduled_tasks
       SET last_run_at = ?, last_run_status = 'skipped',
-          last_conversation_id = COALESCE(?, last_conversation_id),
-          last_turn_id = COALESCE(?, last_turn_id),
+          last_conversation_id = ?,
+          last_turn_id = ?,
           last_error = ?, updated_at = ?
       WHERE id = ?`).run(nowIso, runRow.conversation_id, runRow.turn_id, note, nowIso, runRow.task_id);
   }
@@ -605,9 +607,15 @@ export class OrchestrationQueueRepository {
       return { replayed: committed.replayed, value: this.requireItem(input.itemId), events: committed.events };
     }).immediate();
     if (cancelledPrevious) {
-      for (const listener of this.cancelListeners) {
-        try { listener(cancelledPrevious, input.reason); } catch { /* listener errors must not break cancel */ }
+      const notifyCancelled = (): void => {
+        for (const listener of this.cancelListeners) {
+          try { listener(cancelledPrevious!, input.reason); } catch { /* listener errors must not break cancel */ }
+        }
+      };
+      if (input.deferCancelListeners) {
+        return { ...outcome, notifyCancelled };
       }
+      notifyCancelled();
     }
     return outcome;
   }

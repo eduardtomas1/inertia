@@ -449,10 +449,10 @@ describe("file chips in response Markdown", () => {
       "spreadsheet",
     ]);
 
-    fireEvent.click(chip("docs/report.pdf"));
-    fireEvent.click(chip("recordings/demo.mp4"));
-    fireEvent.click(chip("data/budget.xlsx"));
-    fireEvent.click(chip("data/metrics.csv"));
+    fireEvent.click(screen.getByRole("button", { name: "Preview docs/report.pdf" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview recordings/demo.mp4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview data/budget.xlsx" }));
+    fireEvent.click(screen.getByRole("button", { name: "Preview data/metrics.csv" }));
 
     expect(onPreviewMedia).toHaveBeenCalledTimes(4);
     expect(onPreviewMedia).toHaveBeenNthCalledWith(1, expect.objectContaining({

@@ -196,15 +196,20 @@ export function MarkdownImageSchedulerProvider({
 }: {
   children: ReactNode;
 }): React.JSX.Element {
+  const parentScheduler = useContext(MarkdownImageSchedulerContext);
   const schedulerRef = useRef<MarkdownImageScheduler | null>(null);
-  if (!schedulerRef.current) schedulerRef.current = new MarkdownImageScheduler();
-  const scheduler = schedulerRef.current;
+  if (!parentScheduler && !schedulerRef.current) {
+    schedulerRef.current = new MarkdownImageScheduler();
+  }
+  const ownScheduler = parentScheduler ? null : schedulerRef.current;
   useEffect(() => {
-    scheduler.activate();
-    return () => scheduler.dispose();
-  }, [scheduler]);
+    if (!ownScheduler) return;
+    ownScheduler.activate();
+    return () => ownScheduler.dispose();
+  }, [ownScheduler]);
+  if (parentScheduler) return <>{children}</>;
   return (
-    <MarkdownImageSchedulerContext.Provider value={scheduler}>
+    <MarkdownImageSchedulerContext.Provider value={ownScheduler}>
       {children}
     </MarkdownImageSchedulerContext.Provider>
   );

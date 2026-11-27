@@ -50,7 +50,8 @@ function listItemText(item: HTMLElement): string {
 }
 
 function withTarget(text: string, target: string): string {
-  return target && text !== target ? `${text} (${target})` : text;
+  if (!target || text === target || text.endsWith(`(${target})`)) return text;
+  return `${text} (${target})`;
 }
 
 function linkText(node: HTMLElement, text: string): string {
@@ -77,7 +78,10 @@ function plainText(node: Node): string {
   }
   if (!(node instanceof HTMLElement)) return "";
   if (node.dataset.markdownMediaSource !== undefined || node.dataset.markdownImageSource !== undefined) {
-    return mediaText(node);
+    const label = mediaText(node);
+    const isBlockCard = node.classList.contains("response-markdown-media-card")
+      && !node.closest("a, td, th");
+    return isBlockCard ? `\n${label}\n` : label;
   }
   if (node.dataset.fileChipText !== undefined) return node.dataset.fileChipText;
   if (node.matches(SKIPPED)) return "";

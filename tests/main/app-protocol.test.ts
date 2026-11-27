@@ -409,5 +409,19 @@ describe("workspace media protocol route", () => {
     expect(devRes.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
     expect(devRes.headers.get("Vary")).toBe("Origin");
     await devRes.body!.cancel();
+
+    // Thrown workspace-media validation/open errors still preserve dev loopback CORS on 404
+    const missingUrl = workspaceMediaPreviewUrl({
+      projectId,
+      conversationId,
+      relativePath: "missing.pdf",
+    });
+    resolveProjectPath.mockRejectedValueOnce(new Error("ENOENT"));
+    const devErrRes = await serveDev(
+      new Request(missingUrl, { headers: { Origin: "http://localhost:5173" } }),
+    );
+    expect(devErrRes.status).toBe(404);
+    expect(devErrRes.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
+    expect(devErrRes.headers.get("Vary")).toBe("Origin");
   });
 });

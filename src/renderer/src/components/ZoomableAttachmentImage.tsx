@@ -90,7 +90,10 @@ export function ZoomableAttachmentImage({
 
   const reset = useCallback(() => setZoom(IDENTITY_IMAGE_ZOOM), []);
 
-  useEffect(() => setZoom(IDENTITY_IMAGE_ZOOM), [source]);
+  useEffect(() => {
+    dragRef.current = null;
+    setZoom(IDENTITY_IMAGE_ZOOM);
+  }, [source]);
 
   // React registers wheel listeners passively, so preventing the modal from
   // scrolling behind the stage needs a native non-passive listener.
@@ -220,6 +223,7 @@ export function ZoomableAttachmentImage({
         style={{
           transform: `translate3d(${zoom.offsetX}px, ${zoom.offsetY}px, 0) scale(${zoom.scale})`,
         }}
+        onLoad={() => setZoom((current) => clampImageZoom(current, bounds()))}
         onError={onFailure}
       />
       <div className="image-attachment-zoom-controls">

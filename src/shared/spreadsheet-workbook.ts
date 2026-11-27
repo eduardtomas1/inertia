@@ -21,10 +21,15 @@ export interface SpreadsheetPreviewSheet {
   readonly startColumn: number;
   readonly rows: readonly SpreadsheetPreviewRow[];
   readonly totalRows: number;
+  readonly totalRowsExact: boolean;
   readonly totalColumns: number;
   readonly rowsTruncated: boolean;
   readonly columnsTruncated: boolean;
   readonly contentTruncated: boolean;
+}
+
+export interface ReadSpreadsheetWorkbookOptions {
+  readonly fieldSeparator?: string;
 }
 
 export interface SpreadsheetPreviewWorkbook {
@@ -176,17 +181,327 @@ function safeRangeExtent(start: number, end: number): number {
   return Math.min(Number.MAX_SAFE_INTEGER, end - start + 1);
 }
 
+export interface ReadDelimitedSpreadsheetOptions {
+  readonly sourceTruncated?: boolean;
+  readonly sheetName?: string;
+}
+
+const DELIMITED_DETECTION_SAMPLE_CHARS = 16_384;
+const DELIMITED_DETECTION_MAX_LINES = 8;
+
+function sampleDelimiterColumnCounts(
+  sample: string,
+  delimiter: "," | ";",
+  sourceTruncated: boolean,
+): { readonly counts: readonly number[]; readonly quoteViolations: number } {
+  const counts: number[] = [];
+  let quoteViolations = 0;
+  let rowQuoteViolations = 0;
+  let columns = 1;
+  let inQuotes = false;
+  let justClosedQuote = false;
+  let atFieldStart = true;
+  let rowHasContent = false;
+  for (let index = 0; index < sample.length; index += 1) {
+    const ch = sample[index]!;
+    if (inQuotes) {
+      if (ch === "\"") {
+        if (index + 1 < sample.length && sample[index + 1] === "\"") {
+          index += 1;
+        } else {
+          inQuotes = false;
+          justClosedQuote = true;
+        }
+      }
+      continue;
+    }
+    if (atFieldStart && ch === "\"") {
+      inQuotes = true;
+      atFieldStart = false;
+      rowHasContent = true;
+      continue;
+    }
+    if (ch === delimiter) {
+      columns += 1;
+      justClosedQuote = false;
+      atFieldStart = true;
+      rowHasContent = true;
+      continue;
+    }
+    if (ch === "\r" || ch === "\n") {
+      if (ch === "\r" && index + 1 < sample.length && sample[index + 1] === "\n") {
+        index += 1;
+      }
+      if (rowHasContent) {
+        counts.push(columns);
+        quoteViolations += rowQuoteViolations;
+        if (counts.length >= DELIMITED_DETECTION_MAX_LINES) break;
+      }
+      columns = 1;
+      rowQuoteViolations = 0;
+      justClosedQuote = false;
+      atFieldStart = true;
+      rowHasContent = false;
+      continue;
+    }
+    if (justClosedQuote && ch !== " " && ch !== "\t") {
+      rowQuoteViolations += 1;
+      justClosedQuote = false;
+    } else if (!atFieldStart && ch === "\"") {
+      rowQuoteViolations += 1;
+    }
+    atFieldStart = false;
+    rowHasContent = true;
+  }
+  if (
+    rowHasContent
+    && counts.length < DELIMITED_DETECTION_MAX_LINES
+    && ((!sourceTruncated && !inQuotes) || counts.length === 0)
+  ) {
+    counts.push(columns);
+    quoteViolations += rowQuoteViolations;
+  }
+  return { counts, quoteViolations };
+}
+
+function detectCsvDelimiterAndBody(
+  text: string,
+  sourceTruncated: boolean,
+): { readonly delimiter: "," | ";" | "\t" | "|"; readonly body: string } {
+  const sepMatch = /^sep=(,|;|\t|\|)(?:\r\n|\r|\n|$)/iu.exec(text);
+  if (sepMatch) {
+    const sep = sepMatch[1] as "," | ";" | "\t" | "|";
+    return { delimiter: sep, body: text.slice(sepMatch[0].length) };
+  }
+  const sample = text.slice(0, DELIMITED_DETECTION_SAMPLE_CHARS);
+  const sampleTruncated = sourceTruncated || text.length > DELIMITED_DETECTION_SAMPLE_CHARS;
+  const comma = sampleDelimiterColumnCounts(sample, ",", sampleTruncated);
+  const semi = sampleDelimiterColumnCounts(sample, ";", sampleTruncated);
+  const isConsistent = (counts: readonly number[]): boolean => (
+    counts.length > 0 && counts[0]! >= 2 && counts.every((count) => count === counts[0])
+  );
+  const commaClean = comma.quoteViolations === 0;
+  const semiClean = semi.quoteViolations === 0;
+  const commaMultiRows = comma.counts.filter((count) => count >= 2).length;
+  const semiMultiRows = semi.counts.filter((count) => count >= 2).length;
+  const commaCleanMulti = commaClean && commaMultiRows > 0;
+  const semiCleanMulti = semiClean && semiMultiRows > 0;
+  if (semiCleanMulti && !commaCleanMulti) return { delimiter: ";", body: text };
+  if (commaCleanMulti && !semiCleanMulti) return { delimiter: ",", body: text };
+  const commaConsistent = isConsistent(comma.counts);
+  const semiConsistent = isConsistent(semi.counts);
+  if (semiConsistent && !commaConsistent) return { delimiter: ";", body: text };
+  if (commaConsistent && !semiConsistent) return { delimiter: ",", body: text };
+  if (semiConsistent && commaConsistent) {
+    if (semi.quoteViolations !== comma.quoteViolations) {
+      return { delimiter: semi.quoteViolations < comma.quoteViolations ? ";" : ",", body: text };
+    }
+    return {
+      delimiter: semi.counts[0]! > comma.counts[0]! ? ";" : ",",
+      body: text,
+    };
+  }
+  if (semiMultiRows > commaMultiRows) return { delimiter: ";", body: text };
+  if (commaMultiRows > semiMultiRows) return { delimiter: ",", body: text };
+  if (semiMultiRows > 0 && semi.quoteViolations !== comma.quoteViolations) {
+    return { delimiter: semi.quoteViolations < comma.quoteViolations ? ";" : ",", body: text };
+  }
+  const semiExtra = semi.counts.reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  const commaExtra = comma.counts.reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+  return { delimiter: semiExtra > commaExtra ? ";" : ",", body: text };
+}
+
+export function readDelimitedSpreadsheetWorkbook(
+  rawText: string,
+  requestedDelimiter: "," | ";" | "\t" | "|" | "auto",
+  requestedLimits: SpreadsheetWorkbookLimits = SPREADSHEET_PREVIEW_LIMITS,
+  sheetNameOrOptions?: string | ReadDelimitedSpreadsheetOptions,
+): SpreadsheetPreviewWorkbook {
+  const limits = validatedLimits(requestedLimits);
+  const options: ReadDelimitedSpreadsheetOptions = typeof sheetNameOrOptions === "string"
+    ? { sheetName: sheetNameOrOptions }
+    : (sheetNameOrOptions ?? {});
+  const sheetName = options.sheetName ?? "Sheet1";
+  const sourceTruncated = Boolean(options.sourceTruncated);
+  const withoutBom = rawText.startsWith("\uFEFF") ? rawText.slice(1) : rawText;
+  const { delimiter, body: text } = requestedDelimiter === "auto"
+    ? detectCsvDelimiterAndBody(withoutBom, sourceTruncated)
+    : { delimiter: requestedDelimiter, body: withoutBom };
+  const rows: SpreadsheetPreviewRow[] = [];
+  let remainingCharacters = limits.maxWorkbookCharacters;
+  let rowsTruncated = sourceTruncated;
+  let columnsTruncated = false;
+  let contentTruncated = false;
+  let totalColumns = 0;
+
+  let index = 0;
+  const length = text.length;
+  let rowIndex = 0;
+  let currentCells: string[] = [];
+  let columnIndex = 0;
+  let rowColumnsTruncated = false;
+  let rowContentTruncated = false;
+  let rowRemainingCharacters = remainingCharacters;
+  let cellChars = "";
+  let cellTruncated = false;
+  let inQuotes = false;
+  let atFieldStart = true;
+  let rowHasData = false;
+
+  const commitCell = (): void => {
+    if (columnIndex < limits.maxColumnsPerSheet) {
+      const bounded = safeCellText(cellChars, limits.maxCellCharacters);
+      let value = bounded.value;
+      if (cellTruncated || bounded.truncated) {
+        rowContentTruncated = true;
+      }
+      if (value.length > rowRemainingCharacters) {
+        value = rowRemainingCharacters > 1
+          ? `${value.slice(0, rowRemainingCharacters - 1)}…`
+          : "";
+        rowContentTruncated = true;
+      }
+      rowRemainingCharacters = Math.max(0, rowRemainingCharacters - value.length);
+      currentCells.push(value);
+    } else {
+      rowColumnsTruncated = true;
+    }
+    columnIndex += 1;
+    cellChars = "";
+    cellTruncated = false;
+    atFieldStart = true;
+  };
+
+  const commitRow = (): boolean => {
+    commitCell();
+    totalColumns = Math.max(totalColumns, columnIndex);
+    if (rowColumnsTruncated) columnsTruncated = true;
+    if (rowContentTruncated) contentTruncated = true;
+    remainingCharacters = rowRemainingCharacters;
+    rows.push({ rowNumber: rowIndex + 1, cells: currentCells });
+    rowIndex += 1;
+    currentCells = [];
+    columnIndex = 0;
+    rowColumnsTruncated = false;
+    rowContentTruncated = false;
+    rowHasData = false;
+    atFieldStart = true;
+    if (rowIndex >= limits.maxRowsPerSheet) {
+      return false;
+    }
+    return true;
+  };
+
+  let reachedRowLimit = false;
+  while (index < length) {
+    const ch = text[index]!;
+    if (inQuotes) {
+      if (ch === "\"") {
+        if (index + 1 < length && text[index + 1] === "\"") {
+          if (columnIndex < limits.maxColumnsPerSheet && cellChars.length <= limits.maxCellCharacters) {
+            cellChars += "\"";
+          } else if (columnIndex < limits.maxColumnsPerSheet) {
+            cellTruncated = true;
+          }
+          index += 2;
+          continue;
+        }
+        inQuotes = false;
+        index += 1;
+        continue;
+      }
+      if (columnIndex < limits.maxColumnsPerSheet && cellChars.length <= limits.maxCellCharacters) {
+        cellChars += ch;
+      } else if (columnIndex < limits.maxColumnsPerSheet) {
+        cellTruncated = true;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (atFieldStart && ch === "\"") {
+      inQuotes = true;
+      atFieldStart = false;
+      rowHasData = true;
+      index += 1;
+      continue;
+    }
+
+    if (ch === delimiter) {
+      rowHasData = true;
+      commitCell();
+      index += 1;
+      continue;
+    }
+
+    if (ch === "\r" || ch === "\n") {
+      const nextIndex = ch === "\r" && index + 1 < length && text[index + 1] === "\n"
+        ? index + 2
+        : index + 1;
+      const canContinue = commitRow();
+      index = nextIndex;
+      if (!canContinue) {
+        reachedRowLimit = true;
+        if (index < length) rowsTruncated = true;
+        break;
+      }
+      continue;
+    }
+
+    rowHasData = true;
+    atFieldStart = false;
+    if (columnIndex < limits.maxColumnsPerSheet && cellChars.length <= limits.maxCellCharacters) {
+      cellChars += ch;
+    } else if (columnIndex < limits.maxColumnsPerSheet) {
+      cellTruncated = true;
+    }
+    index += 1;
+  }
+
+  // When the source byte stream was truncated at the transport cap, any trailing
+  // unterminated record (or unclosed quoted field) may be cut mid-cell and must
+  // be discarded rather than rendered or exported as a partial row.
+  if (!reachedRowLimit && !sourceTruncated && (rowHasData || columnIndex > 0 || cellChars.length > 0)) {
+    commitRow();
+  }
+
+  const totalRows = rowsTruncated ? rows.length + 1 : rows.length;
+  const anyTruncated = rowsTruncated || columnsTruncated || contentTruncated;
+  return {
+    sheets: [{
+      name: safeSheetName(sheetName),
+      startColumn: 0,
+      rows,
+      totalRows,
+      totalRowsExact: !rowsTruncated,
+      totalColumns,
+      rowsTruncated,
+      columnsTruncated,
+      contentTruncated,
+    }],
+    totalSheets: 1,
+    sheetsTruncated: false,
+    contentTruncated: anyTruncated,
+  };
+}
+
 export async function readSpreadsheetWorkbook(
   bytes: Uint8Array,
   requestedLimits: SpreadsheetWorkbookLimits = SPREADSHEET_PREVIEW_LIMITS,
+  options?: ReadSpreadsheetWorkbookOptions,
 ): Promise<SpreadsheetPreviewWorkbook> {
   if (bytes.byteLength < 1) throw new Error("The spreadsheet is empty.");
+  if (options?.fieldSeparator === "," || options?.fieldSeparator === "\t") {
+    const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return readDelimitedSpreadsheetWorkbook(decoded, options.fieldSeparator, requestedLimits);
+  }
   const limits = validatedLimits(requestedLimits);
   const spreadsheet = await loadSpreadsheetModule();
   const workbook = spreadsheet.read(bytes, {
     type: "array",
     dense: true,
     sheetRows: limits.maxRowsPerSheet + 1,
+    ...(options?.fieldSeparator ? { FS: options.fieldSeparator } : {}),
     cellDates: true,
     cellFormula: false,
     cellHTML: false,
@@ -269,6 +584,7 @@ export async function readSpreadsheetWorkbook(
       if (remainingCharacters === 0) break;
     }
     const rowsTruncated = totalRows > rows.length;
+    const totalRowsExact = typeof fullRangeValue === "string" || !rowsTruncated;
     const columnsTruncated = totalColumns > visibleColumns;
     if (rowsTruncated || columnsTruncated) workbookContentTruncated = true;
     return {
@@ -276,6 +592,7 @@ export async function readSpreadsheetWorkbook(
       startColumn,
       rows,
       totalRows,
+      totalRowsExact,
       totalColumns,
       rowsTruncated,
       columnsTruncated,

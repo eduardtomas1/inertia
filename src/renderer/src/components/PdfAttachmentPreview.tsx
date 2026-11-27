@@ -18,7 +18,7 @@ interface PdfAttachmentPreviewProps {
   title: string;
   onFailure: () => void;
   onPageCount?: (pageCount: number) => void;
-  loadAttachment: (source: string) => Promise<{
+  loadAttachment: (source: string, signal?: AbortSignal) => Promise<{
     bytes: Uint8Array;
     getDocument: typeof getDocument;
   }>;
@@ -52,7 +52,7 @@ export function PdfAttachmentPreview({
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const taskRef = useRef<PDFDocumentLoadingTask | null>(null);
-  const renderRef = useRef<{ cancel(): void } | null>(null);
+  const renderRef = useRef<{ cancel(): void; promise: Promise<unknown> } | null>(null);
   const [loadedDocument, setLoadedDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(0);
@@ -71,12 +71,13 @@ export function PdfAttachmentPreview({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setLoadedDocument(null);
     setPageCount(0);
     setPageNumber(1);
     setRendering(true);
     void (async () => {
-      const { bytes, getDocument } = await loadAttachment(source);
+      const { bytes, getDocument } = await loadAttachment(source, controller.signal);
       if (cancelled) return;
       const task = getDocument({
         data: bytes,
@@ -88,15 +89,26 @@ export function PdfAttachmentPreview({
         await task.destroy();
         return;
       }
+      if (document.numPages < 1) {
+        await task.destroy();
+        if (!cancelled) onFailure();
+        return;
+      }
       setLoadedDocument(document);
       setPageCount(document.numPages);
       setPageNumber(1);
       onPageCount?.(document.numPages);
-    })().catch(() => {
-      if (!cancelled) onFailure();
+    })().catch((error: unknown) => {
+      if (
+        cancelled
+        || controller.signal.aborted
+        || (error instanceof DOMException && error.name === "AbortError")
+      ) return;
+      onFailure();
     });
     return () => {
       cancelled = true;
+      controller.abort();
       renderRef.current?.cancel();
       renderRef.current = null;
       setLoadedDocument(null);
@@ -111,8 +123,14 @@ export function PdfAttachmentPreview({
     if (!loadedDocument || !canvas || pageCount === 0 || stageWidth === 0) return;
     let cancelled = false;
     setRendering(true);
-    renderRef.current?.cancel();
-    void loadedDocument.getPage(pageNumber).then(async (page) => {
+    const previousRender = renderRef.current;
+    previousRender?.cancel();
+    void (async () => {
+      if (previousRender) {
+        await previousRender.promise.catch(() => undefined);
+      }
+      if (cancelled) return;
+      const page = await loadedDocument.getPage(pageNumber);
       if (cancelled) return;
       const { context, viewport } = prepareCanvas(canvas, page, stageWidth);
       const render = page.render({
@@ -121,9 +139,13 @@ export function PdfAttachmentPreview({
         viewport,
       });
       renderRef.current = render;
-      await render.promise;
+      try {
+        await render.promise;
+      } finally {
+        if (renderRef.current === render) renderRef.current = null;
+      }
       if (!cancelled) setRendering(false);
-    }).catch((error: unknown) => {
+    })().catch((error: unknown) => {
       if (
         !cancelled
         && !(error instanceof Error && error.name === "RenderingCancelledException")
@@ -158,6 +180,7 @@ export function PdfAttachmentPreview({
     >
       <div
         className="pdf-attachment-preview-toolbar"
+        role="group"
         aria-label="PDF page navigation"
       >
         <button

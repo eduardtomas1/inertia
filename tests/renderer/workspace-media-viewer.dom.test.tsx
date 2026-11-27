@@ -222,10 +222,11 @@ describe("WorkspaceMediaPreviewDialog and WorkspaceMediaViewer", () => {
 
     expect(await screen.findByText("1 / 3")).toBeInTheDocument();
     expect(onMetadata).toHaveBeenCalledWith("3 pages");
-    expect(fetchMock).toHaveBeenCalledWith(target.url, {
+    expect(fetchMock).toHaveBeenCalledWith(target.url, expect.objectContaining({
       cache: "no-store",
       credentials: "omit",
-    });
+      signal: expect.any(AbortSignal),
+    }));
 
     const preview = container.querySelector(".pdf-attachment-preview") as HTMLElement;
     await act(async () => {
@@ -298,6 +299,129 @@ describe("WorkspaceMediaPreviewDialog and WorkspaceMediaViewer", () => {
     const table = await screen.findByRole("table");
     expect(table).toHaveTextContent("Tōkyō");
     expect(screen.getByRole("status")).toHaveTextContent("truncated preview");
+  });
+
+  it("renders 0-byte and whitespace-only CSV as empty worksheet, parses TSV with commas, and reports 120+ rows", async () => {
+    const emptyTarget = mediaTarget("data/empty.csv");
+    vi.stubGlobal("fetch", vi.fn(async () => binaryResponse(new Uint8Array(0), "text/csv")));
+    const { unmount } = render(<WorkspaceMediaViewer target={emptyTarget} />);
+    expect(await screen.findByText("Empty worksheet")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    unmount();
+
+    const tsvTarget = mediaTarget("data/items.tsv");
+    const tsvLines = ["Item\tTags", ...Array.from({ length: 130 }, (_, index) => `Row${index}\ta,b,c`)];
+    vi.stubGlobal("fetch", vi.fn(async () => binaryResponse(
+      new TextEncoder().encode(tsvLines.join("\n")),
+      "text/tab-separated-values",
+    )));
+    render(<WorkspaceMediaViewer target={tsvTarget} />);
+    const table = await screen.findByRole("table");
+    expect(table).toHaveTextContent("a,b,c");
+    expect(screen.getByText(/120\+ rows/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy CSV" })).toBeInTheDocument();
+  });
+
+  it("keeps dialog open when Escape exits fullscreen, shows external-open errors, and exposes Copy path & Reload", async () => {
+    const target = mediaTarget("demos/clip.mp4");
+    const onClose = vi.fn();
+    const onOpenExternally = vi.fn(async () => {
+      throw new Error("OS opener failed");
+    });
+    const user = userEvent.setup();
+
+    render(
+      <WorkspaceMediaPreviewDialog
+        target={target}
+        onClose={onClose}
+        onOpenExternally={onOpenExternally}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Copy path" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      value: document.body,
+    });
+    try {
+      await user.keyboard("{Escape}");
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(document, "fullscreenElement", {
+        configurable: true,
+        value: null,
+      });
+    }
+
+    await user.click(screen.getByRole("button", { name: "Open externally" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not open clip.mp4 externally.");
+  });
+
+  it("neutralizes formula-leading cells in Copy CSV and keeps focus trapped inside dialog on keyboard Retry", async () => {
+    const copyText = vi.fn(async () => true);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { copyText },
+    });
+    const paddedFullWidth = `${" ".repeat(40)}＝1+1`;
+    const csvTarget = mediaTarget("data/formulas.csv");
+    vi.stubGlobal("fetch", vi.fn(async () => binaryResponse(
+      new TextEncoder().encode(`Safe,Formula,Tabbed,FullWidth\nhello,"=1+1","\t+SUM(A1)","${paddedFullWidth}"\nBob,cut`),
+      "text/csv",
+      { "x-workspace-media-truncated": "true" },
+    )));
+    const user = userEvent.setup();
+    const { unmount } = render(<WorkspaceMediaViewer target={csvTarget} />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy CSV" });
+    expect(screen.getByText(/2\+ rows/u)).toBeInTheDocument();
+    await user.click(copyButton);
+    expect(copyText).toHaveBeenCalledWith(`Safe,Formula,Tabbed,FullWidth\nhello,'=1+1,'\t+SUM(A1),'${paddedFullWidth}`);
+    unmount();
+
+    // Whitespace-only truncated CSV still reports lower-bound 0+ rows
+    vi.stubGlobal("fetch", vi.fn(async () => binaryResponse(
+      new TextEncoder().encode("   \n  "),
+      "text/csv",
+      { "x-workspace-media-truncated": "true" },
+    )));
+    const emptyTruncated = render(<WorkspaceMediaViewer target={mediaTarget("data/ws-trunc.csv")} />);
+    expect(await emptyTruncated.findByText(/0\+ rows/u)).toBeInTheDocument();
+    emptyTruncated.unmount();
+
+    // Tab-only TSV preserves empty grid rows instead of collapsing into Empty worksheet
+    vi.stubGlobal("fetch", vi.fn(async () => binaryResponse(
+      new TextEncoder().encode("\t\t\n\t\t\n"),
+      "text/tab-separated-values",
+    )));
+    const tabOnlyTsv = render(<WorkspaceMediaViewer target={mediaTarget("data/grid.tsv")} />);
+    expect(await tabOnlyTsv.findByText(/2 rows · 3 columns/u)).toBeInTheDocument();
+    tabOnlyTsv.unmount();
+
+    // Keyboard Retry in dialog preserves focus inside dialog so Tab stays trapped
+    let attempts = 0;
+    const pdfTarget = mediaTarget("docs/retry.pdf");
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      attempts += 1;
+      return new Response("missing", { status: 404 });
+    }));
+    render(
+      <WorkspaceMediaPreviewDialog
+        target={pdfTarget}
+        onClose={vi.fn()}
+        onOpenExternally={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "retry.pdf" });
+    const retryButton = await screen.findByRole("button", { name: "Retry" });
+    retryButton.focus();
+    await user.keyboard("{Enter}");
+    expect(attempts).toBeGreaterThanOrEqual(2);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await user.tab();
+    expect(dialog.contains(document.activeElement)).toBe(true);
   });
 });
 

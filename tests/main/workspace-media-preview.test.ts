@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { crc32, deflateRawSync } from "node:zlib";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -104,8 +106,18 @@ function bmpFixture(width: number, height: number, options: { topDown?: boolean 
   return Buffer.concat([header, Buffer.alloc(4)]);
 }
 
-function icoFixture(width: number, height: number, embeddedPng?: Buffer): Buffer {
-  const payload = embeddedPng ?? Buffer.alloc(40, 0x28);
+function dibHeaderFixture(width: number, height: number): Buffer {
+  const dib = Buffer.alloc(40);
+  dib.writeUInt32LE(40, 0);
+  dib.writeInt32LE(width, 4);
+  dib.writeInt32LE(height * 2, 8);
+  dib.writeUInt16LE(1, 12);
+  dib.writeUInt16LE(32, 14);
+  return dib;
+}
+
+function icoFixture(width: number, height: number, embeddedPayload?: Buffer): Buffer {
+  const payload = embeddedPayload ?? dibHeaderFixture(width, height);
   const entry = Buffer.alloc(16);
   entry[0] = width === 256 ? 0 : width;
   entry[1] = height === 256 ? 0 : height;
@@ -524,6 +536,180 @@ describe("workspace media preview protocol handler", () => {
     await expect(
       resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest("nul.svg"), webRequest("nul.svg")),
     ).rejects.toThrow("NUL bytes");
+
+    const hugeDibIco = icoFixture(16, 16, dibHeaderFixture(16_384, 16_384));
+    const tkhdBox = (width: number, height: number): Buffer => {
+      const payload = Buffer.alloc(84);
+      payload.writeUInt32BE(width * 65_536, 76);
+      payload.writeUInt32BE(height * 65_536, 80);
+      return isoBox("tkhd", payload);
+    };
+    const stszBox = (sampleCount: number, sampleSize = 0): Buffer => {
+      const payload = Buffer.alloc(12);
+      payload.writeUInt32BE(sampleSize, 4);
+      payload.writeUInt32BE(sampleCount, 8);
+      return isoBox("stsz", payload);
+    };
+    const stscBox = (entries: readonly [number, number][]): Buffer => {
+      const payload = Buffer.alloc(8 + entries.length * 12);
+      payload.writeUInt32BE(entries.length, 4);
+      entries.forEach(([firstChunk, samplesPerChunk], index) => {
+        payload.writeUInt32BE(firstChunk, 8 + index * 12);
+        payload.writeUInt32BE(samplesPerChunk, 12 + index * 12);
+        payload.writeUInt32BE(1, 16 + index * 12);
+      });
+      return isoBox("stsc", payload);
+    };
+    const stcoBox = (chunkCount: number): Buffer => {
+      const payload = Buffer.alloc(8 + chunkCount * 4);
+      payload.writeUInt32BE(chunkCount, 4);
+      return isoBox("stco", payload);
+    };
+    const co64Box = (chunkCount: number): Buffer => {
+      const payload = Buffer.alloc(8 + chunkCount * 8);
+      payload.writeUInt32BE(chunkCount, 4);
+      return isoBox("co64", payload);
+    };
+    const sttsBox = (sampleCount: number): Buffer => {
+      const payload = Buffer.alloc(16);
+      payload.writeUInt32BE(1, 4);
+      payload.writeUInt32BE(sampleCount, 8);
+      payload.writeUInt32BE(1, 12);
+      return isoBox("stts", payload);
+    };
+    const stsdAv01Box = (codedW: number, codedH: number): Buffer => {
+      const entryPayload = Buffer.alloc(28);
+      entryPayload.writeUInt16BE(codedW, 24);
+      entryPayload.writeUInt16BE(codedH, 26);
+      const header = Buffer.alloc(8);
+      header.writeUInt32BE(1, 4);
+      return isoBox("stsd", Buffer.concat([header, isoBox("av01", entryPayload)]));
+    };
+    const animatedAvif = (
+      ispeW: number,
+      ispeH: number,
+      tkhdW: number,
+      tkhdH: number,
+      stscSamples: number,
+      options: {
+        stszCount?: number;
+        stszSampleSize?: number;
+        useCo64?: boolean;
+        sttsCount?: number;
+        codedW?: number;
+        codedH?: number;
+      } = {},
+    ): Buffer => {
+      const base = avifFixture(ispeW, ispeH, "avis");
+      const stblChildren = [
+        stscBox([[1, stscSamples]]),
+        options.useCo64 ? co64Box(1) : stcoBox(1),
+        stszBox(options.stszCount ?? stscSamples, options.stszSampleSize ?? 0),
+        ...(options.sttsCount !== undefined ? [sttsBox(options.sttsCount)] : []),
+        ...(options.codedW !== undefined && options.codedH !== undefined
+          ? [stsdAv01Box(options.codedW, options.codedH)]
+          : []),
+      ];
+      const moov = isoBox(
+        "moov",
+        isoBox(
+          "trak",
+          Buffer.concat([
+            tkhdBox(tkhdW, tkhdH),
+            isoBox("mdia", isoBox("minf", isoBox("stbl", Buffer.concat(stblChildren)))),
+          ]),
+        ),
+      );
+      return Buffer.concat([base, moov]);
+    };
+    const truncatedStsd = (() => {
+      const base = avifFixture(64, 64, "avis");
+      const entryPayload = Buffer.alloc(28);
+      entryPayload.writeUInt16BE(64, 24);
+      entryPayload.writeUInt16BE(64, 26);
+      const header = Buffer.alloc(8);
+      header.writeUInt32BE(2, 4); // declares 2 entries, only 1 present
+      const badStsd = isoBox("stsd", Buffer.concat([header, isoBox("av01", entryPayload)]));
+      const moov = isoBox(
+        "moov",
+        isoBox("trak", Buffer.concat([
+          tkhdBox(64, 64),
+          isoBox("mdia", isoBox("minf", isoBox("stbl", Buffer.concat([
+            stscBox([[1, 2]]),
+            stcoBox(1),
+            stszBox(2),
+            badStsd,
+          ])))),
+        ])),
+      );
+      return Buffer.concat([base, moov]);
+    })();
+    const duplicateStsz = (() => {
+      const base = avifFixture(64, 64, "avis");
+      const moov = isoBox(
+        "moov",
+        isoBox("trak", Buffer.concat([
+          tkhdBox(64, 64),
+          isoBox("mdia", isoBox("minf", isoBox("stbl", Buffer.concat([
+            stscBox([[1, 2]]),
+            stcoBox(1),
+            stszBox(99),
+            stszBox(2),
+          ])))),
+        ])),
+      );
+      return Buffer.concat([base, moov]);
+    })();
+    await Promise.all([
+      writeFile(join(directory, "huge-dib.ico"), hugeDibIco),
+      writeFile(join(directory, "valid-seq.avif"), animatedAvif(64, 64, 128, 128, 12, { useCo64: true, sttsCount: 12, codedW: 128, codedH: 128 })),
+      writeFile(join(directory, "huge-tkhd.avif"), animatedAvif(16, 16, 20_000, 1_000, 4)),
+      writeFile(join(directory, "many-frames.avif"), animatedAvif(64, 64, 64, 64, 300)),
+      writeFile(join(directory, "fixed-stsz-bypass.avif"), animatedAvif(64, 64, 64, 64, 300, { stszCount: 1, stszSampleSize: 16 })),
+      writeFile(join(directory, "fixed-stsz-zero.avif"), animatedAvif(64, 64, 64, 64, 12, { stszCount: 0, stszSampleSize: 16 })),
+      writeFile(join(directory, "mismatched-stsz.avif"), animatedAvif(64, 64, 64, 64, 12, { stszCount: 4 })),
+      writeFile(join(directory, "mismatched-stts.avif"), animatedAvif(64, 64, 64, 64, 12, { sttsCount: 8 })),
+      writeFile(join(directory, "co64-many.avif"), animatedAvif(64, 64, 64, 64, 300, { useCo64: true })),
+      writeFile(join(directory, "coded-pixel-bomb.avif"), animatedAvif(64, 64, 64, 64, 50, { codedW: 1_000, codedH: 1_000 })),
+      writeFile(join(directory, "truncated-stsd.avif"), truncatedStsd),
+      writeFile(join(directory, "duplicate-stsz.avif"), duplicateStsz),
+    ]);
+
+    const seqRes = await resolveWorkspaceMediaPreviewResponse(
+      resolver,
+      mediaRequest("valid-seq.avif"),
+      webRequest("valid-seq.avif"),
+    );
+    expect(seqRes.status).toBe(200);
+    await seqRes.body!.cancel();
+
+    for (const malicious of [
+      "huge-dib.ico",
+      "huge-tkhd.avif",
+      "many-frames.avif",
+      "fixed-stsz-bypass.avif",
+      "fixed-stsz-zero.avif",
+      "mismatched-stsz.avif",
+      "mismatched-stts.avif",
+      "co64-many.avif",
+      "coded-pixel-bomb.avif",
+      "duplicate-stsz.avif",
+    ]) {
+      await expect(
+        resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest(malicious), webRequest(malicious)),
+      ).rejects.toThrow("unsafe decoded dimensions");
+    }
+    await expect(
+      resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest("truncated-stsd.avif"), webRequest("truncated-stsd.avif")),
+    ).rejects.toThrow();
+
+    if (process.platform !== "win32") {
+      const fifoPath = join(directory, "trap.png");
+      await promisify(execFile)("mkfifo", [fifoPath]);
+      await expect(
+        resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest("trap.png"), webRequest("trap.png")),
+      ).rejects.toThrow("bounded regular file");
+    }
   });
 
   it("streams MP4, WebM, MP3, and WAV with full HTTP Range 206, 416, and HEAD support", async () => {
@@ -667,6 +853,27 @@ describe("workspace media preview protocol handler", () => {
       expect(response.status).toBe(416);
       expect(response.headers.get("Content-Range")).toBe(`bytes */${mp4.length}`);
     }
+
+    const headInvalidRange = await resolveWorkspaceMediaPreviewResponse(
+      resolver,
+      mediaRequest("clip.mp4"),
+      webRequest("clip.mp4", { method: "HEAD", headers: { Range: "bytes=100-50" } }),
+    );
+    expect(headInvalidRange.status).toBe(416);
+    expect((await headInvalidRange.arrayBuffer()).byteLength).toBe(0);
+
+    // .opus validated as OggS and served as audio/ogg for Chromium nosniff playback
+    const opusBytes = Buffer.concat([Buffer.from("OggS", "ascii"), Buffer.alloc(60, 0x22)]);
+    await writeFile(join(directory, "voice.opus"), opusBytes);
+    const opusRes = await resolveWorkspaceMediaPreviewResponse(
+      resolver,
+      mediaRequest("voice.opus"),
+      webRequest("voice.opus"),
+    );
+    expect(opusRes.status).toBe(200);
+    expect(opusRes.headers.get("Content-Type")).toBe("audio/ogg");
+    expect(opusRes.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(Buffer.from(await opusRes.arrayBuffer())).toEqual(opusBytes);
 
     // Invalid magic bytes rejected
     for (const bad of ["fake.mp4", "fake.webm", "fake.mp3", "fake.wav"]) {
@@ -891,6 +1098,25 @@ describe("workspace media preview protocol handler", () => {
     const hugeBody = Buffer.from(await hugeRes.arrayBuffer());
     expect(hugeBody.byteLength).toBe(prefixLength);
     expect(() => new TextDecoder("utf-8", { fatal: true }).decode(hugeBody)).not.toThrow();
+
+    // UTF-16LE CJK CSV (<10 MiB raw, >10 MiB UTF-8) is clamped to <=10 MiB with truncation header
+    const cjkChars = Math.ceil((MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES + 120) / 3);
+    const utf16Cjk = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from("漢".repeat(cjkChars), "utf16le"),
+    ]);
+    expect(utf16Cjk.byteLength).toBeLessThan(MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES);
+    await writeFile(join(directory, "cjk-utf16.csv"), utf16Cjk);
+    const utf16CjkRes = await resolveWorkspaceMediaPreviewResponse(
+      resolver,
+      mediaRequest("cjk-utf16.csv"),
+      webRequest("cjk-utf16.csv"),
+    );
+    expect(utf16CjkRes.status).toBe(200);
+    expect(utf16CjkRes.headers.get("X-Workspace-Media-Truncated")).toBe("true");
+    const utf16CjkBody = Buffer.from(await utf16CjkRes.arrayBuffer());
+    expect(utf16CjkBody.byteLength).toBeLessThanOrEqual(MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES);
+    expect(() => new TextDecoder("utf-8", { fatal: true }).decode(utf16CjkBody)).not.toThrow();
 
     await expect(
       resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest("nul.csv"), webRequest("nul.csv")),

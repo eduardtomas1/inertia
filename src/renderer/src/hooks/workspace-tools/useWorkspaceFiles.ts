@@ -232,6 +232,10 @@ export function useWorkspaceFiles({
     loadDualViewSource = false,
   ) => {
     if (!project) return;
+    if (loadDualViewSource) {
+      setFilePreviewError(null);
+      setFilePreviewLoading(true);
+    }
     void loadWorkspaceFileActions().then(
       ({ selectWorkspaceFile }) => selectWorkspaceFile([
         path,
@@ -255,6 +259,7 @@ export function useWorkspaceFiles({
       ]),
       () => {
         if (authorityRef.current !== authority) return;
+        setFilePreviewLoading(false);
         const message = "File open failed.";
         setFilePreviewError(message);
         setActionError(message);

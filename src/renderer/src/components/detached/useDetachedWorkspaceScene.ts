@@ -341,6 +341,7 @@ export function useDetachedWorkspaceScene({
     });
     return {
       ...model,
+      detached: true,
       chat: {
         ...model.chat,
         loading: false,

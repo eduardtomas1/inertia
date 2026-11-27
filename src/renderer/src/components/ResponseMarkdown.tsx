@@ -45,7 +45,10 @@ import { isEditorId } from "@shared/editor-ids";
 import { useEditorPreference } from "../hooks/useAvailableEditors";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { createBoundedCache } from "../utils/boundedCache";
-import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
+import {
+  classifyWorkspaceMediaPath,
+  type WorkspaceMediaPreviewTarget,
+} from "@shared/workspace-media-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
 import { encodedLocalFilePath, localFileLocationSuffix, localFileUrl, parseLocalFileUrl } from "@shared/local-file-url";
 import { MarkdownImageSchedulerProvider } from "./markdown/MarkdownImageScheduler";
@@ -340,7 +343,7 @@ export function resolveResponseLink(
   let href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
   if (/^file:/iu.test(href)) {
-    const url = parseLocalFileUrl(href);
+    const url = parseLocalFileUrl(href, { allowSearch: true });
     if (!url) return { kind: "unsafe" };
     href = encodedLocalFilePath(url) + url.hash;
   }
@@ -464,7 +467,12 @@ export function responseHeadingIdFromFragment(fragment: string): string | null {
 function nodeText(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(nodeText).join("");
-  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
+  if (isValidElement<{ children?: ReactNode; alt?: string; src?: string }>(node)) {
+    const nested = nodeText(node.props.children);
+    if (nested) return nested;
+    if (typeof node.props.alt === "string" && node.props.alt.trim()) return node.props.alt;
+    if (typeof node.props.src === "string" && node.props.src.trim()) return node.props.src;
+  }
   return "";
 }
 
@@ -850,11 +858,10 @@ function MarkdownLink({
       : null;
     const editorRelativePath = parsedReference ? parsedReference.path : target.relativePath;
     const editorLocation = target.location ?? parsedReference?.location;
-    const mediaTarget = workspaceMediaPreviewTargetForPath(
-      projectId,
-      effectiveConversationId,
-      editorRelativePath,
-    );
+    const mediaDescriptor = classifyWorkspaceMediaPath(editorRelativePath);
+    const mediaTarget = editorLocation && mediaDescriptor?.isTextDualView
+      ? null
+      : workspaceMediaPreviewTargetForPath(projectId, effectiveConversationId, editorRelativePath);
     const language = sourceLanguageForFile(
       workspaceFileReferenceFallback(target.relativePath)
         ?? target.relativePath,
@@ -1083,7 +1090,8 @@ function MarkdownCode({
   const openInConversationFiles = target?.kind === "project" && target.owner === "project"
     ? undefined
     : onOpenProjectFile;
-  const mediaTarget = relativePath && onPreviewMedia
+  const mediaDescriptor = relativePath ? classifyWorkspaceMediaPath(relativePath) : null;
+  const mediaTarget = relativePath && onPreviewMedia && !(reference?.location && mediaDescriptor?.isTextDualView)
     ? workspaceMediaPreviewTargetForPath(projectId, effectiveConversationId, relativePath)
     : null;
   if (!reference || relativePath === null || (!openInConversationFiles && !mediaTarget)) {
@@ -1111,6 +1119,18 @@ function MarkdownDetails({
   return <details {...props} className="response-details">{children}</details>;
 }
 
+function MarkdownSummary({
+  children,
+  node: _node,
+  ...props
+}: ComponentProps<"summary"> & ExtraProps): React.JSX.Element {
+  return (
+    <InsideMarkdownLinkContext.Provider value={true}>
+      <summary {...props}>{children}</summary>
+    </InsideMarkdownLinkContext.Provider>
+  );
+}
+
 const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   ComponentProps<typeof ReactMarkdown>["components"]
 > = {
@@ -1119,6 +1139,7 @@ const RESPONSE_MARKDOWN_COMPONENTS: NonNullable<
   pre: MarkdownCodeBlock,
   table: MarkdownTable,
   details: MarkdownDetails,
+  summary: MarkdownSummary,
   img: MarkdownImage,
 };
 
@@ -1129,7 +1150,9 @@ const settledMarkdownTrees = createBoundedCache<ReactNode>(
 );
 
 function responseUrlTransform(url: string, key: string): string {
-  return (key === "href" || key === "src") && parseLocalFileUrl(url) ? url : defaultUrlTransform(url);
+  return (key === "href" || key === "src") && parseLocalFileUrl(url, { allowSearch: true })
+    ? url
+    : defaultUrlTransform(url);
 }
 
 function renderMarkdownTree(content: string): ReactNode {

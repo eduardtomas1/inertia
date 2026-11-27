@@ -158,12 +158,26 @@ export function registerAppProtocol(options: {
         ) throw new Error();
         const runtimeSupervisor = options.runtimeSupervisor();
         if (!runtimeSupervisor) throw new Error();
-        return await resolveWorkspaceMediaPreviewResponse(
-          runtimeSupervisor,
-          workspaceMediaRequest,
-          request,
-          { allowDevLoopbackCors },
-        );
+        try {
+          return await resolveWorkspaceMediaPreviewResponse(
+            runtimeSupervisor,
+            workspaceMediaRequest,
+            request,
+            { allowDevLoopbackCors },
+          );
+        } catch {
+          const headers: Record<string, string> = {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+          };
+          const origin = allowDevLoopbackCors ? request.headers?.get?.("origin") : null;
+          if (origin && /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/u.test(origin)) {
+            headers["Access-Control-Allow-Origin"] = origin;
+            headers["Vary"] = "Origin";
+          }
+          return new Response("Not found", { status: 404, headers });
+        }
       }
       const target = resolve(rendererRoot, requestedPath);
       if (!isContained(rendererRoot, target)) throw new Error();

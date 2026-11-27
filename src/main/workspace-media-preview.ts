@@ -214,24 +214,37 @@ function createFileRangeStream(
   let offset = start;
   let remaining = end - start + 1;
   let disposed = false;
+  let closeStarted = false;
+  let inFlightRead: Promise<unknown> | null = null;
   let removeAbortListener = (): void => undefined;
 
   const dispose = async (): Promise<void> => {
-    if (disposed) return;
     disposed = true;
     removeAbortListener();
+    if (closeStarted) return;
+    closeStarted = true;
     try {
-      await handle.close();
+      await inFlightRead?.catch(() => undefined);
     } finally {
-      release();
+      try {
+        await handle.close();
+      } finally {
+        release();
+      }
     }
   };
 
   return new ReadableStream<Uint8Array>({
     start: (controller) => {
       const abort = (): void => {
-        controller.error(new Error("The workspace media request was cancelled."));
-        void dispose();
+        if (disposed) return;
+        disposed = true;
+        try {
+          controller.error(new Error("The workspace media request was cancelled."));
+        } catch {
+          // Controller may already be closed or errored.
+        }
+        void dispose().catch(() => undefined);
       };
       removeAbortListener = (): void => {
         signal?.removeEventListener("abort", abort);
@@ -240,16 +253,32 @@ function createFileRangeStream(
       if (signal?.aborted) abort();
     },
     pull: async (controller) => {
+      if (disposed) return;
       try {
         if (remaining <= 0) {
-          await verifyOpenFileIdentity(handle, info);
+          const verifyPromise = verifyOpenFileIdentity(handle, info);
+          inFlightRead = verifyPromise;
+          try {
+            await verifyPromise;
+          } finally {
+            inFlightRead = null;
+          }
+          if (disposed) return;
           controller.close();
           await dispose();
           return;
         }
         const chunkBytes = Math.min(WORKSPACE_MEDIA_STREAM_CHUNK_BYTES, remaining);
         const buffer = Buffer.allocUnsafe(chunkBytes);
-        const { bytesRead } = await handle.read(buffer, 0, chunkBytes, offset);
+        const readPromise = handle.read(buffer, 0, chunkBytes, offset);
+        inFlightRead = readPromise;
+        let bytesRead: number;
+        try {
+          ({ bytesRead } = await readPromise);
+        } finally {
+          inFlightRead = null;
+        }
+        if (disposed) return;
         if (bytesRead <= 0) {
           throw new Error("The workspace media file changed while streaming.");
         }
@@ -259,14 +288,17 @@ function createFileRangeStream(
           bytesRead === buffer.length ? buffer : buffer.subarray(0, bytesRead),
         );
       } catch (error) {
+        if (disposed) return;
         try {
           controller.error(error);
+        } catch {
+          // Controller may already be closed or errored.
         } finally {
-          await dispose();
+          await dispose().catch(() => undefined);
         }
       }
     },
-    cancel: dispose,
+    cancel: () => dispose().catch(() => undefined),
   }, { highWaterMark: 1 });
 }
 
@@ -461,7 +493,7 @@ async function serveRangeOrFullStream(options: {
       headers["Accept-Ranges"] = "bytes";
       const parsed = parseByteRangeHeader(webRequest.headers?.get?.("range"), info.size);
       if (parsed.kind === "invalid") {
-        return new Response("Range Not Satisfiable", {
+        return new Response(method === "HEAD" ? null : "Range Not Satisfiable", {
           status: 416,
           headers: {
             ...baseHeaders(webRequest, previewOptions),
@@ -691,17 +723,20 @@ async function resolveOleSpreadsheetMedia(
   });
 }
 
-function decodeBoundedTextSpreadsheet(raw: Buffer, truncated: boolean): Buffer {
+function decodeBoundedTextSpreadsheet(
+  raw: Buffer,
+  sourceTruncated: boolean,
+): { readonly bytes: Buffer; readonly truncated: boolean } {
   if (raw.length >= 2 && ((raw[0] === 0xff && raw[1] === 0xfe) || (raw[0] === 0xfe && raw[1] === 0xff))) {
     const littleEndian = raw[0] === 0xff;
     let payload = raw.subarray(2);
-    if (truncated && payload.length % 2 !== 0) {
+    if (sourceTruncated && payload.length % 2 !== 0) {
       payload = payload.subarray(0, payload.length - 1);
     }
     if (payload.length % 2 !== 0) {
       throw new Error("The workspace text spreadsheet has truncated UTF-16 bytes.");
     }
-    if (truncated && payload.length >= 2) {
+    if (sourceTruncated && payload.length >= 2) {
       const lastUnit = littleEndian
         ? payload.readUInt16LE(payload.length - 2)
         : payload.readUInt16BE(payload.length - 2);
@@ -718,18 +753,25 @@ function decodeBoundedTextSpreadsheet(raw: Buffer, truncated: boolean): Buffer {
     if (decoded.includes("\0")) {
       throw new Error("The workspace text spreadsheet contains NUL bytes.");
     }
-    return Buffer.from(decoded, "utf8");
+    const utf8 = Buffer.from(decoded, "utf8");
+    if (utf8.byteLength > MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES) {
+      return {
+        bytes: trimIncompleteUtf8Tail(utf8.subarray(0, MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES)),
+        truncated: true,
+      };
+    }
+    return { bytes: utf8, truncated: sourceTruncated };
   }
   if (raw.includes(0)) {
     throw new Error("The workspace text spreadsheet contains NUL bytes.");
   }
-  const slice = truncated ? trimIncompleteUtf8Tail(raw) : raw;
+  const slice = sourceTruncated ? trimIncompleteUtf8Tail(raw) : raw;
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(slice);
   } catch {
     throw new Error("The workspace text spreadsheet is not valid UTF-8.");
   }
-  return slice;
+  return { bytes: slice, truncated: sourceTruncated };
 }
 
 async function resolveTextSpreadsheetMedia(
@@ -745,7 +787,7 @@ async function resolveTextSpreadsheetMedia(
     allowEmpty: true,
     signal,
   });
-  const truncated = info.size > MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES;
+  let truncated = info.size > MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES;
   const bytesToRead = Math.min(info.size, MAX_WORKSPACE_MEDIA_TEXT_SPREADSHEET_BYTES);
   let slice: Buffer;
   try {
@@ -753,7 +795,9 @@ async function resolveTextSpreadsheetMedia(
       slice = Buffer.alloc(0);
     } else {
       const raw = await readProbeBytes(handle, bytesToRead, bytesToRead);
-      slice = decodeBoundedTextSpreadsheet(raw, truncated);
+      const decoded = decodeBoundedTextSpreadsheet(raw, truncated);
+      slice = decoded.bytes;
+      truncated = decoded.truncated;
     }
     assertRequestActive(signal);
     await verifyOpenFileIdentity(handle, info);

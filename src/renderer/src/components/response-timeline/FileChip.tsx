@@ -153,7 +153,9 @@ export function FileChip({
         data-file-chip-kind={reference.kind}
         data-file-chip-text={reference.token}
         title={reference.token}
-        aria-label={`Open ${reference.token} in ${accessibleOpenTarget}`}
+        aria-label={onPreviewMedia
+          ? `Preview ${reference.token}`
+          : `Open ${reference.token} in ${accessibleOpenTarget}`}
         onClick={(event) => {
           if (wantsCopy(event)) copy();
           else open(event);

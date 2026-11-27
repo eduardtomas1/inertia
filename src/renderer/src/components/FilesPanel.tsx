@@ -853,7 +853,7 @@ export function FilesPanel({
       projectId,
       conversationId,
       selectedPath,
-      preview?.path ?? (previewError || binaryMediaPreview ? selectedPath : null),
+      preview?.path ?? (previewError || showMediaPreview ? selectedPath : null),
     );
     if (openEdit !== undefined) setFileExplorerOpen(false);
     if (
@@ -872,7 +872,6 @@ export function FilesPanel({
     }
     previousSelectedPathRef.current = selectedPath;
   }, [
-    binaryMediaPreview,
     contentMode,
     conversationId,
     projectId,
@@ -881,6 +880,7 @@ export function FilesPanel({
     search.entries,
     searchActive,
     selectedPath,
+    showMediaPreview,
     updateQuery,
     visiblePaths,
   ]);
@@ -1041,7 +1041,7 @@ export function FilesPanel({
                 <span className={FILE_LANGUAGE_CLASS} data-language-family={previewLanguage.family}>
                   {previewLanguage.label}
                 </span>
-              ) : selectedMediaDescriptor && !previewLanguage ? (
+              ) : selectedMediaDescriptor && !previewLanguage && !showMediaPreview ? (
                 <span className={FILE_LANGUAGE_CLASS}>{selectedMediaDescriptor.label}</span>
               ) : null}
               {selectedLocation && (
@@ -1071,7 +1071,7 @@ export function FilesPanel({
                     aria-pressed={!dualTogglePreviewActive}
                     onClick={() => {
                       setPreviewViewState({ identity: previewViewIdentity, view: "source" });
-                      if (dualViewMedia && selectedPath && !preview && !previewLoading && !previewError) {
+                      if (dualViewMedia && selectedPath && !preview && !previewLoading) {
                         onSelectFile(selectedPath, undefined, true, undefined, true);
                       }
                     }}
@@ -1111,7 +1111,7 @@ export function FilesPanel({
               selectedLine={selectedLocation?.startLine ?? null} onOpen={openContentMatch} />
           ) : showMediaPreview && selectedMediaTarget ? (
             <Suspense fallback={<div className={PANEL_LOADING_CLASS} role="status"><LoadingMark label="Loading" /><span>Loading {workspacePathName(selectedMediaTarget.relativePath)}…</span></div>}>
-              <FilesPanelMediaPreview target={selectedMediaTarget} onPreviewMedia={onPreviewMedia} onOpenFile={onOpenFile} />
+              <FilesPanelMediaPreview key={`${selectedMediaTarget.url}:${preview?.contentDigest ?? ""}`} target={selectedMediaTarget} onPreviewMedia={onPreviewMedia} onOpenFile={onOpenFile} />
             </Suspense>
           ) : previewLoading && selectedPath ? (
             <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
@@ -1144,6 +1144,7 @@ export function FilesPanel({
                     defaultCodeWrap
                     fileChips={false}
                     onOpenProjectFile={openMarkdownEntry}
+                    onPreviewMedia={onPreviewMedia}
                     onShowSource={() => setPreviewViewState({
                       identity: previewViewIdentity,
                       view: "source",

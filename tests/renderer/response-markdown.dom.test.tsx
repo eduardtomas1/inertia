@@ -409,7 +409,7 @@ describe("ResponseMarkdown project files", () => {
       "src",
       `inertia://bundle/workspace-image/${PROJECT_ID}/${CONVERSATION_ID}/assets%2Fdiagram-1.png`,
     );
-    expect(firstLoading).toHaveAttribute("loading", "lazy");
+    expect(firstLoading).not.toHaveAttribute("loading", "lazy");
     expect(firstLoading).toHaveAttribute("decoding", "async");
     fireEvent.load(firstLoading!);
     await waitFor(() => {
@@ -921,10 +921,13 @@ describe("ResponseMarkdown media linking and inline embeds", () => {
 
     const buttons = screen.getAllByRole("button");
     expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveAccessibleName("Preview docs/report.pdf (PDF)");
     expect(buttons[0]).toHaveTextContent("report.pdf");
     expect(buttons[0]).toHaveTextContent("PDF");
+    expect(buttons[1]).toHaveAccessibleName("Preview data/budget.xlsx (Excel)");
     expect(buttons[1]).toHaveTextContent("budget.xlsx");
     expect(buttons[1]).toHaveTextContent("Excel");
+    expect(buttons[2]).toHaveAccessibleName("Preview data/metrics.csv (CSV)");
     expect(buttons[2]).toHaveTextContent("metrics.csv");
     expect(buttons[2]).toHaveTextContent("CSV");
 
@@ -1226,5 +1229,80 @@ describe("ResponseMarkdown media linking and inline embeds", () => {
       relativePath: "demos/clip.mp4",
       action: "open-externally",
     });
+  });
+
+  it("preserves line navigation on dual-view media links/chips, keeps summary media non-interactive, resolves file:// query/encoded drives, and avoids duplicated plain-text copy", () => {
+    const onPreviewMedia = vi.fn();
+    const onOpenProjectFile = vi.fn();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+
+    const { container } = render(
+      <ResponseMarkdown
+        content={[
+          "[Row 42](data/report.csv#L42) `data/report.csv:42` `docs/spec.pdf`",
+          "",
+          "<details><summary><img src=\"recordings/demo.mp4\" alt=\"Summary clip\" /></summary>body</details>",
+          "",
+          "![Queried PDF](file:///workspace/project/docs/report.pdf?v=1)",
+          "",
+          "[![Demo](media/demo.mp4)](media/demo.mp4)",
+          "",
+          "![First](media/a.mp4)![Second](media/b.mp4)",
+        ].join("\n")}
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+        onPreviewMedia={onPreviewMedia}
+      />,
+    );
+
+    // Line-anchored dual-view CSV link and FileChip open in Files at line 42 rather than lightbox
+    fireEvent.click(screen.getByRole("link", { name: "Row 42" }));
+    expect(onOpenProjectFile).toHaveBeenCalledWith("data/report.csv", { startLine: 42, endLine: 42 });
+    expect(onPreviewMedia).not.toHaveBeenCalled();
+
+    const csvChip = screen.getByRole("button", { name: "Open data/report.csv:42 in Files" });
+    fireEvent.click(csvChip);
+    expect(onOpenProjectFile).toHaveBeenCalledTimes(2);
+    expect(onPreviewMedia).not.toHaveBeenCalled();
+
+    // Media FileChip without line location announces Preview
+    const pdfChip = screen.getByRole("button", { name: "Preview docs/spec.pdf" });
+    fireEvent.click(pdfChip);
+    expect(onPreviewMedia).toHaveBeenCalledWith(expect.objectContaining({
+      relativePath: "docs/spec.pdf",
+      kind: "pdf",
+    }));
+
+    // Media inside <summary> stays non-interactive (no nested <video> or <button>)
+    const summary = container.querySelector("summary")!;
+    expect(summary.querySelector('[data-markdown-media-kind="video"]')).not.toBeNull();
+    expect(summary.querySelector("video")).toBeNull();
+    expect(summary.querySelector("button")).toBeNull();
+
+    // file:// URL with ?v=1 resolves into project PDF card
+    expect(screen.getByRole("button", { name: /report\.pdf/u })).toBeInTheDocument();
+
+    // Copy plain text deduplicates self-linked media path and separates adjacent cards
+    const copied = renderedAnswerText(container, "fallback");
+    expect(copied).toContain("Demo (media/demo.mp4)");
+    expect(copied).not.toContain("(media/demo.mp4) (media/demo.mp4)");
+    expect(copied).toContain("First (media/a.mp4)\n\nSecond (media/b.mp4)");
+
+    // Percent-encoded Windows drive colon resolves inside Windows project root
+    const winRender = render(
+      <ResponseMarkdown
+        content="![Win Clip](file:///c%3A/workspace/project/recordings/clip.mp4)"
+        projectRoot="C:/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    expect(winRender.container.querySelector("video")).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-media/${PROJECT_ID}/project/recordings%2Fclip.mp4`,
+    );
   });
 });

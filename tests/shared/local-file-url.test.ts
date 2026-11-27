@@ -49,4 +49,15 @@ describe("desktop file URLs", () => {
     expect(localFileUrl("/tmp/file.ts:42:7", true)).toBe("file:///tmp/file.ts%3A42%3A7");
     expect(localFileUrl("/tmp/name:part.ts:2-4", false)).toBe("file:///tmp/name%3Apart.ts:2-4");
   });
+
+  it("normalizes percent-encoded Windows drive colons and optionally allows query strings for Markdown resolution", () => {
+    const encodedDrive = parseLocalFileUrl("file:///c%3A/workspace/clip.mp4");
+    expect(encodedDrive).not.toBeNull();
+    expect(encodedLocalFilePath(encodedDrive!)).toBe("c:/workspace/clip.mp4");
+
+    expect(parseLocalFileUrl("file:///tmp/report.pdf?v=1")).toBeNull();
+    const withQuery = parseLocalFileUrl("file:///tmp/report.pdf?v=1", { allowSearch: true });
+    expect(withQuery).not.toBeNull();
+    expect(encodedLocalFilePath(withQuery!)).toBe("/tmp/report.pdf");
+  });
 });

@@ -134,6 +134,7 @@ export function projectPrivateConnectQueue(
     );
     const attachmentCount = Math.min(20, item.attachmentIds.length);
     const editable = item.kind === "message"
+      && item.attribution === undefined
       && attachmentCount === 0
       && item.steerFollowUpOfRunId === undefined
       && item.state !== "dispatching";

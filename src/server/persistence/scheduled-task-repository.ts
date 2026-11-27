@@ -441,6 +441,10 @@ export class ScheduledTaskRepository {
     })();
   }
 
+  runInTransaction<T>(work: () => T): T {
+    return this.database.transaction(work).immediate();
+  }
+
   delete(taskId: string): boolean {
     const result = this.database.prepare(
       "DELETE FROM scheduled_tasks WHERE id = ?",

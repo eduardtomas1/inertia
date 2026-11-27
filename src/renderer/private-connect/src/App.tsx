@@ -281,17 +281,23 @@ export default function App({
     };
   }, [clearWorkspace, noteRequestFailure, pair.kind, readyCsrf]);
 
-  const request = useCallback(async (value: Parameters<PrivateConnectSocket["request"]>[0], csrf: string) => {
+  const request = useCallback(async (
+    value: Parameters<PrivateConnectSocket["request"]>[0],
+    csrf: string,
+    isFresh?: () => boolean,
+  ) => {
     const currentSocket = socket;
     try {
       const response = currentSocket
         ? await currentSocket.request(value)
         : await apiRequest(value, csrf);
-      setHostUnavailable(false);
+      if (!isFresh || isFresh()) setHostUnavailable(false);
       return response;
     } catch (error) {
-      if (currentSocket) demoteSocket(currentSocket, error);
-      noteRequestFailure(error);
+      if (!isFresh || isFresh()) {
+        if (currentSocket) demoteSocket(currentSocket, error);
+        noteRequestFailure(error);
+      }
       throw error;
     }
   }, [demoteSocket, noteRequestFailure, socket]);
@@ -521,15 +527,17 @@ export default function App({
     if (hostUnavailable || !readyCsrf) return;
     const authorityGen = scheduledTasksAuthorityGenRef.current;
     const reqSeq = ++scheduledTasksRequestSeqRef.current;
+    const isFresh = (): boolean =>
+      authorityGen === scheduledTasksAuthorityGenRef.current
+      && reqSeq === scheduledTasksRequestSeqRef.current;
     setScheduledTasksLoading(true);
     try {
       const response = await request(
         { protocolVersion: 1, type: "scheduled-tasks.list", requestId: crypto.randomUUID() },
         readyCsrf,
+        isFresh,
       );
-      if (authorityGen !== scheduledTasksAuthorityGenRef.current || reqSeq !== scheduledTasksRequestSeqRef.current) {
-        return;
-      }
+      if (!isFresh()) return;
       if (!response.ok) throw new Error(response.message);
       const raw = response.result as { kind?: unknown; tasks?: unknown };
       if (raw?.kind === "scheduled-tasks" && Array.isArray(raw.tasks)) {

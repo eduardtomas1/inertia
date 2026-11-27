@@ -218,13 +218,13 @@ describe("Private Connect browser lifecycle", () => {
     }));
   });
 
-  it("S52: reloads scheduled tasks on ordinary socket reconnect and discards stale HTTP responses after authority reset", async () => {
+  it("S52 + S58 + S59: reloads on socket reconnect and ignores stale HTTP failure/response after authority reset", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
-    const scheduledTask = {
+    const staleTask = {
       id: "11111111-1111-4111-8111-111111111111",
       projectId: "proj-1",
       projectName: "Repo",
-      title: "Nightly check",
+      title: "Stale task",
       scheduleLabel: "Every 30 minutes",
       enabled: true,
       nextRunAt: "2030-01-01T00:30:00.000Z",
@@ -244,7 +244,7 @@ describe("Private Connect browser lifecycle", () => {
     await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
     const beforeReconnect = countListCalls();
 
-    // Ordinary socket reconnect keeps same CSRF, shell, and online state -> must reload scheduled tasks.
+    // 1. Ordinary socket reconnect keeps same CSRF, shell, and online state -> reloads scheduled tasks.
     vi.useFakeTimers();
     await act(async () => {
       notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable);
@@ -252,34 +252,119 @@ describe("Private Connect browser lifecycle", () => {
     });
     expect(countListCalls()).toBeGreaterThan(beforeReconnect);
 
-    // Stale in-flight HTTP response resolving after authorityChanged reset must be discarded.
-    let resolveStale!: (value: unknown) => void;
-    const stalePromise = new Promise((resolve) => { resolveStale = resolve; });
+    // 2. S58: Disconnect socket so Refresh uses HTTP apiRequest; reject stale HTTP after replacement socket connects -> workspace stays online.
+    let rejectStaleHttp!: (err: unknown) => void;
+    const staleHttpRejectPromise = new Promise((_, reject) => { rejectStaleHttp = reject; });
     vi.mocked(apiRequest).mockImplementation((req) => {
       if ((req as { type?: string }).type === "scheduled-tasks.list") {
-        return stalePromise as ReturnType<typeof apiRequest>;
+        return staleHttpRejectPromise as ReturnType<typeof apiRequest>;
       }
       return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof apiRequest>;
     });
-    socket.request.mockImplementation((req) => {
-      if ((req as { type?: string }).type === "scheduled-tasks.list") {
-        return stalePromise as ReturnType<typeof socket.request>;
-      }
-      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof socket.request>;
+    const httpCallsBefore = vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+    expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(httpCallsBefore + 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await act(async () => {
+      rejectStaleHttp(new TypeError("Old HTTP transport failed"));
+      await Promise.resolve();
     });
+    expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
 
-    const refreshBtn = screen.getByRole("button", { name: /Refresh/i });
-    fireEvent.click(refreshBtn);
+    // 3. S59: Start a deferred HTTP list while disconnected, trigger authorityChanged, then resolve stale HTTP -> discarded.
+    let resolveStaleAuth!: (value: unknown) => void;
+    const staleAuthPromise = new Promise((resolve) => { resolveStaleAuth = resolve; });
+    vi.mocked(apiRequest).mockImplementation((req) => {
+      if ((req as { type?: string }).type === "scheduled-tasks.list") {
+        return staleAuthPromise as ReturnType<typeof apiRequest>;
+      }
+      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof apiRequest>;
+    });
+    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
+    const authHttpBefore = vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+    expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(authHttpBefore + 1);
     act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged));
     await act(async () => {
-      resolveStale({
+      resolveStaleAuth({
         type: "response",
-        requestId: "stale-list",
+        requestId: "stale-auth",
         ok: true,
-        result: { kind: "scheduled-tasks", tasks: [scheduledTask] },
+        result: { kind: "scheduled-tasks", tasks: [staleTask] },
       });
       await Promise.resolve();
     });
-    expect(screen.queryByText("Nightly check")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stale task")).not.toBeInTheDocument();
+  });
+
+  it("S59: discards out-of-order scheduled-tasks.list responses when a newer request completes first", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    const makeTask = (id: string, title: string) => ({
+      id,
+      projectId: "proj-1",
+      projectName: "Repo",
+      title,
+      scheduleLabel: "Every 30 minutes",
+      enabled: true,
+      nextRunAt: "2030-01-01T00:30:00.000Z",
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastError: null,
+      consecutiveFailures: 0,
+      boundConversationId: null,
+    });
+    const firstTask = makeTask("22222222-2222-4222-8222-222222222222", "First slow task");
+    const newerTask = makeTask("33333333-3333-4333-8333-333333333333", "Newer fast task");
+
+    const baseImpl = socket.request.getMockImplementation()!;
+    const pendingLists: Array<(value: unknown) => void> = [];
+    socket.request.mockImplementation((req: { type: string; requestId?: string }) => {
+      if (req.type === "scheduled-tasks.list") {
+        return new Promise<unknown>((resolve) => { pendingLists.push(resolve); }) as ReturnType<typeof socket.request>;
+      }
+      return baseImpl(req);
+    });
+    vi.mocked(apiRequest).mockImplementation((req: { type: string; requestId?: string }) => {
+      if (req.type === "scheduled-tasks.list") {
+        return new Promise<unknown>((resolve) => { pendingLists.push(resolve); }) as ReturnType<typeof apiRequest>;
+      }
+      return baseImpl(req) as ReturnType<typeof apiRequest>;
+    });
+
+    try {
+      render(<App initialPairingFragment={null} />);
+      await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+      await waitFor(() => expect(pendingLists.length).toBeGreaterThanOrEqual(1));
+      await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
+      const firstIndex = pendingLists.length - 1;
+
+      // Reconnect while request #1 is still in flight -> starts request #2 concurrently.
+      vi.useFakeTimers();
+      await act(async () => {
+        notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable);
+        await vi.advanceTimersByTimeAsync(3_000);
+      });
+      expect(pendingLists.length).toBeGreaterThan(firstIndex + 1);
+      const firstResolve = pendingLists[firstIndex]!;
+      const secondResolve = pendingLists[pendingLists.length - 1]!;
+
+      // Newer request #2 completes first.
+      await act(async () => {
+        secondResolve({ type: "response", requestId: "req-2", ok: true, result: { kind: "scheduled-tasks", tasks: [newerTask] } });
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Newer fast task")).toBeInTheDocument();
+
+      // Older request #1 completes later -> sequence guard must discard it!
+      await act(async () => {
+        firstResolve({ type: "response", requestId: "req-1", ok: true, result: { kind: "scheduled-tasks", tasks: [firstTask] } });
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Newer fast task")).toBeInTheDocument();
+      expect(screen.queryByText("First slow task")).not.toBeInTheDocument();
+    } finally {
+      socket.request.mockImplementation(baseImpl);
+    }
   });
 });

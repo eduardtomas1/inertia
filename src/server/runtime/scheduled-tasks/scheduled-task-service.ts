@@ -26,6 +26,7 @@ import {
   type ScheduledTaskSummary,
 } from "../../../shared/scheduled-tasks";
 import type { OrchestrationQueueRepository } from "../../orchestration-v2/queue-repository";
+import { OrchestrationConflict } from "../../orchestration-v2/types";
 import { RecordNotFoundError } from "../../persistence/errors";
 import { RuntimeRequestError, USER_CORRECTABLE_REQUEST } from "../../runtime-errors";
 import { withAgentSenderNote } from "../agent-sender-note";
@@ -64,6 +65,7 @@ export interface ScheduledTaskRepositoryLike {
   recordTaskOutcome(taskId: string, outcome: { lastRunAt: string; lastRunStatus: ScheduledTaskRunStatus; lastConversationId?: string | null; lastTurnId?: string | null; lastError: string | null; consecutiveFailures: number; updatedAt: string }): ScheduledTask | null;
   reconcileStrandedRuns(nowIso: string, errorMessage: string): ScheduledTaskRun[];
   disableTasksForMissingOrArchivedTarget(nowIso: string): string[];
+  runInTransaction?<T>(work: () => T): T;
 }
 
 export interface ScheduledTaskStoreLike {
@@ -315,17 +317,22 @@ export class ScheduledTaskService {
     for (const entry of queueItemsByTask) {
       queuedItems.set(entry.itemId, entry.conversationId);
     }
-    if (!this.dependencies.repository.delete(taskId)) {
-      throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
-    }
+    const notifiedConversations = new Set<string>();
+    const runTx = this.dependencies.repository.runInTransaction
+      ? <T>(work: () => T): T => this.dependencies.repository.runInTransaction!(work)
+      : <T>(work: () => T): T => work();
+    runTx(() => {
+      for (const [queueItemId, conversationId] of queuedItems) {
+        if (this.cancelQueuedScheduledItem(conversationId, queueItemId, { throwOnUnexpectedError: true })) {
+          notifiedConversations.add(conversationId);
+        }
+      }
+      if (!this.dependencies.repository.delete(taskId)) {
+        throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
+      }
+    });
     for (const [runId, tracked] of this.trackedByRunId) {
       if (tracked.taskId === taskId) this.untrackRun(runId);
-    }
-    const notifiedConversations = new Set<string>();
-    for (const [queueItemId, conversationId] of queuedItems) {
-      if (this.cancelQueuedScheduledItem(conversationId, queueItemId)) {
-        notifiedConversations.add(conversationId);
-      }
     }
     for (const conversationId of notifiedConversations) {
       this.dependencies.messageQueue?.()?.onExternalQueueChanged?.(conversationId);
@@ -367,7 +374,11 @@ export class ScheduledTaskService {
     return this.cancelQueuedScheduledItem(conversationId, itemId);
   }
 
-  private cancelQueuedScheduledItem(conversationId: string, itemId: string): boolean {
+  private cancelQueuedScheduledItem(
+    conversationId: string,
+    itemId: string,
+    options?: { throwOnUnexpectedError?: boolean },
+  ): boolean {
     const queue = this.dependencies.store.orchestration?.queue;
     if (!queue?.cancel) return false;
     const item = queue.getItem?.(itemId);
@@ -375,7 +386,14 @@ export class ScheduledTaskService {
     try {
       queue.cancel({ conversationId, itemId, reason: "withdrawn" });
       return true;
-    } catch {
+    } catch (error) {
+      if (options?.throwOnUnexpectedError) {
+        const after = queue.getItem?.(itemId);
+        if (error instanceof OrchestrationConflict && (!after || after.state === "cancelled" || after.state === "delivered")) {
+          return false;
+        }
+        throw error;
+      }
       return false;
     }
   }
@@ -1009,15 +1027,21 @@ export class ScheduledTaskService {
     if (run.state === "running") {
       if (queueItem && (queueItem.state === "waiting" || queueItem.state === "dispatching")) {
         const nowIso = now.toISOString();
-        this.dependencies.repository.updateRun(run.id, { state: "queued", turnId: null, updatedAt: nowIso });
-        const task = this.dependencies.repository.get(run.taskId);
-        if (task && (task.lastTurnId === run.turnId || task.lastRunStatus === "running")) {
-          this.dependencies.repository.update(task.id, {
-            now: nowIso,
-            lastRunStatus: "queued",
-            lastTurnId: null,
-          });
-        }
+        const runTx = this.dependencies.repository.runInTransaction
+          ? <T>(work: () => T): T => this.dependencies.repository.runInTransaction!(work)
+          : <T>(work: () => T): T => work();
+        const projectId = runTx(() => {
+          this.dependencies.repository.updateRun(run.id, { state: "queued", turnId: null, updatedAt: nowIso });
+          const task = this.dependencies.repository.get(run.taskId);
+          if (task && (task.lastTurnId === run.turnId || task.lastRunStatus === "running")) {
+            this.dependencies.repository.update(task.id, {
+              now: nowIso,
+              lastRunStatus: "queued",
+              lastTurnId: null,
+            });
+          }
+          return task?.projectId ?? null;
+        });
         this.trackRun({
           runId: run.id,
           taskId: run.taskId,
@@ -1027,7 +1051,7 @@ export class ScheduledTaskService {
           claimedAt: run.claimedAt,
           providerContent: "",
         });
-        return task?.projectId ?? null;
+        return projectId;
       }
       return this.reconcileRunningRunOnBoot(run, now);
     }

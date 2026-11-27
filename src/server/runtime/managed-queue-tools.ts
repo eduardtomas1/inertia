@@ -268,6 +268,28 @@ function mapQueueConflictError(action: ManagedQueueAction, error: unknown): neve
   throw error;
 }
 
+function earliestLegalCommandReorderTarget(
+  activeItems: readonly QueueItemProjection[],
+  itemId: string,
+): string | null {
+  const currentIndex = activeItems.findIndex((item) => item.id === itemId);
+  if (currentIndex <= 0) return null;
+  let startIndex = 0;
+  for (let i = currentIndex - 1; i >= 0; i -= 1) {
+    if (activeItems[i]!.kind === "delegated-results") {
+      startIndex = i + 1;
+      break;
+    }
+  }
+  for (let i = startIndex; i < currentIndex; i += 1) {
+    const candidate = activeItems[i]!;
+    if (candidate.kind !== "delegated-results" && candidate.state !== "dispatching") {
+      return candidate.id;
+    }
+  }
+  return null;
+}
+
 export async function executeManagedQueueMutation(
   dependencies: ManagedQueueToolDependencies,
   source: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
@@ -392,17 +414,17 @@ export async function executeManagedQueueMutation(
   if (isCommandOnlyPrompt(promoteContent, currentItem.attachmentIds.length)) {
     assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source);
     const activeItems = dependencies.store.orchestration.queue.listActive(target.id);
-    const firstMoveTarget = activeItems.find((item) => item.kind !== "delegated-results" && item.state !== "dispatching");
-    if (firstMoveTarget && firstMoveTarget.id !== itemId) {
+    const beforeItemId = earliestLegalCommandReorderTarget(activeItems, itemId);
+    if (beforeItemId !== null) {
       dependencies.store.orchestration.queue.reorder({
         conversationId: target.id,
         itemId,
-        beforeItemId: firstMoveTarget.id,
+        beforeItemId,
         commandType: "message.queue.reorder",
         source: {
           actorId: "runtime",
           commandId,
-          command: { type: "message.queue.reorder", conversationId: target.id, id: itemId, beforeId: firstMoveTarget.id },
+          command: { type: "message.queue.reorder", conversationId: target.id, id: itemId, beforeId: beforeItemId },
         },
       });
       publish();
@@ -491,17 +513,17 @@ export async function executeManagedQueueMutation(
       queue.releaseClaim({ conversationId: target.id, itemId, reason: "steer-declined" });
       claimed = false;
       const activeItems = queue.listActive(target.id);
-      const firstMoveTarget = activeItems.find((item) => item.kind !== "delegated-results" && item.state !== "dispatching");
-      if (firstMoveTarget && firstMoveTarget.id !== itemId) {
+      const beforeItemId = earliestLegalCommandReorderTarget(activeItems, itemId);
+      if (beforeItemId !== null) {
         queue.reorder({
           conversationId: target.id,
           itemId,
-          beforeItemId: firstMoveTarget.id,
+          beforeItemId,
           commandType: "message.queue.reorder",
           source: {
             actorId: "runtime",
             commandId: `${commandId}:reorder`,
-            command: { type: "message.queue.reorder", conversationId: target.id, id: itemId, beforeId: firstMoveTarget.id },
+            command: { type: "message.queue.reorder", conversationId: target.id, id: itemId, beforeId: beforeItemId },
           },
         });
       }

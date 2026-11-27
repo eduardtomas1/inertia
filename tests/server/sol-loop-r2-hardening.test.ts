@@ -9,7 +9,7 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { privateConnectPromptSafetyForHarness } from "../../src/shared/private-connect/prompt-safety";
 import { RuntimeStore } from "../../src/server/database";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
-import { handlePrivateConnectQueueCommand } from "../../src/server/private-connect/queue-gateway";
+import { handlePrivateConnectQueueCommand, projectPrivateConnectQueue } from "../../src/server/private-connect/queue-gateway";
 import { PrivateConnectRuntimeGateway } from "../../src/server/private-connect/runtime-gateway";
 import { sendMessageCommand, QUEUE_ATTRIBUTION_STALE_CODE } from "../../src/server/runtime/commands/message-send-command";
 import { executeManagedQueueMutation } from "../../src/server/runtime/managed-queue-tools";
@@ -879,10 +879,13 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         requestId: randomUUID(),
         payload: { conversationId: conv.id, id: s48ItemId },
       });
+      // S48 + S63: Desktop message.queue.remove atomically settles BOTH scheduled_task_runs AND scheduled_tasks summary inside the same transaction (even without callback)!
       expect(store.orchestration.queue.getItem(s48ItemId)?.state).toBe("cancelled");
       expect(store.scheduledTasks.getRun(s48RunId)?.state).toBe("skipped");
+      expect(store.scheduledTasks.get(s48Task.id)?.lastRunStatus).toBe("skipped");
+      expect(store.scheduledTasks.get(s48Task.id)?.lastError).toContain("Removed from the chat queue");
 
-      // S49: Private Connect generic queue.edit refuses editing a scheduled-task item with an unsupported model override!
+      // S49 + S57: Private Connect projection advertises editable: false AND queue.edit refuses editing a scheduled-task item!
       const s49ItemId = randomUUID();
       store.orchestration.queue.enqueue({
         conversationId: conv.id,
@@ -902,6 +905,8 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
           },
         },
       });
+      const pcProjection = projectPrivateConnectQueue(store, conv, { isActive: false, waitingForLocalAction: false });
+      expect(pcProjection.items.find((entry) => entry.id === s49ItemId)?.editable).toBe(false);
       const pcEditRes = await handlePrivateConnectQueueCommand(
         store,
         {
@@ -978,7 +983,18 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         createConversation: async () => conv,
         broadcast: () => undefined,
       });
+      // S62: if queue cancellation fails, delete surfaces the error and rolls back atomically so the task stays intact for retry!
+      const cancelSpy = vi.spyOn(store.orchestration.queue, "cancel").mockImplementationOnce(() => {
+        throw new Error("Simulated SQLite busy error during withdraw");
+      });
+      expect(() => s50Service.delete(s50Task.id)).toThrow("Simulated SQLite busy error during withdraw");
+      cancelSpy.mockRestore();
+      expect(store.scheduledTasks.get(s50Task.id)).not.toBeNull();
+      expect(store.orchestration.queue.getItem(s50ItemId)?.state).toBe("blocked");
+
+      // Retry succeeds atomically: both blocked item is cancelled and task is deleted.
       s50Service.delete(s50Task.id);
+      expect(store.scheduledTasks.get(s50Task.id)).toBeNull();
       expect(store.orchestration.queue.getItem(s50ItemId)?.state).toBe("cancelled");
 
       // S51: Stale claim withdrawal after async prep marks progressed=true so a second unheld waiting item wakes immediately!
@@ -1151,6 +1167,32 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         sourceHarnessId: s53Parent.modelSelection.harnessId,
         now: "2026-11-27T12:00:00.000Z",
       });
+      // S53 + S60: promote_to_steer rechecks locked content after lease.ready AND never crosses a delegated-results boundary!
+      const s53OrdinaryId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s53Child.id,
+        itemId: s53OrdinaryId,
+        content: "Ordinary item before delegated results",
+        kind: "message",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const s53DelegatedId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s53Child.id,
+        itemId: s53DelegatedId,
+        content: "Delegated child summary",
+        kind: "delegated-results",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          delegatedCompletion: {
+            parentConversationId: s53Child.id,
+            generation: 1,
+            taskIds: ["a".repeat(64)],
+          },
+        },
+      });
       const s53ItemId = randomUUID();
       store.orchestration.queue.enqueue({
         conversationId: s53Child.id,
@@ -1200,6 +1242,74 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(s53Parsed.disposition).toBe("queued");
       expect(s53Parsed.message).toContain("Commands must run as a separate turn.");
       expect(store.orchestration.queue.getItem(s53ItemId)?.state).toBe("waiting");
+      expect(store.orchestration.queue.listActive(s53Child.id).map(({ id }) => id)).toEqual([
+        s53OrdinaryId,
+        s53DelegatedId,
+        s53ItemId,
+      ]);
+
+      // S61: Boot requeue updates scheduled_task_runs + scheduled_tasks atomically and rolls back both if the second write fails!
+      const s61Conv = store.createConversation(project.id, "S61 Rollback");
+      const s61Task = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Atomic boot requeue",
+        prompt: "Run atomic",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s61Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2026-11-27T13:00:00.000Z",
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s61RunId = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: s61RunId,
+        taskId: s61Task.id,
+        claimKey: `manual:${s61Task.id}:${s61RunId}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: "2026-11-27T12:00:00.000Z",
+        nextRunAtAfterClaim: "2026-11-27T13:00:00.000Z",
+      });
+      const s61ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s61Conv.id,
+        itemId: s61ItemId,
+        content: s61Task.prompt,
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          scheduledTask: {
+            taskId: s61Task.id,
+            runId: s61RunId,
+            title: s61Task.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      const s61TurnId = randomUUID();
+      store.scheduledTasks.updateRun(s61RunId, { state: "running", conversationId: s61Conv.id, queueItemId: s61ItemId, turnId: s61TurnId, updatedAt: "2026-11-27T12:00:02.000Z" });
+      store.scheduledTasks.update(s61Task.id, { now: "2026-11-27T12:00:02.000Z", lastRunStatus: "running", lastTurnId: s61TurnId });
+      const s61UpdateSpy = vi.spyOn(store.scheduledTasks, "update").mockImplementationOnce(() => {
+        throw new Error("Simulated summary update failure");
+      });
+      const s61Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s61Conv,
+        broadcast: () => undefined,
+        enableProviders: false,
+      });
+      expect(() => s61Service.start()).toThrow("Simulated summary update failure");
+      s61UpdateSpy.mockRestore();
+      // Both rows rolled back together — occurrence stayed running instead of drifting from summary!
+      expect(store.scheduledTasks.getRun(s61RunId)?.state).toBe("running");
+      expect(store.scheduledTasks.get(s61Task.id)?.lastRunStatus).toBe("running");
 
       // S54: Historical queue.item-claimed (mode: 'steer') on a scheduled item still replays under rebuildProjections()!
       const s54Conv = store.createConversation(project.id, "S54 Replay");

@@ -2,6 +2,10 @@ import type Database from "better-sqlite3";
 
 import type { ChatAttachment, Conversation, ModelSelection } from "../../shared/contracts";
 import { isCommandOnlyPrompt } from "../../shared/follow-up-steer";
+import {
+  normalizeScheduledTaskError,
+  SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS,
+} from "../../shared/scheduled-tasks";
 import { modelSelectionSchema } from "../../shared/model-routing";
 import {
   QUEUE_ITEM_PROJECTION,
@@ -277,10 +281,26 @@ export function settleScheduledRunOnQueueCancel(
   nowIso: string = new Date().toISOString(),
 ): void {
   if (!item?.attribution || !("scheduledTask" in item.attribution)) return;
-  const note = detail ?? `The queued scheduled prompt was cancelled (${reason}).`;
+  const runId = item.attribution.scheduledTask.runId;
+  const runRow = database.prepare(`SELECT task_id, conversation_id, turn_id, claimed_at
+    FROM scheduled_task_runs WHERE id = ? AND state IN ('claimed', 'queued')`).get(runId) as {
+    task_id: string; conversation_id: string | null; turn_id: string | null; claimed_at: string;
+  } | undefined;
+  if (!runRow) return;
+  const note = normalizeScheduledTaskError(detail ?? `The queued scheduled prompt was cancelled (${reason}).`);
   database.prepare(`UPDATE scheduled_task_runs
     SET state = 'skipped', error = COALESCE(error, ?), finished_at = COALESCE(finished_at, ?)
-    WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, item.attribution.scheduledTask.runId);
+    WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, runId);
+  const claimedMs = Date.parse(runRow.claimed_at);
+  const nowMs = Date.parse(nowIso);
+  if (Number.isFinite(claimedMs) && Number.isFinite(nowMs) && (nowMs - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS) {
+    database.prepare(`UPDATE scheduled_tasks
+      SET last_run_at = ?, last_run_status = 'skipped',
+          last_conversation_id = COALESCE(?, last_conversation_id),
+          last_turn_id = COALESCE(?, last_turn_id),
+          last_error = ?, updated_at = ?
+      WHERE id = ?`).run(nowIso, runRow.conversation_id, runRow.turn_id, note, nowIso, runRow.task_id);
+  }
 }
 
 export class OrchestrationQueueRepository {

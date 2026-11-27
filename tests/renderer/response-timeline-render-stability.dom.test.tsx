@@ -2,11 +2,11 @@ import { cleanup, render } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
+import { ResponseTimeline, sameTurnTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
 import { StreamingMarkdownText } from "../../src/renderer/src/components/response-timeline/StreamingMarkdownText";
 import { CONVERSATION_HISTORY_PREPEND_EVENT } from "../../src/renderer/src/utils/conversationHistoryNavigation";
-import { summarizeActivities } from "../../src/renderer/src/utils/responseTimeline";
+import { buildResponseTimeline, summarizeActivities } from "../../src/renderer/src/utils/responseTimeline";
 import type {
   AgentActivity,
   AgentTurn,
@@ -276,5 +276,37 @@ describe("response timeline render stability", () => {
     expect(blocks).toHaveLength(400);
     expect(blocks[399]?.getAttribute("data-stream-block")).toBe("tail");
     expect(blocks[399]?.textContent).toBe(`${paragraphs[399]} more words`);
+  });
+
+  it("tracks projectBaseRoot and onPreviewMedia changes in sameTurnTimelineProps", () => {
+    const onPreviewMediaA = vi.fn();
+    const onPreviewMediaB = vi.fn();
+    const built = buildResponseTimeline({
+      turns,
+      messages,
+      activities: [],
+      reasonings: [],
+      plans: [],
+      approvals: [],
+      inputRequests: [],
+      checkpoints: [],
+    });
+    const turnItem = built.find((item) => item.kind === "turn");
+    expect(turnItem?.kind).toBe("turn");
+    if (!turnItem || turnItem.kind !== "turn") return;
+    const baseProps = timelineProps([], "", {
+      projectBaseRoot: "/workspace-base",
+      onPreviewMedia: onPreviewMediaA,
+    });
+    const base = { turn: turnItem.turn, props: baseProps, previousArtifactTurnId: null };
+    expect(sameTurnTimelineProps(base, { ...base, props: { ...baseProps } })).toBe(true);
+    expect(sameTurnTimelineProps(base, {
+      ...base,
+      props: { ...baseProps, onPreviewMedia: onPreviewMediaB },
+    })).toBe(false);
+    expect(sameTurnTimelineProps(base, {
+      ...base,
+      props: { ...baseProps, projectBaseRoot: "/workspace-other" },
+    })).toBe(false);
   });
 });

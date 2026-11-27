@@ -140,11 +140,13 @@ describe("composer attachment previews", () => {
     );
     // Development loads the renderer over HTTP, so its privileged preview is
     // cross-origin even though packaged windows use inertia://bundle.
-    expect(html).toContain("img-src 'self' inertia: data: blob:");
-    // Canary builds serve frames from their own scheme, which `inertia:` does not match.
+    // Canary builds serve previews from their own scheme, which `inertia:` does not match.
+    expect(html).toContain("img-src 'self' inertia: inertia-canary: data: blob:");
+    expect(html).toContain("media-src 'self' inertia: inertia-canary: blob:");
     expect(html).toMatch(/frame-src inertia: inertia-canary:"/u);
     expect(html).toContain("object-src 'none'");
     expect(html).not.toMatch(/img-src[^;]*file:/u);
+    expect(html).not.toMatch(/media-src[^;]*file:/u);
   });
 
   it("formats bounded metadata compactly", () => {

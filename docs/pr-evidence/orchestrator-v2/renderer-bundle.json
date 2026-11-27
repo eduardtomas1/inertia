@@ -831,5 +831,49 @@
         "headroom": 512
       }
     }
+  },
+  "mainSync338e8939": {
+    "date": "2026-11-27",
+    "checkpoint": "Merge of origin/main 338e8939 (#779 agent-linked media viewer) into 85954f69",
+    "platform": "Linux x64, Node 22.23.2",
+    "measurement": "Full electron-vite + private-connect production build; preserves deferredWorkspaceMediaPreviewJavaScript (29,495 / 30,070 bytes), deferredComposerQueueJavaScript (20,773 / 21,029 bytes), entryCss (259,481 / 259,805 bytes), and detachedChatCss (1,448 / 1,612 bytes).",
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 1011589,
+        "previousLimit": 1009876,
+        "limit": 1012101,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 893484,
+        "previousLimit": 891771,
+        "limit": 893996,
+        "headroom": 512
+      },
+      "filesFirstLoadJavaScript": {
+        "bytes": 169649,
+        "previousLimit": 164806,
+        "limit": 170161,
+        "headroom": 512
+      },
+      "deferredMarkdownJavaScript": {
+        "bytes": 459962,
+        "previousLimit": 450560,
+        "limit": 460474,
+        "headroom": 512
+      },
+      "transcriptJavaScript": {
+        "bytes": 726926,
+        "previousLimit": 710589,
+        "limit": 727438,
+        "headroom": 512
+      },
+      "coreJavaScript": {
+        "bytes": 2846548,
+        "previousLimit": 2832231,
+        "limit": 2847060,
+        "headroom": 512
+      }
+    }
   }
 }

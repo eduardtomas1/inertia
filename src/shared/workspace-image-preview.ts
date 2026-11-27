@@ -3,7 +3,14 @@ import type { OpenProjectPathRequest } from "./desktop";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const WORKSPACE_IMAGE_PATH = /^\/workspace-image\/([^/]+)\/([^/]+)\/([^/]+)$/u;
 
-export const MAX_WORKSPACE_IMAGE_PREVIEW_BYTES = 10 * 1024 * 1024;
+export const MAX_WORKSPACE_IMAGE_PREVIEW_BYTES = 25 * 1024 * 1024;
+export const MAX_WORKSPACE_BMP_IMAGE_PREVIEW_BYTES = 40 * 1024 * 1024;
+
+export function maxWorkspaceImagePreviewBytesForPath(path: string): number {
+  return /\.bmp$/iu.test(path)
+    ? MAX_WORKSPACE_BMP_IMAGE_PREVIEW_BYTES
+    : MAX_WORKSPACE_IMAGE_PREVIEW_BYTES;
+}
 
 export function applicationRendererScheme(protocol?: string): "inertia" | "inertia-canary" {
   return protocol === "inertia-canary:" ? "inertia-canary" : "inertia";

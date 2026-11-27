@@ -1,7 +1,10 @@
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
+import { EditorPreferenceContext } from "../../src/renderer/src/hooks/useAvailableEditors";
+import { renderedAnswerText } from "../../src/renderer/src/utils/answerPlainText";
 import {
   MAX_CONCURRENT_MARKDOWN_IMAGE_LOADS,
   MAX_MARKDOWN_IMAGES_PER_DOCUMENT,
@@ -754,5 +757,474 @@ describe("ResponseMarkdown parse reuse", () => {
     render(markdown(content, true)).unmount();
 
     expect(markdownRenders.count).toBe(2);
+  });
+});
+
+describe("ResponseMarkdown media linking and inline embeds", () => {
+  it("resolves in-project file:// and Windows drive image embeds to workspace-image URLs", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const { container } = render(
+      <ResponseMarkdown
+        content="![shot](file:///workspace/project/assets/shot.png)"
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        conversationId={CONVERSATION_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    const posixImg = await waitFor(() => {
+      const img = container.querySelector<HTMLImageElement>("img");
+      expect(img).not.toBeNull();
+      return img!;
+    });
+    expect(posixImg).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-image/${PROJECT_ID}/${CONVERSATION_ID}/assets%2Fshot.png`,
+    );
+
+    const win = render(
+      <ResponseMarkdown
+        content="![win shot](C:/workspace/project/assets/shot.png)"
+        projectRoot="C:/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    const winImg = await waitFor(() => {
+      const img = win.container.querySelector<HTMLImageElement>("img");
+      expect(img).not.toBeNull();
+      return img!;
+    });
+    expect(winImg).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-image/${PROJECT_ID}/project/assets%2Fshot.png`,
+    );
+  });
+
+  it("handles unencoded percent signs, strips :line suffixes, ignores dot paths, and supports projectBaseRoot", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const { container } = render(
+      <ResponseMarkdown
+        content={[
+          "![percent](assets/100%_done.png:12)",
+          "",
+          "![parent](file:///workspace/repo/shared/logo.png)",
+          "",
+          "![dot](.)",
+        ].join("\n")}
+        projectRoot="/workspace/repo/.worktrees/feat"
+        projectBaseRoot="/workspace/repo"
+        projectId={PROJECT_ID}
+        conversationId={CONVERSATION_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+    await waitFor(() => expect(container.querySelectorAll("img")).toHaveLength(2));
+    const images = [...container.querySelectorAll<HTMLImageElement>("img")];
+    expect(images[0]).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-image/${PROJECT_ID}/${CONVERSATION_ID}/assets%2F100%25_done.png`,
+    );
+    expect(images[1]).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-image/${PROJECT_ID}/project/shared%2Flogo.png`,
+    );
+    expect(screen.getByRole("img", { name: "dot" })).toHaveTextContent("dot (image unavailable)");
+  });
+
+  it("renders inline video and audio cards with workspace-media URLs, Expand actions, error fallback, and unmount cleanup", () => {
+    const onPreviewMedia = vi.fn();
+    const onOpenProjectFile = vi.fn();
+    const openProjectPath = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openProjectPath },
+    });
+    const pauseSpy = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    const loadSpy = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+
+    const { container, unmount } = render(
+      <ResponseMarkdown
+        content={"![demo](recordings/demo.mp4)\n\n![clip](clips/voice.mp3)"}
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        conversationId={CONVERSATION_ID}
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+        onPreviewMedia={onPreviewMedia}
+      />,
+    );
+
+    const video = container.querySelector<HTMLVideoElement>("video");
+    expect(video).not.toBeNull();
+    expect(video).toHaveAttribute("controls");
+    expect(video).toHaveAttribute("preload", "metadata");
+    expect(video).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-media/${PROJECT_ID}/${CONVERSATION_ID}/recordings%2Fdemo.mp4`,
+    );
+
+    const audio = container.querySelector<HTMLAudioElement>("audio");
+    expect(audio).not.toBeNull();
+    expect(audio).toHaveAttribute("controls");
+    expect(audio).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-media/${PROJECT_ID}/${CONVERSATION_ID}/clips%2Fvoice.mp3`,
+    );
+
+    const expandButtons = screen.getAllByRole("button", { name: "Expand" });
+    expect(expandButtons).toHaveLength(2);
+    fireEvent.click(expandButtons[0]!);
+    expect(onPreviewMedia).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      conversationId: CONVERSATION_ID,
+      relativePath: "recordings/demo.mp4",
+      kind: "video",
+      name: "demo.mp4",
+    }));
+
+    expect(renderedAnswerText(container, "fallback")).toBe(
+      "demo (recordings/demo.mp4)\n\nclip (clips/voice.mp3)",
+    );
+
+    fireEvent.error(video!);
+    expect(screen.getByRole("button", { name: "Open in Files" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open in Files" }));
+    expect(onOpenProjectFile).toHaveBeenCalledWith("recordings/demo.mp4");
+    fireEvent.click(screen.getByRole("button", { name: "Open externally" }));
+    expect(openProjectPath).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      conversationId: CONVERSATION_ID,
+      relativePath: "recordings/demo.mp4",
+      action: "open-externally",
+    });
+
+    unmount();
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(loadSpy).toHaveBeenCalled();
+    expect(audio!.getAttribute("src")).toBeNull();
+    pauseSpy.mockRestore();
+    loadSpy.mockRestore();
+  });
+
+  it("renders inline PDF and spreadsheet cards calling onPreviewMedia and copies clean plain text", () => {
+    const onPreviewMedia = vi.fn();
+    const { container } = render(
+      <ResponseMarkdown
+        content={"![report](docs/report.pdf)\n\n![budget](data/budget.xlsx)\n\n![metrics](data/metrics.csv)"}
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+        onPreviewMedia={onPreviewMedia}
+      />,
+    );
+
+    const buttons = screen.getAllByRole("button");
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toHaveTextContent("report.pdf");
+    expect(buttons[0]).toHaveTextContent("PDF");
+    expect(buttons[1]).toHaveTextContent("budget.xlsx");
+    expect(buttons[1]).toHaveTextContent("Excel");
+    expect(buttons[2]).toHaveTextContent("metrics.csv");
+    expect(buttons[2]).toHaveTextContent("CSV");
+
+    fireEvent.click(buttons[0]!);
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      relativePath: "docs/report.pdf",
+      kind: "pdf",
+    }));
+    fireEvent.click(buttons[1]!);
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      relativePath: "data/budget.xlsx",
+      kind: "spreadsheet",
+    }));
+
+    expect(renderedAnswerText(container, "fallback")).toBe(
+      "report (docs/report.pdf)\n\nbudget (data/budget.xlsx)\n\nmetrics (data/metrics.csv)",
+    );
+  });
+
+  it("routes media markdown links to onPreviewMedia even when preferredEditor is external", () => {
+    const onPreviewMedia = vi.fn();
+    const onOpenProjectFile = vi.fn();
+    const openProjectPath = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openProjectPath },
+    });
+
+    render(
+      <EditorPreferenceContext.Provider value={{ preferredEditor: "vscode", detectedEditors: [] }}>
+        <ResponseMarkdown
+          content={[
+            "[report](docs/report.pdf)",
+            "[demo](recordings/demo.mp4)",
+            "[budget](data/budget.xlsx)",
+            "[shot](assets/shot.png)",
+            "[code](src/index.ts)",
+          ].join("\n\n")}
+          projectRoot="/workspace/project"
+          projectId={PROJECT_ID}
+          defaultCodeWrap={false}
+          onOpenProjectFile={onOpenProjectFile}
+          onPreviewMedia={onPreviewMedia}
+        />
+      </EditorPreferenceContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "report" }));
+    fireEvent.click(screen.getByRole("link", { name: "demo" }));
+    fireEvent.click(screen.getByRole("link", { name: "budget" }));
+    fireEvent.click(screen.getByRole("link", { name: "shot" }));
+    expect(onPreviewMedia).toHaveBeenCalledTimes(4);
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(1, expect.objectContaining({ relativePath: "docs/report.pdf", kind: "pdf" }));
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(2, expect.objectContaining({ relativePath: "recordings/demo.mp4", kind: "video" }));
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(3, expect.objectContaining({ relativePath: "data/budget.xlsx", kind: "spreadsheet" }));
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(4, expect.objectContaining({ relativePath: "assets/shot.png", kind: "image" }));
+    expect(openProjectPath).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("link", { name: "code" }));
+    expect(openProjectPath).toHaveBeenCalledWith(expect.objectContaining({
+      relativePath: "src/index.ts",
+      action: "open-in-editor",
+      editor: "vscode",
+    }));
+  });
+
+  it("opens preview lightbox when clicking a loaded inline image", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const onPreviewMedia = vi.fn();
+    const { container } = render(
+      <ResponseMarkdown
+        content="![Dashboard](assets/dashboard.png)"
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+        onPreviewMedia={onPreviewMedia}
+      />,
+    );
+
+    const img = await waitFor(() => {
+      const node = container.querySelector<HTMLImageElement>("img");
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    fireEvent.load(img);
+    fireEvent.click(img);
+
+    expect(onPreviewMedia).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: PROJECT_ID,
+      relativePath: "assets/dashboard.png",
+      kind: "image",
+      name: "dashboard.png",
+    }));
+  });
+
+  it("keeps the 9th image capped at the document image limit without a manual override button", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const { container } = render(
+      <ResponseMarkdown
+        content={markdownImages(MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 1)}
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+
+    await waitFor(() => {
+      const shells = container.querySelectorAll(".response-markdown-image-shell");
+      expect(shells).toHaveLength(MAX_MARKDOWN_IMAGES_PER_DOCUMENT + 1);
+      expect(shells[MAX_MARKDOWN_IMAGES_PER_DOCUMENT]?.getAttribute("data-markdown-image-state")).toBe("overflow");
+    });
+    expect(screen.queryByRole("button", { name: "Load image" })).toBeNull();
+    expect(renderedAnswerText(container, "fallback")).not.toContain("Load image");
+  });
+
+  it("renders outside-project local media as a clickable button without loading or auto-opening it", () => {
+    const openExternal = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openExternal },
+    });
+    const { container } = render(
+      <ResponseMarkdown
+        content="![Outside shot](file:///elsewhere/shot.png)"
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+      />,
+    );
+
+    expect(container.querySelector("img")).toBeNull();
+    expect(openExternal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Outside shot" }));
+    expect(openExternal).toHaveBeenCalledWith("file:///elsewhere/shot.png");
+  });
+
+  it("loads visible workspace images cleanly under React StrictMode", async () => {
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        x: 0,
+        y: 40,
+        top: 40,
+        bottom: 220,
+        left: 0,
+        right: 320,
+        width: 320,
+        height: 180,
+        toJSON: () => ({}),
+      });
+    try {
+      const { container } = render(
+        <StrictMode>
+          <ResponseMarkdown
+            content="![Chart](assets/chart.png)"
+            projectRoot="/workspace/project"
+            projectId={PROJECT_ID}
+            defaultCodeWrap={false}
+          />
+        </StrictMode>,
+      );
+
+      await waitFor(() => {
+        const img = container.querySelector<HTMLImageElement>('img[alt="Chart"]');
+        expect(img).not.toBeNull();
+        expect(img?.getAttribute("src")).toBe(
+          `inertia://bundle/workspace-image/${PROJECT_ID}/project/assets%2Fchart.png`,
+        );
+      });
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
+
+  it("preserves inline video src under React StrictMode and when switching video URLs", () => {
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+    const { container, rerender } = render(
+      <StrictMode>
+        <ResponseMarkdown
+          content="![Demo A](demos/a.mp4)"
+          projectRoot="/workspace/project"
+          projectId={PROJECT_ID}
+          defaultCodeWrap={false}
+        />
+      </StrictMode>,
+    );
+    expect(container.querySelector("video")).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-media/${PROJECT_ID}/project/demos%2Fa.mp4`,
+    );
+
+    rerender(
+      <StrictMode>
+        <ResponseMarkdown
+          content="![Demo B](demos/b.mp4)"
+          projectRoot="/workspace/project"
+          projectId={PROJECT_ID}
+          defaultCodeWrap={false}
+        />
+      </StrictMode>,
+    );
+    expect(container.querySelector("video")).toHaveAttribute(
+      "src",
+      `inertia://bundle/workspace-media/${PROJECT_ID}/project/demos%2Fb.mp4`,
+    );
+  });
+
+  it("lets the parent link own interaction for wrapped images without nesting a preview button", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const openExternal = vi.fn(async () => undefined);
+    const onPreviewMedia = vi.fn();
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openExternal },
+    });
+    const { container } = render(
+      <ResponseMarkdown
+        content="[![Chart](assets/chart.png)](https://example.com)"
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+        onPreviewMedia={onPreviewMedia}
+      />,
+    );
+
+    const link = await waitFor(() => {
+      const anchor = container.querySelector<HTMLAnchorElement>("a");
+      expect(anchor?.querySelector('img[alt="Chart"]')).not.toBeNull();
+      return anchor!;
+    });
+    expect(link.querySelector("button")).toBeNull();
+    fireEvent.click(link.querySelector('img[alt="Chart"]')!);
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/");
+    expect(onPreviewMedia).not.toHaveBeenCalled();
+
+    // Wrapped video and audio render static cards without nested controls or buttons.
+    const { container: mediaContainer } = render(
+      <ResponseMarkdown
+        content="[![Demo](demos/clip.mp4)](https://example.com/v) [![Track](audio/song.mp3)](https://example.com/a)"
+        projectRoot="/workspace/project"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+        onPreviewMedia={onPreviewMedia}
+      />,
+    );
+    const anchors = mediaContainer.querySelectorAll<HTMLAnchorElement>("a");
+    expect(anchors).toHaveLength(2);
+    for (const anchor of anchors) {
+      expect(anchor.querySelector("video")).toBeNull();
+      expect(anchor.querySelector("audio")).toBeNull();
+      expect(anchor.querySelector("button")).toBeNull();
+    }
+    fireEvent.click(anchors[0]!);
+    expect(openExternal).toHaveBeenCalledWith("https://example.com/v");
+    expect(onPreviewMedia).not.toHaveBeenCalled();
+  });
+
+  it("does not pass base-checkout paths into a worktree conversation's Files callback", () => {
+    const openProjectPath = vi.fn(async () => undefined);
+    const onOpenProjectFile = vi.fn();
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openProjectPath },
+    });
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+
+    const { container } = render(
+      <ResponseMarkdown
+        content={[
+          "[Base README](/workspace/base/README.md)",
+          "",
+          "![Base clip](/workspace/base/demos/clip.mp4)",
+        ].join("\n")}
+        projectRoot="/workspace/worktrees/feature"
+        projectBaseRoot="/workspace/base"
+        projectId={PROJECT_ID}
+        conversationId="22222222-2222-4222-8222-222222222222"
+        defaultCodeWrap={false}
+        onOpenProjectFile={onOpenProjectFile}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Base README" }));
+    expect(onOpenProjectFile).not.toHaveBeenCalled();
+    expect(openProjectPath).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      relativePath: "README.md",
+      action: "reveal",
+    });
+
+    const video = container.querySelector("video")!;
+    fireEvent.error(video);
+    expect(screen.queryByRole("button", { name: "Open in Files" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open externally" }));
+    expect(openProjectPath).toHaveBeenCalledWith({
+      projectId: PROJECT_ID,
+      relativePath: "demos/clip.mp4",
+      action: "open-externally",
+    });
   });
 });

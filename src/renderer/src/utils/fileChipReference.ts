@@ -5,7 +5,15 @@ export const MAX_FILE_CHIP_TOKEN_LENGTH = 200;
 export const MAX_FILE_CHIPS_PER_DOCUMENT = 200;
 export const FILE_CHIP_FOLDER_HINT_LENGTH = 40;
 
-export type FileChipKind = "code" | "text" | "image" | "config";
+export type FileChipKind =
+  | "code"
+  | "text"
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "spreadsheet"
+  | "config";
 
 const EXTENSION_KINDS: ReadonlyMap<string, FileChipKind> = new Map([
   ...[
@@ -14,7 +22,19 @@ const EXTENSION_KINDS: ReadonlyMap<string, FileChipKind> = new Map([
     "cpp", "hpp", "cs", "rb", "php", "lua", "dart", "sh", "ps1", "sql",
   ].map((extension) => [extension, "code"] as const),
   ...["md", "mdx", "txt"].map((extension) => [extension, "text"] as const),
-  ...["svg", "png", "jpg", "jpeg", "gif", "webp"].map((extension) => [extension, "image"] as const),
+  ...[
+    "svg", "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico",
+  ].map((extension) => [extension, "image"] as const),
+  ...[
+    "mp4", "m4v", "webm", "mov", "ogv", "mkv",
+  ].map((extension) => [extension, "video"] as const),
+  ...[
+    "mp3", "wav", "ogg", "oga", "m4a", "flac", "aac", "opus",
+  ].map((extension) => [extension, "audio"] as const),
+  ["pdf", "pdf"] as const,
+  ...[
+    "xlsx", "xlsm", "xls", "ods", "csv", "tsv",
+  ].map((extension) => [extension, "spreadsheet"] as const),
   ...[
     "json", "jsonc", "yml", "yaml", "toml", "xml", "ini", "lock", "env",
     "gitignore", "editorconfig", "dockerfile",

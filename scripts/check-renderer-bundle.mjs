@@ -86,9 +86,9 @@ const budgets = {
   // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
   // x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 1_009_364 bytes on
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 1_011_589 bytes on
   // Linux x64; keep 512-byte cross-platform headroom.
-  mainWorkbenchFirstLoadJavaScript: 1_009_364 + 512,
+  mainWorkbenchFirstLoadJavaScript: 1_011_589 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -100,9 +100,9 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 891_259 bytes on
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 893_484 bytes on
   // Linux x64; keep 512-byte cross-platform headroom.
-  detachedChatFirstLoadJavaScript: 891_259 + 512,
+  detachedChatFirstLoadJavaScript: 893_484 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -182,19 +182,25 @@ const budgets = {
   // history and blame add 9,775 bytes over main's cap (127,535 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 164_294 bytes on
-  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  filesFirstLoadJavaScript: 164_294 + 512,
-  deferredMarkdownJavaScript: 440 * kibibyte,
-  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 710_077 bytes on
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 measures 169_649 bytes on
   // Linux x64; keep 512-byte cross-platform headroom.
-  transcriptJavaScript: 710_077 + 512,
+  filesFirstLoadJavaScript: 169_649 + 512,
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 measures 459_962 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  deferredMarkdownJavaScript: 459_962 + 512,
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 726_926 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  transcriptJavaScript: 726_926 + 512,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
   // bytes to the same deferred chunk. Existing headroom is unchanged, and the
   // lightbox still loads only when an attachment preview is opened.
   deferredAttachmentPreviewJavaScript: 13 * kibibyte + 4_418 + 512 + 459,
+  // In-ADE workspace media lightbox, FilesPanel media viewer, video/audio
+  // playback and shared image-zoom/workbook helpers stay deferred off both
+  // initial chat routes.
+  deferredWorkspaceMediaPreviewJavaScript: 29_558 + 512,
   // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 10_569 bytes on
   // Linux x64 (preview picker & annotation additions); retain 512-byte headroom.
   deferredPreviewJavaScript: 10_569 + 512,
@@ -283,9 +289,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 2_831_719 bytes on
-  // Linux x64 (after subtracting full deferredComposerQueueJavaScript closure); keep 512-byte headroom.
-  coreJavaScript: 2_831_719 + 512,
+  // Main sync onto 338e8939 (#779 agent-linked media viewer) with Orchestrator V2 Phase 5 measures 2_846_548 bytes on
+  // Linux x64 (after subtracting deferredComposerQueueJavaScript & deferredWorkspaceMediaPreviewJavaScript); keep 512-byte headroom.
+  coreJavaScript: 2_846_548 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -849,6 +855,32 @@ if (entryJavaScriptClosure.has(iconRegionEntry) || mainWorkbenchJavaScriptClosur
   throw new Error("The Morphicons filled-icon region code must load only when a filled icon morphs");
 }
 const deferredIconRegionJavaScriptBytes = await assetBytes(`assets/${iconRegionEntry}`);
+const workspaceMediaEntries = [
+  "WorkspaceMediaPreviewDialog",
+  "FilesPanelMediaPreview",
+  "WorkspaceMediaViewer",
+].map((prefix) => {
+  const entry = assetNames.find((name) => name.startsWith(`${prefix}-`) && name.endsWith(".js"));
+  if (!entry) throw new Error(`Missing deferred workspace media surface: ${prefix}`);
+  if (
+    entryJavaScriptClosure.has(entry)
+    || mainWorkbenchJavaScriptClosure.has(entry)
+    || detachedChatJavaScriptClosure.has(entry)
+  ) {
+    throw new Error(`Workspace media viewer must remain deferred from the initial routes: ${prefix}`);
+  }
+  return entry;
+});
+const workspaceMediaClosures = await Promise.all(workspaceMediaEntries.map(javaScriptClosure));
+const deferredWorkspaceMediaPreviewJavaScriptBytes = await closureBytes(
+  new Set(workspaceMediaClosures.flatMap((closure) => [...closure])),
+  new Set([
+    ...entryJavaScriptClosure,
+    ...mainWorkbenchJavaScriptClosure,
+    ...detachedChatJavaScriptClosure,
+    deferredAttachmentPreviewJavaScript,
+  ]),
+);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
   - deferredLegacyPromptStashJavaScriptBytes
@@ -879,6 +911,7 @@ const coreJavaScriptBytes =
   - deferredPdfJavaScriptBytes
   - deferredFailureDiagnosticsJavaScriptBytes
   - deferredAttachmentPreviewJavaScriptBytes
+  - deferredWorkspaceMediaPreviewJavaScriptBytes
   - deferredPreviewJavaScriptBytes
   - deferredBrowserEvidenceJavaScriptBytes
   - deferredSpreadsheetJavaScriptBytes
@@ -939,6 +972,8 @@ const measurements = {
     deferredFailureDiagnosticsJavaScriptBytes,
   deferredAttachmentPreviewJavaScript:
     deferredAttachmentPreviewJavaScriptBytes,
+  deferredWorkspaceMediaPreviewJavaScript:
+    deferredWorkspaceMediaPreviewJavaScriptBytes,
   deferredPreviewJavaScript: deferredPreviewJavaScriptBytes,
   deferredBrowserEvidenceJavaScript: deferredBrowserEvidenceJavaScriptBytes,
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,

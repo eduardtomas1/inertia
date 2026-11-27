@@ -130,11 +130,13 @@ function SubagentCallBlockComponent({
               <ResponseMarkdown
                 content={trace.result}
                 projectRoot={context.projectRoot}
+                projectBaseRoot={context.projectBaseRoot}
                 projectId={context.projectId}
                 conversationId={context.conversationId}
                 defaultCodeWrap={context.defaultCodeWrap}
                 announceCopyFeedback={false}
                 onOpenProjectFile={context.onOpenProjectFile}
+                onPreviewMedia={context.onPreviewMedia}
               />
             </div>
           )}

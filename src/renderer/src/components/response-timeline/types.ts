@@ -17,6 +17,7 @@ import type {
   SubagentTrace,
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { WorkspacePanelTab } from "../workspacePanelTypes";
 import type {
@@ -41,6 +42,7 @@ export interface ResponseTimelineProps {
   checkpoints: CheckpointSummary[];
   gitArtifacts?: TurnGitArtifactSummary[];
   projectRoot: string;
+  projectBaseRoot?: string;
   projectId: string;
   conversationId: string;
   latestTurnSummary?: {
@@ -92,6 +94,7 @@ export interface ResponseTimelineProps {
     literalPath?: boolean,
     headingId?: string,
   ) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
   onStop: () => void;
   onOpenSurface?: (surface: WorkspacePanelTab) => void;
 }

@@ -376,6 +376,7 @@ export interface WorkspaceSceneModelInput {
   draftConversation: Conversation | null;
   draftSkills?: DraftSkillsProjection;
   globalChatActive: boolean;
+  detached?: boolean;
   workspaceToolsUnavailable: boolean;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
@@ -439,6 +440,7 @@ export function createWorkspaceSceneModel({
   draftConversation,
   draftSkills,
   globalChatActive,
+  detached = false,
   workspaceToolsUnavailable,
   connection,
   providerMaintenance,
@@ -502,6 +504,8 @@ export function createWorkspaceSceneModel({
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
+  const effectiveProjectRoot = conversation?.worktreePath ?? project?.normalizedPath ?? "";
+  const projectBaseRoot = !detached && project && effectiveProjectRoot && project.normalizedPath !== effectiveProjectRoot ? project.normalizedPath : undefined;
   const snapshotProjects = connection.snapshot?.projects ?? [];
   const snapshotConversations = connection.snapshot?.conversations ?? [];
   const {
@@ -871,6 +875,7 @@ export function createWorkspaceSceneModel({
       onOpenTurnDiff: actions.openTurnDiff,
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
+      projectBaseRoot,
       onRevertCheckpoint: actions.revertCheckpoint,
       onOpenSurface: project && !globalChatActive ? layout.openSurface : undefined,
       onStop: actions.stopAgent,
@@ -1164,7 +1169,8 @@ export function createWorkspaceSceneModel({
         steps: panelPlanSteps,
         document: planDocumentText,
         markdown: {
-          projectRoot: conversation?.worktreePath ?? project.normalizedPath,
+          projectRoot: effectiveProjectRoot,
+          projectBaseRoot,
           projectId: project.id,
           conversationId: persistedConversation?.id,
           defaultCodeWrap: settings.defaultCodeWrap,
@@ -1225,9 +1231,7 @@ export function createWorkspaceSceneModel({
         onForward: () => desktopTools.previewCommand("forward"),
         onReload: () => desktopTools.previewCommand("reload"),
         onViewportChange: (viewport) => desktopTools.previewCommand("viewport", viewport),
-        onTogglePicker: () => desktopTools.previewCommand(
-          desktopTools.previewNavigation.pickerActive ? "pick-cancel" : "pick-start",
-        ),
+        onTogglePicker: () => desktopTools.previewCommand(desktopTools.previewNavigation.pickerActive ? "pick-cancel" : "pick-start"),
         onSubmitPickerComment: (comment) => desktopTools.previewCommand("pick-submit", undefined, comment),
         onCancelPicker: () => desktopTools.previewCommand("pick-cancel"),
         onOpenTab: () => desktopTools.previewTab("open"),
@@ -1235,11 +1239,7 @@ export function createWorkspaceSceneModel({
         onCloseTab: (tabId) => desktopTools.previewTab("close", tabId),
         onInspectEvidenceImage: desktopTools.inspectPreviewEvidenceImage,
         onBoundsChange: desktopTools.setPreviewBounds,
-        onOpenExternal: (url) => {
-          void window.inertia.openExternal(url).catch((error) => {
-            setActionError(error instanceof Error ? error.message : "The URL could not be opened.");
-          });
-        },
+        onOpenExternal: (url) => { void window.inertia.openExternal(url).catch((error) => setActionError(error instanceof Error ? error.message : "The URL could not be opened.")); },
       },
     }) : null,
   };

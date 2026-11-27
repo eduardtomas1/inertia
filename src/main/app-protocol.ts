@@ -1,11 +1,12 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { net, protocol, type Protocol } from "electron";
+import { app, net, protocol, type Protocol } from "electron";
 
 import type { RuntimeHtmlRenderDocument } from "../node/runtime-html-render-protocol.js";
 import { HTML_RENDER_PROTOCOL_HOST, isHtmlRenderId } from "../shared/html-render.js";
 import { parseWorkspaceImagePreviewUrl } from "../shared/workspace-image-preview.js";
+import { parseWorkspaceMediaPreviewUrl } from "../shared/workspace-media-preview.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import {
   attachmentWindowScopeForRegistry,
@@ -23,6 +24,7 @@ import {
 } from "./html-render-document.js";
 import type { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { resolveWorkspaceImagePreviewResponse } from "./workspace-image-preview.js";
+import { resolveWorkspaceMediaPreviewResponse } from "./workspace-media-preview.js";
 
 export const APP_SCHEME = "inertia";
 export const APP_HOST = "bundle";
@@ -79,8 +81,10 @@ export function registerAppProtocol(options: {
   runtimeSupervisor: () => RuntimeSupervisor | null;
   mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
   conversationScope?: string;
+  allowDevLoopbackCors?: boolean;
 }, target: Pick<Protocol, "handle"> = protocol): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
+  const allowDevLoopbackCors = options.allowDevLoopbackCors ?? (app?.isPackaged === false);
   target.handle(options.scheme ?? APP_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
@@ -145,6 +149,22 @@ export function registerAppProtocol(options: {
           request.signal,
         );
       }
+      const workspaceMediaRequest = parseWorkspaceMediaPreviewUrl(url);
+      if (workspaceMediaRequest) {
+        if (
+          options.conversationScope
+          && workspaceMediaRequest.conversationId
+            !== options.conversationScope
+        ) throw new Error();
+        const runtimeSupervisor = options.runtimeSupervisor();
+        if (!runtimeSupervisor) throw new Error();
+        return await resolveWorkspaceMediaPreviewResponse(
+          runtimeSupervisor,
+          workspaceMediaRequest,
+          request,
+          { allowDevLoopbackCors },
+        );
+      }
       const target = resolve(rendererRoot, requestedPath);
       if (!isContained(rendererRoot, target)) throw new Error();
       return net.fetch(pathToFileURL(target).toString());
@@ -167,6 +187,7 @@ export function createAppProtocolRegistrar(options: {
   extractDocument?: AttachmentDocumentPreviewExtractor;
   runtimeSupervisor: () => RuntimeSupervisor | null;
   mascotSprite?: (id: string, name: string) => { type: string; bytes: Buffer } | null;
+  allowDevLoopbackCors?: boolean;
 }): (target?: Pick<Protocol, "handle" | "isProtocolHandled">, conversationId?: string) => void {
   const registrations = new WeakMap<
     Pick<Protocol, "handle" | "isProtocolHandled">,

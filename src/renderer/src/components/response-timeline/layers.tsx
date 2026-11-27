@@ -498,10 +498,12 @@ export function AgentExecutionLayer({
             delegated={delegated}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
+            projectBaseRoot={props.projectBaseRoot}
             projectId={props.projectId}
             conversationId={props.conversationId}
             defaultCodeWrap={props.defaultCodeWrap}
             onOpenProjectFile={props.onOpenTurnFile}
+            onPreviewMedia={props.onPreviewMedia}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
           />
@@ -523,10 +525,12 @@ export function AgentExecutionLayer({
             delegated={delegated}
             showThinking={props.showThinking}
             projectRoot={props.projectRoot}
+            projectBaseRoot={props.projectBaseRoot}
             projectId={props.projectId}
             conversationId={props.conversationId}
             defaultCodeWrap={props.defaultCodeWrap}
             onOpenProjectFile={props.onOpenTurnFile}
+            onPreviewMedia={props.onPreviewMedia}
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
             fold={fold}
@@ -636,10 +640,12 @@ export function FinalAnswerDocument({
       <ResponseMarkdown
         content={presentation.content}
         projectRoot={props.projectRoot}
+        projectBaseRoot={props.projectBaseRoot}
         projectId={props.projectId}
         conversationId={props.conversationId}
         defaultCodeWrap={props.defaultCodeWrap}
         onOpenProjectFile={props.onOpenTurnFile}
+        onPreviewMedia={props.onPreviewMedia}
       />
     </article>
   );

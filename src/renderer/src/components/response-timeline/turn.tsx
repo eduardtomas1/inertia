@@ -73,10 +73,12 @@ function TurnAnswerTail({
           key={entry.id}
           entry={entry}
           projectRoot={props.projectRoot}
+          projectBaseRoot={props.projectBaseRoot}
           projectId={props.projectId}
           conversationId={props.conversationId}
           defaultCodeWrap={props.defaultCodeWrap}
           onOpenProjectFile={props.onOpenTurnFile}
+          onPreviewMedia={props.onPreviewMedia}
         />
       ))}
     </div>
@@ -188,10 +190,12 @@ function TurnTimelineComponent({
   const callContext = useMemo(() => ({
     autoCollapse: props.autoCollapseWorkLog,
     projectRoot: props.projectRoot,
+    projectBaseRoot: props.projectBaseRoot,
     projectId: props.projectId,
     conversationId: props.conversationId,
     defaultCodeWrap: props.defaultCodeWrap,
     onOpenProjectFile: props.onOpenTurnFile,
+    onPreviewMedia: props.onPreviewMedia,
     onStopSubagent: props.onStopSubagent,
     onOpenSurface: props.onOpenSurface,
     memory: transcriptSubagentCallMemory,
@@ -201,7 +205,9 @@ function TurnTimelineComponent({
     props.defaultCodeWrap,
     props.onOpenSurface,
     props.onOpenTurnFile,
+    props.onPreviewMedia,
     props.onStopSubagent,
+    props.projectBaseRoot,
     props.projectId,
     props.projectRoot,
   ]);
@@ -403,6 +409,7 @@ export function sameTurnTimelineProps(
     && previous.onAfterToggle === next.onAfterToggle
     && left.providerIdentityLabels === right.providerIdentityLabels
     && left.projectRoot === right.projectRoot
+    && left.projectBaseRoot === right.projectBaseRoot
     && left.projectId === right.projectId
     && left.conversationId === right.conversationId
     && left.showTimestamps === right.showTimestamps
@@ -418,6 +425,7 @@ export function sameTurnTimelineProps(
     && left.onOpenTurnDiff === right.onOpenTurnDiff
     && left.onCompareTurnArtifacts === right.onCompareTurnArtifacts
     && left.onOpenTurnFile === right.onOpenTurnFile
+    && left.onPreviewMedia === right.onPreviewMedia
     && left.onStop === right.onStop
     && left.onStopSubagent === right.onStopSubagent
     && left.onOpenSurface === right.onOpenSurface

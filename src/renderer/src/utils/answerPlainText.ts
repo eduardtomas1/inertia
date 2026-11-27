@@ -5,6 +5,7 @@ const SKIPPED = [
   ".visually-hidden",
   ".response-code-block > header",
   ".response-table-toolbar",
+  ".response-markdown-media-header",
 ].join(", ");
 const BLOCKS = new Set([
   "P", "PRE", "H1", "H2", "H3", "H4", "H5", "H6", "BLOCKQUOTE", "DIV", "UL", "OL", "TABLE",
@@ -62,9 +63,9 @@ function linkText(node: HTMLElement, text: string): string {
   return named ? text : `${text} (${href})`;
 }
 
-function imageText(node: HTMLElement): string {
-  const alt = node.dataset.markdownImageAlt ?? "";
-  const source = node.dataset.markdownImageSource ?? "";
+function mediaText(node: HTMLElement): string {
+  const alt = node.dataset.markdownMediaAlt ?? node.dataset.markdownImageAlt ?? "";
+  const source = node.dataset.markdownMediaSource ?? node.dataset.markdownImageSource ?? "";
   return alt ? withTarget(alt, source) : source;
 }
 
@@ -75,7 +76,9 @@ function plainText(node: Node): string {
     return STRUCTURAL.has(node.parentElement?.tagName ?? "") && !text.trim() ? "" : text;
   }
   if (!(node instanceof HTMLElement)) return "";
-  if (node.dataset.markdownImageSource !== undefined) return imageText(node);
+  if (node.dataset.markdownMediaSource !== undefined || node.dataset.markdownImageSource !== undefined) {
+    return mediaText(node);
+  }
   if (node.dataset.fileChipText !== undefined) return node.dataset.fileChipText;
   if (node.matches(SKIPPED)) return "";
   if (node instanceof HTMLInputElement) {

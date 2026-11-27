@@ -50,6 +50,7 @@ import type {
 } from "@shared/contracts";
 import type { CompactOnReturnSetting, ConversationCompactionState } from "@shared/compact-on-return";
 import type { ContextCompactionTrigger } from "@shared/context-compaction";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
@@ -250,6 +251,8 @@ type ChatWorkspaceProps = {
     literalPath?: boolean,
     headingId?: string,
   ) => void;
+  projectBaseRoot?: string;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
   onClearPromptContext?: () => void;
   onLatestContentVisibilityChange?: (visible: boolean) => void;
 };
@@ -356,6 +359,8 @@ export function ChatWorkspace({
   onOpenTurnDiff,
   onCompareTurnArtifacts,
   onOpenTurnFile,
+  projectBaseRoot,
+  onPreviewMedia,
   onClearPromptContext,
   onLatestContentVisibilityChange,
 }: ChatWorkspaceProps): React.JSX.Element {
@@ -467,6 +472,7 @@ export function ChatWorkspace({
   } | null>(null);
   const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
+  const resolvedProjectBaseRoot = conversationContextHandoffEnabled ? projectBaseRoot : undefined;
   const ownedTurns = useMemo(() => recordsOwnedByConversation(turns, conversationId), [conversationId, turns]);
   const queueTurnOwner = latestTurnSummary ?? ownedTurns.at(-1) ?? null;
   const queuedTurnAuthoritative = !queueTurnOwner
@@ -1071,6 +1077,7 @@ export function ChatWorkspace({
               omittedTurnIds={history?.omittedTurnIds}
               gitArtifacts={ownedTurnGitArtifacts}
               projectRoot={projectRoot}
+              projectBaseRoot={resolvedProjectBaseRoot}
               projectId={project.id}
               conversationId={conversation.id}
               latestTurnSummary={timelineLatestTurnSummary}
@@ -1110,6 +1117,7 @@ export function ChatWorkspace({
               onOpenTurnDiff={onOpenTurnDiff}
               onCompareTurnArtifacts={onCompareTurnArtifacts}
               onOpenTurnFile={onOpenTurnFile}
+              onPreviewMedia={onPreviewMedia}
               onStop={stopTimeline}
               onOpenSurface={onOpenSurface}
             /> : <LoadingMark label="Loading conversation" />}

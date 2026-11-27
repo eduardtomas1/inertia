@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { FileCode2, FileCog, FileImage, FileText, type LucideIcon } from "lucide-react";
+import {
+  FileAudio,
+  FileCode2,
+  FileCog,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  Film,
+  type LucideIcon,
+} from "lucide-react";
 import { editorLabel, isEditorId } from "@shared/editor-ids";
 import {
   middleTruncate,
@@ -19,6 +28,10 @@ const FILE_CHIP_ICONS: Record<FileChipKind, LucideIcon> = {
   code: FileCode2,
   text: FileText,
   image: FileImage,
+  video: Film,
+  audio: FileAudio,
+  pdf: FileText,
+  spreadsheet: FileSpreadsheet,
   config: FileCog,
 };
 
@@ -31,7 +44,8 @@ export interface FileChipProps {
   projectId: string;
   conversationId?: string;
   announceCopyFeedback?: boolean;
-  onOpenProjectFile: (path: string, location?: WorkspaceFileLocation) => FileChipOpenResult;
+  onOpenProjectFile?: (path: string, location?: WorkspaceFileLocation) => FileChipOpenResult;
+  onPreviewMedia?: () => void;
 }
 
 function wantsCopy(event: MouseEvent<HTMLButtonElement>): boolean {
@@ -50,6 +64,7 @@ export function FileChip({
   conversationId,
   announceCopyFeedback = true,
   onOpenProjectFile,
+  onPreviewMedia,
 }: FileChipProps): React.JSX.Element {
   const clipboard = useCopiedState();
   const { preferredEditor, detectedEditors } = useEditorPreference();
@@ -69,6 +84,10 @@ export function FileChip({
     }, FILE_CHIP_NOTICE_DURATION_MS);
   };
   const openInFiles = (): void => {
+    if (!onOpenProjectFile) {
+      onPreviewMedia?.();
+      return;
+    }
     setMissing(false);
     let opened: FileChipOpenResult;
     try {
@@ -81,6 +100,11 @@ export function FileChip({
     if (opened === false) showMissing();
   };
   const open = (event?: MouseEvent<HTMLButtonElement>): void => {
+    if (onPreviewMedia) {
+      setMissing(false);
+      onPreviewMedia();
+      return;
+    }
     if (isEditorId(preferredEditor)) {
       setMissing(false);
       void window.inertia.openProjectPath({
@@ -116,9 +140,9 @@ export function FileChip({
     projectRoot,
     relativePath,
     location: reference.location,
-    open: openInFiles,
+    open: onPreviewMedia ?? openInFiles,
   });
-  const accessibleOpenTarget = isEditorId(preferredEditor)
+  const accessibleOpenTarget = !onPreviewMedia && isEditorId(preferredEditor)
     ? editorLabel(preferredEditor)
     : "Files";
   return (

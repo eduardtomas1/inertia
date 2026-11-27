@@ -49,6 +49,8 @@ import {
   reconcileTerminalTurnProjections,
   recordsForConversation,
   sameAgentPlan,
+  sameAgentPlanSteps,
+  storedMessageSupersedesLive,
   terminalEventMatchesCurrentTurn,
   turnEventOwner,
   withoutHydratedBaseline,
@@ -232,10 +234,11 @@ export function useConversationProjection({
       ? snapshot?.activeConversationId ?? null
       : targetConversationId
     : null;
+  const snapshotConversations = snapshot?.conversations;
   const persistedConversation = useMemo(
-    () => snapshot?.conversations.find(({ id }) =>
+    () => snapshotConversations?.find(({ id }) =>
       id === conversationId) ?? null,
-    [conversationId, snapshot],
+    [conversationId, snapshotConversations],
   );
   const history = useConversationHistory({ conversationId, online: status === "online", detailState, setDetailState, request });
   const conversation = useMemo(() => projectConversationTerminal(
@@ -447,94 +450,116 @@ export function useConversationProjection({
 
   useEffect(() => {
     if (!detail || detail.conversation.id !== conversation?.id) return;
-    const authoritativeMessages = new Map(
-      detail.messages.map((message) => [message.id, message]),
-    );
-    const authoritativeActivities = new Map(
-      detail.activities.map((activity) => [activity.id, activity]),
-    );
-    const authoritativeSubagents = new Map(
-      detail.subagents.map((trace) => [trace.id, trace]),
-    );
-    const authoritativeUsage = detail.usage.find(
-      ({ conversationId }) => conversationId === detail.conversation.id,
-    );
-    const authoritativePlan = detail.plans.at(-1);
     const conversationId = detail.conversation.id;
+    const hasLiveMessages = Boolean(liveMessagesRef.current[conversationId]?.length);
+    const hasLiveActivities = Boolean(liveActivitiesRef.current[conversationId]?.length);
+    const hasLiveSubagents = Boolean(liveSubagentsRef.current[conversationId]?.length);
+    const hasLiveUsage = Boolean(liveUsageRef.current[conversationId]);
+    const hasNativePlan = Boolean(nativePlansRef.current[conversationId]);
+    if (
+      !hasLiveMessages
+      && !hasLiveActivities
+      && !hasLiveSubagents
+      && !hasLiveUsage
+      && !hasNativePlan
+    ) return;
 
-    setLiveMessages((current) => {
-      const existing = current[conversationId];
-      if (!existing) return current;
-      const remaining = existing.filter((message) => {
-        const stored = authoritativeMessages.get(message.id);
-        return !stored || stored.content !== message.content;
-      });
-      if (remaining.length === existing.length) return current;
-      const next = { ...current };
-      if (remaining.length > 0) next[conversationId] = remaining;
-      else delete next[conversationId];
-      return next;
-    });
-    setLiveActivities((current) => {
-      const existing = current[conversationId];
-      if (!existing) return current;
-      const remaining = existing.filter((activity) => {
-        const stored = authoritativeActivities.get(activity.id);
-        return !stored
-          || stored.title !== activity.title
-          || (stored.detailTruncated
-            ? activity.status === "running" || !activity.detail?.startsWith((stored.detail ?? "").slice(0, 1_024))
-            : stored.detail !== activity.detail)
-          || stored.status !== activity.status;
-      });
-      if (remaining.length === existing.length) return current;
-      const next = { ...current };
-      if (remaining.length > 0) next[conversationId] = remaining;
-      else delete next[conversationId];
-      return next;
-    });
-    setLiveSubagents((current) => {
-      const existing = current[conversationId];
-      if (!existing) return current;
-      const remaining = existing.filter((trace) => {
-        const stored = authoritativeSubagents.get(trace.id);
-        return !stored
-          || stored.sequence < trace.sequence
-          || (stored.sequence === trace.sequence && stored.updatedAt < trace.updatedAt);
-      });
-      if (remaining.length === existing.length) return current;
-      const next = { ...current };
-      if (remaining.length > 0) next[conversationId] = remaining;
-      else delete next[conversationId];
-      return next;
-    });
-    if (authoritativeUsage) {
-      setLiveUsage((current) => {
-        const live = current[conversationId];
-        if (!live || live.updatedAt > authoritativeUsage.updatedAt) {
-          return current;
-        }
+    if (hasLiveMessages) {
+      const authoritativeMessages = new Map(
+        detail.messages.map((message) => [message.id, message]),
+      );
+      setLiveMessages((current) => {
+        const existing = current[conversationId];
+        if (!existing) return current;
+        const remaining = existing.filter((message) => {
+          const stored = authoritativeMessages.get(message.id);
+          return !stored || !storedMessageSupersedesLive(stored, message);
+        });
+        if (remaining.length === existing.length) return current;
         const next = { ...current };
-        delete next[conversationId];
+        if (remaining.length > 0) next[conversationId] = remaining;
+        else delete next[conversationId];
         return next;
       });
     }
-    if (authoritativePlan) {
-      setNativePlans((current) => {
-        const live = current[conversationId];
-        if (
-          !live
-          || live.runId !== authoritativePlan.runId
-          || live.turnId !== authoritativePlan.turnId
-          || live.explanation !== authoritativePlan.explanation
-          || JSON.stringify(live.steps) !== JSON.stringify(authoritativePlan.steps)
-        ) {
-          return current;
-        }
+    if (hasLiveActivities) {
+      const authoritativeActivities = new Map(
+        detail.activities.map((activity) => [activity.id, activity]),
+      );
+      setLiveActivities((current) => {
+        const existing = current[conversationId];
+        if (!existing) return current;
+        const remaining = existing.filter((activity) => {
+          const stored = authoritativeActivities.get(activity.id);
+          return !stored
+            || stored.title !== activity.title
+            || (stored.detailTruncated
+              ? activity.status === "running" || !activity.detail?.startsWith((stored.detail ?? "").slice(0, 1_024))
+              : stored.detail !== activity.detail)
+            || stored.status !== activity.status;
+        });
+        if (remaining.length === existing.length) return current;
         const next = { ...current };
-        delete next[conversationId];
+        if (remaining.length > 0) next[conversationId] = remaining;
+        else delete next[conversationId];
         return next;
       });
+    }
+    if (hasLiveSubagents) {
+      const authoritativeSubagents = new Map(
+        detail.subagents.map((trace) => [trace.id, trace]),
+      );
+      setLiveSubagents((current) => {
+        const existing = current[conversationId];
+        if (!existing) return current;
+        const remaining = existing.filter((trace) => {
+          const stored = authoritativeSubagents.get(trace.id);
+          return !stored
+            || stored.sequence < trace.sequence
+            || (stored.sequence === trace.sequence && stored.updatedAt < trace.updatedAt);
+        });
+        if (remaining.length === existing.length) return current;
+        const next = { ...current };
+        if (remaining.length > 0) next[conversationId] = remaining;
+        else delete next[conversationId];
+        return next;
+      });
+    }
+    if (hasLiveUsage) {
+      const authoritativeUsage = detail.usage.find(
+        ({ conversationId: usageConversationId }) => usageConversationId === conversationId,
+      );
+      if (authoritativeUsage) {
+        setLiveUsage((current) => {
+          const live = current[conversationId];
+          if (!live || live.updatedAt > authoritativeUsage.updatedAt) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
+      }
+    }
+    if (hasNativePlan) {
+      const authoritativePlan = detail.plans.at(-1);
+      if (authoritativePlan) {
+        setNativePlans((current) => {
+          const live = current[conversationId];
+          if (
+            !live
+            || live.runId !== authoritativePlan.runId
+            || live.turnId !== authoritativePlan.turnId
+            || live.explanation !== authoritativePlan.explanation
+            || !sameAgentPlanSteps(live.steps, authoritativePlan.steps)
+          ) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[conversationId];
+          return next;
+        });
+      }
     }
   }, [conversation?.id, detail, detailState]);
 

@@ -250,6 +250,9 @@ export function installPreviewAgentShadowBoundarySignal(
     : HTMLInputElement.prototype;
   const nativeString = String;
   const nativeLowerCase = String.prototype.toLowerCase;
+  const nativeIndexOf = String.prototype.indexOf;
+  const nativeSlice = String.prototype.slice;
+  const nativeCharCodeAt = String.prototype.charCodeAt;
   const getAttribute = Element.prototype.getAttribute;
   const nameAttributes = ["id", "name", "autocomplete", "placeholder", "aria-label"];
   const sensitiveName = (value: string): boolean => {
@@ -533,6 +536,7 @@ export function installPreviewAgentShadowBoundarySignal(
     }
   }
   const maximumParserSourceCharacters = 4_096;
+  const maximumOversizedParserScanCharacters = 262_144;
   const createElement = typeof Document === "undefined"
     ? undefined
     : Document.prototype.createElement;
@@ -555,51 +559,138 @@ export function installPreviewAgentShadowBoundarySignal(
     apply(objectDefineProperty!, Object, [items, iteratorSymbol, { __proto__: null, value: arrayValues }]);
     return items;
   };
-  const signalPrivateContent = (value: unknown): void => {
-    if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return;
+  const maximumOversizedInputTags = 16;
+  const findTagEnd = (source: string, start: number, limit: number): number => {
+    let quote = 0;
+    const end = source.length < limit ? source.length : limit;
+    for (let i = start; i < end; i += 1) {
+      const code = apply(nativeCharCodeAt, source, [i]) as number;
+      if (quote !== 0) {
+        if (code === quote) quote = 0;
+      } else if (code === 34 || code === 39) {
+        quote = code;
+      } else if (code === 62) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  const inspectParsedTemplate = (html: string, preferValueSignal: boolean): void => {
     if (typeof createElement !== "function" || typeof getImplementation !== "function"
       || typeof createHTMLDocument !== "function" || typeof parseSafeHTML !== "function"
       || typeof templateContent !== "function" || typeof querySelector !== "function") {
       signal();
       return;
     }
-    try {
-      // Parse in a fresh in-memory document with no browsing context or page
-      // CSP. Its Trusted Types state cannot invoke a page-owned default policy,
-      // while Chromium's tokenizer still decides exact start-tag attributes.
-      const implementation = apply(getImplementation, document, []) as DOMImplementation;
-      const isolatedDocument = apply(createHTMLDocument, implementation, [""]) as Document;
-      const template = apply(
-        createElement,
-        isolatedDocument,
-        ["template"],
-      ) as HTMLTemplateElement;
-      const next = apply(nativeGetOwnPropertyDescriptor, Object, [arrayIteratorPrototype, "next"]) as
-        PropertyDescriptor | undefined;
-      if (!next || !apply(hasOwnProperty, next, ["value"]) || next.value !== arrayIteratorNext) {
-        signal();
-        return;
-      }
-      apply(parseSafeHTML, template, [value, {
+    // Parse in a fresh in-memory document with no browsing context or page
+    // CSP. Its Trusted Types state cannot invoke a page-owned default policy,
+    // while Chromium's tokenizer still decides exact start-tag attributes.
+    const implementation = apply(getImplementation, document, []) as DOMImplementation;
+    const isolatedDocument = apply(createHTMLDocument, implementation, [""]) as Document;
+    const template = apply(
+      createElement,
+      isolatedDocument,
+      ["template"],
+    ) as HTMLTemplateElement;
+    const next = apply(nativeGetOwnPropertyDescriptor, Object, [arrayIteratorPrototype, "next"]) as
+      PropertyDescriptor | undefined;
+    if (!next || !apply(hasOwnProperty, next, ["value"]) || next.value !== arrayIteratorNext) {
+      signal();
+      return;
+    }
+    apply(parseSafeHTML, template, [html, {
+      __proto__: null,
+      sanitizer: {
         __proto__: null,
-        sanitizer: {
-          __proto__: null,
-          elements: sequence(
-            { __proto__: null, name: "template", attributes: sequence("shadowrootmode") },
-            { __proto__: null, name: "input", attributes: sequence("type", "value") },
-          ),
-        },
-      }]);
-      const content = apply(templateContent, template, []) as DocumentFragment;
-      if (apply(querySelector, content, [
-        "input[type='password' i][value]:not([value=''])",
-      ]) !== null) signal();
-      else if (apply(querySelector, content, ["template[shadowrootmode]"]) !== null) {
-        signalShadowBoundary();
-        if (apply(querySelector, content, [
-          "template[shadowrootmode]:not([shadowrootmode='open' i])",
-        ]) !== null) signalClosedBoundary();
+        elements: sequence(
+          { __proto__: null, name: "template", attributes: sequence("shadowrootmode") },
+          { __proto__: null, name: "input", attributes: sequence("type", "value") },
+        ),
+      },
+    }]);
+    const content = apply(templateContent, template, []) as DocumentFragment;
+    const passwordInput = apply(querySelector, content, [
+      "input[type='password' i][value]:not([value=''])",
+    ]) as Element | null;
+    if (passwordInput !== null) {
+      if (preferValueSignal) {
+        const attrValue = apply(getAttribute, passwordInput, ["value"]) as string | null;
+        if (
+          typeof attrValue === "string"
+          && attrValue.length > 0
+          && attrValue.length <= maximumParserSourceCharacters
+        ) {
+          signalValues(attrValue);
+          return;
+        }
       }
+      signal();
+      return;
+    }
+    if (apply(querySelector, content, ["template[shadowrootmode]"]) !== null) {
+      signalShadowBoundary();
+      if (apply(querySelector, content, [
+        "template[shadowrootmode]:not([shadowrootmode='open' i])",
+      ]) !== null) signalClosedBoundary();
+    }
+  };
+  const inspectOversizedParserSource = (value: string): void => {
+    if (value.length > maximumOversizedParserScanCharacters) {
+      signal();
+      return;
+    }
+    try {
+      const lower = apply(nativeLowerCase, value, []) as string;
+      if (apply(nativeIndexOf, lower, ["shadowrootmode"]) !== -1) {
+        signalShadowBoundary();
+        signalClosedBoundary();
+      }
+      let cursor = 0;
+      let inputTags = 0;
+      while (cursor < lower.length) {
+        const inputIndex = apply(nativeIndexOf, lower, ["<input", cursor]) as number;
+        if (inputIndex === -1) break;
+        const afterTag = inputIndex + 6;
+        if (afterTag < lower.length) {
+          const nextCode = apply(nativeCharCodeAt, lower, [afterTag]) as number;
+          if (
+            nextCode !== 32 && nextCode !== 9 && nextCode !== 10
+            && nextCode !== 13 && nextCode !== 12 && nextCode !== 47 && nextCode !== 62
+          ) {
+            cursor = afterTag;
+            continue;
+          }
+        }
+        inputTags += 1;
+        if (inputTags > maximumOversizedInputTags) {
+          signal();
+          return;
+        }
+        const tagEnd = findTagEnd(value, inputIndex, inputIndex + maximumParserSourceCharacters);
+        if (tagEnd === -1) {
+          signal();
+          return;
+        }
+        const snippet = apply(nativeSlice, value, [inputIndex, tagEnd + 1]) as string;
+        inspectParsedTemplate(snippet, true);
+        cursor = tagEnd + 1;
+      }
+    } catch {
+      signal();
+    }
+  };
+  const signalPrivateContent = (value: unknown): void => {
+    if (value === null || value === undefined) return;
+    if (typeof value !== "string") {
+      signal();
+      return;
+    }
+    if (value.length > maximumParserSourceCharacters) {
+      inspectOversizedParserSource(value);
+      return;
+    }
+    try {
+      inspectParsedTemplate(value, false);
     } catch {
       signal();
     }
@@ -669,17 +760,23 @@ export function installPreviewAgentShadowBoundarySignal(
       ...descriptor,
       value(this: unknown, ...args: unknown[]): unknown {
         let source = "";
-        let inspectable = true;
+        let oversized = false;
         for (let index = 0; index < args.length; index += 1) {
           const argument = args[index];
-          if (typeof argument !== "string"
-            || source.length + argument.length > maximumParserSourceCharacters) {
-            inspectable = false;
-            break;
+          if (argument === null || argument === undefined) continue;
+          if (typeof argument !== "string") {
+            signal();
+            return apply(parser, this, args);
+          }
+          if (source.length + argument.length > maximumOversizedParserScanCharacters) {
+            signal();
+            return apply(parser, this, args);
           }
           source += argument;
+          if (source.length > maximumParserSourceCharacters) oversized = true;
         }
-        if (inspectable) signalPrivateContent(source);
+        if (oversized) inspectOversizedParserSource(source);
+        else if (source.length > 0) signalPrivateContent(source);
         return apply(parser, this, args);
       },
     });

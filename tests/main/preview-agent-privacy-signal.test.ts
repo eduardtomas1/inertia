@@ -42,6 +42,9 @@ function mainWorld() {
   }
   class FakeElement extends FakeNode {
     readonly attributeValues = new Map<string, string>();
+    #innerHTML = "";
+    get innerHTML(): string { return this.#innerHTML; }
+    set innerHTML(value: unknown) { this.#innerHTML = String(value); }
     attachShadow(init: { mode: string }): object { return new FakeShadowRoot(init.mode); }
     getAttribute(name: string): string | null { return this.attributeValues.get(name) ?? null; }
     applyAttribute(name: string, value: string): void { this.attributeValues.set(name, value); }
@@ -49,6 +52,41 @@ function mainWorld() {
     setAttributeNS(_namespace: string | null, name: string, value: string): void { this.applyAttribute(name, String(value)); }
     setAttributeNode(): null { return null; }
     setAttributeNodeNS(): null { return null; }
+    setHTML(value: string, _options?: unknown): void {
+      if (this instanceof FakeHTMLTemplateElement) this.content.source = value;
+    }
+  }
+  class FakeDocumentFragment extends FakeNode {
+    source = "";
+    querySelector(selector: string): FakeElement | null {
+      if (selector === "input[type='password' i][value]:not([value=''])") {
+        if (!/<input\b[^>]*\btype\s*=\s*["']?password["']?/iu.test(this.source)) return null;
+        const match = /\bvalue\s*=\s*(?:"([^"]+)"|'([^']+)')/iu.exec(this.source);
+        if (!match) return null;
+        const input = new FakeHTMLInputElement();
+        input.applyAttribute("type", "password");
+        input.applyAttribute("value", match[1] ?? match[2] ?? "");
+        return input;
+      }
+      return null;
+    }
+  }
+  class FakeHTMLTemplateElement extends FakeElement {
+    readonly #content = new FakeDocumentFragment();
+    get content(): FakeDocumentFragment { return this.#content; }
+  }
+  class FakeDOMImplementation {
+    createHTMLDocument(_title: string): FakeDocument { return new FakeDocument(); }
+  }
+  class FakeDocument extends FakeEventTarget {
+    readonly #implementation = new FakeDOMImplementation();
+    get implementation(): FakeDOMImplementation { return this.#implementation; }
+    createElement(_tag: string): FakeHTMLTemplateElement { return new FakeHTMLTemplateElement(); }
+    write(..._args: unknown[]): void {}
+    writeln(..._args: unknown[]): void {}
+  }
+  class FakeDOMParser {
+    parseFromString(_value: unknown, _type: string): FakeDocument { return new FakeDocument(); }
   }
   class FakeAttr extends FakeNode {
     get ownerElement(): null { return null; }
@@ -79,7 +117,12 @@ function mainWorld() {
     }
   }
   const context: Record<string, unknown> = {
-    document: new FakeEventTarget(),
+    document: new FakeDocument(),
+    Document: FakeDocument,
+    DOMImplementation: FakeDOMImplementation,
+    DOMParser: FakeDOMParser,
+    DocumentFragment: FakeDocumentFragment,
+    HTMLTemplateElement: FakeHTMLTemplateElement,
     Element: FakeElement,
     HTMLElement: FakeHTMLElement,
     HTMLInputElement: FakeHTMLInputElement,
@@ -285,5 +328,60 @@ describe("Browser main-world credential signal", () => {
       listener({ isTrusted: true, composedPath: () => [untrustedHost] });
     }
     await expect(agentPageEvidencePrivacy(contents as never, "semantic")).resolves.toEqual({ withheld: "hidden-input" });
+  });
+
+  it("signals on oversized >4 KB HTML with password or shadowroot markers and on non-string coercible objects, without false positives on benign HTML", () => {
+    const { dispatched, run } = mainWorld();
+
+    // 1. Benign >4 KB HTML must not falsely withhold evidence.
+    run(`
+      const benign = "<div>" + "a".repeat(5_000) + "</div>";
+      new DOMParser().parseFromString(benign, "text/html");
+      const el = new Element();
+      el.innerHTML = benign;
+      document.write(benign);
+    `);
+    expect(dispatched).toEqual([]);
+
+    // 2. >4 KB padded password input via DOMParser, innerHTML, and document.write must signal its value for redaction without falsely withholding the whole page.
+    run(`
+      const paddedPassword = "<div>" + "a".repeat(5_000) + '</div><input type="password" value="s3cr3t">';
+      new DOMParser().parseFromString(paddedPassword, "text/html");
+      const detached = new Element();
+      detached.innerHTML = paddedPassword;
+      document.write("<div>" + "a".repeat(5_000), '</div><input type="password" value="s3cr3t">');
+    `);
+    expect(dispatched).toEqual([
+      { type: "credential-signal", detail: '["s3cr3t"]' },
+      { type: "credential-signal", detail: '["s3cr3t"]' },
+      { type: "credential-signal", detail: '["s3cr3t"]' },
+    ]);
+
+    // 3. Non-string coercible objects passed to innerHTML or document.write fail closed without calling untrusted toString during guard inspection.
+    dispatched.length = 0;
+    run(`
+      const coercible = { toString() { return '<input type="password" value="s3cr3t">'; } };
+      const detachedCoercible = new Element();
+      detachedCoercible.innerHTML = coercible;
+      document.write(coercible);
+    `);
+    expect(dispatched).toEqual([
+      { type: "credential-signal" },
+      { type: "credential-signal" },
+    ]);
+
+    // 4. >4 KB declarative shadow DOM signals shadow + closed boundary, and >256 KB fails closed.
+    dispatched.length = 0;
+    run(`
+      const shadowHtml = "<div>" + "a".repeat(5_000) + '</div><template shadowrootmode="closed"></template>';
+      new DOMParser().parseFromString(shadowHtml, "text/html");
+      const hugeHtml = "<div>" + "a".repeat(270_000) + "</div>";
+      new DOMParser().parseFromString(hugeHtml, "text/html");
+    `);
+    expect(dispatched).toEqual([
+      { type: "nested-boundary" },
+      { type: "closed-boundary" },
+      { type: "credential-signal" },
+    ]);
   });
 });

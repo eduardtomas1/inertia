@@ -56,6 +56,8 @@ import {
 } from "./minimap";
 import {
   captureTranscriptPosition,
+  captureVirtualizedTranscriptPosition,
+  createCoalescedScrollRemember,
   findResponseRow,
   findTurnElement,
   firstVisibleResponseRow,
@@ -939,23 +941,26 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const scroll = props.scrollElementRef?.current;
     const root = props.timelineElementRef?.current;
     if (!scroll || !root) return;
-    const remember = (): void => {
+    const rememberNow = (): void => {
       if (layoutAnchorActive.current || turnAnchorActive.current || props.turnAnchorId) return;
-      rememberTranscriptPosition(props.conversationId, captureTranscriptPosition(root, scroll, props.followsLatest));
+      const position = virtualized
+        ? captureVirtualizedTranscriptPosition(root, scroll, virtualizer.getVirtualItems(), timelineRef.current, props.followsLatest)
+        : captureTranscriptPosition(root, scroll, props.followsLatest);
+      rememberTranscriptPosition(props.conversationId, position);
     };
+    const coalesced = createCoalescedScrollRemember(rememberNow);
     const previous = rememberedFollowMode.current;
     rememberedFollowMode.current = { conversationId: props.conversationId, followsLatest: props.followsLatest };
-    if (previous?.conversationId === props.conversationId && previous.followsLatest !== props.followsLatest) remember();
-    scroll.addEventListener("scroll", remember, { passive: true });
-    return () => scroll.removeEventListener("scroll", remember);
+    if (previous?.conversationId === props.conversationId && previous.followsLatest !== props.followsLatest) coalesced.flush();
+    scroll.addEventListener("scroll", coalesced.schedule, { passive: true });
+    return () => {
+      scroll.removeEventListener("scroll", coalesced.schedule);
+      coalesced.dispose();
+    };
   }, [
-    props.conversationId,
-    props.detailLoading,
-    props.followsLatest,
-    props.scrollElementRef,
-    props.timelineElementRef,
-    props.turnAnchorId,
-    timeline.length,
+    props.conversationId, props.detailLoading, props.followsLatest,
+    props.scrollElementRef, props.timelineElementRef, props.turnAnchorId,
+    timeline.length, virtualized, virtualizer,
   ]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {

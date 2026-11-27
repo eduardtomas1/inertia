@@ -75,6 +75,12 @@ import {
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
 import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
+import {
+  INERTIA_SECRETS_PACK_DIGEST,
+  INERTIA_SECRETS_PACK_ID,
+  SECRET_REQUEST_INSTRUCTION,
+} from "../inertia-harness-capabilities";
+import { codexThreadRegisteredPack } from "../../codex/app-server-thread-tools";
 import { SECRET_REQUEST_FALLBACK_INSTRUCTION } from "../../../node/agent-secrets";
 import type {
   ActiveTurn,
@@ -207,6 +213,29 @@ const SECRET_REQUEST_FALLBACK_HIDDEN_INSTRUCTION: HiddenProviderInstruction = {
   text: SECRET_REQUEST_FALLBACK_INSTRUCTION,
 };
 
+function secretAwareCapabilityInstructions(
+  store: RuntimeStore,
+  route: Pick<InstructionRoute, "providerId">,
+  resumedSessionId: string | null,
+  instructions: readonly HiddenProviderInstruction[],
+): readonly HiddenProviderInstruction[] {
+  if (
+    route.providerId !== "codex"
+    || resumedSessionId === null
+    || !instructions.some(({ label }) => label === SECRET_REQUEST_INSTRUCTION.label)
+    || codexThreadRegisteredPack(
+      resumedSessionId,
+      INERTIA_SECRETS_PACK_ID,
+      INERTIA_SECRETS_PACK_DIGEST,
+      store.codexThreadToolPacks,
+    )
+  ) return instructions;
+  return [
+    ...instructions.filter(({ label }) => label !== SECRET_REQUEST_INSTRUCTION.label),
+    SECRET_REQUEST_FALLBACK_HIDDEN_INSTRUCTION,
+  ];
+}
+
 function watcherTurnPolicy(
   store: RuntimeStore,
   conversation: Conversation,
@@ -337,7 +366,15 @@ export function compactionSessionInstruction(
   ) return undefined;
   return sessionInstructionText(
     route.harnessId,
-    instructionPack(conversation.id, dependencies.hooks.capabilityOfferForTurn?.({ conversation }).instructions ?? []),
+    instructionPack(
+      conversation.id,
+      secretAwareCapabilityInstructions(
+        dependencies.store,
+        route,
+        conversation.providerSessionId,
+        dependencies.hooks.capabilityOfferForTurn?.({ conversation }).instructions ?? [],
+      ),
+    ),
   );
 }
 
@@ -640,12 +677,24 @@ export function resolveTurnRequest(
   const nativeContinuation = canResume ? dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
     providerInstanceId: providerInstanceId(route.providerId, route.continuationIdentity),
     workspaceKey: dependencies.store.conversationPath(conversation.id), nativeSessionId: resumeSessionId! }) : null;
+  const effectiveCapabilityInstructions = capabilityOffer && !watcherTurn
+    ? secretAwareCapabilityInstructions(
+        dependencies.store,
+        route,
+        canResume ? resumeSessionId : null,
+        capabilityInstructions,
+      )
+    : capabilityInstructions;
   const instructionDelivery = resolveHiddenInstructionDelivery({
     store: dependencies.store,
     deliveries: dependencies.instructionDeliveries,
     conversation,
     harnessId: route.harnessId,
-    pack: resumesImportedCodex ? [] : hostToolBridgeAttested ? instructionPack(conversation.id, capabilityInstructions) : capabilityInstructions,
+    pack: resumesImportedCodex
+      ? []
+      : hostToolBridgeAttested
+        ? instructionPack(conversation.id, effectiveCapabilityInstructions)
+        : effectiveCapabilityInstructions,
     resumedSessionId: canResume ? resumeSessionId : null,
     latestTurn,
     promptWithheld: request.goalStart !== undefined || providerCommand,

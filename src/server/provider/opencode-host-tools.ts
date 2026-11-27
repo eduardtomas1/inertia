@@ -39,12 +39,32 @@ type Initializer = <T>(
 
 export interface OpenCodeHostTools {
   install(client: OpencodeClient, initialize: Initializer): Promise<void>;
+  hasPendingCalls(): boolean;
   settle(): void;
   revoke(): Promise<void>;
   cleanup(client: OpencodeClient | undefined): Promise<void>;
   redact(value: string): string;
   redactPayload<T>(value: T): T;
   respondToApproval(requestId: string, decision: AgentApprovalDecision): boolean;
+}
+
+export function openCodeHostMcpPermissionAllowed(
+  permission: string,
+  bridge: ProviderHostToolBridge | undefined,
+): boolean {
+  if (!bridge || bridge.definitions.length === 0) return false;
+  const secretPrefix = `${INERTIA_SECRET_MCP_NAME}_`;
+  if (permission.startsWith(secretPrefix)) {
+    const tool = permission.slice(secretPrefix.length);
+    return tool === SECRET_REQUEST_TOOL_NAME
+      && bridge.definitions.some(({ name }) => name === SECRET_REQUEST_TOOL_NAME);
+  }
+  const hostPrefix = `${INERTIA_HOST_MCP_NAME}_`;
+  if (permission.startsWith(hostPrefix)) {
+    const tool = permission.slice(hostPrefix.length);
+    return tool.length > 0 && bridge.definitions.some(({ name }) => name === tool);
+  }
+  return false;
 }
 
 const OPENCODE_WATCHER_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
@@ -137,18 +157,35 @@ export function createOpenCodeHostTools(input: {
     requestId: string,
     decision: AgentApprovalDecision | "cancelled",
   ): void;
+  onCallStarted?(): void;
+  onCallsSettled?(): void;
 }): OpenCodeHostTools | undefined {
   if (!input.bridge || !input.turnId) return undefined;
+  const sourceBridge = input.bridge;
+  let pendingCalls = 0;
+  const trackedBridge: ProviderHostToolBridge = {
+    ...sourceBridge,
+    invoke: async (call) => {
+      pendingCalls += 1;
+      if (pendingCalls === 1) input.onCallStarted?.();
+      try {
+        return await sourceBridge.invoke(call);
+      } finally {
+        pendingCalls -= 1;
+        if (pendingCalls === 0) input.onCallsSettled?.();
+      }
+    },
+  };
   const runtime = new ProviderHostToolRuntime({
-    bridge: input.bridge,
+    bridge: trackedBridge,
     conversationId: input.conversationId,
     turnId: input.turnId,
     cwd: input.cwd,
     onApproval: input.onApproval,
     onApprovalResolved: input.onApprovalResolved,
   });
-  const servesSecrets = input.bridge.definitions.some(({ name }) => name === SECRET_REQUEST_TOOL_NAME);
-  const servesWaits = input.bridge.definitions.some(({ name }) => OPENCODE_WAIT_HOST_TOOLS.has(name));
+  const servesSecrets = sourceBridge.definitions.some(({ name }) => name === SECRET_REQUEST_TOOL_NAME);
+  const servesWaits = sourceBridge.definitions.some(({ name }) => OPENCODE_WAIT_HOST_TOOLS.has(name));
   const servers: OpenCodeHostMcpServer[] = [
     {
       name: INERTIA_HOST_MCP_NAME,
@@ -209,6 +246,7 @@ export function createOpenCodeHostTools(input: {
         }
       }
     },
+    hasPendingCalls: () => pendingCalls > 0 && !runtime.isSettled(),
     settle: () => runtime.settle(),
     revoke: () => closeSessions(),
     cleanup: (client) => {

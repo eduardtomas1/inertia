@@ -351,7 +351,7 @@ async function mountQuietApp() {
 }
 
 describe("streamed agent text", () => {
-  it("re-renders only the transcript for each token", async () => {
+  it("coalesces same-frame tokens into one transcript commit and keeps the shell still", async () => {
     // LiveElapsed ticks independently of token delivery. Keep its clock fixed
     // while counting token commits, including on slower Windows workers.
     vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
@@ -367,8 +367,11 @@ describe("streamed agent text", () => {
         });
       });
     }
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
     expect({ commits: counter.commits, ...counting.renders }).toEqual({
-      commits: TOKENS,
+      commits: 2,
       App: 0,
       AppLayout: 0,
       Sidebar: 0,
@@ -376,12 +379,41 @@ describe("streamed agent text", () => {
       WorkspaceScene: 0,
       ChatWorkspace: 0,
       Composer: 0,
-      ResponseTimeline: TOKENS,
-      TurnTimeline: TOKENS,
+      ResponseTimeline: 2,
+      TurnTimeline: 2,
     });
     vi.useRealTimers();
     await waitFor(() => expect(view.container.textContent)
       .toContain(`token${TOKENS - 1}`));
+  });
+
+  it("keeps App and shell still when bulleted lists stream in build mode", async () => {
+    vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
+    const { view, counter } = await mountQuietApp();
+    for (let index = 0; index < 25; index += 1) {
+      act(() => {
+        emit({
+          type: "agent.text",
+          conversationId,
+          runId: turn.runId,
+          turnId: turn.id,
+          text: `${index === 0 ? "" : "\n"}- Build mode item ${index} streaming text`,
+        });
+      });
+      act(() => {
+        vi.advanceTimersByTime(20);
+      });
+    }
+    expect(counter.commits).toBeGreaterThan(0);
+    expect({
+      App: counting.renders.App,
+      AppLayout: counting.renders.AppLayout,
+      Sidebar: counting.renders.Sidebar,
+      Composer: counting.renders.Composer,
+    }).toEqual({ App: 0, AppLayout: 0, Sidebar: 0, Composer: 0 });
+    vi.useRealTimers();
+    await waitFor(() => expect(view.container.textContent)
+      .toContain("Build mode item 24"));
   });
 
   it("keeps the composer and sidebar still while tool activity streams", async () => {
@@ -602,6 +634,7 @@ describe("streamed agent text", () => {
   it("streams each word into the same live block and fades in only new paragraphs", async () => {
     const { default: App } = await import("../../src/renderer/src/App");
     const view = await renderReadyTranscript(<App />);
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     const words = Array.from({ length: 12 }, (_, index) => `word${index}`);
     const blocks = () => [...view.container.querySelectorAll(
       `[data-turn-id="${turn.id}"] [data-stream-motion="block-fade"] .response-stream-block`,
@@ -616,6 +649,7 @@ describe("streamed agent text", () => {
           turnId: turn.id,
           text: index === 0 ? word : ` ${word}`,
         });
+        vi.advanceTimersByTime(20);
       });
       expect(blocks()).toHaveLength(1);
       expect(blocks()[0]!.textContent).toBe(words.slice(0, index + 1).join(" "));
@@ -624,6 +658,7 @@ describe("streamed agent text", () => {
     }
     act(() => {
       emit({ type: "agent.text", conversationId, runId: turn.runId, turnId: turn.id, text: "\n\nNext" });
+      vi.advanceTimersByTime(20);
     });
     expect(blocks()).toHaveLength(2);
     expect(blocks()[0]).toBe(first);

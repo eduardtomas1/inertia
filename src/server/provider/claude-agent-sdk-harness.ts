@@ -30,7 +30,7 @@ import {
   safeError,
   stringValue,
 } from "./claude-agent-sdk-errors";
-export { claudeSupportsThinkingDisplay };
+export { claudeRunEnvironment, claudeSupportsThinkingDisplay };
 import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,

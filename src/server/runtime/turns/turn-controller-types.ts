@@ -456,6 +456,7 @@ export interface ActiveTurn {
   closedAssistantSegmentEnds?: number[];
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
+  latestSecretCardAt?: string | null;
   followUpBoundary: { at: string; text: string; messageId: string | null } | null;
   pendingFollowUpBoundary: { at: string; messageId: string | null } | null;
   assistantStream: TurnStreamChannel;

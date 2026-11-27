@@ -33,8 +33,10 @@ import {
   isUnreceiptedProviderRunRefusal,
   isolatedProviderConversationId,
   providerRunIdentity,
+  type ProviderTextEvent,
 } from "../../provider/contracts";
 import { assembleTurnRequest } from "../turns/request-context";
+import type { TurnSecretOutputFilter } from "../turns/turn-secret-output";
 
 export const DEFAULT_ISOLATED_RUN_TIMEOUT_MS = 120_000;
 export const DEFAULT_ISOLATED_RUN_OUTPUT_LIMIT = 512_000;
@@ -153,6 +155,7 @@ export interface IsolatedRunControllerOptions {
   defaultOutputLimitChars?: number;
   stopGraceMs?: number;
   fileSystem?: IsolatedRunFileSystem;
+  secretOutput?: () => TurnSecretOutputFilter | undefined;
 }
 
 interface Deferred<Value> {
@@ -262,6 +265,7 @@ export class IsolatedRunController<Owner extends object> {
   private readonly stopGraceMs: number;
   private readonly fileSystem: IsolatedRunFileSystem;
   private readonly lifetimeSignal: AbortSignal | undefined;
+  private readonly secretOutput: (() => TurnSecretOutputFilter | undefined) | undefined;
   private closing = false;
   // Quiescence waits for command results before dispose(), so request their owned stops at abort.
   private readonly stopForRuntimeShutdown = (): void => {
@@ -303,6 +307,7 @@ export class IsolatedRunController<Owner extends object> {
       },
     };
     this.lifetimeSignal = options.lifetimeSignal;
+    this.secretOutput = options.secretOutput;
     if (this.lifetimeSignal?.aborted) this.stopForRuntimeShutdown();
     else this.lifetimeSignal?.addEventListener("abort", this.stopForRuntimeShutdown, { once: true });
   }
@@ -458,15 +463,34 @@ export class IsolatedRunController<Owner extends object> {
       );
       let streamed = "";
       let outputExceeded = false;
+      const appendText = (text: string): void => {
+        if (active.stopOutcome || !text) return;
+        if (streamed.length + text.length > outputLimit) {
+          outputExceeded = true;
+          this.requestStop(active, "output-limit");
+          return;
+        }
+        streamed += text;
+      };
       const callbacks: ProviderRunCallbacks = {
-        onText: ({ text }) => {
+        onText: (event) => {
           if (active.stopOutcome) return;
-          if (streamed.length + text.length > outputLimit) {
-            outputExceeded = true;
-            this.requestStop(active, "output-limit");
+          const filter = this.secretOutput?.();
+          if (!filter) {
+            appendText(event.text);
             return;
           }
-          streamed += text;
+          const fullEvent: ProviderTextEvent = {
+            ...event,
+            providerId: route.providerId,
+            conversationId: active.providerConversationId,
+            runId: active.runId,
+            turnId: active.turnId,
+            type: "text",
+          };
+          for (const projected of filter.events(fullEvent)) {
+            if (projected.type === "text") appendText(projected.text);
+          }
         },
         onActivity: (event) => {
           if (
@@ -558,13 +582,24 @@ export class IsolatedRunController<Owner extends object> {
       }
       if (first.result.textTruncated || outputExceeded) throw new IsolatedRunError("output-limit");
 
-      const text = (first.result.text || streamed).slice(0, outputLimit);
-      if ((first.result.text || streamed).length > outputLimit) {
+      const filter = this.secretOutput?.();
+      const filtered = filter ? filter.result(first.result) : null;
+      if (filtered) {
+        for (const event of filtered.events) {
+          if (event.type === "text") appendText(event.text);
+        }
+      }
+      const providerResult = filtered ? filtered.result : first.result;
+      if (outputExceeded) throw new IsolatedRunError("output-limit");
+      const rawText = providerResult.text || streamed;
+      const redactedText = filter ? filter.text(rawText) : rawText;
+      if (rawText.length > outputLimit || redactedText.length > outputLimit) {
         throw new IsolatedRunError("output-limit");
       }
+      const text = redactedText.slice(0, outputLimit);
       const output: IsolatedProviderOutput = {
         text,
-        providerResult: first.result,
+        providerResult,
         taskId: active.taskId,
         runId: active.runId,
         turnId: active.turnId,
@@ -604,8 +639,9 @@ export class IsolatedRunController<Owner extends object> {
       const isolated = error instanceof IsolatedRunError
         ? error
         : new IsolatedRunError(active.stopOutcome?.reason ?? "setup-failed");
+      const filter = this.secretOutput?.();
       finalReason = isolated.reason;
-      finalDetail = isolated.message;
+      finalDetail = filter ? filter.text(isolated.message) : isolated.message;
       if (
         !active.stopOutcome
         && (
@@ -621,6 +657,7 @@ export class IsolatedRunController<Owner extends object> {
         this.requestStop(active, isolated.reason);
       }
     } finally {
+      this.secretOutput?.()?.discard(active.turnId);
       await this.settleAndCleanup(active, finalReason, finalDetail);
     }
 

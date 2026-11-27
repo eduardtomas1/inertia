@@ -1,4 +1,4 @@
-import { lstat, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import {
   dirname,
   isAbsolute,
@@ -267,6 +267,148 @@ export async function repositoryRoot(
   }
 }
 
+const MAX_GIT_MARKER_FILE_BYTES = 4_096;
+const MAX_DIRECT_GIT_CONFIG_BYTES = 65_536;
+const GIT_WORKTREE_OR_INCLUDE_CONFIG_PATTERN = /\bworktree\s*=|^\s*\[include(?:if)?\b/imu;
+
+function hasGitDirectoryEnvOverride(): boolean {
+  return Boolean(
+    process.env.GIT_DIR
+    || process.env.GIT_COMMON_DIR
+    || process.env.GIT_WORK_TREE
+    || process.env.GIT_OBJECT_DIRECTORY,
+  );
+}
+
+async function isRegularFile(
+  path: string,
+  options: GitPathInspectionOptions,
+): Promise<boolean> {
+  try {
+    const info = await awaitPathInspection(async () => await lstat(path), options);
+    return info.isFile() && !info.isSymbolicLink();
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    return false;
+  }
+}
+
+async function isDirectoryPath(
+  path: string,
+  options: GitPathInspectionOptions,
+): Promise<boolean> {
+  try {
+    const info = await awaitPathInspection(async () => await stat(path), options);
+    return info.isDirectory();
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    return false;
+  }
+}
+
+async function readSmallRegularFile(
+  path: string,
+  maxBytes: number,
+  options: GitPathInspectionOptions,
+): Promise<string | null> {
+  try {
+    const info = await awaitPathInspection(async () => await lstat(path), options);
+    if (!info.isFile() || info.isSymbolicLink() || info.size > maxBytes) return null;
+    const raw = await awaitPathInspection(async () => await readFile(path, "utf8"), options);
+    return raw.includes("\0") ? null : raw;
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    return null;
+  }
+}
+
+async function tryDirectGitMetadataDirectories(
+  root: string,
+  options: GitPathInspectionOptions,
+): Promise<{ gitDir: string; commonDir: string } | null> {
+  if (hasGitDirectoryEnvOverride()) return null;
+  const markerPath = join(root, ".git");
+  let markerInfo;
+  try {
+    markerInfo = await awaitPathInspection(async () => await lstat(markerPath), options);
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    return null;
+  }
+  if (markerInfo.isSymbolicLink()) return null;
+  let gitDir: string;
+  if (markerInfo.isDirectory()) {
+    gitDir = markerPath;
+  } else if (markerInfo.isFile() && markerInfo.size <= MAX_GIT_MARKER_FILE_BYTES) {
+    const content = await readSmallRegularFile(markerPath, MAX_GIT_MARKER_FILE_BYTES, options);
+    if (!content || !content.startsWith("gitdir: ")) return null;
+    const firstLineEnd = content.indexOf("\n");
+    const rawLine = firstLineEnd === -1 ? content : content.slice(0, firstLineEnd);
+    const trailing = firstLineEnd === -1 ? "" : content.slice(firstLineEnd + 1);
+    if (trailing.trim().length > 0) return null;
+    const target = rawLine.slice("gitdir: ".length).replace(/\r$/u, "");
+    if (!target || target.includes("\0")) return null;
+    gitDir = isAbsolute(target) ? target : resolve(root, target);
+    if (!(await isDirectoryPath(gitDir, options))) return null;
+  } else {
+    return null;
+  }
+  if (!(await isRegularFile(join(gitDir, "HEAD"), options))) return null;
+  const commonDirFile = join(gitDir, "commondir");
+  let commonDir = gitDir;
+  let commonDirInfo;
+  try {
+    commonDirInfo = await awaitPathInspection(async () => await lstat(commonDirFile), options);
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") return null;
+  }
+  if (commonDirInfo) {
+    if (!commonDirInfo.isFile() || commonDirInfo.isSymbolicLink() || commonDirInfo.size > MAX_GIT_MARKER_FILE_BYTES) {
+      return null;
+    }
+    const rawCommon = await readSmallRegularFile(commonDirFile, MAX_GIT_MARKER_FILE_BYTES, options);
+    const target = rawCommon?.trim() ?? "";
+    if (!target || target.includes("\n") || target.includes("\r") || target.includes("\0")) {
+      return null;
+    }
+    commonDir = isAbsolute(target) ? target : resolve(gitDir, target);
+    if (!(await isDirectoryPath(commonDir, options))) return null;
+  }
+  if (!(await isDirectoryPath(join(commonDir, "objects"), options))) return null;
+  return { gitDir, commonDir };
+}
+
+/**
+ * Returns true when `repositoryPath` is demonstrably its own direct Git
+ * worktree root (standard `.git` directory or `gitdir:` file with no
+ * `core.worktree` or config include redirects), allowing callers to skip a
+ * redundant `git rev-parse --show-toplevel` subprocess.
+ */
+export async function hasDirectGitWorktreeRoot(
+  repositoryPath: string,
+  options: GitPathInspectionOptions = {},
+): Promise<boolean> {
+  const direct = await tryDirectGitMetadataDirectories(repositoryPath, options);
+  if (!direct) return false;
+  if (await entryMayExist(join(direct.gitDir, "config.worktree"))) return false;
+  const configPath = join(direct.commonDir, "config");
+  let configInfo;
+  try {
+    configInfo = await awaitPathInspection(async () => await lstat(configPath), options);
+  } catch (error) {
+    if (error instanceof GitError) throw error;
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+  if (!configInfo.isFile() || configInfo.isSymbolicLink() || configInfo.size > MAX_DIRECT_GIT_CONFIG_BYTES) {
+    return false;
+  }
+  const configText = await readSmallRegularFile(configPath, MAX_DIRECT_GIT_CONFIG_BYTES, options);
+  if (configText === null) return false;
+  return !GIT_WORKTREE_OR_INCLUDE_CONFIG_PATTERN.test(configText);
+}
+
 /**
  * Captures both the resolved per-worktree Git directory behind a checkout's
  * `.git` marker and the resolved common Git directory that owns shared refs,
@@ -281,32 +423,6 @@ export async function repositoryMetadataMarkerIdentity(
 ): Promise<string> {
   const root = await requireDirectory(repositoryPath, options);
   requirePathInspectionTime(options);
-  const inspect = async (args: readonly string[]) => await runGitInspection(
-    root,
-    args,
-    {
-      deadlineAt: options.deadlineAt,
-      signal: options.signal,
-      maxOutputBytes: MAX_PATH_LENGTH * 2,
-      failureMessage: "Unable to inspect this Git repository identity.",
-    },
-  );
-  const reportedDirectories = async (
-    ...flags: readonly ("--git-dir" | "--git-common-dir")[]
-  ): Promise<Buffer> => (await inspect([
-    "rev-parse",
-    "--path-format=absolute",
-    ...flags,
-  ]).catch(async (error: unknown) => {
-    if (
-      options.signal?.aborted
-      || isGitProcessTreeTerminationFailure(error)
-    ) {
-      throw error;
-    }
-    requirePathInspectionTime(options);
-    return await inspect(["rev-parse", ...flags]);
-  })).stdout;
   const directoryIdentity = async (reported: string): Promise<string> => {
     if (!reported || reported.includes("\0")) {
       throw new GitError(
@@ -349,6 +465,45 @@ export async function repositoryMetadataMarkerIdentity(
       );
     }
   };
+  const direct = await tryDirectGitMetadataDirectories(root, options);
+  if (direct) {
+    try {
+      const gitDirectory = await directoryIdentity(direct.gitDir);
+      const commonDirectory = direct.commonDir === direct.gitDir
+        ? gitDirectory
+        : await directoryIdentity(direct.commonDir);
+      return ["git-dir", gitDirectory, "git-common-dir", commonDirectory].join("\0");
+    } catch (error) {
+      if (error instanceof GitError && error.code === "timeout") throw error;
+      // Fall back to Git inspection on any unexpected filesystem metadata race.
+    }
+  }
+  const inspect = async (args: readonly string[]) => await runGitInspection(
+    root,
+    args,
+    {
+      deadlineAt: options.deadlineAt,
+      signal: options.signal,
+      maxOutputBytes: MAX_PATH_LENGTH * 2,
+      failureMessage: "Unable to inspect this Git repository identity.",
+    },
+  );
+  const reportedDirectories = async (
+    ...flags: readonly ("--git-dir" | "--git-common-dir")[]
+  ): Promise<Buffer> => (await inspect([
+    "rev-parse",
+    "--path-format=absolute",
+    ...flags,
+  ]).catch(async (error: unknown) => {
+    if (
+      options.signal?.aborted
+      || isGitProcessTreeTerminationFailure(error)
+    ) {
+      throw error;
+    }
+    requirePathInspectionTime(options);
+    return await inspect(["rev-parse", ...flags]);
+  })).stdout;
   const probedDirectoryIdentity = async (
     argument: "--git-dir" | "--git-common-dir",
   ): Promise<string> => await directoryIdentity(

@@ -66,7 +66,6 @@ import {
   providerNativeBackendProfile,
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
-  versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { providerTimestamp, validatePromptCacheFacts, validateProviderUsage, validateSubagentTaskUsage } from "../provider/usage-values";
 import {
@@ -90,6 +89,10 @@ import {
   subagentTaskStepsFromJson,
 } from "../provider/subagent-trace";
 import { SERVER_EVENT_OPTIONS } from "../../shared/contracts/server-event-discriminants";
+import {
+  parseCachedContinuationIdentityJson,
+  parseCachedModelSelectionJson,
+} from "./codec-parse-cache";
 import { parseWorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 import type {
   ActivityRow,
@@ -191,12 +194,8 @@ export function parseModelSelection(
   fallback: () => ModelSelection,
 ): ModelSelection {
   if (value !== null) {
-    try {
-      const parsed = modelSelectionSchema.safeParse(JSON.parse(value));
-      if (parsed.success) return parsed.data;
-    } catch {
-      // Preserve readable historical state through the safe flattened fallback.
-    }
+    const parsed = parseCachedModelSelectionJson(value);
+    if (parsed) return parsed;
   }
   return fallback();
 }
@@ -225,13 +224,7 @@ function parseConversationContinuationIdentity(
   selection: ModelSelection,
 ): ContinuationIdentity | null {
   if (value !== null) {
-    try {
-      const parsed = versionedContinuationIdentitySchema.safeParse(JSON.parse(value));
-      if (parsed.success) return parsed.data;
-    } catch {
-      // A persisted but unreadable identity must never be guessed.
-    }
-    return null;
+    return parseCachedContinuationIdentityJson(value);
   }
   return legacyNativeContinuationIdentity(selection);
 }
@@ -356,11 +349,67 @@ export function conversationWorktreeOwnershipFromRow(
   };
 }
 
+export function latestTurnSummaryFromRow(
+  row: AgentTurnRow & { usage_limited?: number; failure_kind?: string | null },
+): ConversationLatestTurnSummary {
+  const modelSelection = parseModelSelection(
+    row.model_selection_json,
+    () => providerModelSelectionFromLegacyFields({
+      providerId: row.provider_id,
+      harnessId: row.harness_id,
+      backendProfileId: row.backend_profile_id,
+      model: row.model,
+      modelAlias: row.model_alias,
+      reasoningEffort: row.reasoning_effort,
+      configurationRevision: row.configuration_revision,
+    }),
+  );
+  return {
+    id: row.id,
+    runId: row.run_id,
+    status: row.status,
+    runState: {
+      state: AGENT_RUN_STATES.includes(row.run_state)
+        ? row.run_state
+        : row.status,
+      providerState: row.provider_state,
+      revision: Number.isSafeInteger(row.run_state_revision)
+        && row.run_state_revision >= 0
+        ? row.run_state_revision
+        : 0,
+    },
+    providerId: row.provider_id,
+    harnessId: modelSelection.harnessId,
+    backendProfileId: modelSelection.backendProfileId,
+    modelSelection,
+    continuationIdentity: parseAgentTurnContinuationIdentity(
+      row.continuation_identity_json,
+      modelSelection,
+    ),
+    continuationReasonCode: persistedContinuationReasonCode(
+      row.continuation_reason_code,
+    ),
+    model: modelSelection.modelId,
+    reasoningEffort: modelSelection.reasoningEffort ?? "",
+    requestedAt: row.requested_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    terminalReason: row.terminal_reason,
+    updatedAt: row.updated_at,
+    ...(row.usage_limited === 1 ? { usageLimited: true } : {}),
+    ...(isTurnFailureKind(row.failure_kind) ? { failureKind: row.failure_kind } : {}),
+    interactionMode: row.interaction_mode,
+  };
+}
+
 function conversationTurnSummary(
-  turn: AgentTurn | null,
+  turn: AgentTurn | ConversationLatestTurnSummary | null,
   usageLimited: boolean,
 ): ConversationLatestTurnSummary | null {
   if (!turn) return null;
+  if (!("userMessageId" in turn)) {
+    return usageLimited && !turn.usageLimited ? { ...turn, usageLimited: true } : turn;
+  }
   return {
     id: turn.id,
     runId: turn.runId,
@@ -400,7 +449,7 @@ export function conversationDetailFromRow(
 
 export function conversationShellFromRow(
   row: ConversationRow & { has_history: number },
-  latestTurn: AgentTurn | null,
+  latestTurn: AgentTurn | ConversationLatestTurnSummary | null,
   latestTurnUsageLimited = false,
 ): ConversationShell {
   const conversation = conversationFromRow(row);

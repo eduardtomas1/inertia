@@ -5,11 +5,16 @@ import {
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
+import {
+  SECRET_REQUEST_TOOL_NAME,
+  SECRET_REQUEST_WAIT_MS_BY_PROVIDER,
+} from "../../node/agent-secrets";
 import type { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
 import { providerMcpTools } from "./host-tool-mcp-protocol";
 
 const UNCHECKED_ARGUMENTS = z.looseObject({});
+export const CLAUDE_SECRET_MCP_TIMEOUT_MS = SECRET_REQUEST_WAIT_MS_BY_PROVIDER.claude + 60_000;
 
 interface McpRequestExtra {
   requestId?: unknown;
@@ -19,6 +24,7 @@ interface McpRequestExtra {
 export interface ClaudeHostTools {
   config: McpSdkServerConfigWithInstance;
   providerToolNames: ReadonlySet<string>;
+  servesSecrets: boolean;
   close(): Promise<void>;
 }
 
@@ -43,10 +49,14 @@ function requestSignal(extra: unknown): AbortSignal | undefined {
 export function createClaudeHostTools(
   runtime: ProviderHostToolRuntime,
 ): ClaudeHostTools {
-  const config = createSdkMcpServer({
+  const server = createSdkMcpServer({
     name: INERTIA_HOST_MCP_NAME,
     version: "1.0.0",
   });
+  const servesSecrets = runtime.definitions().some(({ name }) => name === SECRET_REQUEST_TOOL_NAME);
+  const config: McpSdkServerConfigWithInstance = servesSecrets
+    ? { ...server, timeout: CLAUDE_SECRET_MCP_TIMEOUT_MS }
+    : server;
   const providerToolNames = new Set<string>();
   for (const definition of runtime.definitions()) {
     if (!definition.inputValidator) {
@@ -93,6 +103,7 @@ export function createClaudeHostTools(
   return {
     config,
     providerToolNames,
+    servesSecrets,
     close: () => {
       closePromise ??= (async () => {
         runtime.settle();

@@ -79,6 +79,7 @@ import { usageQuotaSourceForSelection } from "../../utils/usageDisplay";
 import { compactOnReturnChatState } from "../../utils/compactOnReturn";
 import { WORKSPACE_BOUND_SURFACES } from "../../utils/rightPanelSurfaces";
 import { requestGitBlame } from "../../utils/gitHistoryCommands";
+import type { SecretRequestCommandRunner } from "../../utils/response-timeline/secretRequests";
 import type { SettingsSection, SettingsTarget } from "../../lib/settingsTarget";
 
 type Connection = ReturnType<typeof useInertiaConnection>;
@@ -175,6 +176,7 @@ interface StableSceneCallbacks {
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   backgroundSubagent: (trace: SubagentTrace) => Promise<void>;
   openCustomAgentSettings: () => void;
+  runSecretRequestCommand: SecretRequestCommandRunner;
 }
 
 const stableSceneCallbacks = new WeakMap<WorkspaceSceneActions, StableSceneCallbacks>();
@@ -208,6 +210,7 @@ export function workspaceSceneCallbacks(
       }
     },
     openCustomAgentSettings: () => actions.openSettings({ section: "custom-agents" }),
+    runSecretRequestCommand: (key, command) => actions.run(key, command, { reportError: false, passive: true }),
   };
   stableSceneCallbacks.set(actions, created);
   return created;
@@ -354,7 +357,7 @@ export interface WorkspaceSceneActions {
   stopSubagent: (trace: SubagentTrace) => Promise<void>;
   backgroundSubagent?: (trace: SubagentTrace) => Promise<void>;
   stopAgent: () => Promise<void>;
-  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean }) => Promise<ServerEvent>;
+  run: (key: string, command: CommandWithoutId, options?: { reportError?: boolean; passive?: boolean }) => Promise<ServerEvent>;
   runConversationContextCommand?: ConversationContextCommandRunner;
   runQueueCommand?: QueueCommandRunner;
   runLimitResetCommand?: LimitResetCommandRunner;
@@ -803,7 +806,7 @@ export function createWorkspaceSceneModel({
       onOpenConversation: actions.openConversation,
       onConversationContextCommand: actions.runConversationContextCommand ?? actions.run,
       onForkCommand: savedChatRunner(actions.run, draftConversation, snapshotConversations),
-      onSecretRequestCommand: actions.run,
+      onSecretRequestCommand: sceneCallbacks.runSecretRequestCommand,
       onQueueCommand: chatQueueRunner(actions.runQueueCommand, draftConversation, snapshotConversations),
       onLimitResetCommand: actions.runLimitResetCommand,
       previewContextUrl: desktopTools.previewUrl || null,
@@ -1234,11 +1237,7 @@ export function createWorkspaceSceneModel({
         onBoundsChange: desktopTools.setPreviewBounds,
         onOpenExternal: (url) => {
           void window.inertia.openExternal(url).catch((error) => {
-            setActionError(
-              error instanceof Error
-                ? error.message
-                : "The URL could not be opened.",
-            );
+            setActionError(error instanceof Error ? error.message : "The URL could not be opened.");
           });
         },
       },

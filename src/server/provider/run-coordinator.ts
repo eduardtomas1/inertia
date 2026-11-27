@@ -39,11 +39,19 @@ import {
   ProviderRunCleanupLedger,
   boundedCleanupConfirmation,
 } from "./run-cleanup-settlement";
-import { forceTerminationBudgetMs } from "../process-lifecycle";
+import {
+  forceCancelHarness,
+  isPreSpawnHarnessRefusal,
+  providerAdmissionRefusal,
+  runStopLadder,
+  type OwnedProviderStopResult,
+} from "./run-stop-ladder";
 import { providerChildEnvironment } from "../environment";
 import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { PROVIDER_MAINTENANCE_RECOVERY_MESSAGE } from "../../shared/provider-maintenance";
 import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
+
+export type { OwnedProviderStopResult } from "./run-stop-ladder";
 
 interface ProviderRunInstallationUse {
   release(): boolean;
@@ -57,6 +65,7 @@ interface ActiveRun {
   resolveLifecycleSettlement: () => void;
   harnessRun: AgentHarnessRun | null;
   harnessStartInvoked: boolean;
+  startFailed: boolean;
   launchAbort: AbortController;
   markPendingCancellation: () => void;
   runId: string;
@@ -79,12 +88,6 @@ interface ActiveRun {
   hardKillTimer?: NodeJS.Timeout;
   shutdownTimers: NodeJS.Timeout[];
 }
-
-export type OwnedProviderStopResult =
-  | "missing"
-  | "identity-mismatch"
-  | "settled"
-  | "force-detached";
 
 export interface ProviderRunCoordinatorOptions {
   cursorSdk?: ProviderManagerOptions["cursorSdk"];
@@ -128,7 +131,6 @@ export interface ProviderRunCoordinatorOptions {
   forceStopBudgetMs?: number;
 }
 
-const MAX_OWNED_STOP_GRACE_MS = 30_000;
 const MAX_REFUSED_OWNERS_PER_CONVERSATION = 64;
 const MAX_REFUSED_OWNERS = 1_024;
 
@@ -660,6 +662,15 @@ export class ProviderRunCoordinator {
         active.quarantine("provider-run-harness-owner-mismatch");
         this.cancelStartedHarness(active);
         disposeLaunch();
+        settleLateCleanup(
+          harnessRun.result.then(
+            (value) =>
+              value.cleanupConfirmed
+              && hasExactProviderRunIdentity(value, input)
+              && hasConsistentProviderTerminalOutcome(value),
+            () => false,
+          ),
+        );
         throw new ProviderRuntimeError(
           "lifecycle_corruption",
           `Agent harness '${harness.id}' returned a mismatched run owner.`,
@@ -689,6 +700,7 @@ export class ProviderRunCoordinator {
       resolveLifecycleSettlement,
       harnessRun: null,
       harnessStartInvoked: false,
+      startFailed: false,
       launchAbort,
       markPendingCancellation: () => currentEmitter.status("cancelling"),
       runId,
@@ -738,10 +750,16 @@ export class ProviderRunCoordinator {
           )
         : startHarness(resolved);
     } catch (error) {
-      if (!active.harnessStartInvoked) {
+      if (
+        !active.harnessStartInvoked
+        || (!active.harnessRun && isPreSpawnHarnessRefusal(error))
+      ) {
         active.processCleanupConfirmed = true;
         settle();
-      } else {
+      } else if (!active.harnessRun) {
+        active.startFailed = true;
+        active.quarantine("provider-run-start-terminal-outcome-unavailable");
+      } else if (!active.installationQuarantined) {
         active.quarantine("provider-run-start-terminal-outcome-unavailable");
       }
       throw error;
@@ -806,11 +824,18 @@ export class ProviderRunCoordinator {
         return value;
       },
       (error: unknown) => {
-        if (active.cleanupDetached) throw error;
-        if (!active.harnessStartInvoked) {
+        if (active.settled || active.cleanupDetached) throw error;
+        if (
+          !active.harnessStartInvoked
+          || (!active.harnessRun && isPreSpawnHarnessRefusal(error))
+        ) {
           active.processCleanupConfirmed = true;
           settle();
-        } else {
+        } else if (!active.harnessRun) {
+          active.startFailed = true;
+          active.quarantine("provider-run-start-terminal-outcome-unavailable");
+          if (active.stopLadder) active.detachUnconfirmed();
+        } else if (!active.installationQuarantined) {
           active.quarantine("provider-run-terminal-outcome-unavailable");
           this.cancelStartedHarness(active);
         }
@@ -1028,40 +1053,15 @@ export class ProviderRunCoordinator {
       ? graceMs
       : Math.min(graceMs, PROVIDER_SHUTDOWN_STOP_GRACE_MS);
     if (stopGraceMs <= 0) active.escalateStop?.();
-    active.stopLadder ??= this.stopLadder(conversationId, active, stopGraceMs, hooks);
-    return await active.stopLadder;
-  }
-
-  private async stopLadder(
-    conversationId: string,
-    active: ActiveRun,
-    graceMs: number,
-    hooks?: { escalated?(): void },
-  ): Promise<OwnedProviderStopResult> {
-    const escalated = new Promise<void>((resolve) => {
-      active.escalateStop = resolve;
+    active.stopLadder ??= runStopLadder({
+      active,
+      graceMs: stopGraceMs,
+      forceStopBudgetMs: this.options.forceStopBudgetMs,
+      cancel: () => { this.cancel(conversationId); },
+      settledResult: () => this.settledStopResult(conversationId, active),
+      hooks,
     });
-    this.cancel(conversationId);
-    if (await this.waitForSettlement(active, graceMs, escalated)) {
-      return this.settledStopResult(conversationId, active);
-    }
-    if (active.hardKillTimer) {
-      clearTimeout(active.hardKillTimer);
-      active.hardKillTimer = undefined;
-    }
-    hooks?.escalated?.();
-    try {
-      active.harnessRun?.cancel(true);
-    } catch {
-      // A malformed harness can throw while its owned process is already gone.
-    }
-    const forceBudgetMs = this.options.forceStopBudgetMs
-      ?? forceTerminationBudgetMs(process.platform);
-    if (await this.waitForSettlement(active, forceBudgetMs)) {
-      return this.settledStopResult(conversationId, active);
-    }
-    active.detachUnconfirmed();
-    return "force-detached";
+    return await active.stopLadder;
   }
 
   private settledStopResult(
@@ -1202,48 +1202,4 @@ export class ProviderRunCoordinator {
     }, this.options.cancelGraceMs);
     active.hardKillTimer.unref();
   }
-
-  private async waitForSettlement(
-    active: ActiveRun,
-    graceMs: number,
-    escalated?: Promise<void>,
-  ): Promise<boolean> {
-    if (active.settled) return true;
-    const boundedGraceMs = Math.max(0, Math.min(graceMs, MAX_OWNED_STOP_GRACE_MS));
-    if (boundedGraceMs === 0) return active.settled;
-    let timer: NodeJS.Timeout | undefined;
-    const settled = await Promise.race([
-      active.lifecycleSettlement.then(() => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), boundedGraceMs);
-        timer.unref();
-      }),
-      ...(escalated ? [escalated.then(() => active.settled)] : []),
-    ]);
-    if (timer) clearTimeout(timer);
-    return settled;
-  }
-}
-
-function forceCancelHarness(active: ActiveRun): void {
-  try {
-    active.harnessRun?.cancel(true);
-  } catch {
-    return;
-  }
-}
-
-function providerAdmissionRefusal(
-  name: string,
-  installation: "current" | "changed" | "unverified",
-  capabilityId: ProviderCapabilityId,
-): string {
-  const next = "Open Settings > Agents and choose Refresh all providers, or restart Inertia.";
-  if (installation === "changed") {
-    return `${name} changed since Inertia last checked it, for example after an update, and Inertia could not verify the new installation. ${next}`;
-  }
-  if (installation === "unverified") {
-    return `Inertia has not verified this ${name} installation yet. ${next}`;
-  }
-  return `The exact provider installation does not attest '${capabilityId}'.`;
 }

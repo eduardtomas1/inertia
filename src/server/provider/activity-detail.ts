@@ -34,10 +34,58 @@ function objectValue(value: unknown): JsonObject | null {
     : null;
 }
 
+const DEFAULT_HOME_DIRECTORY = homedir();
+const MAX_PATH_REGEX_CACHE = 32;
+const windowsPathRegexCache = new Map<string, RegExp>();
+
+const SYSTEM_PROMPT_TAG = /<system(?:[_ -]?prompt)?\b[^>]*>[\s\S]*?<\/system(?:[_ -]?prompt)?>/giu;
+const LABELED_PROMPT_LINE =
+  /(?:^|\n)[ \t]*(?:-{2,}[ \t]*)?(?:developer|generated|internal|system)[_ -]?prompt(?:[ \t]*-{2,})?[ \t]*[:=][ \t]*(?:"[\s\S]*?"|'[\s\S]*?'|[^\n]*)/giu;
+const QUERY_SECRET_PARAM =
+  /((?:[?&#;]|%(?:3F|26|23|3B))(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2}){0,64}?(?:key|token|secret|password|passwd|signature|sig|credentials?|auth|jwt|session(?:[_-]?id)?|(?<=[?&#;_.~-]|%[0-9A-F]{2})code)(?:=|%3D))(?:(?!%2[36])[^&#\s'"<>])+/giu;
+const PLATFORM_TOKEN = /\b(?:ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu;
+const JWT_TOKEN = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu;
+const SK_TOKEN = /\bsk-[A-Za-z0-9_-]{20,}/gu;
+const KEY_VALUE_SECRET =
+  /\b(api[_ -]?key|authorization|cookie|credential|password|prompt|secret|system[_ -]?prompt|tokens?)\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
+const ENV_ASSIGNMENT_SECRET =
+  /\b((?:[A-Z0-9]+_)*(?:[A-Z0-9]*PASSWORD|PASS|PASSWD|SECRET|TOKEN|CREDENTIALS?|(?:API|ACCESS|PRIVATE|SECRET)_KEY)(?:_[A-Z0-9]+)*)=(?:"[^"\n]*"|'[^'\n]*'|[^\s,;]+)/gu;
+const USER_PASS_FLAG = /(^|\s)(-u|--user)(\s+|=)([^\s:]+):(?!\[redacted\])(\S+)/gmu;
+const CLI_SECRET_FLAG = /(^|\s)--(password|token)\s+(?:"[^"\n]*"|'[^'\n]*'|\S+)/gmu;
+const MYSQL_PASSWORD_FLAG = /(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]*?\s)-p(?=[^\s-])\S+/gu;
+const CLI_TOOL_PASSWORD_FLAG =
+  /(\b(?:docker\s+login|sshpass)\b[^\n]*?\s-p|\bredis-cli\b[^\n]*?\s-a)(?:\s+|=)?(?=[^\s-])\S+/gu;
+const AWS_CONFIGURE_SECRET =
+  /(\baws\s+configure\s+set\s+(?:\S+\.)?(?:aws_secret_access_key|aws_session_token)\s+)\S+/giu;
+const NPM_AUTH_CONFIG = /(\bnpm\s+config\s+set\s+\S*_auth(?:Token)?)(\s+|=)\S+/gu;
+const QUOTED_WINDOWS_USER_PATH = /(["'])[A-Za-z]:\\(?:Users|Temp)\\(?:(?!\1)[^\n])*\1/giu;
+const QUOTED_POSIX_USER_PATH = /(["'])\/(?:Users|home|private\/tmp|tmp)\/(?:(?!\1)[^\n])*\1/gu;
+const WINDOWS_USER_PATH = /\b[A-Za-z]:\\(?:Users|Temp)\\(?:[^\\\s"'`]+\\)*[^\\\s"'`]*/giu;
+const POSIX_USER_PATH = /\/(?:Users|home|private\/tmp|tmp)(?:\/(?:[^\s,;:"'`\\]|\\.)+)+/gu;
+
+function cachedWindowsPathRegex(normalized: string): RegExp {
+  const existing = windowsPathRegexCache.get(normalized);
+  if (existing) {
+    windowsPathRegexCache.delete(normalized);
+    windowsPathRegexCache.set(normalized, existing);
+    return existing;
+  }
+  const compiled = new RegExp(escaped(normalized), "giu");
+  windowsPathRegexCache.set(normalized, compiled);
+  if (windowsPathRegexCache.size > MAX_PATH_REGEX_CACHE) {
+    const oldest = windowsPathRegexCache.keys().next().value;
+    if (typeof oldest === "string") windowsPathRegexCache.delete(oldest);
+  }
+  return compiled;
+}
+
 function scrubPathPrefix(text: string, path: string | undefined, replacement: string): string {
   const normalized = path?.replace(/[\\/]+$/u, "");
   if (!normalized) return text;
-  return text.replace(new RegExp(escaped(normalized), process.platform === "win32" ? "giu" : "gu"), replacement);
+  if (process.platform !== "win32") {
+    return text.includes(normalized) ? text.replaceAll(normalized, replacement) : text;
+  }
+  return text.replace(cachedWindowsPathRegex(normalized), replacement);
 }
 
 export const PROVIDER_ACTIVITY_DETAIL_OMISSION = /(\n… \[\d+ or more characters omitted\] …\n)/u;
@@ -170,46 +218,80 @@ export function sanitizeProviderActivityDetail(
 ): string | null {
   if (typeof value !== "string") return null;
   let text = stripTerminalControlSequences(value);
-  text = text
-    .replace(/<system(?:[_ -]?prompt)?\b[^>]*>[\s\S]*?<\/system(?:[_ -]?prompt)?>/giu, "system_prompt=[redacted]")
-    .replace(
-      /(?:^|\n)[ \t]*(?:-{2,}[ \t]*)?(?:developer|generated|internal|system)[_ -]?prompt(?:[ \t]*-{2,})?[ \t]*[:=][ \t]*(?:"[\s\S]*?"|'[\s\S]*?'|[^\n]*)/giu,
+  if (text.includes("<") && text.includes(">")) {
+    text = text.replace(SYSTEM_PROMPT_TAG, "system_prompt=[redacted]");
+  }
+  const hasColon = text.includes(":");
+  const hasEquals = text.includes("=");
+  const hasColonOrEquals = hasColon || hasEquals;
+  if (hasColonOrEquals) {
+    text = text.replace(
+      LABELED_PROMPT_LINE,
       (match) => `${match.startsWith("\n") ? "\n" : ""}system_prompt=[redacted]`,
-    )
-    .replace(
-      /((?:[?&#;]|%(?:3F|26|23|3B))(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2}){0,64}?(?:key|token|secret|password|passwd|signature|sig|credentials?|auth|jwt|session(?:[_-]?id)?|(?<=[?&#;_.~-]|%[0-9A-F]{2})code)(?:=|%3D))(?:(?!%2[36])[^&#\s'"<>])+/giu,
-      "$1[redacted]",
-    )
-    .replace(/\b(?:ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}\b/giu, "[redacted]")
-    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, "[redacted]")
-    .replace(/\bsk-[A-Za-z0-9_-]{20,}/gu, "[redacted]")
-    .replace(
-      /\b(api[_ -]?key|authorization|cookie|credential|password|prompt|secret|system[_ -]?prompt|tokens?)\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu,
-      "$1=[redacted]",
-    )
-    .replace(
-      /\b((?:[A-Z0-9]+_)*(?:[A-Z0-9]*PASSWORD|PASS|PASSWD|SECRET|TOKEN|CREDENTIALS?|(?:API|ACCESS|PRIVATE|SECRET)_KEY)(?:_[A-Z0-9]+)*)=(?:"[^"\n]*"|'[^'\n]*'|[^\s,;]+)/gu,
-      "$1=[redacted]",
-    )
-    .replace(
-      /(^|\s)(-u|--user)(\s+|=)([^\s:]+):(?!\[redacted\])(\S+)/gmu,
-      (match, lead: string, flag: string, gap: string, user: string, password: string) => /^\d+$/u.test(user) && /^\d+$/u.test(password)
-        ? match : `${lead}${flag}${gap}${user}:[redacted]`,
-    )
-    .replace(/(^|\s)--(password|token)\s+(?:"[^"\n]*"|'[^'\n]*'|\S+)/gmu, "$1--$2=[redacted]")
-    .replace(/(\b(?:mysql|mysqldump|mysqladmin|mariadb|mariadb-dump)\b[^\n]*?\s)-p(?=[^\s-])\S+/gu, "$1-p[redacted]")
-    .replace(/(\b(?:docker\s+login|sshpass)\b[^\n]*?\s-p|\bredis-cli\b[^\n]*?\s-a)(?:\s+|=)?(?=[^\s-])\S+/gu, "$1 [redacted]")
-    .replace(/(\baws\s+configure\s+set\s+(?:\S+\.)?(?:aws_secret_access_key|aws_session_token)\s+)\S+/giu, "$1[redacted]")
-    .replace(/(\bnpm\s+config\s+set\s+\S*_auth(?:Token)?)(\s+|=)\S+/gu, "$1$2[redacted]");
+    );
+  }
+  if (
+    text.includes("?")
+    || text.includes("&")
+    || text.includes("#")
+    || text.includes(";")
+    || text.includes("%")
+  ) {
+    text = text.replace(QUERY_SECRET_PARAM, "$1[redacted]");
+  }
+  if (text.includes("_") || text.includes("-")) {
+    text = text.replace(PLATFORM_TOKEN, "[redacted]");
+  }
+  if (text.includes("eyJ")) {
+    text = text.replace(JWT_TOKEN, "[redacted]");
+  }
+  if (text.includes("sk-")) {
+    text = text.replace(SK_TOKEN, "[redacted]");
+  }
+  if (hasColonOrEquals) {
+    text = text.replace(KEY_VALUE_SECRET, "$1=[redacted]");
+  }
+  if (hasEquals) {
+    text = text.replace(ENV_ASSIGNMENT_SECRET, "$1=[redacted]");
+  }
+  if (hasColon && (text.includes("-u") || text.includes("--user"))) {
+    text = text.replace(
+      USER_PASS_FLAG,
+      (match, lead: string, flag: string, gap: string, user: string, password: string) =>
+        /^\d+$/u.test(user) && /^\d+$/u.test(password)
+          ? match
+          : `${lead}${flag}${gap}${user}:[redacted]`,
+    );
+  }
+  if (text.includes("--")) {
+    text = text.replace(CLI_SECRET_FLAG, "$1--$2=[redacted]");
+  }
+  if (text.includes("-p")) {
+    text = text.replace(MYSQL_PASSWORD_FLAG, "$1-p[redacted]");
+  }
+  if (text.includes("-p") || text.includes("-a")) {
+    text = text.replace(CLI_TOOL_PASSWORD_FLAG, "$1 [redacted]");
+  }
+  if (text.includes("_")) {
+    text = text.replace(AWS_CONFIGURE_SECRET, "$1[redacted]");
+  }
+  if (text.includes("_auth")) {
+    text = text.replace(NPM_AUTH_CONFIG, "$1$2[redacted]");
+  }
   // Scrubbing can lengthen the text, so only the caller's bound below cuts it.
   text = scrubSubagentSecrets(options.preserveWhitespace ? text : text.trim());
   text = scrubPathPrefix(text, options.workspaceRoot, "<workspace>");
-  text = scrubPathPrefix(text, options.homeDirectory ?? homedir(), "<home>");
-  text = text
-    .replace(/(["'])[A-Za-z]:\\(?:Users|Temp)\\(?:(?!\1)[^\n])*\1/giu, "$1<path>$1")
-    .replace(/(["'])\/(?:Users|home|private\/tmp|tmp)\/(?:(?!\1)[^\n])*\1/gu, "$1<path>$1")
-    .replace(/\b[A-Za-z]:\\(?:Users|Temp)\\(?:[^\\\s"'`]+\\)*[^\\\s"'`]*/giu, "<path>")
-    .replace(/\/(?:Users|home|private\/tmp|tmp)(?:\/(?:[^\s,;:"'`\\]|\\.)+)+/gu, "<path>");
+  text = scrubPathPrefix(text, options.homeDirectory ?? DEFAULT_HOME_DIRECTORY, "<home>");
+  if (text.includes(":\\")) {
+    text = text
+      .replace(QUOTED_WINDOWS_USER_PATH, "$1<path>$1")
+      .replace(WINDOWS_USER_PATH, "<path>");
+  }
+  if (text.includes("/")) {
+    text = text
+      .replace(QUOTED_POSIX_USER_PATH, "$1<path>$1")
+      .replace(POSIX_USER_PATH, "<path>");
+  }
   if (!options.preserveWhitespace) text = text.trim();
   if (!text) return null;
   return boundProviderActivityDetail(

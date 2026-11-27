@@ -447,4 +447,60 @@ describe("detached chat window manager", () => {
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
+
+  it("waits for a closing window to close before creating a replacement and focuses it if unload is prevented", async () => {
+    const fixture = managerFixture();
+    try {
+      await fixture.manager.open({
+        conversationId: conversationId(1),
+        title: "First window",
+      });
+      const first = fixture.windows[0]!;
+      first.emit("close");
+      expect(fixture.manager.hasOpenWindow(conversationId(1))).toBe(false);
+
+      const beforeCreate = vi.fn();
+      const reopened = fixture.manager.open(
+        { conversationId: conversationId(1), title: "Replacement window" },
+        { onBeforeCreate: beforeCreate },
+      );
+      await Promise.resolve();
+      expect(beforeCreate).not.toHaveBeenCalled();
+      expect(fixture.windows).toHaveLength(1);
+
+      first.destroyed = true;
+      first.contents.destroyed = true;
+      first.emit("closed");
+      const openResult = await reopened;
+      expect(openResult).toMatchObject({
+        disposition: "opened",
+        conversationId: conversationId(1),
+      });
+      expect(beforeCreate).toHaveBeenCalledOnce();
+      expect(fixture.windows).toHaveLength(2);
+      const second = fixture.windows[1]!;
+      expect(second.focused).toBe(true);
+      expect(second.title).toContain("Replacement window");
+
+      second.focused = false;
+      second.emit("close");
+      const beforePrevented = vi.fn();
+      const refocused = fixture.manager.open(
+        { conversationId: conversationId(1), title: "Kept window" },
+        { onBeforeCreate: beforePrevented },
+      );
+      await Promise.resolve();
+      second.contents.emit("will-prevent-unload");
+      await expect(refocused).resolves.toMatchObject({
+        disposition: "focused",
+        conversationId: conversationId(1),
+      });
+      expect(beforePrevented).not.toHaveBeenCalled();
+      expect(fixture.windows).toHaveLength(2);
+      expect(second.focused).toBe(true);
+    } finally {
+      await fixture.manager.closeAll();
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
 });

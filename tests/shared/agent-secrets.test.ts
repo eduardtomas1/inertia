@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -133,17 +134,57 @@ describe("secret request tool input", () => {
       properties: {
         title: { type: "string", minLength: 1, maxLength: 80 },
         description: { type: "string", minLength: 1, maxLength: 600 },
-        fileName: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
-        ttlHours: { type: "integer", minimum: 1, maximum: 24, default: 24 },
+        fileName: { type: ["string", "null"], pattern: "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$" },
+        ttlHours: { type: ["integer", "null"], minimum: 1, maximum: 24, default: 24 },
       },
     });
   });
 
-  it("accepts what the schema advertises and fills the lifetime default", () => {
+  it("accepts what the schema advertises, normalizes null/empty optionals, and keeps AJV and Zod in exact agreement", () => {
     expect(secretRequestToolInputSchema.parse(valid)).toEqual({ ...valid, ttlHours: 24 });
+    expect(secretRequestToolInputSchema.parse({ ...valid, fileName: null, ttlHours: null }))
+      .toEqual({ ...valid, fileName: null, ttlHours: 24 });
+    expect(secretRequestToolInputSchema.parse({ ...valid, fileName: "", ttlHours: null }))
+      .toEqual({ ...valid, fileName: "", ttlHours: 24 });
+    expect(normalizeSecretRequestToolInput({ ...valid, fileName: null, ttlHours: null }))
+      .toEqual({ ...valid, fileName: "secret", ttlHours: 24 });
+    expect(normalizeSecretRequestToolInput({ ...valid, fileName: "", ttlHours: null }))
+      .toEqual({ ...valid, fileName: "secret", ttlHours: 24 });
     expect(secretRequestToolInputSchema.parse({ ...valid, fileName: "tailscale.authkey", ttlHours: 1 }))
       .toEqual({ ...valid, fileName: "tailscale.authkey", ttlHours: 1 });
     expect(secretRequestToolInputSchema.safeParse({ ...valid, title: "🔑".repeat(80) }).success).toBe(true);
+
+    const ajvValidate = new AjvJsonSchemaValidator().getValidator(
+      SECRET_REQUEST_TOOL_INPUT_SCHEMA as unknown as Record<string, unknown>,
+    );
+    const agreementCases: Record<string, unknown>[] = [
+      valid,
+      { ...valid, fileName: null },
+      { ...valid, fileName: "" },
+      { ...valid, fileName: "tailscale-authkey" },
+      { ...valid, fileName: "../x" },
+      { ...valid, fileName: "a/b" },
+      { ...valid, fileName: "a\\b" },
+      { ...valid, fileName: ".." },
+      { ...valid, fileName: ".env" },
+      { ...valid, fileName: "f".repeat(65) },
+      { ...valid, fileName: 123 },
+      { ...valid, ttlHours: null },
+      { ...valid, ttlHours: 1 },
+      { ...valid, ttlHours: 24 },
+      { ...valid, ttlHours: 0 },
+      { ...valid, ttlHours: 48 },
+      { ...valid, ttlHours: 2.5 },
+      { ...valid, ttlHours: "24" },
+      { ...valid, value: "fixture" },
+      { title: "Key" },
+    ];
+    for (const candidate of agreementCases) {
+      expect(
+        ajvValidate(candidate).valid,
+        `AJV vs Zod disagreement for ${JSON.stringify(candidate)}`,
+      ).toBe(secretRequestToolInputSchema.safeParse(candidate).success);
+    }
   });
 
   it.each([
@@ -177,6 +218,8 @@ describe("secret request tool input", () => {
 
   it.each([
     [undefined, "secret"],
+    [null, "secret"],
+    ["", "secret"],
     ["tailscale-authkey", "tailscale-authkey"],
     ["CON", "CON-secret"],
     ["nul.txt", "nul-secret.txt"],
@@ -186,9 +229,11 @@ describe("secret request tool input", () => {
     ["key...", "key"],
     ["../x", "secret"],
     [`con.${"x".repeat(59)}`, `con-secret.${"x".repeat(53)}`],
+    [`con.${"a".repeat(52)}.b`, `con-secret.${"a".repeat(52)}`],
   ])("names the file for %s as %s", (input, expected) => {
     expect(sanitizeSecretRequestFileName(input)).toBe(expected);
     expect(expected.length).toBeLessThanOrEqual(64);
+    expect(expected.endsWith(".")).toBe(false);
   });
 });
 

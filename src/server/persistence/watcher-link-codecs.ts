@@ -330,9 +330,14 @@ export function activeWatcherLinks(database: Database.Database): WatcherLinkReco
 }
 
 export function watcherLinkViews(database: Database.Database): WatcherLinkView[] {
-  return activeWatcherLinks(database)
-    .map(watcherLinkView)
-    .filter((view) => watcherLinkViewSchema.safeParse(view).success);
+  const links = activeWatcherLinks(database);
+  if (links.length === 0) return [];
+  const views: WatcherLinkView[] = [];
+  for (const link of links) {
+    const view = watcherLinkView(link);
+    if (watcherLinkViewSchema.safeParse(view).success) views.push(view);
+  }
+  return views;
 }
 
 export function watcherWakeSummaries(
@@ -340,16 +345,16 @@ export function watcherWakeSummaries(
   conversationId: string,
   turnIds?: readonly string[],
 ): WatcherWakeSummary[] | undefined {
-  const link = database.prepare("SELECT id FROM watcher_links WHERE watcher_conversation_id = ?")
+  const link = cachedStatement(database, "SELECT id FROM watcher_links WHERE watcher_conversation_id = ?")
     .get(conversationId) as { id: string } | undefined;
   if (!link) return undefined;
   const rows = (turnIds === undefined
-    ? database.prepare(`
+    ? cachedStatement(database, `
         SELECT wake.* FROM watcher_wakes AS wake
         JOIN agent_turns AS turn ON turn.id = wake.watcher_turn_id AND turn.conversation_id = ?
         WHERE wake.link_id = ? ORDER BY wake.sequence ASC
       `).all(conversationId, link.id)
-    : database.prepare(`
+    : cachedStatement(database, `
         SELECT wake.* FROM watcher_wakes AS wake
         JOIN agent_turns AS turn ON turn.id = wake.watcher_turn_id AND turn.conversation_id = ?
         WHERE wake.link_id = ? AND wake.watcher_turn_id IN (SELECT value FROM json_each(?))

@@ -1,10 +1,18 @@
-const GAP_CHARACTERS: ReadonlySet<string> = new Set([" ", "\t", "\r", "\n"]);
-const GAP_PATTERN = "[ \\t\\r\\n]*";
 const MASK = "[redacted]";
 const OVER_DEPTH = "[redacted:over-depth]";
 const MAX_PAYLOAD_DEPTH = 32;
 const SIGNIFICANT_PARTIAL_CHARS = 6;
 const LINE_ENDINGS = ["", "\n", "\r\n"] as const;
+
+export interface LaunchSecretSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface LaunchSecretScanResult {
+  readonly matches: readonly LaunchSecretSpan[];
+  readonly partialStart: number;
+}
 
 export function launchSecretForms(values: readonly string[]): string[] {
   const forms = new Set<string>();
@@ -27,48 +35,118 @@ export function launchSecretForms(values: readonly string[]): string[] {
 }
 
 export class LaunchSecretMatcher {
-  private readonly pattern: RegExp | null;
+  private readonly asciiFirst: (string[] | undefined)[];
+  private readonly nonAsciiFirst: Map<number, string[]> | null;
   readonly window: number;
 
   constructor(readonly forms: readonly string[]) {
-    this.pattern = forms.length === 0
-      ? null
-      : new RegExp(forms.map(gapTolerantSource).join("|"), "gu");
-    this.window = 2 * Math.max(0, ...forms.map((form) => form.length)) + 8;
+    this.asciiFirst = Array.from<string[] | undefined>({ length: 128 });
+    let nonAscii: Map<number, string[]> | null = null;
+    let longest = 0;
+    for (const form of forms) {
+      if (form.length === 0) continue;
+      if (form.length > longest) longest = form.length;
+      const code = form.charCodeAt(0);
+      if (code < 128) {
+        const bucket = this.asciiFirst[code];
+        if (bucket) bucket.push(form);
+        else this.asciiFirst[code] = [form];
+      } else {
+        nonAscii ??= new Map();
+        const bucket = nonAscii.get(code);
+        if (bucket) bucket.push(form);
+        else nonAscii.set(code, [form]);
+      }
+    }
+    this.nonAsciiFirst = nonAscii;
+    this.window = 2 * longest + 8;
+  }
+
+  scan(text: string, includePartial: boolean): LaunchSecretScanResult {
+    const length = text.length;
+    if (this.forms.length === 0 || length === 0) {
+      return { matches: [], partialStart: length };
+    }
+    const matches: LaunchSecretSpan[] = [];
+    const windowStart = includePartial ? Math.max(0, length - this.window) : length;
+    let partialStart = length;
+    for (let index = 0; index < length; index += 1) {
+      const code = text.charCodeAt(index);
+      const candidates = code < 128 ? this.asciiFirst[code] : this.nonAsciiFirst?.get(code);
+      if (!candidates) continue;
+      let matchedEnd = -1;
+      let isPartial = false;
+      const canStartPartial = includePartial && index >= windowStart && !isGapCode(code);
+      for (let c = 0; c < candidates.length; c += 1) {
+        const result = matchForm(text, index, candidates[c]!);
+        if (result > 0) {
+          matchedEnd = result;
+          break;
+        }
+        if (result === -2 && canStartPartial) {
+          isPartial = true;
+        }
+      }
+      if (matchedEnd !== -1) {
+        matches.push({ start: index, end: matchedEnd });
+        index = matchedEnd - 1;
+      } else if (isPartial) {
+        partialStart = index;
+        break;
+      }
+    }
+    return { matches, partialStart };
   }
 
   mask(text: string): string {
-    return this.pattern ? text.replace(this.pattern, MASK) : text;
+    if (this.forms.length === 0 || !text) return text;
+    const { matches } = this.scan(text, false);
+    return spliceMasked(text, text.length, matches);
   }
 
   payload<T>(value: T): T {
-    if (!this.pattern) return value;
+    if (this.forms.length === 0) return value;
     const visit = (current: unknown, depth: number): unknown => {
       if (typeof current === "string") return this.mask(current);
       if (current === null || typeof current !== "object") return current;
       if (depth >= MAX_PAYLOAD_DEPTH) return OVER_DEPTH;
-      if (Array.isArray(current)) return current.map((entry) => visit(entry, depth + 1));
-      return Object.fromEntries(Object.entries(current).map(([key, entry]) => [
-        this.mask(key),
-        visit(entry, depth + 1),
-      ]));
+      if (Array.isArray(current)) {
+        let changed = false;
+        const next = current.map((entry) => {
+          const visited = visit(entry, depth + 1);
+          if (visited !== entry) changed = true;
+          return visited;
+        });
+        return changed ? next : current;
+      }
+      let changed = false;
+      const next: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(current)) {
+        const maskedKey = this.mask(key);
+        const visited = visit(entry, depth + 1);
+        if (maskedKey !== key || visited !== entry) changed = true;
+        next[maskedKey] = visited;
+      }
+      return changed ? next : current;
     };
     return visit(value, 0) as T;
   }
 
-  matches(text: string): Array<{ start: number; end: number }> {
-    if (!this.pattern) return [];
-    return [...text.matchAll(this.pattern)].map((match) => ({
-      start: match.index,
-      end: match.index + match[0].length,
-    }));
+  matches(text: string): LaunchSecretSpan[] {
+    return [...this.scan(text, false).matches];
   }
 
   partialStart(text: string, covered: ReadonlyArray<{ start: number; end: number }>): number {
+    if (this.forms.length === 0) return text.length;
     for (let start = Math.max(0, text.length - this.window); start < text.length; start += 1) {
-      if (GAP_CHARACTERS.has(text[start]!)) continue;
+      const code = text.charCodeAt(start);
+      if (isGapCode(code)) continue;
+      const candidates = code < 128 ? this.asciiFirst[code] : this.nonAsciiFirst?.get(code);
+      if (!candidates) continue;
       if (covered.some((range) => start >= range.start && start < range.end)) continue;
-      if (this.forms.some((form) => continuesForm(text, start, form))) return start;
+      for (let c = 0; c < candidates.length; c += 1) {
+        if (matchForm(text, start, candidates[c]!) === -2) return start;
+      }
     }
     return text.length;
   }
@@ -82,43 +160,81 @@ export class LaunchSecretStream {
   push(value: string): string {
     if (!value) return "";
     this.pending += value;
-    const matches = this.matcher.matches(this.pending);
-    let cut = this.matcher.partialStart(this.pending, matches);
-    if (cut > 0 && isHighSurrogate(this.pending, cut - 1)) cut -= 1;
-    const output = this.matcher.mask(this.pending.slice(0, cut));
-    this.pending = this.pending.slice(cut);
+    const text = this.pending;
+    const { matches, partialStart } = this.matcher.scan(text, true);
+    let cut = partialStart;
+    if (cut > 0 && isHighSurrogate(text, cut - 1)) cut -= 1;
+    const output = spliceMasked(text, cut, matches);
+    this.pending = cut === text.length ? "" : text.slice(cut);
     return output;
   }
 
   finish(): string {
     const text = this.pending;
     this.pending = "";
-    const cut = this.matcher.partialStart(text, this.matcher.matches(text));
-    const tail = text.slice(cut);
-    const significant = tail.replace(/[ \t\r\n]/gu, "").length >= SIGNIFICANT_PARTIAL_CHARS;
-    return this.matcher.mask(text.slice(0, cut)) + (significant ? MASK : tail);
+    if (!text) return "";
+    const { matches, partialStart } = this.matcher.scan(text, true);
+    const tail = text.slice(partialStart);
+    const significant = countNonGapChars(tail) >= SIGNIFICANT_PARTIAL_CHARS;
+    return spliceMasked(text, partialStart, matches) + (significant ? MASK : tail);
   }
 }
 
-function gapTolerantSource(form: string): string {
-  return [...form].map((character) => character.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&")).join(GAP_PATTERN);
+function isGapCode(code: number): boolean {
+  return code === 32 || code === 9 || code === 13 || code === 10;
 }
 
-function continuesForm(text: string, start: number, form: string): boolean {
-  let matched = 0;
-  let index = start;
-  while (index < text.length && matched < form.length) {
-    const character = text[index]!;
-    if (character === form[matched]) {
+function countNonGapChars(text: string): number {
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (!isGapCode(text.charCodeAt(index))) count += 1;
+  }
+  return count;
+}
+
+/**
+ * Matches one gap-tolerant form starting at `start` (where `text[start] === form[0]`).
+ * Returns end index (>0) on complete match, -2 on partial match reaching `text.length`, or -1 on mismatch.
+ */
+function matchForm(text: string, start: number, form: string): number {
+  const textLen = text.length;
+  const formLen = form.length;
+  let scan = start + 1;
+  let matched = 1;
+  while (matched < formLen && scan < textLen) {
+    const code = text.charCodeAt(scan);
+    if (code === form.charCodeAt(matched)) {
       matched += 1;
-      index += 1;
-    } else if (matched > 0 && GAP_CHARACTERS.has(character)) {
-      index += 1;
+      scan += 1;
+    } else if (isGapCode(code)) {
+      scan += 1;
     } else {
-      return false;
+      return -1;
     }
   }
-  return index === text.length && matched > 0 && matched < form.length;
+  if (matched === formLen) return scan;
+  return scan === textLen ? -2 : -1;
+}
+
+function spliceMasked(
+  text: string,
+  cut: number,
+  matches: readonly LaunchSecretSpan[],
+): string {
+  if (matches.length === 0) {
+    return cut === text.length ? text : text.slice(0, cut);
+  }
+  let output = "";
+  let cursor = 0;
+  for (let index = 0; index < matches.length; index += 1) {
+    const span = matches[index]!;
+    if (span.end > cut) break;
+    if (span.start > cursor) output += text.slice(cursor, span.start);
+    output += MASK;
+    cursor = span.end;
+  }
+  if (cursor < cut) output += text.slice(cursor, cut);
+  return output;
 }
 
 function isHighSurrogate(text: string, index: number): boolean {

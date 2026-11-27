@@ -62,7 +62,6 @@ import {
 import {
   isSettledExchangeEntry,
   withHtmlRenders,
-  withSecretRequests,
   withLiveCommentary,
   type TurnWorkStreamEntry,
 } from "../../utils/response-timeline/execution";
@@ -894,7 +893,7 @@ export function WorkLog({
     }), previousDurableStream.current);
     previousDurableStream.current = next;
     const layered = layeredHtmlRenders(turn);
-    return withSecretRequests(withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message))), turn.secretRequests);
+    return withHtmlRenders(next, turn.htmlRenders.filter((message) => !layered.includes(message)));
   }, [turn]);
   const durableStream = useMemo(() => withDelegatedWork(renderedStream, delegated), [renderedStream, delegated]);
   // Transient text is the final visible execution entry unless follow-ups

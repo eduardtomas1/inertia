@@ -1874,4 +1874,97 @@ describe("editing, re-confirming and documents in the queue", () => {
       expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
     } finally { await f.close(); }
   });
+
+  it("preserves explicit manual send when sendDuringTurn races with a failed turn end", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      const steerSpy = vi.spyOn(f.controller, "steer").mockImplementationOnce(async () => {
+        f.provider.resolve({ status: "failed", error: "provider crashed" });
+        await flushTurnControllerTestPromises();
+        return { kind: "turn-ended" };
+      });
+
+      await f.command("message.queue.send", id);
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+
+      expect(steerSpy).toHaveBeenCalledOnce();
+      expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("preserves stop-and-send override when a concurrent schedule runs while turns.isActive is still true", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      const id = randomUUID();
+      const realCleanup = f.controller.waitForProviderCleanup.bind(f.controller);
+      let releaseCleanup!: () => void;
+      const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+      const cleanupSpy = vi.spyOn(f.controller, "waitForProviderCleanup")
+        .mockImplementationOnce(async () => {
+          await cleanupGate;
+          return true;
+        })
+        .mockImplementation(realCleanup);
+
+      await f.stopAndSend(id, initial.turn.id, "Must survive intermediate schedule");
+      let holdActive = true;
+      const realIsActive = f.controller.isActive.bind(f.controller);
+      const activeSpy = vi.spyOn(f.controller, "isActive").mockImplementation(
+        (conversationId) => holdActive || realIsActive(conversationId),
+      );
+
+      // Trigger a concurrent schedule while turns.isActive() still reports true.
+      f.queue.onCompactionSettled(f.conversationId);
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("waiting");
+      expect(f.provider.runCount).toBe(1);
+
+      holdActive = false;
+      releaseCleanup();
+      await vi.waitFor(() => expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted"));
+      await f.drain();
+      expect(f.provider.runCount).toBe(2);
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+      cleanupSpy.mockRestore();
+      activeSpy.mockRestore();
+    } finally { await f.close(); }
+  });
+
+  it("does not leak background track rejections into foreground message.queue.send or reconfirm", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID();
+      f.admission.closed = true;
+      await f.command("message.queue.enqueue", id);
+      // Immediately send while the background track rejection may still be settling in running.
+      f.admission.closed = false;
+      await expect(f.command("message.queue.send", id)).resolves.toBeUndefined();
+      await f.drain();
+      expect(f.store.queuedMessages.get(f.conversationId, id)?.state).toBe("accepted");
+      expect(f.provider.runCount).toBe(1);
+
+      const secondId = randomUUID();
+      await f.command("message.queue.enqueue", secondId);
+      await f.drain();
+      f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      f.admission.closed = true;
+      f.queue.onCompactionSettled(f.conversationId);
+      f.admission.closed = false;
+      await expect(f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.reconfirm",
+        requestId: randomUUID(),
+        payload: {
+          conversationId: f.conversationId,
+          id: secondId,
+          confirmed: { interactionMode: "build", accessMode: "full" },
+        },
+      })).resolves.toBe("handled");
+    } finally { await f.close(); }
+  });
 });

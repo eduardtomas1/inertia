@@ -76,6 +76,7 @@ import {
 } from "./stream-text-storage";
 import { claimConversationContextPackets } from "./conversation-context-packet-repository";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
+import { cachedStatement } from "./statement-cache";
 
 type TurnLedgerPersistenceContext = Pick<
   PersistenceContext,
@@ -170,10 +171,10 @@ export class TurnLedgerRepository {
     if (sessionRecovery !== null && !isTurnSessionRecovery(sessionRecovery)) {
       throw new Error("The turn session recovery is invalid.");
     }
-    if (new TextEncoder().encode(modelSelectionJson).byteLength > 65_536) {
+    if (Buffer.byteLength(modelSelectionJson, "utf8") > 65_536) {
       throw new Error("Turn model selection is too large.");
     }
-    if (new TextEncoder().encode(continuationIdentityJson).byteLength > 4_096) {
+    if (Buffer.byteLength(continuationIdentityJson, "utf8") > 4_096) {
       throw new Error("Turn continuation identity is too large.");
     }
 
@@ -226,7 +227,7 @@ export class TurnLedgerRepository {
       updatedAt: requestedAt,
     };
 
-    const userMessage = this.context.database.prepare("SELECT * FROM messages WHERE id = ?").get(turn.userMessageId) as MessageRow | undefined;
+    const userMessage = cachedStatement(this.context.database, "SELECT * FROM messages WHERE id = ?").get(turn.userMessageId) as MessageRow | undefined;
     if (!userMessage || userMessage.conversation_id !== turn.conversationId || userMessage.role !== "user") {
       throw new Error("An agent turn must reference a user message in the same conversation.");
     }
@@ -234,7 +235,7 @@ export class TurnLedgerRepository {
       throw new Error("The user message is already owned by a different turn.");
     }
 
-    const insertTurn = this.context.database.prepare(`
+    const insertTurn = cachedStatement(this.context.database, `
       INSERT INTO agent_turns (
         id, conversation_id, run_id, user_message_id, terminal_assistant_message_id,
         provider_id, model_selection_json, continuation_identity_json,
@@ -267,7 +268,7 @@ export class TurnLedgerRepository {
         providerState: turn.runState?.providerState ?? null,
         runStateRevision: turn.runState?.revision ?? 0,
       });
-      this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(turn.id, turn.userMessageId);
+      cachedStatement(this.context.database, "UPDATE messages SET turn_id = ? WHERE id = ?").run(turn.id, turn.userMessageId);
     })();
     return turn;
   }
@@ -297,7 +298,7 @@ export class TurnLedgerRepository {
           "Provider session invalidation identity",
           1_000,
         );
-        const cleared = this.context.database.prepare(`
+        const cleared = cachedStatement(this.context.database, `
           UPDATE conversations
           SET provider_session_id = NULL, continuation_identity_json = NULL
           WHERE id = ? AND provider_session_id = ?
@@ -334,7 +335,7 @@ export class TurnLedgerRepository {
         requestedAt: message.createdAt,
       }, allowQueuedSelectionProvider);
       if (input.limitResetPlanId) {
-        const accepted = this.context.database.prepare(`
+        const accepted = cachedStatement(this.context.database, `
           UPDATE usage_limit_resume_plans SET state='completed', turn_id=?, error=NULL
           WHERE id=? AND conversation_id=? AND state='dispatching'
         `).run(turn.id, input.limitResetPlanId, input.conversationId);
@@ -346,7 +347,7 @@ export class TurnLedgerRepository {
       if (input.adoptedFollowUp && !input.queuedMessageId) throw new Error("An unread follow-up starts only from its queue row.");
       if (input.queuedMessageId) {
         // A row that names an unread follow-up (an active row with a message) accepts only with that message.
-        const accepted = this.context.database.prepare(`
+        const accepted = cachedStatement(this.context.database, `
           UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ?, error = NULL,
             content = '', attachments_json = '[]', route_identity = ''
           WHERE id = ? AND conversation_id = ? AND state = 'dispatching'
@@ -451,7 +452,7 @@ export class TurnLedgerRepository {
   }
 
   runtimeInterruptionSource(conversationId: string): string | null {
-    const recent = this.context.database.prepare(`
+    const recent = cachedStatement(this.context.database, `
       SELECT id, status, terminal_reason FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
@@ -464,7 +465,7 @@ export class TurnLedgerRepository {
   }
 
   runtimeInterruption(turnId: string): RuntimeInterruption {
-    const request = this.context.database.prepare(`
+    const request = cachedStatement(this.context.database, `
       SELECT substr(message.content, 1, 1000) AS content
       FROM agent_turns AS turn JOIN messages AS message ON message.id = turn.user_message_id
       WHERE turn.id = ?
@@ -476,7 +477,7 @@ export class TurnLedgerRepository {
       AND status = 'cancelled'
       AND progress = 'Stopped when the turn ended.'
     ))`;
-    const lost = this.context.database.prepare(`
+    const lost = cachedStatement(this.context.database, `
       SELECT substr(CASE
         WHEN task_kind IN ('shell', 'monitor', 'mcp')
           THEN 'background command: ' || COALESCE(NULLIF(trim(description), ''), command, 'command')
@@ -487,14 +488,15 @@ export class TurnLedgerRepository {
       ORDER BY created_at ASC, id ASC
       LIMIT ?
     `).all(turnId, MAX_RUNTIME_INTERRUPTION_ENTRIES) as Array<{ label: string }>;
-    const { count } = this.context.database.prepare(
+    const { count } = cachedStatement(
+      this.context.database,
       `SELECT COUNT(*) AS count FROM subagent_traces WHERE ${lostWork}`,
     ).get(turnId) as { count: number };
     return { request: request?.content ?? null, lostTasks: lost.map(({ label }) => label), lostTaskCount: count };
   }
 
   savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {
-    const attempts = this.context.database.prepare(`
+    const attempts = cachedStatement(this.context.database, `
       SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
         turn.terminal_assistant_message_id, turn.harness_id,
         CASE WHEN json_valid(turn.session_recovery_json)
@@ -537,7 +539,7 @@ export class TurnLedgerRepository {
         || attempt.terminal_reason === "provider-process-exit"
         || attempt.terminal_reason === "provider-process-crash"));
     if (!rejectedTwice) return false;
-    const origin = this.context.database.prepare(`
+    const origin = cachedStatement(this.context.database, `
       SELECT
         EXISTS(
           SELECT 1 FROM agent_turns
@@ -561,7 +563,7 @@ export class TurnLedgerRepository {
     conversationId: string,
     sessionId: string,
   ): { requestedAt: string; sessionInstructionDigest: string | null } | null {
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT turn.requested_at, turn.provider_session_before,
         CASE WHEN json_valid(manifest.manifest_json)
           THEN json_extract(manifest.manifest_json, '$.sessionInstructionDigest')
@@ -590,7 +592,7 @@ export class TurnLedgerRepository {
     since: string,
   ): { sessionInstructionDigest: string | null } | null {
     const titles = CONTEXT_COMPACTION_ACTIVITY_TITLES;
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT compaction.turn_id, compaction.created_at, compaction.receipt, compaction.receipt_digest FROM (
         SELECT NULL AS turn_id, created_at, 1 AS receipt,
           CASE WHEN json_valid(compaction_json)
@@ -618,7 +620,7 @@ export class TurnLedgerRepository {
         sessionInstructionDigest: isSessionInstructionDigest(row.receipt_digest) ? row.receipt_digest : null,
       };
     }
-    const digest = this.context.database.prepare(`
+    const digest = cachedStatement(this.context.database, `
       SELECT CASE WHEN json_valid(manifest.manifest_json)
         THEN json_extract(manifest.manifest_json, '$.sessionInstructionDigest')
       END AS digest
@@ -633,7 +635,7 @@ export class TurnLedgerRepository {
   }
 
   forgetSessionInstruction(turnId: string): void {
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       UPDATE turn_execution_manifests
       SET manifest_json = json_remove(manifest_json, '$.sessionInstructionDigest')
       WHERE turn_id = ? AND json_valid(manifest_json)
@@ -641,7 +643,7 @@ export class TurnLedgerRepository {
   }
 
   promptWithheld(turnId: string): boolean {
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT CASE WHEN json_valid(manifest_json)
         THEN json_extract(manifest_json, '$.promptWithheld')
       END AS withheld
@@ -653,7 +655,7 @@ export class TurnLedgerRepository {
 
   compactedSince(conversationId: string, since: string): boolean {
     const titles = CONTEXT_COMPACTION_ACTIVITY_TITLES;
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT EXISTS(
         SELECT 1 FROM messages
         WHERE conversation_id = ? AND turn_id IS NULL AND role = 'system'
@@ -672,7 +674,7 @@ export class TurnLedgerRepository {
     backendProfileId: string,
     endpointIdentity: string | null,
   ): { turnCount: number; stayed: boolean } {
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT COUNT(*) AS turn_count,
         COALESCE(SUM(
           backend_profile_id IS NOT @backendProfileId
@@ -707,7 +709,7 @@ export class TurnLedgerRepository {
     backendProfileId: string,
     endpointIdentity: string | null,
   ): { requestedAt: string } | null {
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT handoff.requested_at FROM agent_turns AS handoff
       WHERE handoff.conversation_id = @conversationId
         AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS run WHERE run.kind = 'run' AND run.id = handoff.run_id
@@ -743,7 +745,7 @@ export class TurnLedgerRepository {
    * prompt of a turn the provider never accepted still counts.
    */
   recordRejectedResume(turnId: string, sessionId: string): void {
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       UPDATE agent_turns
       SET session_recovery_json = CASE WHEN session_recovery_json IS NULL THEN '{"resumeRejected":true}'
         ELSE json_set(session_recovery_json, '$.resumeRejected', json('true')) END
@@ -761,7 +763,7 @@ export class TurnLedgerRepository {
    */
   turnHasProviderActivity(conversationId: string, turnId: string, harnessId: string): boolean {
     const turnScoped = providerTurnProgress(harnessId) === "turn-scoped";
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT EXISTS(
         SELECT 1 FROM activities
         WHERE conversation_id = ? AND turn_id = ? AND ${turnScoped
@@ -791,7 +793,7 @@ export class TurnLedgerRepository {
       }
       const conversation = this.context.requireConversation(current.conversationId);
       if (conversation.provider_id === current.providerId) {
-        const cleared = this.context.database.prepare(`
+        const cleared = cachedStatement(this.context.database, `
           UPDATE conversations
           SET provider_session_id = NULL, continuation_identity_json = NULL
           WHERE id = ? AND provider_session_id = ?
@@ -800,7 +802,7 @@ export class TurnLedgerRepository {
           throw new Error("The provider session changed before the turn could restart.");
         }
       }
-      const restarted = this.context.database.prepare(`
+      const restarted = cachedStatement(this.context.database, `
         UPDATE agent_turns
         SET provider_session_before = NULL,
           usage_start_json = NULL,
@@ -815,10 +817,12 @@ export class TurnLedgerRepository {
       if (restarted.changes !== 1) {
         throw new Error("The turn settled before it could restart on a fresh provider session.");
       }
-      this.context.database.prepare(
+      cachedStatement(
+        this.context.database,
         "DELETE FROM turn_execution_context_refs WHERE turn_id = ?",
       ).run(turnId);
-      this.context.database.prepare(
+      cachedStatement(
+        this.context.database,
         "DELETE FROM turn_execution_manifests WHERE turn_id = ?",
       ).run(turnId);
       this.persistExecutionContext(turnId, input.executionContext, input.restartedAt);
@@ -832,7 +836,7 @@ export class TurnLedgerRepository {
    */
   executionManifest(turnId: string): SanitizedTurnExecutionManifest | null {
     this.context.requireAgentTurn(turnId);
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT manifest_json
       FROM turn_execution_manifests
       WHERE turn_id = ?
@@ -845,7 +849,7 @@ export class TurnLedgerRepository {
       throw new Error("Turn execution manifest contains invalid JSON.");
     }
     const manifest = parseSanitizedTurnExecutionManifest(parsed);
-    const references = this.context.database.prepare(`
+    const references = cachedStatement(this.context.database, `
       SELECT ordinal, digest, kind, label, byte_size, truncated
       FROM turn_execution_context_refs
       WHERE turn_id = ?
@@ -875,7 +879,7 @@ export class TurnLedgerRepository {
       ) {
         throw new Error("Turn execution manifest reference metadata is malformed.");
       }
-      const blob = this.context.database.prepare(`
+      const blob = cachedStatement(this.context.database, `
         SELECT byte_size, content
         FROM turn_execution_context_blobs
         WHERE digest = ?
@@ -897,19 +901,19 @@ export class TurnLedgerRepository {
   }
 
   forRun(runId: string): AgentTurn | null {
-    const row = this.context.database.prepare("SELECT * FROM agent_turns WHERE run_id = ?").get(runId) as AgentTurnRow | undefined;
+    const row = cachedStatement(this.context.database, "SELECT * FROM agent_turns WHERE run_id = ?").get(runId) as AgentTurnRow | undefined;
     return row ? agentTurnFromRow(row) : null;
   }
 
   latestRequestedAt(): number {
-    const row = this.context.database.prepare("SELECT MAX(requested_at) AS requested_at FROM agent_turns")
+    const row = cachedStatement(this.context.database, "SELECT MAX(requested_at) AS requested_at FROM agent_turns")
       .get() as { requested_at: string | null };
     return row.requested_at === null ? Number.NEGATIVE_INFINITY : Date.parse(row.requested_at);
   }
 
   latestForConversation(conversationId: string): AgentTurn | null {
     this.context.requireConversation(conversationId);
-    const row = this.context.database.prepare(`
+    const row = cachedStatement(this.context.database, `
       SELECT * FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at DESC, id DESC
@@ -928,7 +932,7 @@ export class TurnLedgerRepository {
 
   forConversation(conversationId: string): AgentTurn[] {
     this.context.requireConversation(conversationId);
-    return (this.context.database.prepare(`
+    return (cachedStatement(this.context.database, `
       SELECT * FROM agent_turns
       WHERE conversation_id = ?
       ORDER BY requested_at ASC, id ASC
@@ -936,7 +940,7 @@ export class TurnLedgerRepository {
   }
 
   unfinished(): AgentTurn[] {
-    return (this.context.database.prepare(`
+    return (cachedStatement(this.context.database, `
       SELECT * FROM agent_turns
       WHERE status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
       ORDER BY requested_at ASC, id ASC
@@ -944,7 +948,7 @@ export class TurnLedgerRepository {
   }
 
   terminalAuthoritativeMissingGitArtifacts(): AgentTurn[] {
-    return (this.context.database.prepare(`
+    return (cachedStatement(this.context.database, `
       SELECT turn.*
       FROM agent_turns AS turn
       LEFT JOIN turn_git_artifacts AS artifact ON artifact.turn_id = turn.id
@@ -1092,7 +1096,7 @@ export class TurnLedgerRepository {
     };
     let terminalMessage: MessageRow | undefined;
     if (terminalAssistantMessageId) {
-      terminalMessage = this.context.database.prepare("SELECT * FROM messages WHERE id = ?").get(terminalAssistantMessageId) as MessageRow | undefined;
+      terminalMessage = cachedStatement(this.context.database, "SELECT * FROM messages WHERE id = ?").get(terminalAssistantMessageId) as MessageRow | undefined;
       if (
         !terminalMessage
         || terminalMessage.conversation_id !== current.conversationId
@@ -1104,7 +1108,7 @@ export class TurnLedgerRepository {
         throw new Error("The terminal assistant message is already owned by a different turn.");
       }
     }
-    const updateTurn = this.context.database.prepare(`
+    const updateTurn = cachedStatement(this.context.database, `
       UPDATE agent_turns SET
         terminal_assistant_message_id = @terminalAssistantMessageId,
         provider_session_after = @providerSessionAfter,
@@ -1137,7 +1141,7 @@ export class TurnLedgerRepository {
         throw new Error("Agent turn lifecycle changed concurrently or was already settled.");
       }
       if (terminalMessage) {
-        this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(current.id, terminalMessage.id);
+        cachedStatement(this.context.database, "UPDATE messages SET turn_id = ? WHERE id = ?").run(current.id, terminalMessage.id);
       }
       if (terminal) {
         compactMessageContentForTurn(this.context.database, current.id, current.conversationId);
@@ -1179,12 +1183,12 @@ export class TurnLedgerRepository {
     if (Buffer.byteLength(manifestJson, "utf8") > 65_536) {
       throw new Error("Turn execution manifest exceeds its persistence limit.");
     }
-    const insertBlob = this.context.database.prepare(`
+    const insertBlob = cachedStatement(this.context.database, `
       INSERT INTO turn_execution_context_blobs (digest, byte_size, content, created_at)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(digest) DO NOTHING
     `);
-    const selectBlob = this.context.database.prepare(`
+    const selectBlob = cachedStatement(this.context.database, `
       SELECT byte_size, content
       FROM turn_execution_context_blobs
       WHERE digest = ?
@@ -1200,11 +1204,11 @@ export class TurnLedgerRepository {
         throw new Error("Content-addressed execution context collided with different content.");
       }
     }
-    this.context.database.prepare(`
+    cachedStatement(this.context.database, `
       INSERT INTO turn_execution_manifests (turn_id, manifest_json, created_at)
       VALUES (?, ?, ?)
     `).run(turnId, manifestJson, createdAt);
-    const insertReference = this.context.database.prepare(`
+    const insertReference = cachedStatement(this.context.database, `
       INSERT INTO turn_execution_context_refs (
         turn_id, ordinal, digest, kind, label, byte_size, truncated
       ) VALUES (?, ?, ?, ?, ?, ?, ?)

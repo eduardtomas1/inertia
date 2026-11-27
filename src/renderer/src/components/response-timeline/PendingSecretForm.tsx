@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import type { SecretRequestReference } from "@shared/agent-secrets";
 import { composerFocusRestorer } from "../../utils/composerFocusRestore";
 import {
   SECRET_REQUEST_PLACEHOLDER,
+  secretDeclineFailureMessage,
   secretRequestFootnote,
   secretSaveFailureMessage,
   secretValueIssue,
@@ -11,7 +12,6 @@ import {
 import { claimSecretRequestAutoFocus } from "./secretRequestContext";
 
 const COMPOSER_TEXTAREA = 'section[aria-label="Message composer"] textarea';
-const DECLINE_FAILED = "Couldn't decline. Try again.";
 
 type SaveAgentSecret = typeof window.inertia.saveAgentSecret;
 
@@ -35,6 +35,7 @@ export function PendingSecretForm({
   const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const selectionRef = useRef<{ start: number; end: number; direction?: "forward" | "backward" | "none" } | null>(null);
   const descriptionId = useId();
   const footnoteId = useId();
   const errorId = useId();
@@ -48,6 +49,14 @@ export function PendingSecretForm({
     const idle = !active || active === document.body || active === composer;
     if (composer && composer.value.trim() === "" && idle) input.focus({ preventScroll: true });
   }, [requestId]);
+
+  useLayoutEffect(() => {
+    const selection = selectionRef.current;
+    selectionRef.current = null;
+    const input = inputRef.current;
+    if (!selection || !input) return;
+    input.setSelectionRange(selection.start, selection.end, selection.direction);
+  }, [revealed]);
 
   const run = async (kind: "saving" | "declining", operation: () => Promise<void>, failure: (error: unknown) => string): Promise<boolean> => {
     if (busyRef.current) return false;
@@ -70,7 +79,7 @@ export function PendingSecretForm({
     event.preventDefault();
     const secret = value.trim();
     if (!secret || busyRef.current) return;
-    const issue = secretValueIssue(secret);
+    const issue = secretValueIssue(value);
     if (issue) {
       setError(issue);
       return;
@@ -87,7 +96,23 @@ export function PendingSecretForm({
 
   const decline = async (): Promise<void> => {
     const restoreFocus = composerFocusRestorer(formRef.current);
-    if (await run("declining", onDecline, () => DECLINE_FAILED)) restoreFocus();
+    const declined = await run("declining", onDecline, secretDeclineFailureMessage);
+    if (!declined) return;
+    setValue("");
+    setRevealed(false);
+    restoreFocus();
+  };
+
+  const toggleReveal = (): void => {
+    const input = inputRef.current;
+    if (input && input.selectionStart !== null && input.selectionEnd !== null) {
+      selectionRef.current = {
+        start: input.selectionStart,
+        end: input.selectionEnd,
+        direction: input.selectionDirection ?? undefined,
+      };
+    }
+    setRevealed((current) => !current);
   };
 
   const focusInput = (event: React.MouseEvent<HTMLElement>): void => {
@@ -136,7 +161,8 @@ export function PendingSecretForm({
             className="secret-request-reveal"
             aria-pressed={revealed}
             aria-label={revealed ? "Hide secret" : "Show secret"}
-            onClick={() => setRevealed((current) => !current)}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={toggleReveal}
           >
             {revealed ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
           </button>
@@ -147,7 +173,7 @@ export function PendingSecretForm({
             {busy === "saving" ? "Saving…" : "Save securely"}
           </button>
           <button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void decline()}>
-            Decline
+            {busy === "declining" ? "Declining…" : "Decline"}
           </button>
         </div>
         <p id={footnoteId} className="secret-request-footnote">

@@ -111,10 +111,19 @@ function normalizedSecrets(values: readonly string[]): string[] {
     .sort((left, right) => right.length - left.length);
 }
 
+export interface CachedEdgePattern {
+  readonly forward: string;
+  readonly forwardFailure: Int32Array;
+  readonly reverse: string;
+  readonly reverseFailure: Int32Array;
+  readonly length: number;
+}
+
 export class SecretMatcher {
   static readonly empty = new SecretMatcher([]);
   readonly secrets: readonly string[];
   private trie: SecretTrieNode | undefined;
+  private cachedEdges: readonly CachedEdgePattern[] | undefined;
 
   constructor(secrets: readonly string[]) {
     this.secrets = Object.freeze([...secrets]);
@@ -122,6 +131,60 @@ export class SecretMatcher {
 
   get root(): SecretTrieNode {
     return this.trie ??= secretTrie(this.secrets);
+  }
+
+  get edgePatterns(): readonly CachedEdgePattern[] {
+    return this.cachedEdges ??= this.secrets.map((secret) => {
+      const reverse = reverseString(secret);
+      return {
+        forward: secret,
+        forwardFailure: buildKmpFailure(secret),
+        reverse,
+        reverseFailure: buildKmpFailure(reverse),
+        length: secret.length,
+      };
+    });
+  }
+
+  redact(text: string): string {
+    if (!text) return text;
+    const root = this.root;
+    if (root.children.size === 0) return text;
+    const rootAscii = root.ascii;
+    let node = root;
+    const runs: SecretRun[] = [];
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      while (node !== root) {
+        const next = node.children.get(code);
+        if (next !== undefined) {
+          node = next;
+          break;
+        }
+        node = node.fail;
+      }
+      if (node === root) {
+        const next = code < 128 ? rootAscii[code] : root.children.get(code);
+        if (next !== undefined) node = next;
+      }
+      if (node.longestMatch > 0) {
+        const end = index + 1;
+        let start = end - node.longestMatch;
+        while (runs.length > 0 && runs[runs.length - 1]!.end > start) {
+          const popped = runs.pop()!;
+          if (popped.start < start) start = popped.start;
+        }
+        runs.push({ start, end });
+      }
+    }
+    if (runs.length === 0) return text;
+    let output = "";
+    let cursor = 0;
+    for (const run of runs) {
+      output += `${text.slice(cursor, run.start)}[redacted]`;
+      cursor = run.end;
+    }
+    return cursor < text.length ? output + text.slice(cursor) : output;
   }
 
   matches(secrets: readonly string[]): boolean {
@@ -163,33 +226,69 @@ export class BoundarySecretRedactor {
       this.pending = "";
       return text;
     }
+    const rootAscii = root.ascii;
     const runs: SecretRun[] = [];
-    let held = text.length;
-    for (let start = 0; start < held; start += 1) {
-      let node = root;
-      let scan = start;
-      let end = -1;
-      while (scan < text.length) {
-        const next = node.children.get(text[scan]!);
-        if (!next) break;
-        node = next;
-        scan += 1;
-        if (node.terminal) end = scan;
+    let node = root;
+    const length = text.length;
+    for (let index = 0; index < length; index += 1) {
+      const code = text.charCodeAt(index);
+      while (node !== root) {
+        const next = node.children.get(code);
+        if (next !== undefined) {
+          node = next;
+          break;
+        }
+        node = node.fail;
       }
-      if (scan === text.length && node.children.size > 0) {
-        if (!final) held = start;
-        else if (redactsPartialSecret(redactPartial, scan - start, node)) end = scan;
+      if (node === root) {
+        const next = code < 128 ? rootAscii[code] : root.children.get(code);
+        if (next !== undefined) node = next;
       }
-      if (end < 0 || start >= held) continue;
-      const last = runs.at(-1);
-      if (last && start <= last.end) last.end = Math.max(last.end, end);
-      else runs.push({ start, end });
+      if (node.longestMatch > 0) {
+        const end = index + 1;
+        let start = end - node.longestMatch;
+        while (runs.length > 0 && runs[runs.length - 1]!.end >= start) {
+          const popped = runs.pop()!;
+          if (popped.start < start) start = popped.start;
+        }
+        runs.push({ start, end });
+      }
     }
+    let held = length;
     if (!final) {
-      while (runs.length > 0 && runs.at(-1)!.end >= held) held = Math.min(held, runs.pop()!.start);
-      if (held > 0 && isHighSurrogate(text, held - 1) && (held === text.length || isLowSurrogate(text, held))) {
+      let suffix = node;
+      while (suffix !== root) {
+        if (suffix.children.size > 0) {
+          held = length - suffix.depth;
+          break;
+        }
+        suffix = suffix.fail;
+      }
+      while (runs.length > 0 && runs[runs.length - 1]!.end >= held) {
+        held = Math.min(held, runs.pop()!.start);
+      }
+      if (held > 0 && isHighSurrogate(text, held - 1) && (held === length || isLowSurrogate(text, held))) {
         held -= 1;
       }
+    } else if (redactPartial !== undefined) {
+      let suffix = node;
+      while (suffix !== root) {
+        if (suffix.children.size > 0 && redactsPartialSecret(redactPartial, suffix.depth, suffix)) {
+          let start = length - suffix.depth;
+          while (runs.length > 0 && runs[runs.length - 1]!.end >= start) {
+            const popped = runs.pop()!;
+            if (popped.start < start) start = popped.start;
+          }
+          runs.push({ start, end: length });
+          break;
+        }
+        suffix = suffix.fail;
+      }
+    }
+    if (runs.length === 0) {
+      const output = held === length ? text : text.slice(0, held);
+      this.pending = held === length ? "" : text.slice(held);
+      return output;
     }
     let output = "";
     let cursor = 0;
@@ -221,8 +320,12 @@ function isLowSurrogate(text: string, index: number): boolean {
 export type PartialSecretRedaction = "all" | "significant";
 
 interface SecretTrieNode {
-  readonly children: Map<string, SecretTrieNode>;
+  readonly children: Map<number, SecretTrieNode>;
+  readonly ascii: (SecretTrieNode | undefined)[];
+  readonly depth: number;
+  fail: SecretTrieNode;
   terminal: boolean;
+  longestMatch: number;
   shortestSecret: number;
 }
 
@@ -236,21 +339,86 @@ function redactsPartialSecret(
       && (length >= SIGNIFICANT_SECRET_PREFIX_CHARS || length * 2 >= node.shortestSecret));
 }
 
+function buildKmpFailure(pattern: string): Int32Array {
+  const failure = new Int32Array(pattern.length);
+  for (let index = 1, matched = 0; index < pattern.length; index += 1) {
+    while (matched > 0 && pattern.charCodeAt(index) !== pattern.charCodeAt(matched)) {
+      matched = failure[matched - 1]!;
+    }
+    if (pattern.charCodeAt(index) === pattern.charCodeAt(matched)) matched += 1;
+    failure[index] = matched;
+  }
+  return failure;
+}
+
+function reverseString(value: string): string {
+  let out = "";
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    out += value[index]!;
+  }
+  return out;
+}
+
 function secretTrie(secrets: readonly string[]): SecretTrieNode {
-  const root: SecretTrieNode = { children: new Map(), terminal: false, shortestSecret: Infinity };
+  const rootAscii = Array.from<SecretTrieNode | undefined>({ length: 128 });
+  const root: SecretTrieNode = {
+    children: new Map(),
+    ascii: rootAscii,
+    depth: 0,
+    fail: null as unknown as SecretTrieNode,
+    terminal: false,
+    longestMatch: 0,
+    shortestSecret: Infinity,
+  };
+  root.fail = root;
+  const emptyAscii: (SecretTrieNode | undefined)[] = [];
   for (const secret of secrets) {
     let node = root;
     for (let index = 0; index < secret.length; index += 1) {
-      const unit = secret[index]!;
-      let child = node.children.get(unit);
+      const code = secret.charCodeAt(index);
+      let child = node === root && code < 128 ? rootAscii[code] : node.children.get(code);
       if (!child) {
-        child = { children: new Map(), terminal: false, shortestSecret: secret.length };
-        node.children.set(unit, child);
+        child = {
+          children: new Map(),
+          ascii: emptyAscii,
+          depth: index + 1,
+          fail: root,
+          terminal: false,
+          longestMatch: 0,
+          shortestSecret: secret.length,
+        };
+        node.children.set(code, child);
+        if (node === root && code < 128) rootAscii[code] = child;
+      } else if (secret.length < child.shortestSecret) {
+        child.shortestSecret = secret.length;
       }
-      child.shortestSecret = Math.min(child.shortestSecret, secret.length);
       node = child;
     }
     node.terminal = true;
+    node.longestMatch = secret.length;
+  }
+  // Build Aho-Corasick failure links in BFS order.
+  const queue: SecretTrieNode[] = [];
+  for (const child of root.children.values()) {
+    child.fail = root;
+    queue.push(child);
+  }
+  for (let head = 0; head < queue.length; head += 1) {
+    const current = queue[head]!;
+    for (const [code, child] of current.children) {
+      let fallback = current.fail;
+      while (fallback !== root && !fallback.children.has(code)) {
+        fallback = fallback.fail;
+      }
+      const target = fallback === root && code < 128
+        ? rootAscii[code]
+        : fallback.children.get(code);
+      child.fail = target ?? root;
+      if (child.fail.longestMatch > child.longestMatch) {
+        child.longestMatch = child.fail.longestMatch;
+      }
+      queue.push(child);
+    }
   }
   return root;
 }

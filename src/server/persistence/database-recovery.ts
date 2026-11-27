@@ -921,14 +921,18 @@ export class DatabaseBackupManager {
       && listBackupMetadata(this.databasePath).length > 0;
   }
 
-  async cancelAndWait(): Promise<void> {
+  beginShutdown(): void {
     this.stop();
     this.pendingAutomaticTriggers.clear();
     this.quietUntil = 0;
     this.retryNotBefore = 0;
     this.rejectPendingInitial(new DatabaseBackupCancelledError());
-    const operation = this.inFlight;
     this.inFlightAbort?.abort();
+  }
+
+  async cancelAndWait(): Promise<void> {
+    const operation = this.inFlight;
+    this.beginShutdown();
     if (!operation) return;
     try {
       await operation;

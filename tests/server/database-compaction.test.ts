@@ -9,16 +9,20 @@ import WebSocket from "ws";
 
 import { RuntimeStore } from "../../src/server/database";
 import {
+  DatabaseCompactionCancelledError,
   DatabaseCompactionError,
   DatabaseCompactionManager,
   measureDatabaseStorage,
   runtimeDatabaseCompactionBlocker,
   shouldAutoConvertToIncremental,
 } from "../../src/server/persistence/database-compaction";
+import { closeDatabaseAfterBackupCancellation } from "../../src/server/persistence/database-backup-close";
 import {
   DatabaseBackupManager,
   recoverDatabaseOnStartup,
 } from "../../src/server/persistence/database-recovery";
+import { runRuntimeShutdownPhases } from "../../src/server/runtime-shutdown";
+import { RuntimeUpdatePreparationGate } from "../../src/server/runtime-update-preparation";
 import {
   openRuntimeConnection,
   RUNTIME_MMAP_SIZE_BYTES,
@@ -552,6 +556,84 @@ describe("database storage measurement and compaction", () => {
     } finally {
       socket.close();
       await runtime.close();
+    }
+  });
+
+  it("aborts tracked compaction backup during shutdown quiescence so closeStore completes before deadline", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    seedLegacyDatabase(databasePath);
+    const database = new Database(databasePath);
+    openRuntimeConnection(database, () => undefined);
+    let validationStarted!: () => void;
+    const validationEntered = new Promise<void>((resolve) => { validationStarted = resolve; });
+    let validationAborted = false;
+    const backups = new DatabaseBackupManager(database, databasePath, {
+      validateBackup: (_path, signal) => new Promise((_resolve, reject) => {
+        validationStarted();
+        signal.addEventListener("abort", () => {
+          validationAborted = true;
+          reject(new Error("aborted"));
+        }, { once: true });
+      }),
+    });
+    const updatePreparation = new RuntimeUpdatePreparationGate({
+      isClosed: () => false,
+      activeRuntimeCommands: () => 0,
+      databaseRecoveryActive: () => false,
+      agentWorkActive: () => false,
+      terminalActivity: () => false,
+      providerMaintenanceActive: () => false,
+      providerRefreshActive: () => false,
+      artifactReconciliationActive: () => false,
+      holdTerminalAdmission: () => undefined,
+      releaseTerminalAdmission: () => undefined,
+      drainAdditionalOperations: async () => undefined,
+    });
+    const compaction = new DatabaseCompactionManager(database, databasePath, backups, {
+      availableDiskBytes: () => 2 * 1024 ** 3,
+      trackOperation: (operation) => updatePreparation.track(operation),
+    });
+    const phases: string[] = [];
+    try {
+      const compacting = updatePreparation.track(() => compaction.compactNow());
+      void compacting.catch(() => undefined);
+      await validationEntered;
+      expect(compaction.status().compactionState).toBe("backing-up");
+
+      // Mirrors src/server/index.ts runtime.close(): abort store managers
+      // synchronously before quiescence drains tracked runtime operations.
+      compaction.beginShutdown();
+      backups.beginShutdown();
+
+      await runRuntimeShutdownPhases({
+        quiesceRuntimeWork: async () => {
+          phases.push("quiesce:start");
+          await updatePreparation.drainTracked();
+          phases.push("quiesce:done");
+        },
+        independentDrains: [],
+        stopIsolatedRuns: () => undefined,
+        disposeTurnsAndProviders: () => undefined,
+        settleArtifacts: () => undefined,
+        terminateClients: () => undefined,
+        closeServer: () => undefined,
+        closeStore: async () => {
+          phases.push("closeStore");
+          await closeDatabaseAfterBackupCancellation(database, backups, compaction);
+        },
+      }, 1_500);
+
+      await expect(compacting).rejects.toBeInstanceOf(DatabaseCompactionCancelledError);
+      expect(validationAborted).toBe(true);
+      expect(phases).toEqual(["quiesce:start", "quiesce:done", "closeStore"]);
+      expect(database.open).toBe(false);
+    } finally {
+      if (database.open) {
+        await compaction.cancelAndWait();
+        await backups.cancelAndWait();
+        database.close();
+      }
     }
   });
 });

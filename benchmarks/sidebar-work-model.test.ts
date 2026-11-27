@@ -6,6 +6,7 @@ import {
   defaultSettings,
   type AppSnapshot,
   type ConversationShell,
+  type Project,
   type WorkspaceRun,
 } from "../src/shared/contracts";
 import { providerNativeModelSelection } from "../src/shared/model-routing";
@@ -20,6 +21,8 @@ import {
   type SidebarThreadView,
   type SidebarWorkSection,
 } from "../src/renderer/src/utils/sidebarModel";
+import { conversationWorkspaceOptions } from "../src/renderer/src/components/workspace-scene/conversationWorkspaceOptions";
+import { buildWorkspaceSurfaceSummary } from "../src/renderer/src/utils/environmentSummary";
 import { structurallyEqual } from "../src/renderer/src/utils/structuralEquality";
 
 interface Measurement {
@@ -227,6 +230,77 @@ describe("sidebar Work model benchmark", () => {
       sidebarWorkLayoutKey(false, sections.flatMap(({ threads }) => threads.map(({ conversation: entry }) => ({ id: `thread:${entry.id}` }))));
     };
 
+    const projects: Project[] = Array.from({ length: 12 }, (_, index) => ({
+      id: `project-${index}`,
+      name: `Project ${index}`,
+      path: `/workspace/project-${index}`,
+      normalizedPath: `/workspace/project-${index}`,
+      repositoryIdentity: null,
+      repositoryRoot: null,
+      repositoryRelativePath: "",
+      groupingMode: null,
+      gitRepositoryLimit: 64,
+      color: "#6366f1",
+      status: "ready",
+      createdAt: new Date(NOW).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    }));
+    const mutatedEvent: ShellEvent = {
+      type: "conversation.shell.updated",
+      conversation: {
+        ...conversations[500]!,
+        status: "running",
+        updatedAt: new Date(NOW + 60_000).toISOString(),
+      },
+      runs: [agentRun(conversations[500]!)],
+    };
+    const legacyMutatedEvent = () => {
+      const next = legacyApplyConversationShellEvent(snapshot, mutatedEvent);
+      const nextViews = legacyViewMap(next.conversations, next.runs);
+      const sorted = sortSidebarThreadViews([...nextViews.values()]);
+      const sections = legacyGroupWorkThreads(sorted, NOW);
+      JSON.stringify([false, sections.flatMap(({ threads }) => threads.map(({ conversation: entry }) => `thread:${entry.id}`))]);
+    };
+    const currentMutatedEvent = () => {
+      const next = applyConversationShellEvent(snapshot, mutatedEvent);
+      const nextViews = sidebarThreadViewMap(next.conversations, snapshot.activeConversationId, next.runs);
+      const sorted = sortSidebarThreadViews([...nextViews.values()]);
+      const sections = groupWorkThreads(sorted, NOW);
+      sidebarWorkLayoutKey(false, sections.flatMap(({ threads }) => threads.map(({ conversation: entry }) => ({ id: `thread:${entry.id}` }))));
+    };
+    let switchToggle = 0;
+    const targetA = conversations[10]!;
+    const targetB = conversations[20]!;
+    const projectA = projects.find(({ id }) => id === targetA.projectId)!;
+    const projectB = projects.find(({ id }) => id === targetB.projectId)!;
+    // Prime view cache before measuring chat switches.
+    sidebarThreadViewMap(snapshot.conversations, targetA.id, snapshot.runs);
+    const currentChatSwitch = () => {
+      switchToggle = 1 - switchToggle;
+      const target = switchToggle === 0 ? targetA : targetB;
+      const targetProject = switchToggle === 0 ? projectA : projectB;
+      sidebarThreadViewMap(snapshot.conversations, target.id, snapshot.runs);
+      conversationWorkspaceOptions({
+        conversations: snapshot.conversations,
+        projects,
+        providers: [],
+        persistedConversationId: target.id,
+        conversation: target,
+        project: targetProject,
+        workspaceToolsUnavailable: false,
+      });
+      buildWorkspaceSurfaceSummary({
+        projectId: targetProject.id,
+        conversationId: target.id,
+        connectionStatus: "online",
+        workspaceGitStatus: null,
+        runs: snapshot.runs,
+        messages: [],
+        projects,
+        conversations: snapshot.conversations,
+      });
+    };
+
     const measurements: Measurement[] = [];
     for (const [label, mode, operation] of [
       [`groupWorkThreads × ${THREADS}`, "legacy", () => legacyGroupWorkThreads(views, NOW)],
@@ -235,6 +309,9 @@ describe("sidebar Work model benchmark", () => {
       [`shell projection × ${THREADS}`, "current", () => applyConversationShellEvent(snapshot, event)],
       [`command run event chain × ${THREADS}`, "legacy", legacyEvent],
       [`command run event chain × ${THREADS}`, "current", currentEvent],
+      [`mutated shell event chain × ${THREADS}`, "legacy", legacyMutatedEvent],
+      [`mutated shell event chain × ${THREADS}`, "current", currentMutatedEvent],
+      [`chat switch chain × ${THREADS}`, "current", currentChatSwitch],
     ] as const) {
       measurements.push({ case: label, mode, ...measure(operation) });
     }

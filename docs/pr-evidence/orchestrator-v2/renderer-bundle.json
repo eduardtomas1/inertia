@@ -793,5 +793,43 @@
         "headroom": 512
       }
     }
+  },
+  "mainSyncb1b41fbf": {
+    "date": "2026-11-27",
+    "checkpoint": "Merge of origin/main b1b41fbf (#781 speed/reliability/security + #780 agent secret request reliability) into be023cd9",
+    "platform": "Linux x64, Node 22.23.2",
+    "measurement": "Full electron-vite + private-connect production build; route closures and exclusions unchanged (deferredComposerQueueJavaScript stays 20,773 / 21,029 bytes, entryCss 259,481 / 259,805 bytes, detachedChatCss 1,448 / 1,612 bytes).",
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 1009364,
+        "previousLimit": 1002997,
+        "limit": 1009876,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 891259,
+        "previousLimit": 884969,
+        "limit": 891771,
+        "headroom": 512
+      },
+      "settingsJavaScript": {
+        "bytes": 115989,
+        "previousLimit": 116171,
+        "limit": 116501,
+        "headroom": 512
+      },
+      "transcriptJavaScript": {
+        "bytes": 710077,
+        "previousLimit": 705938,
+        "limit": 710589,
+        "headroom": 512
+      },
+      "coreJavaScript": {
+        "bytes": 2831719,
+        "previousLimit": 2821761,
+        "limit": 2832231,
+        "headroom": 512
+      }
+    }
   }
 }

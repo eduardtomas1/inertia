@@ -3,7 +3,15 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { createClaudeHostTools } from "../../src/server/provider/claude-host-tools";
+import {
+  CLAUDE_SECRET_MCP_TIMEOUT_MS,
+  createClaudeHostTools,
+} from "../../src/server/provider/claude-host-tools";
+import { claudeRunEnvironment } from "../../src/server/provider/claude-agent-sdk-harness";
+import {
+  SECRET_REQUEST_TOOL_NAME,
+  SECRET_REQUEST_WAIT_MS_BY_PROVIDER,
+} from "../../src/node/agent-secrets";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { ProviderHostToolRuntime } from "../../src/server/provider/host-tool-runtime";
 import type { AgentApprovalRequest } from "../../src/server/provider/interactions";
@@ -232,5 +240,43 @@ describe("Claude in-process Inertia chat tools", () => {
     await expect(cancelClose).rejects.toThrow("fixture close failure");
     await expect(terminalClose).rejects.toThrow("fixture close failure");
     expect(runtime.isSettled()).toBe(true);
+  });
+
+  it("sets a 660s per-server timeout only when inertia_request_secret is registered without overriding MCP_TOOL_TIMEOUT", () => {
+    expect(CLAUDE_SECRET_MCP_TIMEOUT_MS).toBe(SECRET_REQUEST_WAIT_MS_BY_PROVIDER.claude + 60_000);
+    expect(CLAUDE_SECRET_MCP_TIMEOUT_MS).toBe(660_000);
+
+    const withoutSecretsRuntime = new ProviderHostToolRuntime({
+      bridge: hostBridge(),
+      conversationId: "claude-parent",
+      turnId: "claude-turn",
+      cwd: "/project",
+      onApproval: () => undefined,
+      onApprovalResolved: () => undefined,
+    });
+    const withoutSecrets = createClaudeHostTools(withoutSecretsRuntime);
+    expect(withoutSecrets.servesSecrets).toBe(false);
+    expect(withoutSecrets.config.timeout).toBeUndefined();
+
+    const registry = createInertiaHarnessCapabilities({
+      orchestrationTools: [],
+      browserEnabled: false,
+      secretsEnabled: true,
+      invoke: async () => ({ success: true, text: "{}" }),
+    });
+    const withSecretsRuntime = new ProviderHostToolRuntime({
+      bridge: registry.bridgeFor({ conversation: {} as Conversation, turn: {} as AgentTurn }),
+      conversationId: "claude-parent",
+      turnId: "claude-turn",
+      cwd: "/project",
+      onApproval: () => undefined,
+      onApprovalResolved: () => undefined,
+    });
+    const withSecrets = createClaudeHostTools(withSecretsRuntime);
+    expect(withSecrets.servesSecrets).toBe(true);
+    expect(withSecrets.providerToolNames.has(`mcp__inertia-chat-manager__${SECRET_REQUEST_TOOL_NAME}`)).toBe(true);
+    expect(withSecrets.config.timeout).toBe(660_000);
+
+    expect(claudeRunEnvironment({ MCP_TOOL_TIMEOUT: "30000" }).MCP_TOOL_TIMEOUT).toBe("30000");
   });
 });

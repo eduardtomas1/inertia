@@ -86,9 +86,9 @@ const budgets = {
   // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
   // x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 1_002_485 bytes on
-  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  mainWorkbenchFirstLoadJavaScript: 1_002_485 + 512,
+  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 1_009_364 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  mainWorkbenchFirstLoadJavaScript: 1_009_364 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -100,9 +100,9 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 884_457 bytes on
-  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  detachedChatFirstLoadJavaScript: 884_457 + 512,
+  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 891_259 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  detachedChatFirstLoadJavaScript: 891_259 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -123,9 +123,9 @@ const budgets = {
   // Custom agents: the settings section entry and its search rows add 843
   // bytes over main's cap (102,199 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 115_659 bytes on
-  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  settingsJavaScript: 115_659 + 512,
+  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 measures 115_989 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  settingsJavaScript: 115_989 + 512,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2 + 1_623,
@@ -186,9 +186,9 @@ const budgets = {
   // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
   filesFirstLoadJavaScript: 164_294 + 512,
   deferredMarkdownJavaScript: 440 * kibibyte,
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 705_426 bytes on
-  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
-  transcriptJavaScript: 705_426 + 512,
+  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 710_077 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  transcriptJavaScript: 710_077 + 512,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -283,9 +283,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 Phase 5 measures 2_821_249 bytes on
+  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 Phase 5 measures 2_831_719 bytes on
   // Linux x64 (after subtracting full deferredComposerQueueJavaScript closure); keep 512-byte headroom.
-  coreJavaScript: 2_821_249 + 512,
+  coreJavaScript: 2_831_719 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

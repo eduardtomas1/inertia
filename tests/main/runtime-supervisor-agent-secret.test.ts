@@ -155,7 +155,23 @@ describe("RuntimeSupervisor agent secret delivery", () => {
   it("is unavailable before the runtime is ready and posts nothing", async () => {
     const children: FakeUtilityProcess[] = [];
     const supervisor = supervisorWith(children);
-    await expect(supervisor.deliverAgentSecret(delivery())).resolves.toEqual({ status: "rejected", reason: "unavailable" });
+    await expect(supervisor.deliverAgentSecret(delivery())).resolves.toEqual({
+      status: "rejected",
+      reason: "unavailable",
+      dispatched: false,
+    });
+  });
+
+  it("reports dispatched: false when posting to the worker fails", async () => {
+    const { supervisor, children } = readySupervisor();
+    vi.spyOn(children[0]!, "postMessage").mockImplementation(() => {
+      throw new Error("channel closed");
+    });
+    await expect(supervisor.deliverAgentSecret(delivery())).resolves.toEqual({
+      status: "rejected",
+      reason: "unavailable",
+      dispatched: false,
+    });
   });
 
   it("posts exactly the protocol command and resolves on the matching delivered event", async () => {
@@ -204,7 +220,7 @@ describe("RuntimeSupervisor agent secret delivery", () => {
     await vi.advanceTimersByTimeAsync(AGENT_SECRET_DELIVERY_TIMEOUT_MS - 1);
     expect(settled()).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    await expect(outcome).resolves.toEqual({ status: "rejected", reason: "unavailable" });
+    await expect(outcome).resolves.toEqual({ status: "rejected", reason: "unavailable", dispatched: true });
     children[0]!.message({ type: "runtime.agent-secret-delivered", transportId, expiresAt: EXPIRES_AT, storage: "keychain" });
     expect(supervisor.snapshot().phase).toBe("ready");
   });
@@ -214,7 +230,7 @@ describe("RuntimeSupervisor agent secret delivery", () => {
     const stale = supervisor.deliverAgentSecret(delivery());
     const staleTransport = lastDeliverCommand(children[0]!).transportId;
     children[0]!.exit(9);
-    await expect(stale).resolves.toEqual({ status: "rejected", reason: "unavailable" });
+    await expect(stale).resolves.toEqual({ status: "rejected", reason: "unavailable", dispatched: true });
 
     await vi.advanceTimersByTimeAsync(60_000);
     const replacement = children[1];
@@ -240,7 +256,7 @@ describe("RuntimeSupervisor agent secret delivery", () => {
     expect(supervisor.snapshot().lastError).toBe("The runtime process sent an invalid lifecycle message.");
     expect(JSON.stringify(supervisor.snapshot())).not.toContain(SECRET);
     children[0]!.exit(9);
-    await expect(outcome).resolves.toEqual({ status: "rejected", reason: "unavailable" });
+    await expect(outcome).resolves.toEqual({ status: "rejected", reason: "unavailable", dispatched: true });
   });
 });
 

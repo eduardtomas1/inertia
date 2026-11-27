@@ -13,6 +13,7 @@ import {
   type PreferredEditor,
 } from "../shared/editors.js";
 import type { EditorLauncher } from "./editor-launcher.js";
+import { openDesktopLink, type DesktopLinkShell } from "./external-link-open.js";
 
 export interface EditorIpcOptions {
   channel: string;
@@ -80,20 +81,11 @@ export async function openProjectPathInEditor(
   return "";
 }
 
-export async function tryOpenLinkInPreferredEditor(
+async function launchResolvedPreferredEditor(
   launcher: EditorLauncher,
-  runtime: EditorRuntimeBridge | null,
-  filePath: string,
+  context: RuntimeEditorContextResult,
   position: EditorPosition,
-  conversationId?: string,
 ): Promise<boolean> {
-  if (!runtime) return false;
-  let context: RuntimeEditorContextResult;
-  try {
-    context = await runtime.editorContext(filePath, conversationId);
-  } catch {
-    return false;
-  }
   if (!isEditorId(context.preferredEditor) || !context.authorizedPath || !context.projectRoot) {
     return false;
   }
@@ -113,4 +105,64 @@ export async function tryOpenLinkInPreferredEditor(
     ...(position.column !== undefined ? { column: position.column } : {}),
   });
   return true;
+}
+
+export async function tryOpenLinkInPreferredEditor(
+  launcher: EditorLauncher,
+  runtime: EditorRuntimeBridge | null,
+  filePath: string,
+  position: EditorPosition,
+  conversationId?: string,
+): Promise<boolean> {
+  if (!runtime) return false;
+  let context: RuntimeEditorContextResult;
+  try {
+    context = await runtime.editorContext(filePath, conversationId);
+  } catch {
+    return false;
+  }
+  return await launchResolvedPreferredEditor(launcher, context, position);
+}
+
+export async function openAuthorizedDesktopLink(
+  value: unknown,
+  shell: DesktopLinkShell,
+  launcher: EditorLauncher,
+  runtime: EditorRuntimeBridge | null,
+  conversationId?: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<void> {
+  let resolvedContext: RuntimeEditorContextResult | null = null;
+  await openDesktopLink(
+    value,
+    shell,
+    platform,
+    async (authorizedPath, position) => {
+      if (!resolvedContext || resolvedContext.authorizedPath !== authorizedPath) {
+        return false;
+      }
+      return await launchResolvedPreferredEditor(launcher, resolvedContext, position);
+    },
+    async (filePath) => {
+      if (conversationId !== undefined) {
+        // Detached chat windows are strictly scoped to their own conversation's project.
+        if (!runtime) return null;
+        const context = await runtime.editorContext(filePath, conversationId).catch(() => null);
+        if (!context?.authorizedPath || !context.projectRoot) return null;
+        resolvedContext = context;
+        return context.authorizedPath;
+      }
+      const context = runtime
+        ? await runtime.editorContext(filePath).catch(() => null)
+        : null;
+      if (context?.authorizedPath && context.projectRoot) {
+        resolvedContext = context;
+        return context.authorizedPath;
+      }
+      // Outside-project links from the main workbench still pass through
+      // openAuthorizedProjectPath("open-link"), which restricts opening to
+      // inert document/media extensions and reveals anything launchable.
+      return filePath;
+    },
+  );
 }

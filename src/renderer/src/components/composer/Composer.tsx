@@ -7,6 +7,7 @@ import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import { fastModeProviderValue, providerIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
+import { useStableActions } from "../../hooks/useStableController";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import {
   buildComposerModelRoutes,
@@ -83,6 +84,11 @@ export const DRAFT_PERSISTENCE_DELAY_MS = 275;
 // force-terminated renderer can lose at most this much newer draft history;
 // ordinary lifecycle boundaries still flush the exact pending owner/value.
 export const DRAFT_PERSISTENCE_MAX_WAIT_MS = 1_000;
+const EMPTY_BACKEND_PROFILES: NonNullable<ComposerProps["backendProfiles"]> = [];
+const EMPTY_PROMPT_HISTORY: NonNullable<ComposerProps["promptHistory"]> = [];
+const EMPTY_CONTEXT_SOURCES: NonNullable<ComposerProps["contextSources"]> = [];
+const EMPTY_CONTEXT_PACKETS: NonNullable<ComposerProps["contextPackets"]> = [];
+const EMPTY_PROMPT_PRESETS: NonNullable<ComposerProps["promptPresets"]> = [];
 const ignorePromptPresetMutation = (): Promise<void> => Promise.resolve();
 const unavailableCompaction = (): Promise<never> =>
   Promise.reject(new Error("Compaction unavailable."));
@@ -98,9 +104,9 @@ export const Composer = memo(function Composer({
   disabled,
   sending,
   running,
-  backendProfiles = [],
+  backendProfiles = EMPTY_BACKEND_PROFILES,
   latestTurn = null,
-  promptHistory = [],
+  promptHistory = EMPTY_PROMPT_HISTORY,
   latestTurnSummary = null,
   queuedTurnAuthoritative = true,
   mentionResults,
@@ -111,7 +117,7 @@ export const Composer = memo(function Composer({
   skillsLoading, skillsError,
   conversationContextHandoffEnabled = true,
   agentContextRequestEnabled = conversationContextHandoffEnabled, promptContext,
-  contextSources = [], contextPackets = [], hasVisibleHistory = false,
+  contextSources = EMPTY_CONTEXT_SOURCES, contextPackets = EMPTY_CONTEXT_PACKETS, hasVisibleHistory = false,
   agentContextRequest = null, onConversationContextCommand,
   onQueueCommand,
   onLimitResetCommand,
@@ -123,7 +129,7 @@ export const Composer = memo(function Composer({
   compaction: shellCompaction = null,
   compactOnReturnSetting = DEFAULT_COMPACT_ON_RETURN,
   onCompactAndSend,
-  onListSkills, onListProviderCommands, promptPresets = [], promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings,
+  onListSkills, onListProviderCommands, promptPresets = EMPTY_PROMPT_PRESETS, promptPresetsEnabled = true, customAgents, onOpenCustomAgentSettings,
   promptStashEnabled = true,
   onPromptPresetCommand = ignorePromptPresetMutation,
   onUpdateConversation,
@@ -163,7 +169,7 @@ export const Composer = memo(function Composer({
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]); const [pendingAttachmentIds, setPendingAttachmentIds] = useState<ReadonlySet<string>>(() => new Set()); const pendingAttachmentIdsRef = useRef(new Set<string>());
   const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
   const [submitting, setSubmitting] = useState(false);
-  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: JSON.stringify([conversation.projectId, conversation.worktreePath]), conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, latestTurnCompletedAt: latestKnownTurn?.completedAt ?? null, paused: running || submitting || sending, onCommand: onConversationContextCommand });
+  const conversationContext = useComposerConversationContext({ conversationId: conversation.id, workspaceKey: `${conversation.projectId}\0${conversation.worktreePath ?? ""}`, conversationTitle: conversation.title, contextSources, contextPackets, hasVisibleHistory, enabled: conversationContextHandoffEnabled, latestTurnCompletedAt: latestKnownTurn?.completedAt ?? null, paused: running || submitting || sending, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
   const reattachedSourcesRef = useRef(new Map<string, string>());
@@ -184,7 +190,7 @@ export const Composer = memo(function Composer({
   });
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
-  const attachmentAuthorityKey = JSON.stringify([conversation.id, running, latestKnownTurn?.id ?? null, latestKnownTurn?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
+  const attachmentAuthorityKey = `${conversation.id}\0${running ? "1" : "0"}\0${latestKnownTurn?.id ?? ""}\0${latestKnownTurn?.harnessId ?? ""}`; const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
   const submissionSequenceRef = useRef(0);
   const activeSubmissionsRef = useRef(new Map<string, number>());
   const editorRevisionSequenceRef = useRef(0);
@@ -197,7 +203,7 @@ export const Composer = memo(function Composer({
   const [previewContextSelected, setPreviewContextSelected] = useState(false);
   const selectedPreviewUrlRef = useRef<string | null>(null);
   const [dismissedPreviews, setDismissedPreviews] = useState<ReadonlySet<string>>(() => new Set());
-  const previewContextKey = JSON.stringify([conversation.id, previewContextUrl]);
+  const previewContextKey = `${conversation.id}\0${previewContextUrl ?? ""}`;
   const visiblePreviewContextUrl = previewContextUrl && !dismissedPreviews.has(previewContextKey)
     ? previewContextUrl : null;
   const [routeRepairing, setRouteRepairing] = useState(false);
@@ -995,6 +1001,24 @@ export const Composer = memo(function Composer({
     });
   };
   const conversationProvider = providers.find(({ id }) => id === conversation.providerId);
+  const promptRestoreBlockedReason = useCallback((entry: PromptStashEntry) => (
+    attachments.length > 0
+      ? "Remove attachments before restoring another prompt"
+      : promptStashRestoreBlockedReason(conversation.modelSelection, entry.route)
+  ), [attachments.length, conversation.modelSelection]);
+  const toolbarActions = useStableActions({
+    chooseAttachments, insertSkill, applyPromptPreset, stashCurrentPrompt, restoreStashedPrompt,
+    removeStashedPrompt: (entryId: string) => updatePromptStash((current) => removePromptStashEntry(current, entryId)),
+    setPromptRecurrence: (entryId: string, recurrence: PromptStashEntry["recurrence"]) =>
+      updatePromptStash((current) => setPromptStashRecurrence(current, entryId, recurrence)),
+    chooseModelRoute, updateReasoningEffort, updateFastMode, updateConversation,
+    sendQueued: (content: string, queuedAttachments: ChatAttachment[]) => onSend(content, queuedAttachments, undefined),
+    submit, stopAndKeepFocus, resumeAndKeepFocus,
+  });
+  const canStashPrompt = Boolean(message.trim()) && attachments.length === 0;
+  const promptStashBlockedReason = attachments.length > 0
+    ? "Remove attachments before stashing text"
+    : message.trim() ? null : "Type a prompt to stash";
   const openModelChooser = (): void => {
     const chip = composerRef.current?.querySelector<HTMLButtonElement>(".selected-model-chip");
     if (chip?.getAttribute("aria-expanded") !== "true") chip?.click();
@@ -1140,95 +1164,43 @@ export const Composer = memo(function Composer({
           onUpdateConversation={updateConversation}
         />
         <ComposerToolbar
-          actions={actions}
-          disabled={disabled}
-          running={running}
-          attachmentCount={attachments.length}
-          attachmentDisabled={disabled || sending || submitting || attachmentImporting}
-          attachmentImporting={attachmentImporting}
-          onChooseAttachments={chooseAttachments} imageInputUnavailableReason={imageInputUnavailableReason}
-          onRunAction={onRunAction}
-          skills={skills}
-          skillsCapability={skillsCapability}
-          skillsLoading={skillsLoading}
-          skillsError={skillsError}
-          skillQuery={skillCompletion.skillQuery}
-          skillListboxId={skillCompletion.skillListboxId}
-          activeSkillId={skillCompletion.activeSkill?.id ?? null}
-          onListSkills={onListSkills}
-          onInsertSkill={insertSkill}
-          promptPresets={promptPresets}
-          promptPresetsEnabled={promptPresetsEnabled}
-          promptStashEnabled={promptStashEnabled}
-          currentPrompt={message}
-          onApplyPromptPreset={applyPromptPreset}
-          onPromptPresetCommand={onPromptPresetCommand}
-          promptStash={promptStash}
-          canStashPrompt={Boolean(message.trim()) && attachments.length === 0}
-          promptStashBlockedReason={
-            attachments.length > 0
-              ? "Remove attachments before stashing text"
-              : message.trim()
-                ? null
-                : "Type a prompt to stash"
-          }
-          promptRestoreBlockedReason={(entry) => {
-            if (attachments.length > 0) {
-              return "Remove attachments before restoring another prompt";
-            }
-            return promptStashRestoreBlockedReason(
-              conversation.modelSelection,
-              entry.route,
-            );
-          }}
-          onStashPrompt={stashCurrentPrompt}
-          onRestorePrompt={restoreStashedPrompt}
-          onRemoveStashedPrompt={(entryId) =>
-            updatePromptStash((current) =>
-              removePromptStashEntry(current, entryId))}
-          onSetPromptRecurrence={(entryId, recurrence) =>
-            updatePromptStash((current) =>
-              setPromptStashRecurrence(current, entryId, recurrence))}
-          modelRoutes={modelRoutes}
-          selectedModelRoute={selectedModelRoute}
-          onChooseModelRoute={chooseModelRoute}
-          selectedModel={selectedModel}
-          selectedReasoning={selectedReasoning}
-          reasoningLabel={reasoningLabel}
-          selectedFastMode={selectedFastMode}
-          onUpdateReasoningEffort={updateReasoningEffort}
-          onUpdateFastMode={updateFastMode}
-          conversation={conversation}
-          checkoutBranch={checkoutBranch}
-          showCheckoutContext={showCheckoutContext}
-          scratchWorkspace={scratchWorkspace}
-          newChatProjectPicker={newChatProjectPicker}
-          onUpdateConversation={updateConversation}
-          conversationUpdatePending={conversationUpdatePending}
-          conversationUpdateError={conversationUpdateError}
-          menuController={menuController}
-          selectedProvider={selectedProvider}
-          selectedBackendProfile={selectedBackendProfile}
-          selectedIdentityLabel={selectedIdentityLabel}
-          usage={usage}
-          usageDisplayMode={usageDisplayMode}
-          latestTurn={latestTurn}
-          onUsageDisplayModeChange={onUsageDisplayModeChange}
-          primaryAction={visiblePrimaryAction}
-          compactOnReturn={compactOnReturn.action}
-          compacting={compactOnReturn.compactingOnReturn}
-          promptCache={compactOnReturn.promptCache}
+          actions={actions} disabled={disabled} running={running}
+          attachmentCount={attachments.length} attachmentDisabled={disabled || sending || submitting || attachmentImporting}
+          attachmentImporting={attachmentImporting} onChooseAttachments={toolbarActions.chooseAttachments}
+          imageInputUnavailableReason={imageInputUnavailableReason} onRunAction={onRunAction}
+          skills={skills} skillsCapability={skillsCapability} skillsLoading={skillsLoading} skillsError={skillsError}
+          skillQuery={skillCompletion.skillQuery} skillListboxId={skillCompletion.skillListboxId}
+          activeSkillId={skillCompletion.activeSkill?.id ?? null} onListSkills={onListSkills} onInsertSkill={toolbarActions.insertSkill}
+          promptPresets={promptPresets} promptPresetsEnabled={promptPresetsEnabled} promptStashEnabled={promptStashEnabled}
+          currentPrompt={menu === "presets" ? message : ""} onApplyPromptPreset={toolbarActions.applyPromptPreset}
+          onPromptPresetCommand={onPromptPresetCommand} promptStash={promptStash}
+          canStashPrompt={canStashPrompt} promptStashBlockedReason={promptStashBlockedReason}
+          promptRestoreBlockedReason={promptRestoreBlockedReason}
+          onStashPrompt={toolbarActions.stashCurrentPrompt} onRestorePrompt={toolbarActions.restoreStashedPrompt}
+          onRemoveStashedPrompt={toolbarActions.removeStashedPrompt} onSetPromptRecurrence={toolbarActions.setPromptRecurrence}
+          modelRoutes={modelRoutes} selectedModelRoute={selectedModelRoute} onChooseModelRoute={toolbarActions.chooseModelRoute}
+          selectedModel={selectedModel} selectedReasoning={selectedReasoning} reasoningLabel={reasoningLabel}
+          selectedFastMode={selectedFastMode} onUpdateReasoningEffort={toolbarActions.updateReasoningEffort}
+          onUpdateFastMode={toolbarActions.updateFastMode} conversation={conversation}
+          checkoutBranch={checkoutBranch} showCheckoutContext={showCheckoutContext} scratchWorkspace={scratchWorkspace}
+          newChatProjectPicker={newChatProjectPicker} onUpdateConversation={toolbarActions.updateConversation}
+          conversationUpdatePending={conversationUpdatePending} conversationUpdateError={conversationUpdateError}
+          menuController={menuController} selectedProvider={selectedProvider} selectedBackendProfile={selectedBackendProfile}
+          selectedIdentityLabel={selectedIdentityLabel} usage={usage} usageDisplayMode={usageDisplayMode}
+          latestTurn={latestTurn} onUsageDisplayModeChange={onUsageDisplayModeChange}
+          primaryAction={visiblePrimaryAction} compactOnReturn={compactOnReturn.action}
+          compacting={compactOnReturn.compactingOnReturn} promptCache={compactOnReturn.promptCache}
           canSendQueuedNow={!disabled && !sending && !shellCompacting && !attachmentImporting
             && (!running || (!stopping && !submitting && steerCapabilities.canSteer))}
           canSteer={steerCapabilities.canSteer} canInterrupt={steerCapabilities.canInterrupt}
           hasPendingQuestionOrApproval={hasPendingQuestionOrApproval}
-          resuming={resuming} onResume={resumeAndKeepFocus} providers={providers}
+          resuming={resuming} onResume={toolbarActions.resumeAndKeepFocus} providers={providers}
           queueHost={queueHost} editBannerHost={editBannerHost}
           queuedTurnId={latestKnownTurn?.id ?? null} queuedTurnStatus={latestKnownTurn?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
-          onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
+          onSendQueued={toolbarActions.sendQueued}
           onQueueCommand={onQueueCommand} queueEdit={queuedEdit.queueEdit}
-          onReleaseAttachment={onReleaseAttachment} onSubmit={submit} onStop={stopAndKeepFocus}
+          onReleaseAttachment={onReleaseAttachment} onSubmit={toolbarActions.submit} onStop={toolbarActions.stopAndKeepFocus}
           onFocusInput={focusInput} awaitingInput={!draftHasContent && !sendBlocked}
         />
       </section>

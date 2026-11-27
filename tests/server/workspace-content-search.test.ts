@@ -3,8 +3,10 @@ import { randomUUID } from "node:crypto";
 import {
   mkdtemp,
   mkdir,
+  open,
   rename,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -34,6 +36,11 @@ import {
   RUNTIME_COMMAND_TYPES,
 } from "../../src/server/runtime/commands/command-router";
 import { searchWorkspaceContent } from "../../src/server/workspace";
+import {
+  literalSearchPattern,
+  readSearchableFile,
+  searchCandidateFilesInWaves,
+} from "../../src/server/workspace-content-search";
 
 const temporaryDirectories: string[] = [];
 
@@ -263,6 +270,107 @@ describe("workspace content search", () => {
       afterEntryObserved: () => during.abort(),
     })).resolves.toMatchObject({ matches: [], truncated: false, cancelled: true });
     await expect(searchWorkspaceContent(root, "needle")).resolves.toMatchObject({ cancelled: false });
+  });
+
+  it("flushes visited candidates when maxVisitedEntries is below the batch size", async () => {
+    const root = await temporaryDirectory();
+    for (let i = 0; i < 6; i += 1) {
+      await writeFile(join(root, `file-${i}.ts`), `export const needle${i} = "needle";\n`);
+    }
+    const result = await searchWorkspaceContent(root, "needle", { maxVisitedEntries: 3 });
+    expect(result.visitedEntries).toBe(3);
+    expect(result.filesSearched).toBe(3);
+    expect(result.matches).toHaveLength(3);
+    expect(result.truncated).toBe(true);
+  });
+
+  it("never exceeds maxTotalBytes physically across concurrent wave retries or exact-budget reads", async () => {
+    const root = await temporaryDirectory();
+    const aPath = join(root, "a.ts");
+    const bPath = join(root, "b.ts");
+    const cPath = join(root, "c.ts");
+    await writeFile(aPath, `${"a".repeat(54)}needle`); // 60 bytes on disk, estimated 20
+    await writeFile(bPath, `${"b".repeat(34)}needle`); // 40 bytes on disk
+    await writeFile(cPath, `${"c".repeat(34)}needle`); // 40 bytes on disk
+    const [aStat, bStat, cStat] = await Promise.all([stat(aPath), stat(bPath), stat(cPath)]);
+
+    const outcome = await searchCandidateFilesInWaves(
+      [
+        { absolute: aPath, projectPath: "a.ts", identity: { dev: aStat.dev, ino: aStat.ino }, estimatedSize: 20 },
+        { absolute: bPath, projectPath: "b.ts", identity: { dev: bStat.dev, ino: bStat.ino }, estimatedSize: 40 },
+        { absolute: cPath, projectPath: "c.ts", identity: { dev: cStat.dev, ino: cStat.ino }, estimatedSize: 40 },
+      ],
+      {
+        concurrency: 3,
+        maxFileBytes: 1_024,
+        maxTotalBytes: 100,
+        bytesRead: 0,
+        pattern: literalSearchPattern("needle"),
+        matches: [],
+        maxResults: 20,
+        deadline: Date.now() + 10_000,
+        now: () => Date.now(),
+        onCancelled: () => { throw new Error("cancelled"); },
+      },
+    );
+    expect(outcome.truncated).toBe(true);
+    expect(outcome.stopped).toBe(true);
+    // B (40) + C (40) = 80 physically read; A must NOT retry for 60 bytes and push physical reads to 140.
+    expect(outcome.bytesRead).toBe(80);
+
+    // Exact-budget read succeeds without allocating or reading a +1 probe byte past remainingBytes.
+    const exact = await readSearchableFile(bPath, { dev: bStat.dev, ino: bStat.ino }, 1_024, 40);
+    expect(exact).toEqual({ status: "text", text: `${"b".repeat(34)}needle`, bytes: 40 });
+
+    // A post-read stat error still accounts for physical bytes already read so later files do not exceed maxTotalBytes.
+    const dPath = join(root, "d.ts");
+    const ePath = join(root, "e.ts");
+    await writeFile(dPath, "abcd"); // 4 bytes
+    await writeFile(ePath, "efgh"); // 4 bytes
+    const [dStat, eStat] = await Promise.all([stat(dPath), stat(ePath)]);
+    let openedFiles = 0;
+    const failingPostStatOpen: typeof open = async (filePath, flags) => {
+      openedFiles += 1;
+      const realHandle = await open(filePath, flags);
+      let statCalls = 0;
+      const wrapped = new Proxy(realHandle, {
+        get(target, prop, receiver) {
+          if (prop === "stat") {
+            return async () => {
+              statCalls += 1;
+              if (statCalls === 2) throw new Error("simulated post-read stat failure");
+              return await target.stat();
+            };
+          }
+          const value = Reflect.get(target, prop, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      return wrapped;
+    };
+    const errorBudgetOutcome = await searchCandidateFilesInWaves(
+      [
+        { absolute: dPath, projectPath: "d.ts", identity: { dev: dStat.dev, ino: dStat.ino }, estimatedSize: 4 },
+        { absolute: ePath, projectPath: "e.ts", identity: { dev: eStat.dev, ino: eStat.ino }, estimatedSize: 4 },
+      ],
+      {
+        concurrency: 1,
+        maxFileBytes: 1_024,
+        maxTotalBytes: 4,
+        bytesRead: 0,
+        pattern: literalSearchPattern("abcd"),
+        matches: [],
+        maxResults: 20,
+        deadline: Date.now() + 10_000,
+        now: () => Date.now(),
+        onCancelled: () => { throw new Error("cancelled"); },
+        openFile: failingPostStatOpen,
+      },
+    );
+    expect(errorBudgetOutcome.bytesRead).toBe(4);
+    expect(errorBudgetOutcome.truncated).toBe(true);
+    // e.ts opens and immediately hits `info.size > remainingBytes (0)` before reading any bytes.
+    expect(openedFiles).toBe(2);
   });
 });
 

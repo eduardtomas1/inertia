@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, posix, win32 } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, normalize, posix, relative, sep, win32 } from "node:path";
 
 import { z } from "zod";
 
@@ -220,6 +220,15 @@ export function checkDestination(destination: string, platform: NodeJS.Platform,
   return path;
 }
 
+function isContainedInDirectory(candidatePath: string, directoryPath: string): boolean {
+  const root = normalize(directoryPath);
+  const target = normalize(candidatePath);
+  const rel = sep === "\\"
+    ? relative(root.toLowerCase(), target.toLowerCase())
+    : relative(root, target);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
 /** Runs one task at a time: CAD writes are rare and must not interleave in the same app. */
 class WriteGate {
   private busy = false;
@@ -245,6 +254,7 @@ class WriteGate {
 
 export class CadService {
   private readonly hosts: readonly CadHost[];
+  private readonly stateDirectory: string;
   private readonly receiptsFile: string;
   private readonly now: () => number;
   private readonly proposals = new Map<string, Proposal>();
@@ -257,6 +267,7 @@ export class CadService {
 
   constructor(options: CadServiceOptions) {
     this.hosts = options.hosts;
+    this.stateDirectory = options.stateDirectory;
     this.receiptsFile = join(options.stateDirectory, "receipts.jsonl");
     this.now = options.now ?? Date.now;
     this.platform = options.platform ?? process.platform;
@@ -299,13 +310,64 @@ export class CadService {
   }
 
   /** The file an export would write, for the approval card of a custom destination. */
-  async exportDestination(input: CadExportInput): Promise<string> {
-    return await this.requireExporter().destinationFor(input);
+  async exportDestination(input: CadExportInput, workspaceRoot?: string): Promise<string> {
+    const exporter = this.requireExporter();
+    return workspaceRoot === undefined
+      ? await exporter.destinationFor(input)
+      : await exporter.destinationFor(input, workspaceRoot);
+  }
+
+  /**
+   * Computes the exact export authorization and returns the path requiring
+   * user approval (or `null` for inline PNGs and managed-folder exports).
+   */
+  async exportAuthorization(
+    input: CadExportInput,
+    workspaceRoot?: string,
+  ): Promise<{ authorization: import("./cad-export").CadExportAuthorization | undefined; approvalTarget: string | null }> {
+    const exporter = this.requireExporter();
+    if (typeof exporter.authorizeExport === "function") {
+      const authorization = workspaceRoot === undefined
+        ? await exporter.authorizeExport(input)
+        : await exporter.authorizeExport(input, workspaceRoot);
+      const approvalTarget = authorization.target !== null && !authorization.target.managed
+        ? authorization.target.path
+        : null;
+      return { authorization, approvalTarget };
+    }
+    const approvalTarget = await this.exportApprovalTarget(input, workspaceRoot);
+    return { authorization: undefined, approvalTarget };
+  }
+
+  /**
+   * Returns the file path that requires explicit user approval before exporting, or `null` when
+   * the export writes no file (inline PNG) or writes only inside Inertia's managed `exported` folder.
+   */
+  async exportApprovalTarget(input: CadExportInput, workspaceRoot?: string): Promise<string | null> {
+    if (input.format === "png" && input.destination === undefined) return null;
+    const destination = await this.exportDestination(input, workspaceRoot);
+    if (input.destination !== undefined) return destination;
+    const exporter = this.requireExporter();
+    const managed = typeof exporter.isManagedExportPath === "function"
+      ? await exporter.isManagedExportPath(destination)
+      : isContainedInDirectory(destination, join(this.stateDirectory, "exported"));
+    return managed ? null : destination;
   }
 
   /** Runs AutoCAD's console on a copy; the open session and the original are never touched. */
-  async export(input: CadExportInput, signal?: AbortSignal): Promise<CadExportResult> {
-    return await this.requireExporter().export(input, signal);
+  async export(
+    input: CadExportInput,
+    signal?: AbortSignal,
+    workspaceRoot?: string,
+    authorization?: import("./cad-export").CadExportAuthorization,
+  ): Promise<CadExportResult> {
+    const exporter = this.requireExporter();
+    if (authorization !== undefined) {
+      return await exporter.export(input, signal, workspaceRoot, authorization);
+    }
+    return workspaceRoot === undefined
+      ? await exporter.export(input, signal)
+      : await exporter.export(input, signal, workspaceRoot);
   }
 
   private requireExporter(): CadExporter {

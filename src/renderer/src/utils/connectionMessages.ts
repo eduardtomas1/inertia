@@ -3,11 +3,16 @@ import type { ServerEvent } from "@shared/contracts";
 let serverEventParser: Promise<
   (value: unknown) => ServerEvent
 > | null = null;
+let resolvedServerEventParser: ((value: unknown) => ServerEvent) | null = null;
+let pendingAsyncDeliveries = 0;
 
 function loadServerEventParser(): Promise<(value: unknown) => ServerEvent> {
   if (serverEventParser) return serverEventParser;
   const loading = import("@shared/contracts/server-event-schema")
-    .then(({ parseServerEvent }) => parseServerEvent);
+    .then(({ parseServerEvent }) => {
+      resolvedServerEventParser = parseServerEvent;
+      return parseServerEvent;
+    });
   serverEventParser = loading;
   void loading.catch(() => {
     if (serverEventParser === loading) serverEventParser = null;
@@ -66,7 +71,8 @@ export type PendingConnectionSettlement =
 
 export async function decodeServerEventMessage(data: unknown): Promise<ServerEvent> {
   const received: unknown = JSON.parse(String(data));
-  return (await loadServerEventParser())(received);
+  const parse = resolvedServerEventParser ?? await loadServerEventParser();
+  return parse(received);
 }
 
 export async function deliverDecodedServerEvent(
@@ -85,6 +91,28 @@ export async function deliverDecodedServerEvent(
   // must never be relabelled as malformed transport data.
   onEvent(event);
   return true;
+}
+
+export function deliverDecodedServerEventSync(
+  data: unknown,
+  onEvent: (event: ServerEvent) => void,
+  onUnreadable: () => void,
+): boolean | Promise<boolean> {
+  if (resolvedServerEventParser !== null && pendingAsyncDeliveries === 0) {
+    let event: ServerEvent;
+    try {
+      event = resolvedServerEventParser(JSON.parse(String(data)));
+    } catch {
+      onUnreadable();
+      return false;
+    }
+    onEvent(event);
+    return true;
+  }
+  pendingAsyncDeliveries += 1;
+  return deliverDecodedServerEvent(data, onEvent, onUnreadable).finally(() => {
+    pendingAsyncDeliveries -= 1;
+  });
 }
 
 export function notifyConnectionListeners(

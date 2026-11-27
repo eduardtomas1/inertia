@@ -8,6 +8,7 @@ import { projectFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import { releaseProviderRecoveryRecords } from "./provider-run-ownership-repository";
 import { assertNativeProjectIdle } from "../orchestration-v2/native-control-fence";
+import { cachedStatement } from "./statement-cache";
 
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
 
@@ -33,7 +34,7 @@ export class ProjectRepository {
   ): Project {
     const id = randomUUID();
     const now = new Date().toISOString();
-    const projectCount = (this.context.database.prepare("SELECT COUNT(*) AS count FROM projects").get() as { count: number }).count;
+    const projectCount = (cachedStatement(this.context.database, "SELECT COUNT(*) AS count FROM projects").get() as { count: number }).count;
     const path = resolve(projectPath);
     const project: Project = {
       ...(identity.workspaceKind ? { workspaceKind: identity.workspaceKind } : {}),
@@ -53,7 +54,7 @@ export class ProjectRepository {
       updatedAt: now,
     };
     this.context.database.transaction(() => {
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         INSERT INTO projects (
           id, name, path, normalized_path, repository_identity, repository_root,
           repository_relative_path, grouping_mode, git_repository_limit,
@@ -64,7 +65,7 @@ export class ProjectRepository {
           @color, @status, @createdAt, @updatedAt, @workspaceKind
         )
       `).run({ ...project, workspaceKind: project.workspaceKind ?? null });
-      if (identity.activate !== false) this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
+      if (identity.activate !== false) cachedStatement(this.context.database, "UPDATE app_state SET active_project_id = ?, active_conversation_id = NULL WHERE id = 1").run(project.id);
       if (identity.enroll !== false) {
         this.pathAuthority.enrollProject(
           project.id,
@@ -112,7 +113,7 @@ export class ProjectRepository {
           next.repositoryIdentity,
         );
       }
-      this.context.database.prepare(`
+      cachedStatement(this.context.database, `
         UPDATE projects SET
           name = @name,
           normalized_path = @normalizedPath,
@@ -138,7 +139,7 @@ export class ProjectRepository {
     const updatedAt = new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString();
     const next = { ...current, path, normalizedPath: path, updatedAt };
     this.context.database.transaction(() => {
-      this.context.database.prepare("UPDATE projects SET path = ?, normalized_path = ?, updated_at = ? WHERE id = ?")
+      cachedStatement(this.context.database, "UPDATE projects SET path = ?, normalized_path = ?, updated_at = ? WHERE id = ?")
         .run(next.path, next.normalizedPath, next.updatedAt, projectId);
       this.pathAuthority.reenrollProject(projectId, path);
     })();
@@ -151,11 +152,11 @@ export class ProjectRepository {
   ): void {
     assertNativeProjectIdle(this.context.database, projectId);
     this.context.requireProject(projectId);
-    const state = this.context.database.prepare("SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
+    const state = cachedStatement(this.context.database, "SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
     this.context.database.transaction(() => {
       releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
-      this.context.database.prepare("DELETE FROM orchestration_v2_receipts WHERE project_id = ?").run(projectId);
-      this.context.database.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+      cachedStatement(this.context.database, "DELETE FROM orchestration_v2_receipts WHERE project_id = ?").run(projectId);
+      cachedStatement(this.context.database, "DELETE FROM projects WHERE id = ?").run(projectId);
     })();
     const activeProjectId = state?.active_project_id ?? null;
     if (activeProjectId !== null && activeProjectId !== projectId) return;
@@ -164,20 +165,21 @@ export class ProjectRepository {
 
   select(projectId: string): void {
     const project = this.context.requireProject(projectId);
-    const conversation = this.context.database.prepare(`SELECT id FROM conversations WHERE project_id = ? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1`).get(projectId) as { id: string } | undefined;
+    const conversation = cachedStatement(this.context.database, `SELECT id FROM conversations WHERE project_id = ? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1`).get(projectId) as { id: string } | undefined;
     if (!conversation && project.workspace_kind === "scratch") {
       this.selectRegularProject();
       return;
     }
-    this.context.database.prepare("UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation?.id ?? null);
+    cachedStatement(this.context.database, "UPDATE app_state SET active_project_id = ?, active_conversation_id = ? WHERE id = 1").run(projectId, conversation?.id ?? null);
   }
 
   private selectRegularProject(): void {
-    const next = this.context.database.prepare(
+    const next = cachedStatement(
+      this.context.database,
       "SELECT id FROM projects WHERE workspace_kind IS NULL ORDER BY updated_at DESC LIMIT 1",
     ).get() as { id: string } | undefined;
     if (next) this.select(next.id);
-    else this.context.database.prepare("UPDATE app_state SET active_project_id = NULL, active_conversation_id = NULL WHERE id = 1").run();
+    else cachedStatement(this.context.database, "UPDATE app_state SET active_project_id = NULL, active_conversation_id = NULL WHERE id = 1").run();
   }
 
   get(projectId: string): Project {
@@ -195,6 +197,6 @@ export class ProjectRepository {
   }
 
   touch(projectId: string, timestamp: string): void {
-    this.context.database.prepare("UPDATE projects SET updated_at = MAX(updated_at, ?) WHERE id = ?").run(timestamp, projectId);
+    cachedStatement(this.context.database, "UPDATE projects SET updated_at = MAX(updated_at, ?) WHERE id = ?").run(timestamp, projectId);
   }
 }

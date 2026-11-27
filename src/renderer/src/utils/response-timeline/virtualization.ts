@@ -568,8 +568,8 @@ function estimateExpandedWorkHeight(
         if (entry.kind === "follow-up") {
           return total + 14 + estimatedWrappedLines(entry.message.content, columns - 6) * 18;
         }
-        // A settled turn shows its messages to the user outside the fold.
-        if (entry.kind === "sent-message") return total;
+        // A settled turn shows its messages and secret cards outside the fold.
+        if (entry.kind === "sent-message" || entry.kind === "secret-request") return total;
         return total + estimateActivityGroupHeight(entry.activities, expandActivityGroups);
       }, 0);
   const reasoningHeight = includeReasoning && turn.reasoning

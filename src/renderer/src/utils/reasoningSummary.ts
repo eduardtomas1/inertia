@@ -5,11 +5,94 @@ export interface ReasoningSummarySegment {
 }
 
 const SEGMENT_PATTERN = /\*\*([^*]+?)\*\*/gu;
+const EMPTY_SUMMARY_SEGMENTS: ReasoningSummarySegment[] = [];
+
+function normalizeLineEndings(value: string): string {
+  return value.includes("\r") ? value.replace(/\r\n?/gu, "\n") : value;
+}
+
+function nextSummaryScanFrom(content: string, cursor: number): number {
+  let end = content.length;
+  if (end > cursor && content[end - 1] === "*" && (end - 1 === cursor || content[end - 2] !== "*")) {
+    end -= 1;
+  }
+  const lastStar = content.lastIndexOf("*", end - 1);
+  if (lastStar < cursor) return end;
+  if (lastStar > cursor && content[lastStar - 1] === "*") return lastStar - 1;
+  return end;
+}
+
+export function createReasoningSummaryReader(): (
+  content: string,
+) => ReasoningSummarySegment[] {
+  let rawContent = "";
+  let settled: ReasoningSummarySegment[] = [];
+  let pendingTitle: string | null = null;
+  let cursor = 0;
+  let scanFrom = 0;
+  let hasTitle = false;
+  let lastResult: ReasoningSummarySegment[] = EMPTY_SUMMARY_SEGMENTS;
+  return (content) => {
+    if (content === rawContent) return lastResult;
+    const extended = content.length > rawContent.length
+      && content.startsWith(rawContent);
+    if (!extended) {
+      settled = [];
+      pendingTitle = null;
+      cursor = 0;
+      scanFrom = 0;
+      hasTitle = false;
+    }
+    SEGMENT_PATTERN.lastIndex = scanFrom;
+    let settledChanged = !extended;
+    for (
+      let match = SEGMENT_PATTERN.exec(content);
+      match !== null;
+      match = SEGMENT_PATTERN.exec(content)
+    ) {
+      const body = normalizeLineEndings(content.slice(cursor, match.index)).trim();
+      if (pendingTitle !== null || body) {
+        if (!settledChanged) {
+          settled = [...settled];
+          settledChanged = true;
+        }
+        settled.push({
+          id: `${settled.length}`,
+          title: pendingTitle,
+          body,
+        });
+      }
+      pendingTitle = normalizeLineEndings(match[1]!).trim();
+      hasTitle = true;
+      cursor = match.index + match[0].length;
+    }
+    rawContent = content;
+    scanFrom = nextSummaryScanFrom(content, cursor);
+    if (!hasTitle) {
+      lastResult = EMPTY_SUMMARY_SEGMENTS;
+      return lastResult;
+    }
+    const trailing = normalizeLineEndings(content.slice(cursor)).trim();
+    if (pendingTitle !== null || trailing) {
+      lastResult = [
+        ...settled,
+        {
+          id: `${settled.length}`,
+          title: pendingTitle,
+          body: trailing,
+        },
+      ];
+    } else {
+      lastResult = settled;
+    }
+    return lastResult;
+  };
+}
 
 export function parseReasoningSummary(
   content: string,
 ): ReasoningSummarySegment[] {
-  const text = content.replace(/\r\n?/gu, "\n");
+  const text = normalizeLineEndings(content);
   const segments: ReasoningSummarySegment[] = [];
   let lastIndex = 0;
   let pendingTitle: string | null = null;

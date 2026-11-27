@@ -14,6 +14,8 @@ import {
   type PromptPresetDraft,
 } from "../../shared/prompt-presets";
 
+import { cachedStatement } from "./statement-cache";
+
 interface PromptPresetRow {
   id: string;
   name: string;
@@ -67,24 +69,70 @@ function throwInvalidPreset(detail?: string): never {
   );
 }
 
+interface PromptPresetListCache {
+  generation: number;
+  dataVersion: number;
+  totalChanges: number;
+  presets: PromptPreset[];
+}
+
+function clonePromptPresets(presets: readonly PromptPreset[]): PromptPreset[] {
+  return presets.map((preset) => ({
+    ...preset,
+    route: preset.route === null ? null : { ...preset.route },
+  }));
+}
+
 export class PromptPresetRepository {
+  private generation = 0;
+  private cache: PromptPresetListCache | null = null;
+
   constructor(
     private readonly database: Database.Database,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
   list(): PromptPreset[] {
-    return (this.database.prepare(`
+    const inTransaction = this.database.inTransaction;
+    const versionBefore = inTransaction ? null : this.cacheVersion();
+    if (
+      versionBefore !== null
+      && this.cache !== null
+      && this.cache.generation === this.generation
+      && this.cache.dataVersion === versionBefore.dataVersion
+      && this.cache.totalChanges === versionBefore.totalChanges
+    ) {
+      return clonePromptPresets(this.cache.presets);
+    }
+    const rows = cachedStatement(this.database, `
       SELECT id, name, body, route_json, position, revision,
         created_at, updated_at
       FROM prompt_presets
       ORDER BY position ASC, id ASC
-    `).all() as PromptPresetRow[]).map(presetFromRow);
+    `).all() as PromptPresetRow[];
+    const presets = rows.map(presetFromRow);
+    if (versionBefore !== null && !this.database.inTransaction) {
+      const versionAfter = this.cacheVersion();
+      if (
+        versionAfter.dataVersion === versionBefore.dataVersion
+        && versionAfter.totalChanges === versionBefore.totalChanges
+      ) {
+        this.cache = {
+          generation: this.generation,
+          dataVersion: versionAfter.dataVersion,
+          totalChanges: versionAfter.totalChanges,
+          presets,
+        };
+        return clonePromptPresets(presets);
+      }
+      this.cache = null;
+    }
+    return presets;
   }
 
   create(input: PromptPresetDraft): PromptPreset {
     const draft = parseDraft(input);
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const current = this.list();
       this.assertRoom(current);
       const timestamp = this.now();
@@ -97,7 +145,7 @@ export class PromptPresetRepository {
         updatedAt: timestamp,
       });
       this.assertSerializedBound([...current, preset]);
-      this.database.prepare(`
+      cachedStatement(this.database, `
         INSERT INTO prompt_presets (
           id, name, body, route_json, position, revision,
           created_at, updated_at
@@ -113,7 +161,7 @@ export class PromptPresetRepository {
         preset.updatedAt,
       );
       return preset;
-    })();
+    });
   }
 
   update(
@@ -121,7 +169,7 @@ export class PromptPresetRepository {
     expectedRevision: number,
     update: Partial<PromptPresetDraft>,
   ): PromptPreset {
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const current = this.list();
       const existing = this.requireCurrent(
         current,
@@ -141,7 +189,7 @@ export class PromptPresetRepository {
       });
       this.assertSerializedBound(current.map((preset) =>
         preset.id === presetId ? next : preset));
-      const result = this.database.prepare(`
+      const result = cachedStatement(this.database, `
         UPDATE prompt_presets SET
           name = ?, body = ?, route_json = ?, revision = ?, updated_at = ?
         WHERE id = ? AND revision = ?
@@ -156,11 +204,11 @@ export class PromptPresetRepository {
       );
       if (result.changes !== 1) this.throwStale();
       return next;
-    })();
+    });
   }
 
   duplicate(presetId: string, expectedRevision: number): PromptPreset {
-    return this.database.transaction(() => {
+    return this.mutate(() => {
       const current = this.list();
       const source = this.requireCurrent(
         current,
@@ -189,10 +237,11 @@ export class PromptPresetRepository {
         })),
       ];
       this.assertSerializedBound(candidate);
-      this.database.prepare(
+      cachedStatement(
+        this.database,
         "UPDATE prompt_presets SET position = position + 1 WHERE position >= ?",
       ).run(position);
-      this.database.prepare(`
+      cachedStatement(this.database, `
         INSERT INTO prompt_presets (
           id, name, body, route_json, position, revision,
           created_at, updated_at
@@ -208,26 +257,27 @@ export class PromptPresetRepository {
         duplicate.updatedAt,
       );
       return duplicate;
-    })();
+    });
   }
 
   delete(presetId: string, expectedRevision: number): void {
-    this.database.transaction(() => {
+    this.mutate(() => {
       const current = this.list();
       this.requireCurrent(current, presetId, expectedRevision);
-      const result = this.database.prepare(
+      const result = cachedStatement(
+        this.database,
         "DELETE FROM prompt_presets WHERE id = ? AND revision = ?",
       ).run(presetId, expectedRevision);
       if (result.changes !== 1) this.throwStale();
       this.normalizePositions();
-    })();
+    });
   }
 
   reorder(
     expectedPresetIds: readonly string[],
     presetIds: readonly string[],
   ): void {
-    this.database.transaction(() => {
+    this.mutate(() => {
       const current = this.list();
       const currentIds = current.map(({ id }) => id);
       if (
@@ -241,15 +291,36 @@ export class PromptPresetRepository {
           "Prompt presets changed before they could be reordered. Try again.",
         );
       }
-      const update = this.database.prepare(
+      const update = cachedStatement(
+        this.database,
         "UPDATE prompt_presets SET position = ? WHERE id = ?",
       );
       presetIds.forEach((id, position) => update.run(position, id));
-    })();
+    });
+  }
+
+  private mutate<T>(change: () => T): T {
+    this.generation += 1;
+    this.cache = null;
+    try {
+      return this.database.transaction(change)();
+    } finally {
+      this.generation += 1;
+      this.cache = null;
+    }
+  }
+
+  private cacheVersion(): { dataVersion: number; totalChanges: number } {
+    const dataVersion = Number(this.database.pragma("data_version", { simple: true }) ?? 0);
+    const totalChanges = (
+      cachedStatement(this.database, "SELECT total_changes() AS total").get() as { total: number }
+    ).total;
+    return { dataVersion, totalChanges };
   }
 
   private normalizePositions(): void {
-    const update = this.database.prepare(
+    const update = cachedStatement(
+      this.database,
       "UPDATE prompt_presets SET position = ? WHERE id = ?",
     );
     this.list().forEach((preset, position) => update.run(position, preset.id));

@@ -115,6 +115,7 @@ function SecretRequestCardComponent({ message }: { message: SecretRequestMessage
       className={interactive ? "secret-request-card is-pending" : "secret-request-card is-settled"}
       role={reference.status === "pending" ? "region" : undefined}
       aria-labelledby={reference.status === "pending" ? titleId : undefined}
+      tabIndex={reference.status === "pending" && !answerable ? -1 : undefined}
       data-secret-request-state={reference.status}
       data-secret-request-mode={reference.status === "pending" && !answerable ? "read-only" : undefined}
     >
@@ -140,7 +141,7 @@ function SecretRequestCardComponent({ message }: { message: SecretRequestMessage
       ) : (
         <>
           <span id={titleId} className="visually-hidden">{`${SECRET_REQUEST_LABEL}: ${reference.title}`}</span>
-          <SettledSecretRow reference={reference} onRevoke={answerable ? revoke : undefined} />
+          <SettledSecretRow reference={reference} onRevoke={revoke} />
         </>
       )}
     </section>

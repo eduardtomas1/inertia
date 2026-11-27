@@ -14,6 +14,10 @@ import type {
 } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { acpAttachmentReadAllowed } from "./attachment-read-grant";
+import {
+  acpHostMcpAllowOption,
+  isInertiaHostMcpPermissionRequest,
+} from "./acp-host-tool-permission";
 import { acpReadOnlyWatcher } from "./acp-watcher";
 import type { AgentApprovalDecision } from "./interactions";
 import { clipCodeUnits } from "../../shared/code-units";
@@ -60,7 +64,14 @@ export async function cursorPermission(
   options: AgentHarnessStartOptions,
   emit: CursorRichEmitter,
   approvals: Map<string, PendingCursorApproval>,
+  hostMcpToolNames: ReadonlySet<string> = new Set(),
 ): Promise<RequestPermissionResponse> {
+  if (isInertiaHostMcpPermissionRequest(params, hostMcpToolNames)) {
+    const hostAllow = acpHostMcpAllowOption(params.options);
+    if (hostAllow) {
+      return { outcome: { outcome: "selected", optionId: hostAllow.optionId } };
+    }
+  }
   const allow = cursorOneShotPermissionOption(params.options, true);
   if (allow && acpAttachmentReadAllowed(params, options.input.attachmentReadRoots)) {
     return { outcome: { outcome: "selected", optionId: allow.optionId } };

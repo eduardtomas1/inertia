@@ -687,7 +687,7 @@ export function createQueuedMessageRuntime(
       if (steerEffectId) runControl.settleSteer(steerEffectId, steered.kind === "turn-ended" ? "turn-ended" : "refused", { queuedMessageId: first.id });
       releaseClaimItem(conversationId, first.id, steered.kind === "turn-ended" ? "turn-ended" : "steer-declined");
       claimed = false;
-      if (steered.kind === "turn-ended") void schedule(conversationId).catch(() => undefined);
+      if (steered.kind === "turn-ended") retryAfterCleanup(conversationId);
       else throw new RuntimeRequestError("The agent did not take this message now. It will send when the turn ends.");
     } catch (error) {
       if (steerEffectId) runControl.settleSteer(steerEffectId, acknowledged ? "unconfirmed" : "unavailable", { queuedMessageId: first.id });
@@ -886,7 +886,7 @@ export function createQueuedMessageRuntime(
         changed(conversationId);
         void schedule(conversationId).catch(() => undefined);
       } else if (command.type === "message.queue.send") {
-        await running.get(conversationId);
+        await running.get(conversationId)?.catch(() => undefined);
         if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id, command.requestId);
         else await dispatch(conversationId, command.payload.id);
       } else if (command.type === "message.queue.stop-and-send") {

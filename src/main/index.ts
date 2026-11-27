@@ -2,7 +2,7 @@ import { registerLinuxDesktopIcon } from "./linux-desktop-integration.js";
 import { registerChatAttachmentIpc } from "./chat-attachment-ipc.js";
 import { openAuthorizedProjectPath } from "./project-path-open.js";
 import { EditorLauncher } from "./editor-launcher.js";
-import { openProjectPathInEditor, registerEditorIpc, resolveContextMenuEditorState, tryOpenLinkInPreferredEditor } from "./editor-ipc.js";
+import { openAuthorizedDesktopLink, openProjectPathInEditor, registerEditorIpc, resolveContextMenuEditorState } from "./editor-ipc.js";
 import { MascotMain } from "./mascot-main.js";
 import { MascotFeedMemory } from "./mascot-feed-memory.js";
 import { DeferredWindowCreation } from "./deferred-window-creation.js";
@@ -42,7 +42,6 @@ import {
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { PREVIEW_PICKER_EVENT_CHANNEL } from "../shared/preview-picker-channel.js";
 import { previewAnnotationImportDocument } from "./preview-picker.js";
-import { openDesktopLink } from "./external-link-open.js";
 import { inertiaWindowInForeground } from "./desktop-notification-gate.js";
 import { registerSnapshotIpc } from "./snapshot-ipc.js";
 import type { SnapshotService } from "./snapshot-service.js";
@@ -578,7 +577,7 @@ function registerIpcHandlers(): void {
     owner: (event, count) => {
       if (!detachedChatMain) throw new Error("Rejected untrusted renderer request");
       return detachedChatMain.windowForTrustedChatIpc(event, count, 1);
-    }, mainWindow: () => mainWindow, focusMainWindow, registry: attachmentRegistry, imports: rendererAttachmentImports,
+    }, assertTrusted: assertTrustedChatIpc, mainWindow: () => mainWindow, focusMainWindow, registry: attachmentRegistry, imports: rendererAttachmentImports,
     onFailure: (diagnostic) => runtimeDiagnostics?.record("snapshot.failure", { ...diagnostic }),
   });
 
@@ -610,8 +609,7 @@ function registerIpcHandlers(): void {
     const context = assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
     const conversationId = context.role === "detached-chat" ? context.conversationId : undefined;
-    await openDesktopLink(value, shell, process.platform, (filePath, position) =>
-      tryOpenLinkInPreferredEditor(editorLauncher, runtimeSupervisor, filePath, position, conversationId));
+    await openAuthorizedDesktopLink(value, shell, editorLauncher, runtimeSupervisor, conversationId);
   });
 
   ipcMain.handle(IPC.showThreadNotification, (event, ...args) => {
@@ -1123,12 +1121,8 @@ async function bootstrap(safetyAssets: ReturnType<typeof resolveDesktopRuntimePr
       suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);
       runtimeDiagnostics?.setIncidentRuntimeReady(snapshot.phase === "ready", snapshot.runtimeGenerationHash);
-      if (
-        snapshot.phase === "ready"
-        && mainWindow
-        && !mainWindow.isDestroyed()
-      ) {
-        mainWindow.webContents.send(IPC.runtimeReady);
+      if (snapshot.phase === "ready") {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.runtimeReady);
         detachedChatMain?.sendToDetached(IPC.runtimeReady);
       }
       if (snapshot.phase === "restarting" && snapshot.lastError) {

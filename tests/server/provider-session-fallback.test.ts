@@ -26,6 +26,7 @@ import {
   acpSessionUnavailable,
   openCodeSessionUnavailable,
 } from "../../src/server/provider/session-unavailable";
+import { createCodexAppServerHarness } from "../../src/server/provider/codex-app-server-harness";
 import { createCursorAcpHarness } from "../../src/server/provider/cursor-acp-harness";
 import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
@@ -818,5 +819,92 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       text: "Answered from a fresh session", cleanupConfirmed: true });
     expect(fresh.some((event) => event.type === "text")).toBe(true);
     expect(requests().filter(({ method }) => method === "session/new")).toHaveLength(1);
+  });
+});
+
+describe("fresh-session-fallback environment hygiene and cancellation fidelity", () => {
+  it("copies and scrubs retained environment and preserves forced cancellation across fallback transition", async () => {
+    const firstCancel = vi.fn();
+    const nextCancel = vi.fn();
+    let resolveFirst!: (value: ProviderRunResult) => void;
+    const firstResult = new Promise<ProviderRunResult>((resolve) => { resolveFirst = resolve; });
+    const receivedEnvironments: NodeJS.ProcessEnv[] = [];
+    let activeRun!: AgentHarnessRun;
+
+    const harness: AgentHarness = {
+      ...createCodexAppServerHarness(),
+      start(options: AgentHarnessStartOptions): AgentHarnessRun {
+        receivedEnvironments.push(options.environment);
+        if (receivedEnvironments.length === 1) {
+          return {
+            harnessId: "codex-app-server",
+            providerId: "codex",
+            cancel: firstCancel,
+            result: firstResult,
+            extension: {
+              kind: "codex-app-server",
+              respondToApproval: () => false,
+              respondToInput: () => false,
+              setGoal: async () => { throw new Error("unused"); },
+              clearGoal: async () => false,
+            },
+          };
+        }
+        // Simulate a forced cancellation arriving while fallback start is in progress.
+        activeRun.cancel(true);
+        return {
+          harnessId: "codex-app-server",
+          providerId: "codex",
+          cancel: nextCancel,
+          result: Promise.resolve({
+            ...providerRunTerminal(options.input, "cancelled"),
+            text: "",
+            textTruncated: false,
+            exitCode: null,
+            signal: "SIGKILL",
+            cleanupConfirmed: true,
+          }),
+          extension: {
+            kind: "codex-app-server",
+            respondToApproval: () => false,
+            respondToInput: () => false,
+            setGoal: async () => { throw new Error("unused"); },
+            clearGoal: async () => false,
+          },
+        };
+      },
+    };
+
+    const runInput = input("stale-session");
+    const callerEnvironment: NodeJS.ProcessEnv = { SECRET_API_KEY: "top-secret-token" };
+    activeRun = startHarnessWithFreshSessionFallback(
+      harness,
+      {
+        input: runInput,
+        executable: "codex",
+        environment: callerEnvironment,
+        installationVersion: "1.0.0",
+        providerNativeToolsAvailable: true,
+      },
+      () => ({ prompt: "Fresh session prompt." }),
+    );
+    // Simulate run-coordinator's releaseLaunch() scrubbing the caller-owned map immediately after start.
+    delete callerEnvironment.SECRET_API_KEY;
+
+    resolveFirst({
+      ...providerRunTerminal(runInput, "failed"),
+      text: "",
+      textTruncated: false,
+      exitCode: 1,
+      signal: null,
+      cleanupConfirmed: true,
+      failure: unavailable,
+    });
+
+    await expect(activeRun.result).resolves.toMatchObject({ status: "cancelled" });
+    expect(receivedEnvironments).toHaveLength(2);
+    expect(receivedEnvironments[1]).toEqual({ SECRET_API_KEY: "top-secret-token" });
+    expect(receivedEnvironments[1]).not.toBe(callerEnvironment);
+    expect(nextCancel).toHaveBeenCalledExactlyOnceWith(true);
   });
 });

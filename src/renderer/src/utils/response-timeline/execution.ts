@@ -18,10 +18,10 @@ export {
   type ActivityAttentionSeverity,
 } from "./activity-attention";
 
-function timestamp(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
+import {
+  EN_COLLATOR,
+  compareTimestampsAsc as compareTimestamps,
+} from "../fastCompare";
 
 export interface ActivityDetailPresentation {
   preview: string | null;
@@ -106,6 +106,12 @@ export type TurnExecutionStreamEntry =
       message: SentToUserMessage;
     }
   | {
+      kind: "secret-request";
+      id: string;
+      createdAt: string;
+      message: SecretRequestMessage;
+    }
+  | {
       kind: "activity-group";
       id: string;
       createdAt: string;
@@ -125,12 +131,6 @@ export type TurnWorkStreamEntry =
       id: string;
       createdAt: string;
       message: ChatMessage;
-    }
-  | {
-      kind: "secret-request";
-      id: string;
-      createdAt: string;
-      message: SecretRequestMessage;
     }
   | SubagentCallEntry
   | SubagentGroupEntry;
@@ -152,13 +152,22 @@ function mergeChronologically(
   pending: TurnWorkStreamEntry[],
 ): TurnWorkStreamEntry[] {
   const merged: TurnWorkStreamEntry[] = [];
+  let pendingIndex = 0;
   for (const entry of stream) {
-    while (pending.length > 0 && timestamp(pending[0]!.createdAt) <= timestamp(entry.createdAt)) {
-      merged.push(pending.shift()!);
+    while (
+      pendingIndex < pending.length
+      && compareTimestamps(pending[pendingIndex]!.createdAt, entry.createdAt) <= 0
+    ) {
+      merged.push(pending[pendingIndex]!);
+      pendingIndex += 1;
     }
     merged.push(entry);
   }
-  return [...merged, ...pending];
+  while (pendingIndex < pending.length) {
+    merged.push(pending[pendingIndex]!);
+    pendingIndex += 1;
+  }
+  return merged;
 }
 
 export function withHtmlRenders(
@@ -169,19 +178,6 @@ export function withHtmlRenders(
   return mergeChronologically(stream, renders.map((message) => ({
     kind: "html-render" as const,
     id: `html-render:${message.id}`,
-    createdAt: message.createdAt,
-    message,
-  })));
-}
-
-export function withSecretRequests(
-  stream: TurnWorkStreamEntry[],
-  requests: readonly SecretRequestMessage[],
-): TurnWorkStreamEntry[] {
-  if (requests.length === 0) return stream;
-  return mergeChronologically(stream, requests.map((message) => ({
-    kind: "secret-request" as const,
-    id: `secret-request:${message.secretRequest.requestId}`,
     createdAt: message.createdAt,
     message,
   })));
@@ -229,7 +225,7 @@ export function liveSegmentContinuation(
   const latest = turn.isActive && !turn.terminalAssistantMessage && live
     ? turn.commentaryMessages.at(-1)
     : undefined;
-  return latest && !turn.activities.some(({ createdAt }) => timestamp(createdAt) > timestamp(latest.createdAt))
+  return latest && !turn.activities.some(({ createdAt }) => compareTimestamps(createdAt, latest.createdAt) > 0)
     ? continuedLiveSegment(latest.content, live)
     : null;
 }
@@ -250,10 +246,13 @@ export function followUpAnswers(
   turn: Pick<ResponseTurn, "followUpMessages" | "commentaryMessages">,
 ): Set<ChatMessage> {
   const answers = new Set<ChatMessage>();
+  if (turn.followUpMessages.length === 0 || turn.commentaryMessages.length === 0) {
+    return answers;
+  }
   for (const followUp of turn.followUpMessages) {
     let answer: ChatMessage | undefined;
     for (const message of turn.commentaryMessages) {
-      if (timestamp(message.createdAt) <= timestamp(followUp.createdAt)) answer = message;
+      if (compareTimestamps(message.createdAt, followUp.createdAt) <= 0) answer = message;
     }
     if (answer) answers.add(answer);
   }
@@ -274,7 +273,7 @@ export function buildTurnExecutionStream(
   turn: Pick<
     ResponseTurn,
     "id" | "agentTurn" | "followUpMessages" | "commentaryMessages" | "activities"
-  > & Partial<Pick<ResponseTurn, "sentMessages">>,
+  > & Partial<Pick<ResponseTurn, "sentMessages" | "secretRequests">>,
   options: BuildTurnExecutionStreamOptions = {},
 ): TurnExecutionStreamEntry[] {
   const includeImportant = options.includeImportantActivities ?? true;
@@ -302,6 +301,13 @@ export function buildTurnExecutionStream(
         id: string;
         createdAt: string;
         message: SentToUserMessage;
+        order: number;
+      }
+    | {
+        kind: "secret-request";
+        id: string;
+        createdAt: string;
+        message: SecretRequestMessage;
         order: number;
       }
     | {
@@ -346,6 +352,15 @@ export function buildTurnExecutionStream(
       order: 3,
     });
   }
+  for (const message of turn.secretRequests ?? []) {
+    items.push({
+      kind: "secret-request",
+      id: `secret-request:${message.secretRequest.requestId}`,
+      createdAt: message.createdAt,
+      message,
+      order: 3,
+    });
+  }
   let episode = 0;
   let previousCompaction: AgentActivity | null = null;
   for (const activity of turn.activities) {
@@ -380,15 +395,19 @@ export function buildTurnExecutionStream(
   items.sort((left, right) =>
     Number(left.kind === "commentary" && left.streaming)
       - Number(right.kind === "commentary" && right.streaming)
-    ||
-    timestamp(left.createdAt) - timestamp(right.createdAt)
+    || compareTimestamps(left.createdAt, right.createdAt)
     || left.order - right.order
-    || left.id.localeCompare(right.id, "en"));
+    || EN_COLLATOR.compare(left.id, right.id));
 
   const stream: TurnExecutionStreamEntry[] = [];
   let streamEpisode = 0;
   for (const item of items) {
-    if (item.kind === "commentary" || item.kind === "follow-up" || item.kind === "sent-message") {
+    if (
+      item.kind === "commentary"
+      || item.kind === "follow-up"
+      || item.kind === "sent-message"
+      || item.kind === "secret-request"
+    ) {
       stream.push(item);
       continue;
     }

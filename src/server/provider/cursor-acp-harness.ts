@@ -263,6 +263,7 @@ function startCursorRun(
     ? createHostMcpSession(hostToolRuntime)
     : undefined;
   let hostMcpConnection: ProviderHostToolMcpConnection | undefined;
+  let hostMcpToolNames: ReadonlySet<string> = new Set();
   const redactHostMcpPayload = <T>(value: T): T => secretRedactor.payload(value);
   let activeContext: acp.ClientContext | undefined;
   let child: ChildProcessWithoutNullStreams;
@@ -332,6 +333,7 @@ function startCursorRun(
         options,
         emitter.rich,
         approvals,
+        hostMcpToolNames,
       );
     })
     .onNotification(acp.methods.client.session.update, (value) =>
@@ -568,6 +570,9 @@ function startCursorRun(
           hostMcpProxyRuntime,
         )
       : [];
+    if (hostMcpServers.length > 0 && hostToolRuntime) {
+      hostMcpToolNames = new Set(hostToolRuntime.definitions().map(({ name }) => name));
+    }
     const turnPrompt = acpPromptForHostMcp(
       options.input.prompt,
       options.hostTools,

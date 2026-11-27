@@ -15,6 +15,7 @@ import {
   conversationFromRow,
   conversationShellFromRow,
   conversationDetailFromRow,
+  latestTurnSummaryFromRow,
   messageFromRow,
   planFromRow,
   projectFromRow,
@@ -57,6 +58,7 @@ import { MAX_CONVERSATION_HISTORY_BYTES, type ConversationHistoryRequest } from 
 import {
   conversationStoredBytes,
   CONVERSATION_RECORDS_TOO_LARGE_MESSAGE,
+  estimateJsonUtf8BytesBound,
   historyPredicate,
   historyStoredBytes,
   selectConversationHistory,
@@ -84,7 +86,11 @@ import {
   type ArchivedConversationsRequest,
 } from "../../shared/archived-conversations";
 import { MAX_ACTIVITY_DETAIL_READ_CHARS, type ActivityDetailReadResult } from "../../shared/activity-detail";
-import { activityDetailPreview } from "./activity-detail-preview";
+import {
+  activityPreviewFromProjectedRow,
+  buildActivityPreviewQuery,
+  type ProjectedActivityRow,
+} from "./activity-detail-preview";
 
 type ConversationShellRow = ConversationRow & { has_history: number };
 type UsageLimitedTurnRow = AgentTurnRow & { usage_limited: number; failure_kind: string | null };
@@ -218,7 +224,8 @@ export class SnapshotRepository {
       conversations: this.conversationShells("conversations.archived_at IS NULL OR conversations.id = ?", [state.active_conversation_id ?? ""]),
       archivedConversationRefs: this.referencedArchivedConversations(state.active_conversation_id),
       archivedConversationCount: this.archivedConversationCount(),
-      runs: (this.context.database.prepare(
+      runs: (cachedStatement(
+        this.context.database,
         "SELECT * FROM workspace_runs ORDER BY started_at DESC LIMIT 200",
       ).all() as WorkspaceRunRow[]).map(workspaceRunFromRow),
       providers,
@@ -319,7 +326,7 @@ export class SnapshotRepository {
 
   private conversationShells(where: string, parameters: readonly string[]): ConversationShell[] {
     const latestTurns = new Map(
-      (this.context.database.prepare(`
+      (cachedStatement(this.context.database, `
         SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited, ${TURN_FAILURE_KIND_SQL} AS failure_kind
         FROM conversations
         JOIN agent_turns ON agent_turns.id = (
@@ -331,15 +338,13 @@ export class SnapshotRepository {
         )
         WHERE ${where}
       `).all(...parameters) as UsageLimitedTurnRow[])
-        .map((row) => [row.conversation_id, { turn: agentTurnFromRow(row), usageLimited: row.usage_limited === 1 }] as const),
+        .map((row) => [row.conversation_id, latestTurnSummaryFromRow(row)] as const),
     );
-    return (this.context.database.prepare(`
+    return (cachedStatement(this.context.database, `
       SELECT conversations.*, ${CONVERSATION_HAS_HISTORY_SQL} AS has_history
       FROM conversations WHERE ${where} ORDER BY updated_at DESC, id ASC
-    `).all(...parameters) as ConversationShellRow[]).map((row) => {
-      const latest = latestTurns.get(row.id);
-      return conversationShellFromRow(row, latest?.turn ?? null, latest?.usageLimited);
-    });
+    `).all(...parameters) as ConversationShellRow[]).map((row) =>
+      conversationShellFromRow(row, latestTurns.get(row.id) ?? null));
   }
 
   private conversationRow(conversationId: string): ConversationShellRow | undefined {
@@ -360,8 +365,7 @@ export class SnapshotRepository {
     `).get(conversationId) as UsageLimitedTurnRow | undefined;
     return conversationShellFromRow(
       row,
-      latestTurn ? agentTurnFromRow(latestTurn) : null,
-      latestTurn?.usage_limited === 1,
+      latestTurn ? latestTurnSummaryFromRow(latestTurn) : null,
     );
   }
 
@@ -380,10 +384,12 @@ export class SnapshotRepository {
       ...(latest ? this.conversationRecords(conversationId) : EMPTY_CONVERSATION_RECORDS),
       ...(latest ? delegationField(this.context.database, conversationId) : {}),
     };
+    const fastByteBudget = Math.floor(MAX_CONVERSATION_HISTORY_BYTES * 0.9);
     const page = (records: HistoryPageRecords, omittedTurnIds: string[] = []): ConversationDetail | null => {
       const detail: ConversationDetail = { ...shared, ...records,
         ...(latest ? { plans: withLatestPlanDocument(this.context.database, conversationId, records.plans) } : {}),
         history: { older: scope.older, ...(omittedTurnIds.length ? { omittedTurnIds } : {}) } };
+      if (estimateJsonUtf8BytesBound(detail, fastByteBudget) <= fastByteBudget) return detail;
       return Buffer.byteLength(JSON.stringify(detail), "utf8") <= MAX_CONVERSATION_HISTORY_BYTES ? detail : null;
     };
     while (true) {
@@ -425,7 +431,7 @@ export class SnapshotRepository {
     const conversationRow = this.conversationRow(conversationId);
     if (!conversationRow) return null;
     const newest = <T>(sql: string, ...parameters: (string | number)[]) =>
-      (this.context.database.prepare(sql).all(...parameters) as T[]).reverse();
+      (cachedStatement(this.context.database, sql).all(...parameters) as T[]).reverse();
     return {
       ...EMPTY_HISTORY_RECORDS,
       ...EMPTY_CONVERSATION_RECORDS,
@@ -458,20 +464,31 @@ export class SnapshotRepository {
       const where = scope
         ? historyPredicate(table, scope, conversationId)
         : { sql: `${table}.conversation_id = ?`, parameters: [conversationId] };
-      return this.context.database.prepare(`SELECT ${columns} FROM ${table}
+      return cachedStatement(this.context.database, `SELECT ${columns} FROM ${table}
         WHERE ${where.sql} ORDER BY ${order}`)
         .all(...where.parameters) as T[];
     };
     const messages = query<MessageRow>("messages", MESSAGE_PROJECTION_COLUMNS, "messages.created_at ASC, messages.id ASC").map(messageFromRow);
     const turns = query<UsageLimitedTurnRow>("agent_turns", `agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited`, "requested_at ASC, id ASC").map(agentTurnFromRow);
+    const activities = previewActivities
+      ? (() => {
+          const where = scope
+            ? historyPredicate("activities", scope, conversationId)
+            : { sql: "activities.conversation_id = ?", parameters: [conversationId] };
+          return (cachedStatement(
+            this.context.database,
+            buildActivityPreviewQuery(where.sql, "created_at ASC, id ASC"),
+          ).all(...where.parameters) as ProjectedActivityRow[]).map((row) => ({
+            ...activityFromRow(row),
+            ...activityPreviewFromProjectedRow(row),
+          }));
+        })()
+      : query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map(activityFromRow);
     return {
       agentTurns: turns,
       turnGitArtifacts: query<TurnGitArtifactRow>("turn_git_artifacts", "*", "created_at ASC, id ASC").map(turnGitArtifactFromRow),
       messages,
-      activities: query<ActivityRow>("activities", "*", "created_at ASC, id ASC").map((row) => {
-        const activity = activityFromRow(row);
-        return previewActivities ? { ...activity, ...activityDetailPreview(activity) } : activity;
-      }),
+      activities,
       subagents: query<SubagentTraceRow>("subagent_traces", "*", "created_at ASC, sequence ASC, id ASC").map(subagentTraceFromRow),
       reasonings: query<AgentReasoningRow>("agent_reasonings", REASONING_PROJECTION_COLUMNS, "agent_reasonings.created_at ASC, agent_reasonings.id ASC").map(reasoningFromRow),
       plans: query<AgentPlanRow>("agent_plans", "conversation_id, run_id, turn_id, explanation, steps_json", "updated_at ASC, conversation_id ASC, run_id ASC").map(planFromRow),
@@ -484,9 +501,9 @@ export class SnapshotRepository {
   }
 
   private omittedTurnRecords(conversationId: string, turnId: string): HistoryPageRecords {
-    const turn = this.context.database.prepare(`SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited
+    const turn = cachedStatement(this.context.database, `SELECT agent_turns.*, ${TURN_USAGE_LIMITED_SQL} AS usage_limited
       FROM agent_turns WHERE conversation_id = ? AND id = ?`).get(conversationId, turnId) as UsageLimitedTurnRow;
-    const messages = (this.context.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
+    const messages = (cachedStatement(this.context.database, `SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages
       WHERE messages.conversation_id = ? AND messages.id = ?`)
       .all(conversationId, turn.user_message_id) as MessageRow[]).map(messageFromRow);
     return { ...EMPTY_HISTORY_RECORDS, agentTurns: [agentTurnFromRow(turn)], messages,
@@ -497,7 +514,7 @@ export class SnapshotRepository {
   }
 
   private conversationRecords(conversationId: string): ConversationRecords {
-    const all = <T>(sql: string) => this.context.database.prepare(sql).all(conversationId) as T[];
+    const all = <T>(sql: string) => cachedStatement(this.context.database, sql).all(conversationId) as T[];
     return {
       usage: all<ThreadUsageRow>("SELECT * FROM thread_usage WHERE conversation_id = ? ORDER BY updated_at ASC").map(usageFromRow),
       goals: all<AgentGoalRow>("SELECT * FROM agent_goals WHERE conversation_id = ? ORDER BY updated_at ASC, source ASC").map(agentGoalFromRow),
@@ -512,7 +529,7 @@ export class SnapshotRepository {
   }
 
   private state(): StateRow {
-    const state = this.context.database.prepare("SELECT * FROM app_state WHERE id = 1").get() as StateRow | undefined;
+    const state = cachedStatement(this.context.database, "SELECT * FROM app_state WHERE id = 1").get() as StateRow | undefined;
     if (!state) throw new Error("Runtime state is unavailable.");
     return state;
   }

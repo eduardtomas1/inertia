@@ -130,15 +130,22 @@ describe("pending secret request card", () => {
     expect(screen.getByText("Kept out of chat, in a private file this agent's commands can read for 6 hours")).toBeVisible();
   });
 
-  it("reveals and hides the value with a pressed toggle", () => {
+  it("reveals and hides the value with a pressed toggle and preserves caret selection", () => {
     render(workspace(<SecretRequestCard message={message(reference())} />));
+    fireEvent.change(input(), { target: { value: SECRET } });
+    input().focus();
+    input().setSelectionRange(5, 10);
     const toggle = screen.getByRole("button", { name: "Show secret" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: "Hide secret" })).toHaveAttribute("aria-pressed", "true");
     expect(input()).toHaveAttribute("type", "text");
+    expect(input().selectionStart).toBe(5);
+    expect(input().selectionEnd).toBe(10);
     fireEvent.click(screen.getByRole("button", { name: "Hide secret" }));
     expect(input()).toHaveAttribute("type", "password");
+    expect(input().selectionStart).toBe(5);
+    expect(input().selectionEnd).toBe(10);
   });
 
   it("saves through the desktop bridge only, clears the field and hands focus back to the composer", async () => {
@@ -203,24 +210,51 @@ describe("pending secret request card", () => {
     expect(screen.getByRole("alert").textContent).not.toContain(SECRET);
   });
 
-  it("rejects a too-short value before it leaves the card", async () => {
+  it("rejects too-short (under 8 chars) and overly long values before they leave the card", async () => {
     render(workspace(<SecretRequestCard message={message(reference())} />));
-    fireEvent.change(input(), { target: { value: "abc" } });
+    fireEvent.change(input(), { target: { value: "1234567" } });
     await act(async () => { fireEvent.submit(input().closest("form")!); });
     expect(saveAgentSecret).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent("The secret must be at least 8 characters long.");
+
+    fireEvent.change(input(), { target: { value: "x".repeat(16_385) } });
+    await act(async () => { fireEvent.submit(input().closest("form")!); });
+    expect(saveAgentSecret).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("The secret is longer than 16,384 characters.");
   });
 
-  it("declines through the runtime command without any value", async () => {
+  it("declines through the runtime command, clears the field and resets reveal", async () => {
+    let resolveDecline!: (event: ServerEvent) => void;
+    onCommand.mockImplementationOnce(() => new Promise<ServerEvent>((resolve) => { resolveDecline = resolve; }));
     render(workspace(<SecretRequestCard message={message(reference())} />));
     fireEvent.change(input(), { target: { value: SECRET } });
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Decline" })); });
+    fireEvent.click(screen.getByRole("button", { name: "Show secret" }));
+    expect(input()).toHaveAttribute("type", "text");
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    expect(screen.getByRole("button", { name: "Declining…" })).toBeDisabled();
+    await act(async () => { resolveDecline(resultEvent); });
     expect(onCommand).toHaveBeenCalledWith("secret-request.decline", {
       type: "secret-request.decline",
       payload: { conversationId: CONVERSATION_ID, requestId: reference().requestId },
     });
     expect(JSON.stringify(onCommand.mock.calls)).not.toContain(SECRET);
     expect(saveAgentSecret).not.toHaveBeenCalled();
+    expect(input().value).toBe("");
+    expect(input()).toHaveAttribute("type", "password");
+  });
+
+  it("shows fixed decline errors and preserves typed value on failure", async () => {
+    onCommand.mockRejectedValueOnce(new Error("That secret request is no longer pending."));
+    render(workspace(<SecretRequestCard message={message(reference())} />));
+    fireEvent.change(input(), { target: { value: SECRET } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Decline" })); });
+    expect(screen.getByRole("alert")).toHaveTextContent("That secret request is no longer pending.");
+    expect(input().value).toBe(SECRET);
+
+    onCommand.mockRejectedValueOnce(new Error(`internal failure ${SECRET}`));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Decline" })); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Couldn't decline. Try again.");
+    expect(screen.getByRole("alert").textContent).not.toContain(SECRET);
   });
 
   it("focuses the field when it appears beside an idle empty composer, once per request", () => {
@@ -301,13 +335,19 @@ describe("settled secret request rows", () => {
     expect(screen.getByText("Saved · expires in 23h · kept until Inertia quits")).toBeVisible();
   });
 
-  it("revokes a saved secret from its row", async () => {
+  it("revokes a saved secret from its row even without the saveAgentSecret bridge", async () => {
+    installBridge({ getWindowContext: vi.fn() });
     render(workspace(<SecretRequestCard message={message(settled("saved"))} />));
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Revoke Tailscale auth key" })); });
     expect(onCommand).toHaveBeenCalledWith("secret-request.revoke", {
       type: "secret-request.revoke",
       payload: { requestId: reference().requestId },
     });
+  });
+
+  it("hides revoke when no command runner is provided", () => {
+    render(workspace(<SecretRequestCard message={message(settled("saved"))} />, { runner: null }));
+    expect(screen.queryByRole("button", { name: /Revoke/u })).toBeNull();
   });
 
   it.each([

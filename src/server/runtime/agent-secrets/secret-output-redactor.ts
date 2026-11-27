@@ -2,7 +2,6 @@ import { BoundarySecretRedactor, SecretMatcher, SIGNIFICANT_SECRET_PREFIX_CHARS 
 import {
   credentialEncodings,
   PROVIDER_ACTIVITY_DETAIL_OMISSION,
-  redactExactCredentials,
   stripTerminalControlSequences,
 } from "../../provider/activity-detail";
 import type {
@@ -13,8 +12,10 @@ import type {
   ProviderTextEvent,
   ProviderTextSnapshotEvent,
 } from "../../provider/contracts";
+import { StreamingTerminalControlStripper } from "./streaming-terminal-control-stripper";
 
 const MAX_DEPTH = 32;
+const OVER_DEPTH = "[redacted:over-depth]";
 const STRUCTURAL_KEY = /^(?:id|type|kind|status|phase|decision)$|Id$/u;
 const MAX_OUTPUT_STREAMS_PER_TURN = 64;
 
@@ -29,6 +30,7 @@ const ASSISTANT_SEGMENT_CLOSERS: ReadonlySet<ProviderEvent["type"]> = new Set([
 
 interface Stream<T extends ProviderEvent> {
   boundary: BoundarySecretRedactor;
+  stripper: StreamingTerminalControlStripper;
   template: T;
 }
 
@@ -58,28 +60,39 @@ function withOutput(event: ProviderActivityEvent, output: string): ProviderActiv
   return output ? { ...event, outputDelta: output } : event;
 }
 
-function prefixOverlap(pattern: string, text: string): number {
-  const failure = new Int32Array(pattern.length);
-  for (let index = 1, matched = 0; index < pattern.length; index += 1) {
-    while (matched > 0 && pattern[index] !== pattern[matched]) matched = failure[matched - 1]!;
-    if (pattern[index] === pattern[matched]) matched += 1;
-    failure[index] = matched;
-  }
+function prefixOverlapWithTable(
+  pattern: string,
+  failure: Int32Array,
+  text: string,
+): number {
   let state = 0;
   for (let index = Math.max(0, text.length - pattern.length); index < text.length; index += 1) {
-    while (state > 0 && text[index] !== pattern[state]) state = failure[state - 1]!;
-    if (text[index] === pattern[state]) state += 1;
+    const code = text.charCodeAt(index);
+    while (state > 0 && code !== pattern.charCodeAt(state)) state = failure[state - 1]!;
+    if (code === pattern.charCodeAt(state)) state += 1;
     if (state === pattern.length) state = failure[state - 1]!;
   }
   return state;
 }
 
-function reversed(value: string): string {
-  return value.split("").reverse().join("");
+function prefixOverlapReversedWithTable(
+  reversePattern: string,
+  reverseFailure: Int32Array,
+  text: string,
+): number {
+  let state = 0;
+  const limit = Math.min(text.length, reversePattern.length);
+  for (let index = limit - 1; index >= 0; index -= 1) {
+    const code = text.charCodeAt(index);
+    while (state > 0 && code !== reversePattern.charCodeAt(state)) state = reverseFailure[state - 1]!;
+    if (code === reversePattern.charCodeAt(state)) state += 1;
+    if (state === reversePattern.length) state = reverseFailure[state - 1]!;
+  }
+  return state;
 }
 
-function significantOverlap(length: number, secret: string): boolean {
-  return length >= SIGNIFICANT_SECRET_PREFIX_CHARS || length * 2 >= secret.length;
+function significantOverlap(length: number, secretLength: number): boolean {
+  return length >= SIGNIFICANT_SECRET_PREFIX_CHARS || length * 2 >= secretLength;
 }
 
 function outputTemplate(event: ProviderActivityEvent): ProviderActivityEvent {
@@ -113,15 +126,15 @@ export class SecretOutputRedactor {
   }
 
   private exact(value: string): string {
-    const direct = redactExactCredentials(value, this.matcher.secrets);
+    const direct = this.matcher.redact(value);
     const stripped = stripTerminalControlSequences(direct);
     if (stripped === direct) return direct;
-    const redacted = redactExactCredentials(stripped, this.matcher.secrets);
+    const redacted = this.matcher.redact(stripped);
     return redacted === stripped ? direct : redacted;
   }
 
   private omissionEdges(value: string): string {
-    if (!PROVIDER_ACTIVITY_DETAIL_OMISSION.test(value)) return value;
+    if (!value.includes("… [") || !PROVIDER_ACTIVITY_DETAIL_OMISSION.test(value)) return value;
     const parts = value.split(PROVIDER_ACTIVITY_DETAIL_OMISSION);
     for (let index = 0; index < parts.length; index += 2) {
       let part = parts[index]!;
@@ -134,11 +147,11 @@ export class SecretOutputRedactor {
 
   private redactEdge(part: string, edge: "start" | "end"): string {
     let longest = 0;
-    for (const secret of this.matcher.secrets) {
+    for (const pattern of this.matcher.edgePatterns) {
       const length = edge === "end"
-        ? prefixOverlap(secret, part)
-        : prefixOverlap(reversed(secret), reversed(part.slice(0, secret.length)));
-      if (length > longest && significantOverlap(length, secret)) longest = length;
+        ? prefixOverlapWithTable(pattern.forward, pattern.forwardFailure, part)
+        : prefixOverlapReversedWithTable(pattern.reverse, pattern.reverseFailure, part);
+      if (length > longest && significantOverlap(length, pattern.length)) longest = length;
     }
     if (longest === 0) return part;
     return edge === "end" ? `${part.slice(0, -longest)}[redacted]` : `[redacted]${part.slice(longest)}`;
@@ -149,7 +162,7 @@ export class SecretOutputRedactor {
     const visit = (current: unknown, depth: number): unknown => {
       if (typeof current === "string") return this.text(current);
       if (Array.isArray(current)) {
-        if (depth >= MAX_DEPTH) return current;
+        if (depth >= MAX_DEPTH) return OVER_DEPTH;
         let changed = false;
         const next = current.map((entry) => {
           const visited = visit(entry, depth + 1);
@@ -158,13 +171,16 @@ export class SecretOutputRedactor {
         });
         return changed ? next : current;
       }
-      if (!plainObject(current) || depth >= MAX_DEPTH) return current;
+      if (!plainObject(current)) return current;
+      if (depth >= MAX_DEPTH) return OVER_DEPTH;
       let changed = false;
       const next: Record<string, unknown> = {};
       for (const [key, entry] of Object.entries(current)) {
-        const visited = structural && typeof entry === "string" && STRUCTURAL_KEY.test(key) ? entry : visit(entry, depth + 1);
-        if (visited !== entry) changed = true;
-        next[key] = visited;
+        const isStructuralKey = structural && STRUCTURAL_KEY.test(key);
+        const redactedKey = isStructuralKey ? key : this.text(key);
+        const visited = isStructuralKey && typeof entry === "string" ? entry : visit(entry, depth + 1);
+        if (redactedKey !== key || visited !== entry) changed = true;
+        next[redactedKey] = visited;
       }
       return changed ? next : current;
     };
@@ -188,7 +204,7 @@ export class SecretOutputRedactor {
     if (!turn || !stream) return [];
     turn.text = null;
     this.forgetEmptyTurn(turnId, turn);
-    const text = stream.boundary.finish("significant");
+    const text = this.finishStream(stream);
     return text ? [{ ...stream.template, text }] : [];
   }
 
@@ -208,16 +224,22 @@ export class SecretOutputRedactor {
     const turn = this.turns.get(turnId);
     if (!turn) return;
     this.turns.delete(turnId);
+    turn.text?.stripper.discard();
     turn.text?.boundary.discard();
+    turn.reasoning?.stripper.discard();
     turn.reasoning?.boundary.discard();
-    for (const output of turn.outputs.values()) output.boundary.discard();
+    for (const output of turn.outputs.values()) {
+      output.stripper.discard();
+      output.boundary.discard();
+    }
   }
 
   private streamText(event: ProviderTextEvent): readonly ProviderEvent[] {
     const turn = this.turnStreams(event.turnId);
     const stream = turn.text ??= this.open(event);
     stream.template = event;
-    const text = stream.boundary.push(event.text);
+    const cleaned = stream.stripper.push(event.text);
+    const text = cleaned ? stream.boundary.push(cleaned) : "";
     return text ? [{ ...event, text }] : [];
   }
 
@@ -238,10 +260,14 @@ export class SecretOutputRedactor {
     const { replace, ...appended } = event;
     // A replacement abandons what the stream held back; it restarts the stream, and a held-back tail of its own
     // follows as an append. An empty replacement still clears what was shown.
-    if (replace) turn.reasoning?.boundary.discard();
+    if (replace) {
+      turn.reasoning?.stripper.discard();
+      turn.reasoning?.boundary.discard();
+    }
     const stream = replace ? turn.reasoning = this.open(appended) : turn.reasoning ??= this.open(appended);
     stream.template = appended;
-    const text = stream.boundary.push(event.text);
+    const cleaned = stream.stripper.push(event.text);
+    const text = cleaned ? stream.boundary.push(cleaned) : "";
     return text || replace ? [{ ...event, text }] : [];
   }
 
@@ -262,12 +288,14 @@ export class SecretOutputRedactor {
       stream = this.open(outputTemplate(safe));
       streams.set(activityId, stream);
     }
-    let output = event.outputDelta
-      ? stream.boundary.push(this.omissionEdges(stripTerminalControlSequences(event.outputDelta)))
-      : "";
+    let output = "";
+    if (event.outputDelta) {
+      const cleaned = stream.stripper.push(event.outputDelta);
+      if (cleaned) output = stream.boundary.push(this.omissionEdges(cleaned));
+    }
     if (event.phase !== "started" || event.detail !== undefined) {
       streams.delete(activityId);
-      output += stream.boundary.finish("significant");
+      output += this.finishStream(stream, true);
     } else {
       stream.template = outputTemplate(safe);
     }
@@ -282,7 +310,7 @@ export class SecretOutputRedactor {
     this.turns.delete(turnId);
     for (const activityId of turn.outputs.keys()) events.push(...this.finishOutput(turn.outputs, activityId));
     const reasoning = turn.reasoning;
-    const text = reasoning?.boundary.finish("significant");
+    const text = reasoning ? this.finishStream(reasoning) : "";
     if (reasoning && text) events.push({ ...reasoning.template, text });
     return events;
   }
@@ -291,8 +319,18 @@ export class SecretOutputRedactor {
     const stream = streams.get(activityId);
     if (!stream) return [];
     streams.delete(activityId);
-    const output = stream.boundary.finish("significant");
+    const output = this.finishStream(stream, true);
     return output ? [withOutput(stream.template, output)] : [];
+  }
+
+  private finishStream<T extends ProviderEvent>(stream: Stream<T>, applyOmissionEdges = false): string {
+    const trailing = stream.stripper.finish();
+    let output = "";
+    if (trailing) {
+      output += stream.boundary.push(applyOmissionEdges ? this.omissionEdges(trailing) : trailing);
+    }
+    output += stream.boundary.finish("significant");
+    return output;
   }
 
   private turnStreams(turnId: string): TurnStreams {
@@ -309,6 +347,10 @@ export class SecretOutputRedactor {
   }
 
   private open<T extends ProviderEvent>(template: T): Stream<T> {
-    return { boundary: new BoundarySecretRedactor(() => this.matcher), template };
+    return {
+      boundary: new BoundarySecretRedactor(() => this.matcher),
+      stripper: new StreamingTerminalControlStripper(),
+      template,
+    };
   }
 }

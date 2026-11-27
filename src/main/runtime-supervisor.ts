@@ -949,7 +949,7 @@ export class RuntimeSupervisor {
         return;
       }
       if (!record.cleanupConfirmed && record.cleanupRecoveryRequired) {
-        this.phase = "restarting";
+        this.phase = this.desiredRunning ? "restarting" : "stopping";
         this.emitState();
         recoverUnconfirmedRuntimeCleanup({
           record,
@@ -1036,7 +1036,7 @@ export class RuntimeSupervisor {
     };
     if (record.processTreeTermination) {
       if (!record.processTreeTerminationSettled) {
-        this.phase = "restarting";
+        this.phase = this.desiredRunning ? "restarting" : "stopping";
         this.emitState();
         void record.processTreeTermination.then(continueAfterTermination);
         return;
@@ -1102,7 +1102,10 @@ export class RuntimeSupervisor {
         && !record.ready
         && !record.cleanupConfirmed
       ) record.cleanupRecoveryRequired = true;
-      if (record.processTreeTermination) return;
+      if (
+        record.processTreeTermination
+        && (!record.processTreeTerminationSettled || record.processTreeTerminationConfirmed)
+      ) return;
       record.processTreeTerminationConfirmed = false;
       record.processTreeTerminationSettled = false;
       const deadlineAt = record.shutdownDeadlineAt === null
@@ -1124,6 +1127,7 @@ export class RuntimeSupervisor {
         resolveTermination(false);
       }
       void termination.then((confirmed) => {
+        if (record.processTreeTermination !== termination) return;
         record.processTreeTerminationConfirmed = confirmed;
         record.processTreeTerminationSettled = true;
         if (!confirmed && this.current === record) {

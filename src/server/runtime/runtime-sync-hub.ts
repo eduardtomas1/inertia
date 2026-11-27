@@ -310,6 +310,23 @@ export class RuntimeSyncHub<Socket> {
     createEvent: (sync: RuntimeSyncCursor) => RuntimeMutationEvent,
   ): void {
     const committed = this.sequencer.commit(createEvent);
+    if (this.clients.size === 0) return;
+    if (this.clients.size === 1) {
+      for (const [socket, subscription] of this.clients) {
+        const frame = projectRuntimeFrameForAuthority(
+          committed.event,
+          subscription,
+          subscription.authority,
+          this.watcherLink,
+          this.detachedChatRecords,
+        );
+        this.send(
+          socket,
+          frame === committed.event ? committed : new SerializedRuntimeEvent(frame),
+        );
+      }
+      return;
+    }
     const payloads = new Map<RuntimeSequencedFrame, SerializedRuntimeEvent>([
       [committed.event, committed],
     ]);

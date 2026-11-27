@@ -11,6 +11,18 @@ export interface ThreadToolRegistrations {
 }
 
 const MAX_CACHED_THREADS = 1_024;
+const CACHED_BY_DURABLE = new WeakMap<ThreadToolRegistrations, CachedThreadToolRegistrations>();
+
+/**
+ * Returns the runtime's cached registrations wrapper for `registrations` when
+ * one has been attached to it, so callers that hold the durable store share
+ * the same in-memory view as bridge callers even if a durable write failed.
+ */
+export function cachedThreadToolRegistrationsFor(
+  registrations: ThreadToolRegistrations,
+): ThreadToolRegistrations {
+  return CACHED_BY_DURABLE.get(registrations) ?? registrations;
+}
 
 /**
  * A bounded memory of recent registrations in front of an optional durable
@@ -24,6 +36,7 @@ export class CachedThreadToolRegistrations implements ThreadToolRegistrations {
 
   constructor(durable?: ThreadToolRegistrations) {
     this.#durable = durable;
+    if (durable) CACHED_BY_DURABLE.set(durable, this);
   }
 
   record(threadId: string, packs: ThreadToolPackDigests): void {

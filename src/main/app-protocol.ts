@@ -8,6 +8,10 @@ import { HTML_RENDER_PROTOCOL_HOST, isHtmlRenderId } from "../shared/html-render
 import { parseWorkspaceImagePreviewUrl } from "../shared/workspace-image-preview.js";
 import type { AttachmentRegistry } from "./attachment-registry.js";
 import {
+  attachmentWindowScopeForRegistry,
+  authorizeAttachmentForConversationScope,
+} from "./attachment-window-scope.js";
+import {
   resolveAttachmentPreviewResponse,
   type AttachmentDocumentPreviewExtractor,
   type ConversationAttachmentAccess,
@@ -98,12 +102,22 @@ export function registerAppProtocol(options: {
       const previewId = /^attachment-preview\/([0-9a-f-]{36})$/iu
         .exec(requestedPath)?.[1];
       if (previewId) {
+        const registry = options.attachmentRegistry();
+        const scopePolicy = options.conversationScope
+          ? authorizeAttachmentForConversationScope(
+            previewId,
+            options.conversationScope,
+            registry ? attachmentWindowScopeForRegistry(registry) : null,
+            options.runtimeSupervisor(),
+          )
+          : undefined;
         const response = await resolveAttachmentPreviewResponse(
-          options.attachmentRegistry(),
+          registry,
           options.conversationAttachments(),
           previewId,
           options.extractDocument,
           request.signal,
+          scopePolicy,
         );
         if (!response) throw new Error();
         return response;

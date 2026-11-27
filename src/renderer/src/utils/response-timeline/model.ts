@@ -19,6 +19,10 @@ import type { WatcherNoteAttribution, WatcherWakeSummary } from "@shared/watcher
 import { activityNeedsAttention } from "./activity-attention";
 import { providerBackendName } from "../providerBackendName";
 import { isSecretRequestMessage, type SecretRequestMessage } from "./secretRequests";
+import {
+  EN_COLLATOR,
+  compareTimestampsAsc as compareTimestamps,
+} from "../fastCompare";
 
 /** Current workspace status is intentionally not accepted by the timeline. */
 export type TurnGitArtifactSummary = TurnGitArtifact;
@@ -66,8 +70,9 @@ export function layeredHtmlRenders(
 ): ChatMessage[] {
   const lastFollowUp = turn.followUpMessages.at(-1);
   if (!lastFollowUp) return turn.htmlRenders;
-  const since = timestamp(lastFollowUp.createdAt);
-  return turn.htmlRenders.filter(({ createdAt }) => timestamp(createdAt) > since);
+  return turn.htmlRenders.filter(
+    ({ createdAt }) => compareTimestamps(createdAt, lastFollowUp.createdAt) > 0,
+  );
 }
 
 export function answerTailCommentary(
@@ -78,20 +83,25 @@ export function answerTailCommentary(
     | "activities"
     | "approvals"
     | "inputRequests"
+    | "secretRequests"
     | "commentaryMessages"
     | "followUpMessages"
   >,
 ): ChatMessage[] | null {
   const lastRender = layeredHtmlRenders(turn).at(-1);
   if (!turn.isActive || !lastRender) return null;
-  if (turn.approvals.length > 0 || turn.inputRequests.length > 0) return null;
-  const since = timestamp(lastRender.createdAt);
+  if (
+    turn.approvals.length > 0
+    || turn.inputRequests.length > 0
+    || turn.secretRequests.some(({ secretRequest }) => secretRequest.status === "pending")
+  ) return null;
   const afterRender = ({ createdAt }: { createdAt: string }): boolean =>
-    timestamp(createdAt) > since;
+    compareTimestamps(createdAt, lastRender.createdAt) > 0;
   const workFollows = turn.activities.some((activity) =>
     (activity.kind === "tool" || activity.kind === "command" || activity.kind === "file")
     && afterRender(activity))
-    || turn.followUpMessages.some(afterRender);
+    || turn.followUpMessages.some(afterRender)
+    || turn.secretRequests.some(afterRender);
   return workFollows ? null : turn.commentaryMessages.filter(afterRender);
 }
 
@@ -134,20 +144,25 @@ export type ResponseTimelineItem =
       compatibility: ResponseTimelineCompatibility;
     };
 
-function timestamp(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function compareTimestamped(
   left: { id: string; createdAt: string },
   right: { id: string; createdAt: string },
 ): number {
-  return timestamp(left.createdAt) - timestamp(right.createdAt) || left.id.localeCompare(right.id, "en");
+  return compareTimestamps(left.createdAt, right.createdAt) || EN_COLLATOR.compare(left.id, right.id);
 }
 
 function compareTurns(left: AgentTurn, right: AgentTurn): number {
-  return timestamp(left.requestedAt) - timestamp(right.requestedAt) || left.id.localeCompare(right.id, "en");
+  return compareTimestamps(left.requestedAt, right.requestedAt) || EN_COLLATOR.compare(left.id, right.id);
+}
+
+function sortIfNeeded<T>(
+  items: T[],
+  compare: (left: T, right: T) => number,
+): T[] {
+  for (let index = 1; index < items.length; index += 1) {
+    if (compare(items[index - 1]!, items[index]!) > 0) return items.sort(compare);
+  }
+  return items;
 }
 
 function latestReasoning(items: AgentReasoning[]): AgentReasoning | null {
@@ -227,11 +242,12 @@ function buildTurn(
     || userMessage.turnId !== agentTurn.id
   ) return null;
 
-  const scopedMessages = (indexes.messagesByTurn.get(agentTurn.id) ?? [])
-    .filter((message) =>
+  const scopedMessages = sortIfNeeded(
+    (indexes.messagesByTurn.get(agentTurn.id) ?? []).filter((message) =>
       message.conversationId === agentTurn.conversationId
-      && message.id !== userMessage.id)
-    .sort(compareTimestamped);
+      && message.id !== userMessage.id),
+    compareTimestamped,
+  );
   const assistantMessages = scopedMessages.filter(({ role }) => role === "assistant");
   const followUpMessages = scopedMessages.filter(({ role }) => role === "user");
   const terminalAssistantMessage = agentTurn.terminalAssistantMessageId === null
@@ -249,16 +265,18 @@ function buildTurn(
   const systemMessages = scopedMessages.filter((message) =>
     message.role === "system" && !isHtmlRenderReference(message.htmlRender) && !isSecretRequestMessage(message)
     && !isSentToUserMessage(message));
-  const turnActivities = (indexes.activitiesByTurn.get(agentTurn.id) ?? [])
-    .filter((activity) =>
-      activity.conversationId === agentTurn.conversationId)
-    .sort(compareTimestamped);
+  const turnActivities = sortIfNeeded(
+    (indexes.activitiesByTurn.get(agentTurn.id) ?? []).filter((activity) =>
+      activity.conversationId === agentTurn.conversationId),
+    compareTimestamped,
+  );
   const activities = turnActivities.filter((activity) =>
     !isTurnCheckpointUnavailableActivity(activity));
-  const reasonings = (indexes.reasoningsByTurn.get(agentTurn.id) ?? [])
-    .filter((reasoning) =>
-      reasoning.conversationId === agentTurn.conversationId)
-    .sort(compareTimestamped);
+  const reasonings = sortIfNeeded(
+    (indexes.reasoningsByTurn.get(agentTurn.id) ?? []).filter((reasoning) =>
+      reasoning.conversationId === agentTurn.conversationId),
+    compareTimestamped,
+  );
   const plans = (indexes.plansByTurn.get(agentTurn.id) ?? [])
     .filter((plan) => plan.conversationId === agentTurn.conversationId);
   const checkpoint = agentTurn.checkpointId
@@ -418,7 +436,10 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     ...input.messages.filter((message) => message.role === "system" && message.turnId === null && message.compaction).map((message) => ({ kind: "compaction" as const, id: message.id, message })),
   ];
   const time = (item: ResponseTimelineItem): string => item.kind === "turn" ? item.turn.requestedAt : item.kind === "compaction" ? item.message.createdAt : "";
-  ordered.sort((left, right) => timestamp(time(left)) - timestamp(time(right)) || left.id.localeCompare(right.id, "en"));
+  sortIfNeeded(
+    ordered,
+    (left, right) => compareTimestamps(time(left), time(right)) || EN_COLLATOR.compare(left.id, right.id),
+  );
   return [
     ...(hasCompatibility
       ? [{
@@ -494,21 +515,46 @@ export function updateResponseTimelineForActivityDelta(
   previousTimeline: ResponseTimelineItem[],
 ): ResponseTimelineItem[] | null {
   if (input.activities === previousActivities) return previousTimeline;
-  const previousById = new Map(
-    previousActivities.map((activity) => [activity.id, activity]),
-  );
-  const nextById = new Map(
-    input.activities.map((activity) => [activity.id, activity]),
-  );
-  const changedTurnIds = new Set<string>();
+  let prefix = 0;
+  const sharedMin = Math.min(previousActivities.length, input.activities.length);
+  while (prefix < sharedMin && previousActivities[prefix] === input.activities[prefix]) {
+    prefix += 1;
+  }
+  let prevEnd = previousActivities.length - 1;
+  let nextEnd = input.activities.length - 1;
+  while (
+    prevEnd >= prefix
+    && nextEnd >= prefix
+    && previousActivities[prevEnd] === input.activities[nextEnd]
+  ) {
+    prevEnd -= 1;
+    nextEnd -= 1;
+  }
+  if (prefix > prevEnd && prefix > nextEnd) return previousTimeline;
+
+  const previousById = new Map<string, AgentActivity>();
+  for (let index = prefix; index <= prevEnd; index += 1) {
+    const activity = previousActivities[index]!;
+    previousById.set(activity.id, activity);
+  }
+  const nextById = new Map<string, AgentActivity>();
+  for (let index = prefix; index <= nextEnd; index += 1) {
+    const activity = input.activities[index]!;
+    nextById.set(activity.id, activity);
+  }
+  let changedTurnId: string | null = null;
   const recordChangedTurn = (
     activity: AgentActivity | undefined,
   ): boolean => {
     if (!activity || activity.turnId === null) return false;
-    changedTurnIds.add(activity.turnId);
-    return changedTurnIds.size <= 1;
+    if (changedTurnId === null) {
+      changedTurnId = activity.turnId;
+      return true;
+    }
+    return changedTurnId === activity.turnId;
   };
-  for (const activity of input.activities) {
+  for (let index = prefix; index <= nextEnd; index += 1) {
+    const activity = input.activities[index]!;
     const previous = previousById.get(activity.id);
     if (previous === activity) continue;
     if (!recordChangedTurn(activity)) return null;
@@ -518,59 +564,74 @@ export function updateResponseTimelineForActivityDelta(
       && !recordChangedTurn(previous)
     ) return null;
   }
-  for (const activity of previousActivities) {
+  for (let index = prefix; index <= prevEnd; index += 1) {
+    const activity = previousActivities[index]!;
     if (nextById.has(activity.id)) continue;
     if (!recordChangedTurn(activity)) return null;
   }
-  if (changedTurnIds.size === 0) return previousTimeline;
+  if (changedTurnId === null) return previousTimeline;
 
-  const turnId = [...changedTurnIds][0]!;
-  const previousItem = previousTimeline.find(
-    (item) => item.kind === "turn" && item.turn.id === turnId,
-  );
-  const agentTurn = input.turns.find(({ id }) => id === turnId);
-  if (previousItem?.kind !== "turn" || !agentTurn) return null;
+  const turnId = changedTurnId;
+  let turnIndex = -1;
+  for (let index = previousTimeline.length - 1; index >= 0; index -= 1) {
+    const candidate = previousTimeline[index]!;
+    if (candidate.kind === "turn" && candidate.turn.id === turnId) {
+      turnIndex = index;
+      break;
+    }
+  }
+  if (turnIndex < 0) return null;
+  const previousItem = previousTimeline[turnIndex]!;
+  if (previousItem.kind !== "turn") return null;
 
-  const scoped = buildResponseTimeline({
-    turns: [agentTurn],
-    messages: input.messages.filter(({ turnId: owner }) => owner === turnId),
-    activities: input.activities.filter(
-      ({ turnId: owner }) => owner === turnId,
-    ),
-    reasonings: input.reasonings.filter(
-      ({ turnId: owner }) => owner === turnId,
-    ),
-    plans: input.plans?.filter(({ turnId: owner }) => owner === turnId),
-    approvals: input.approvals?.filter(({ turnId: owner }) => owner === turnId),
-    inputRequests: input.inputRequests?.filter(
-      ({ turnId: owner }) => owner === turnId,
-    ),
-    checkpoints: input.checkpoints.filter(
-      ({ id, turnId: owner }) =>
-        owner === turnId || id === agentTurn.checkpointId,
-    ),
-    gitArtifacts: input.gitArtifacts?.filter(
-      ({ turnId: owner }) => owner === turnId,
-    ),
-    watcherWakes: input.watcherWakes?.filter(
-      ({ turnId: owner }) => owner === turnId,
-    ),
-  });
-  const scopedTurns = scoped.filter((item) => item.kind !== "watcher-note");
-  const rebuilt = scopedTurns.length === 1 && scopedTurns[0]?.kind === "turn"
-    ? scopedTurns[0]
-    : null;
-  if (!rebuilt) return null;
+  let agentTurn: AgentTurn | undefined;
+  for (let index = input.turns.length - 1; index >= 0; index -= 1) {
+    if (input.turns[index]!.id === turnId) {
+      agentTurn = input.turns[index]!;
+      break;
+    }
+  }
+  if (!agentTurn || agentTurn.association !== "authoritative") return null;
+
+  const turnActivities: AgentActivity[] = [];
+  for (const activity of input.activities) {
+    if (activity.turnId === turnId && activity.conversationId === agentTurn.conversationId) {
+      turnActivities.push(activity);
+    }
+  }
+  sortIfNeeded(turnActivities, compareTimestamped);
+  const activities: AgentActivity[] = [];
+  const importantActivities: AgentActivity[] = [];
+  const foldableActivities: AgentActivity[] = [];
+  let toolCallCount = 0;
+  for (const activity of turnActivities) {
+    if (isTurnCheckpointUnavailableActivity(activity)) continue;
+    activities.push(activity);
+    if (activity.kind === "tool" || activity.kind === "command" || activity.kind === "file") {
+      toolCallCount += 1;
+    }
+    (activityNeedsAttention(activity)
+      ? importantActivities
+      : foldableActivities).push(activity);
+  }
   const replacement: ResponseTimelineItem = {
-    ...rebuilt,
+    kind: "turn",
+    id: previousItem.id,
     turn: {
-      ...rebuilt.turn,
-      index: previousItem.turn.index,
-      ...(previousItem.turn.providerChanged ? { providerChanged: true as const } : {}),
+      ...previousItem.turn,
+      activities,
+      importantActivities,
+      foldableActivities,
+      toolCallCount,
+      checkpointUnavailableReason: checkpointUnavailableReason(
+        previousItem.turn.checkpoint,
+        turnActivities,
+      ),
     },
   };
-  return previousTimeline.map((item) =>
-    item.id === turnId ? replacement : item);
+  const nextTimeline = previousTimeline.slice();
+  nextTimeline[turnIndex] = replacement;
+  return nextTimeline;
 }
 
 function checkpointUnavailableReason(
@@ -633,6 +694,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
 }
 
 function stabilizeTurn(left: ResponseTurn | undefined, right: ResponseTurn): ResponseTurn {
+  if (left === right) return left;
   return left && sameResponseTurn(left, right) ? left : right;
 }
 
@@ -674,11 +736,21 @@ export function stabilizeResponseTimeline(
   next: ResponseTimelineItem[],
   previous: ResponseTimelineItem[],
 ): ResponseTimelineItem[] {
-  if (previous.length === 0) return next;
-  const previousById = new Map(previous.map((item) => [item.id, item]));
+  if (next === previous || previous.length === 0) return next;
+  let previousById: Map<string, ResponseTimelineItem> | null = null;
+  const findPrior = (id: string, index: number): ResponseTimelineItem | undefined => {
+    const aligned = previous[index];
+    if (aligned?.id === id) return aligned;
+    previousById ??= new Map(previous.map((entry) => [entry.id, entry]));
+    return previousById.get(id);
+  };
   let changed = next.length !== previous.length;
   const result = next.map((item, index) => {
-    const prior = previousById.get(item.id);
+    const prior = findPrior(item.id, index);
+    if (prior === item) {
+      if (item !== previous[index]) changed = true;
+      return item;
+    }
     if (item.kind === "turn") {
       const turn = stabilizeTurn(prior?.kind === "turn" ? prior.turn : undefined, item.turn);
       const stable = prior?.kind === "turn" && turn === prior.turn ? prior : { ...item, turn };

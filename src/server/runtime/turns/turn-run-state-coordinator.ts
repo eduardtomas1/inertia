@@ -22,6 +22,7 @@ import {
   broadcastConversationShellFor,
   broadcastTurnConversationShell,
 } from "./turn-controller-support";
+import type { TurnSecretEndReason } from "./turn-secret-output";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -41,6 +42,7 @@ interface TurnRunStateCoordinatorOptions {
   providerRunOwnershipBarriers: Map<string, Promise<void>>;
   now(): string;
   activity(active: ActiveTurn): void;
+  cancelSecrets?(active: ActiveTurn, reason: TurnSecretEndReason): void;
   release(active: ActiveTurn): Promise<void>;
   track(value: void | Promise<void> | undefined): void;
 }
@@ -333,6 +335,10 @@ export class TurnRunStateCoordinator {
       });
     }
     active.inputIds.clear();
+    this.options.cancelSecrets?.(
+      active,
+      active.deferredSettlement?.status === "cancelled" ? "cancelled" : "stopped",
+    );
   }
 
   private releaseUnconfirmedCleanup(

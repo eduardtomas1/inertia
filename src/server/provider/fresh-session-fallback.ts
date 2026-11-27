@@ -90,18 +90,25 @@ export function startHarnessWithFreshSessionFallback(
     withheld = null;
     if (deliver) for (const event of events) forward?.(event);
   };
-  const first = harness.start({
-    ...options,
-    callbacks: {
-      onEvent: (event) => {
-        if (firstSuperseded) return;
-        if (withheld && isTerminalStatus(event)) withheld.push(event);
-        else forward?.(event);
+  let first: AgentHarnessRun;
+  try {
+    first = harness.start({
+      ...options,
+      callbacks: {
+        onEvent: (event) => {
+          if (firstSuperseded) return;
+          if (withheld && isTerminalStatus(event)) withheld.push(event);
+          else forward?.(event);
+        },
       },
-    },
-  });
+    });
+  } catch (error) {
+    release();
+    throw error;
+  }
   let current = first;
   let cancelled = false;
+  let forcedCancel = false;
   const result = first.result.then((
     outcome,
   ): ProviderRunResult | Promise<ProviderRunResult> => {
@@ -129,6 +136,7 @@ export function startHarnessWithFreshSessionFallback(
     firstSuperseded = true;
     settleFirstAttempt(false);
     const route = replacement.callbacks?.onEvent ?? forward;
+    let next: AgentHarnessRun;
     try {
       const {
         sessionId: _sessionId,
@@ -140,25 +148,30 @@ export function startHarnessWithFreshSessionFallback(
       } = options.input;
       // The rejected attempt's injection authority is bound to that attempt; only the replacement's own may be used.
       const { nativeContinuation: _startContinuation, historyInjection: _firstInjection, ...fresh } = options;
-      const next = harness.start({
-        ...fresh,
-        environment,
-        ...(replacement.historyInjection ? { historyInjection: replacement.historyInjection } : {}),
-        input: { ...input, prompt: replacement.prompt },
-        callbacks: {
-          onEvent: (event) => {
-            if (event.type === "status" && event.status === "starting") return;
-            route?.(event);
+      const fallbackEnvironment = { ...environment };
+      try {
+        next = harness.start({
+          ...fresh,
+          environment: fallbackEnvironment,
+          ...(replacement.historyInjection ? { historyInjection: replacement.historyInjection } : {}),
+          input: { ...input, prompt: replacement.prompt },
+          callbacks: {
+            onEvent: (event) => {
+              if (event.type === "status" && event.status === "starting") return;
+              route?.(event);
+            },
           },
-        },
-      });
-      current = next;
-      if (cancelled) next.cancel(false);
-      return next.result;
+        });
+      } finally {
+        release();
+      }
     } catch {
       release();
       return replacementStartFailed(options.input);
     }
+    current = next;
+    if (cancelled) next.cancel(forcedCancel);
+    return next.result;
   }, (error: unknown) => {
     release();
     settleFirstAttempt(true);
@@ -170,6 +183,7 @@ export function startHarnessWithFreshSessionFallback(
     result,
     cancel: (force) => {
       cancelled = true;
+      if (force) forcedCancel = true;
       current.cancel(force);
     },
     get extension() {

@@ -42,6 +42,8 @@ export interface ObservedWorkspaceEntry {
   kind: WorkspaceEntryKind;
 }
 
+export const WORKSPACE_METADATA_BATCH_SIZE = 32;
+
 const workspaceEntryNameCollator = new Intl.Collator("en", {
   numeric: true,
   sensitivity: "base",
@@ -81,16 +83,6 @@ async function stableContainedDirectory(
     && info.isDirectory()
     && sameIdentity(info, identity)
     && isContained(root, await realpath(absolute));
-}
-
-async function stableDirectoryIdentity(
-  absolute: string,
-  identity: WorkspaceEntryIdentity,
-): Promise<boolean> {
-  const info = await lstat(absolute);
-  return !info.isSymbolicLink()
-    && info.isDirectory()
-    && sameIdentity(info, identity);
 }
 
 export async function openStableWorkspaceDirectory(
@@ -153,13 +145,11 @@ export async function describeStableWorkspaceEntries(
   parentIdentity: WorkspaceEntryIdentity,
   observed: readonly ObservedWorkspaceEntry[],
 ): Promise<Array<StableWorkspaceEntry | null>> {
+  if (observed.length === 0) return [];
   if (!(await stableContainedDirectory(root, parentAbsolute, parentIdentity))) {
     return observed.map(() => null);
   }
   const described = await Promise.all(observed.map(async ({ absolute, kind: observedKind }) => {
-    if (!(await stableDirectoryIdentity(parentAbsolute, parentIdentity))) {
-      return null;
-    }
     let info: Stats;
     try {
       info = await lstat(absolute);
@@ -172,10 +162,7 @@ export async function describeStableWorkspaceEntries(
       throw error;
     }
     const kind = entryKind(info);
-    if (
-      (observedKind !== "other" && kind !== observedKind)
-      || !(await stableDirectoryIdentity(parentAbsolute, parentIdentity))
-    ) return null;
+    if (observedKind !== "other" && kind !== observedKind) return null;
     return {
       kind,
       size: kind === "file" ? info.size : null,

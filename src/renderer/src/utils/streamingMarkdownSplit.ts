@@ -1,6 +1,7 @@
 export interface StreamingMarkdownSplit {
   readonly content: string;
   readonly blocks: readonly string[];
+  readonly definitions: string;
   readonly settledEnd: number;
   readonly lineStart: number;
   readonly scannedEnd: number;
@@ -25,6 +26,7 @@ const HTML_BLOCK_OPEN = /^ {0,3}<(details|div|table|section|article|aside|figure
 const EMPTY_SPLIT: StreamingMarkdownSplit = {
   content: "",
   blocks: [],
+  definitions: "",
   settledEnd: 0,
   lineStart: 0,
   scannedEnd: 0,
@@ -34,6 +36,11 @@ const EMPTY_SPLIT: StreamingMarkdownSplit = {
   fence: null,
   html: null,
 };
+
+function blockReferenceDefinitions(block: string): string {
+  if (!block.includes("]:") || FENCE.test(block) || INDENTED_CODE.test(block)) return "";
+  return block.match(REFERENCE_DEFINITION)?.join("\n") ?? "";
+}
 
 function closesFence(line: string, fence: string): boolean {
   const marker = FENCE.exec(line)?.[1];
@@ -61,8 +68,13 @@ function continuesBlock(line: string, blockIsList: boolean): boolean {
 }
 
 function continuesFrom(previous: StreamingMarkdownSplit, content: string): boolean {
-  return content.length >= previous.scannedEnd
-    && content.startsWith(previous.content.slice(0, previous.scannedEnd));
+  const scanned = previous.scannedEnd;
+  if (scanned === 0) return true;
+  if (content.length < scanned) return false;
+  if (content.charCodeAt(scanned - 1) !== previous.content.charCodeAt(scanned - 1)) return false;
+  if (content.length >= previous.content.length && content.startsWith(previous.content)) return true;
+  if (scanned === previous.content.length) return false;
+  return content.startsWith(previous.content.slice(0, scanned));
 }
 
 export function splitStreamingMarkdown(
@@ -72,10 +84,13 @@ export function splitStreamingMarkdown(
   if (previous.content === content) return previous;
   const base = continuesFrom(previous, content) ? previous : EMPTY_SPLIT;
   let blocks: string[] | null = null;
-  let { settledEnd, lineStart, blockStart, blockIsList, breakAt, fence, html } = base;
+  let { definitions, settledEnd, lineStart, blockStart, blockIsList, breakAt, fence, html } = base;
   const settle = (): void => {
+    const block = content.slice(blockStart, breakAt).replace(/\r?\n$/u, "");
     blocks ??= [...base.blocks];
-    blocks.push(content.slice(blockStart, breakAt).replace(/\r?\n$/u, ""));
+    blocks.push(block);
+    const added = blockReferenceDefinitions(block);
+    if (added) definitions = definitions ? `${definitions}\n${added}` : added;
     settledEnd = lineStart;
     blockStart = lineStart;
     breakAt = -1;
@@ -119,6 +134,7 @@ export function splitStreamingMarkdown(
   return {
     content,
     blocks: blocks ?? base.blocks,
+    definitions,
     settledEnd,
     lineStart,
     scannedEnd,
@@ -135,8 +151,10 @@ export function streamingMarkdownTail(split: StreamingMarkdownSplit): string {
 }
 
 export function markdownReferenceDefinitions(blocks: readonly string[]): string {
-  return blocks
-    .filter((block) => !FENCE.test(block) && !INDENTED_CODE.test(block))
-    .flatMap((block) => block.match(REFERENCE_DEFINITION) ?? [])
-    .join("\n");
+  let result = "";
+  for (const block of blocks) {
+    const definitions = blockReferenceDefinitions(block);
+    if (definitions) result = result ? `${result}\n${definitions}` : definitions;
+  }
+  return result;
 }

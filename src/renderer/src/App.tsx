@@ -75,6 +75,7 @@ import { useLaunchRequests } from "./hooks/useLaunchRequests";
 import { focusWorkspacePreviewAddress } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import { cacheColorTheme, cacheThemePreference } from "./utils/theme";
+import { runningTurnPlanMode } from "./utils/planFromText";
 import { cachedAppSettings } from "./utils/cachedSettings";
 import { applyInterfaceScale } from "./utils/interfaceScale";
 import { withRequestId, type CommandWithoutId } from "./lib/runtimeCommands";
@@ -280,6 +281,7 @@ export default function App(): React.JSX.Element {
     messages,
     conversation?.status ?? "idle",
     conversationProjection.streaming,
+    runningTurnPlanMode(conversationProjection.turns, conversation?.interactionMode ?? null, conversationProjection.latestTurnSummary?.id ?? null),
   );
 
   const {
@@ -1195,28 +1197,15 @@ export default function App(): React.JSX.Element {
       onClose={watchers.attach.close} onAttached={watchers.attach.attached}
       onOpenProviderSetup={openProviderSetup} onOpenBackendSetup={openBackendSetup} />
     <AppLayout
-      platform={platform}
-      documentActive={documentActive}
-      documentVisible={documentVisible}
-      settings={settings}
-      connection={connection}
-      appUpdate={appUpdate}
-      updateEverything={updateEverything}
-      providerQuotaNotices={providerQuotaNotices}
-      workspaceLayout={workspaceLayout}
-      view={view}
-      setView={layoutCallbacks.setView}
-      busyAction={busyAction}
-      visibleError={visibleError}
-      setActionError={setActionError}
-      commitDialogOpen={commitDialogOpen}
-      setCommitDialogOpen={setCommitDialogOpen}
-      dailyWorkOpen={dailyWorkOpen}
-      setDailyWorkOpen={setDailyWorkOpen}
-      paletteOpen={paletteOpen}
-      setPaletteOpen={setPaletteOpen}
-      tasksFocusAddRequest={tasksFocusAddRequest}
-      setTasksFocusAddRequest={setTasksFocusAddRequest}
+      platform={platform} documentActive={documentActive} documentVisible={documentVisible}
+      settings={settings} connection={connection} appUpdate={appUpdate} updateEverything={updateEverything}
+      providerQuotaNotices={providerQuotaNotices} workspaceLayout={workspaceLayout}
+      view={view} setView={layoutCallbacks.setView}
+      busyAction={busyAction} visibleError={visibleError} setActionError={setActionError}
+      commitDialogOpen={commitDialogOpen} setCommitDialogOpen={setCommitDialogOpen}
+      dailyWorkOpen={dailyWorkOpen} setDailyWorkOpen={setDailyWorkOpen}
+      paletteOpen={paletteOpen} setPaletteOpen={setPaletteOpen}
+      tasksFocusAddRequest={tasksFocusAddRequest} setTasksFocusAddRequest={setTasksFocusAddRequest}
       project={composerProject}
       conversation={conversation}
       headerConversation={draftConversation.conversation ?? conversation}

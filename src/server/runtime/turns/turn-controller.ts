@@ -954,8 +954,8 @@ export class TurnController {
   failBeforeStart(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
-    requestProviderCancellation(this.providers, conversationId);
-    return this.settle(active, "failed", "turn-start-failed", message);
+    try { return this.settle(active, "failed", "turn-start-failed", message); }
+    finally { requestProviderCancellation(this.providers, conversationId); }
   }
 
   acquireFollowUpAdmission(conversationId: string): FollowUpAdmissionLease | null {
@@ -1050,16 +1050,16 @@ export class TurnController {
   unsupportedInteraction(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
-    requestProviderCancellation(this.providers, conversationId);
-    return this.settle(active, "failed", "unsupported-interaction", message);
+    try { return this.settle(active, "failed", "unsupported-interaction", message); }
+    finally { requestProviderCancellation(this.providers, conversationId); }
   }
 
   async interruptForUpdate(conversationIds: readonly string[], subject: string): Promise<boolean> {
     for (const conversationId of conversationIds) {
       const active = this.activeByConversation.get(conversationId);
       if (!active || active.runState.isTerminal()) continue;
-      requestProviderCancellation(this.providers, conversationId);
-      this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id, subject));
+      try { this.settle(active, "interrupted", "app-update", updateInterruptionMessage(this.store, conversationId, active.turn.id, subject)); }
+      finally { requestProviderCancellation(this.providers, conversationId); }
     }
     return await this.waitForProviderCleanup(conversationIds, Date.now() + PROVIDER_CLEANUP_WAIT_MS);
   }
@@ -1069,15 +1069,16 @@ export class TurnController {
     this.closing = true;
     this.admissions.dispose();
     for (const active of this.activeByConversation.values()) {
-      requestProviderCancellation(this.providers, active.conversation.id);
-      this.settle(
-        active,
-        "interrupted",
-        cause,
-        cause === "runtime-shutdown"
-          ? "The local runtime shut down before this turn completed."
-          : "The local runtime crashed before this turn completed.",
-      );
+      try {
+        this.settle(
+          active,
+          "interrupted",
+          cause,
+          cause === "runtime-shutdown"
+            ? "The local runtime shut down before this turn completed."
+            : "The local runtime crashed before this turn completed.",
+        );
+      } finally { requestProviderCancellation(this.providers, active.conversation.id); }
     }
     try {
       await this.providers.disposeAll();
@@ -1108,8 +1109,8 @@ export class TurnController {
       for (const projected of this.secretRequests.events(event)) { this.providerEvents.project(active, projected, observer); this.nativeGoals.handleEvent(active, projected); }
       return true;
     } catch (error) {
-      requestProviderCancellation(this.providers, active.conversation.id);
-      this.settle(active, "failed", "stream-persistence-failed", this.secretRequests.text(publicTurnError(error)));
+      try { this.settle(active, "failed", "stream-persistence-failed", this.secretRequests.text(publicTurnError(error))); }
+      finally { requestProviderCancellation(this.providers, active.conversation.id); }
       return false;
     }
   }

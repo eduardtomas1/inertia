@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../../shared/model-routing";
 import type { ConversationRollbackResult, HistoryRollbackPlan, RollbackFiles } from "../../shared/orchestration-history";
@@ -106,6 +107,8 @@ export async function rollbackConversationHistory(dependencies: HistoryRollbackD
     const control = { id: operationId, threadId: conversationId,
       projectId: conversation.projectId, request, rollback: plan, sourceWorkspaceKey: workspaceKey, targetWorkspaceKey: workspaceKey,
       selection, continuationIdentity: versionedContinuationIdentitySchema.parse(route.continuationIdentity) };
+    const nativeCwd = await realpath(workspaceKey).catch(() => workspaceKey);
+    signal.throwIfAborted();
     // A live fork of this chat fences only its provider conversation, so `busy()` cannot see it.
     if (nativeControlLockResources(control).some((id) => {
       const holder = store.orchestration.nativeControls.lockHolder(id);
@@ -114,7 +117,7 @@ export async function rollbackConversationHistory(dependencies: HistoryRollbackD
     const effect = store.orchestration.nativeControls.start(control,
       input.source, store.orchestration.history.nativeReceipt(operationId, plan, restoreFiles));
     try {
-      const result = await providers.nativeConversation(request, selection, { cwd: workspaceKey, signal, timeoutMs: 30_000 });
+      const result = await providers.nativeConversation(request, selection, { cwd: nativeCwd, signal, timeoutMs: 30_000 });
       const after = store.conversation(conversationId);
       const afterRoute = providers.resolveModelRoute(after.modelSelection);
       if (durableJson(modelSelectionSchema.parse(after.modelSelection)) !== durableJson(selection)

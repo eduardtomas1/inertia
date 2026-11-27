@@ -166,7 +166,8 @@ test("Stop and send stops a Kimi run and sends the draft as the next turn in the
     await expect(page.getByRole("list", { name: "Queued messages" })).toContainText("Queued behind stop and send.");
 
     await input.fill("Do this instead.");
-    await expect(composer.getByRole("button", { name: "Stop and send" })).toBeVisible();
+    const messageActions = composer.getByRole("group", { name: "Message actions" });
+    await expect(messageActions.getByRole("button", { name: "Stop and send", exact: true })).toBeVisible();
     await capture("running-draft");
     await input.focus();
 
@@ -180,7 +181,7 @@ test("Stop and send stops a Kimi run and sends the draft as the next turn in the
     await expect(sent.locator('[data-turn-status="completed"]')).toBeVisible();
     await expect(page.getByText("Queue paused · Stopped", { exact: true })).toBeVisible();
     await expect(page.getByRole("list", { name: "Queued messages" })).toContainText("Queued behind stop and send.");
-    await expect(composer.getByRole("button", { name: "Resume queue" })).toBeVisible();
+    await expect(messageActions.getByRole("button", { name: "Resume queue", exact: true })).toBeVisible();
 
     const events = await wireEvents(wirePath);
     const prompts = events.filter(event => event.method === "session/prompt");

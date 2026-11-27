@@ -717,10 +717,9 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
       store.close();
     }
     const region = await showChat(app, chat);
-    const turnWith = (step: number) => page.locator("[data-turn-id]")
-      .filter({ has: page.getByText(`Step ${step} of the long delegated history.`, { exact: true }) });
-    await turnWith(46).getByRole("button", { name: /^Worked/u }).click();
-    await expect(page.getByRole("button", { name: "12 subagents, 12 done" })).toBeVisible();
+    const turnWith = (step: number) => page.locator("[data-turn-id]").filter({ has: page.getByText(`Step ${step} of the long delegated history.`, { exact: true }) });
+    const latestFold = turnWith(46).getByRole("button", { name: /^Worked/u });
+    await latestFold.click(); await expect(page.getByRole("button", { name: "12 subagents, 12 done" })).toBeVisible(); await latestFold.click();
     await expect(page.getByText("Step 1 of the long delegated history.", { exact: true })).toHaveCount(0);
     const finished = region.getByRole("button", { name: "Finished 38 · 2 failed" });
     await expect(finished).toBeVisible();

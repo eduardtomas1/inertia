@@ -162,7 +162,8 @@ describe("composer Resume primary action, shared Stop/Resume latch, and unlocked
     );
 
     const composer = screen.getByRole("region", { name: "Message composer" });
-    const primaryResume = await within(composer).findByRole("button", { name: "Resume queue" }, { timeout: 5_000 });
+    const messageActions = within(composer).getByRole("group", { name: "Message actions" });
+    const primaryResume = await within(messageActions).findByRole("button", { name: "Resume queue" }, { timeout: 5_000 });
     expect(primaryResume).toHaveAttribute("data-composer-action-state", "resume-ready");
 
     // Pending question/approval hides both primary and inline Resume buttons.
@@ -244,9 +245,8 @@ describe("composer Resume primary action, shared Stop/Resume latch, and unlocked
     );
 
     await screen.findByText("Already queued", undefined, { timeout: 5_000 });
-    // Queue slot renders in-flow above .composer inside .composer-shell.
-    const shell = document.querySelector(".composer-shell")!;
-    expect(shell.firstElementChild).toHaveClass("composer-queue-slot");
+    const composer = document.querySelector(".composer")!;
+    expect(composer.firstElementChild).toHaveClass("composer-queue-slot");
 
     // Controls are unlocked while running (Decision 4.8).
     expect(screen.getByRole("button", { name: /Choose project access/u })).toBeEnabled();
@@ -256,7 +256,7 @@ describe("composer Resume primary action, shared Stop/Resume latch, and unlocked
     // Stop and send works even though another message is already queued (no old refusal!).
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Urgent override" } });
-    expect(screen.getByRole("button", { name: "Stop and send" })).toBeEnabled();
+    expect(within(screen.getByRole("group", { name: "Message actions" })).getByRole("button", { name: "Stop and send" })).toBeEnabled();
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
     await waitFor(() => expect(run).toHaveBeenCalledWith(expect.objectContaining({
       type: "message.queue.stop-and-send",

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -375,6 +375,76 @@ describe("D.5: Visible notice on provider-side native fork failure and conversat
       expect(runtime.store.orchestration.history.rolledBack(second.turn.id)).toBe(true);
       expect(runtime.store.orchestration.history.rolledBack(third.turn.id)).toBe(true);
       expect(runtime.store.orchestration.history.rolledBack(first.turn.id)).toBe(false);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("canonicalizes symlinked workspace paths before invoking native rollback and fork operations", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const rawParent = join(runtime.directory, "real-parent-root");
+      await mkdir(rawParent, { recursive: true });
+      const realParent = await realpath(rawParent);
+      const aliasParent = join(runtime.directory, "alias-parent-root");
+      await symlink(realParent, aliasParent, process.platform === "win32" ? "junction" : "dir");
+      const realWorkspace = join(realParent, "workspace");
+      await mkdir(realWorkspace, { recursive: true });
+      const aliasWorkspace = join(aliasParent, "workspace");
+      const project = runtime.store.createProject("Symlink project", aliasWorkspace);
+      const parent = runtime.store.createConversation(project.id, "Symlink chat", { providerId: "codex" });
+
+      const first = await finishTurn(runtime, "first", parent.id);
+      await finishTurn(runtime, "second", parent.id);
+
+      const seenContexts: Array<{ cwd: string; sourceCwd?: string }> = [];
+      const nativeConversation = vi.fn(async (
+        request: NativeConversationRequest,
+        _selection: unknown,
+        context: { cwd: string; sourceCwd?: string },
+      ): Promise<NativeConversationResult> => {
+        seenContexts.push(context);
+        return {
+          operationId: request.operationId,
+          identity: request.source.identity,
+          ...(request.kind === "fork" ? { targetConversationId: request.targetConversationId } : {}),
+          status: "completed",
+          effect: request.kind === "fork" ? "native-fork" : "native-revert",
+          backing: {
+            nativeConversationId: request.kind === "fork" ? "fork-native" : "source-native",
+            headId: first.turn.id,
+            persistedHeadId: first.turn.id,
+          },
+        };
+      });
+      const deps = {
+        store: runtime.store,
+        turns: runtime.controller,
+        providerTerminalResumes: new ProviderTerminalResumeRegistry(runtime.store.conversationWork),
+        providers: {
+          resolveModelRoute: runtime.provider.resolveModelRoute,
+          isRunning: (id: string) => runtime.provider.isRunning(id),
+          nativeConversation,
+        },
+      };
+
+      const forkInput = { projectId: parent.projectId, sourceConversationId: parent.id, sourceTurnId: first.turn.id, activate: false };
+      const child = runtime.store.orchestration.forks.create(forkInput, { actorId: "human", commandId: "fork-symlink", command: { ...forkInput } });
+      await prepareForkSession(deps, child.id, new AbortController().signal);
+      expect(seenContexts[0]).toMatchObject({ cwd: realWorkspace, sourceCwd: realWorkspace });
+
+      const requestId = randomUUID();
+      await rollbackConversationHistory(deps, {
+        conversationId: parent.id,
+        turnId: first.turn.id,
+        restoreFiles: false,
+        source: {
+          actorId: "human",
+          commandId: requestId,
+          command: { type: "conversation.rollback", requestId, payload: { conversationId: parent.id, turnId: first.turn.id, restoreFiles: false } },
+        },
+      }, new AbortController().signal);
+      expect(seenContexts[1]).toMatchObject({ cwd: realWorkspace });
     } finally {
       runtime.store.close();
     }

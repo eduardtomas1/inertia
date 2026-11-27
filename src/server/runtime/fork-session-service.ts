@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 
 import type { AgentActivity } from "../../shared/contracts";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../../shared/model-routing";
@@ -104,6 +105,9 @@ async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, 
       projectId: fork.projectId, request, sourceWorkspaceKey: fork.sourceWorkspaceKey,
       targetWorkspaceKey: workspaceKey, selection,
       continuationIdentity: versionedContinuationIdentitySchema.parse(currentRoute.continuationIdentity) };
+    const nativeCwd = await realpath(workspaceKey).catch(() => workspaceKey);
+    const nativeSourceCwd = await realpath(fork.sourceWorkspaceKey).catch(() => fork.sourceWorkspaceKey);
+    signal.throwIfAborted();
     // Another native control of the same provider conversation (a live fork of it still reading after the source
     // went idle, or one a crash left unconfirmed) leaves this fork portable instead of failing its send.
     if (nativeControlLockResources(control).some((id) => store.orchestration.nativeControls.locked(id))) {
@@ -118,7 +122,7 @@ async function prepareOrderedForkSession(dependencies: ForkSessionDependencies, 
     }
     try {
       const result = await providers.nativeConversation(request, selection,
-        { cwd: workspaceKey, sourceCwd: fork.sourceWorkspaceKey, signal, timeoutMs: 30_000 });
+        { cwd: nativeCwd, sourceCwd: nativeSourceCwd, signal, timeoutMs: 30_000 });
       // Revalidate routing and canonical paths after every asynchronous provider operation.
       const after = store.conversation(conversationId);
       const afterRoute = providers.resolveModelRoute(after.modelSelection);

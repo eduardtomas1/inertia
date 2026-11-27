@@ -222,8 +222,8 @@ describe("composer shell", () => {
     render(<Composer {...composerProps(current, { running: true, latestTurn, onQueueCommand })} />);
     const queue = await screen.findByRole("list", { name: "Queued messages" }, { timeout: 5_000 });
     const composer = screen.getByRole("region", { name: "Message composer" });
-    expect(queue.closest(".composer-queue-slot")?.nextElementSibling).toBe(composer);
-    expect(composer.querySelector(".composer-queue-slot")).toBeNull();
+    expect(queue.closest(".composer-queue-slot")?.parentElement).toBe(composer);
+    expect(composer.firstElementChild).toHaveClass("composer-queue-slot");
     const row = within(queue).getByRole("listitem");
     expect(row.firstElementChild?.tagName.toLowerCase()).toBe("svg");
     expect(row.firstElementChild).toHaveAttribute("aria-hidden", "true");

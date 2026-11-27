@@ -123,4 +123,31 @@ describe("update everything with restart continuation", () => {
       expect(runtime.provider.runCount).toBe(1);
     } finally { await close(); }
   });
+
+  it("continues after an update even when provider cancellation synchronously emits a cancelling status", async () => {
+    const { runtime, firstTurnId, continuation, close } = await runningChat();
+    try {
+      const originalCancel = runtime.provider.cancel.bind(runtime.provider);
+      runtime.provider.cancel = (): boolean => {
+        runtime.provider.emit({
+          ...turnControllerTestIdentity(runtime),
+          type: "status",
+          status: "cancelling",
+          providerState: "interrupting",
+        });
+        return originalCancel();
+      };
+      await runUpdateEverything({
+        store: runtime.store, turns: runtime.controller, restartContinuation: continuation, preparation,
+        maintenance: maintenance(async () => undefined),
+      } as unknown as UpdateEverythingDependencies, { providerIds: ["codex"], includeApp: false, continueChats: true }, owner());
+
+      expect(runtime.store.agentTurn(firstTurnId)).toMatchObject({ status: "interrupted", terminalReason: "app-update" });
+      await continuation.scheduler.tick();
+      await flushTurnControllerTestPromises();
+      expect(runtime.provider.runCount).toBe(2);
+      expect(runtime.store.conversationDetail(runtime.conversationId)!.messages.at(-1))
+        .toMatchObject({ role: "user", content: RESTART_CONTINUATION_PROMPT });
+    } finally { await close(); }
+  });
 });

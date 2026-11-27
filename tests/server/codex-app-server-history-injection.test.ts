@@ -125,7 +125,6 @@ describe("Codex App Server native history injection", { concurrent: false }, () 
     ["a malformed response", { INERTIA_APP_SERVER_INJECT: "malformed" }],
     ["another JSON-RPC error", { INERTIA_APP_SERVER_INJECT: "error" }],
     ["another invalid request (-32600)", { INERTIA_APP_SERVER_INJECT: "invalid-request" }],
-    ["a transport close during the request", { INERTIA_APP_SERVER_INJECT: "close" }],
   ])("fails the turn without starting it after %s, leaving delivery to the record", async (_label, environment) => {
     const { steps, injection } = recordingAuthority();
     const run = start(environment, injection);
@@ -133,6 +132,37 @@ describe("Codex App Server native history injection", { concurrent: false }, () 
     expect(steps).toEqual(["begin"]);
     expect(methods(run.messages())).toContain("thread/inject_items");
     expect(methods(run.messages())).not.toContain("turn/start");
+  });
+
+  it("fails the turn without starting it after a transport close during the request, leaving delivery to the record", async () => {
+    const { steps, injection } = recordingAuthority();
+    const fake = fakeAppServer(roots);
+    const run = startCodexAppServerRun({
+      executable: fake.command,
+      environment: { ...process.env, INERTIA_APP_SERVER_CAPTURE: fake.capturePath, INERTIA_APP_SERVER_INJECT: "hold" },
+      cwd: fake.root,
+      prompt: INLINE_PROMPT,
+      planMode: false,
+      access: "full",
+      historyInjection: injection,
+    });
+    const closed = new Promise<void>((resolve) => run.child.once("close", () => resolve()));
+    try {
+      await vi.waitFor(() => expect(methods(captured(fake.capturePath) as Message[])).toContain("thread/inject_items"));
+      run.child.stdout.destroy();
+      await expect(run.result).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "transport-closed" },
+      });
+    } finally {
+      run.cancel(true);
+      await closed;
+    }
+    expect(steps).toEqual(["begin"]);
+    const messages = captured(fake.capturePath) as Message[];
+    expect(methods(messages)).toContain("thread/inject_items");
+    expect(methods(messages)).not.toContain("turn/start");
   });
 
   it("stops while the injection is pending without starting the turn", async () => {

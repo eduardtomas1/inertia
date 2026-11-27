@@ -469,7 +469,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     }
     const snapshot = store.shellSnapshot(providerInfo);
     const approvalConversationIds = new Set([...pendingApprovals.values()].map(({ conversationId }) => conversationId));
-    const inputConversationIds = new Set([...pendingInputs.values()].map(({ conversationId }) => conversationId));
+    const inputConversationIds = new Set([...[...pendingInputs.values()].map(({ conversationId }) => conversationId), ...(agentThreads?.secrets.pendingConversationIds() ?? [])]);
     const maintenanceOperations = providerMaintenance.activeOperations();
     const providerMaintenanceStates = providerMaintenance.diagnosticStates();
     const providerRunOwnership = store.providerRunOwnership.all();
@@ -504,7 +504,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         activeConversationIds,
         runningProviderConversationIds: new Set(providers.activeConversationIds()),
         ...providerRunOwnershipDiagnostics(store, providerRunOwnership),
-        terminalOwnershipCount: terminals.ownedResourceCount(), interactionCount: pendingApprovals.size + pendingInputs.size,
+        terminalOwnershipCount: terminals.ownedResourceCount(), interactionCount: pendingApprovals.size + pendingInputs.size + (agentThreads?.secrets.pendingCount() ?? 0),
         windowsCleanupFailures: windowsCleanupFailures(),
       }),
       sync,
@@ -530,7 +530,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         ),
         pendingInput: [...pendingInputs.values()].some(
           (request) => request.conversationId === conversationId,
-        ),
+        ) || Boolean(agentThreads?.secrets.hasPending(conversationId)),
         compaction: compactions.state(conversationId),
       },
       runs: store.workspaceRunsForConversation(conversationId).map((run) => ({
@@ -573,6 +573,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     {
       defaultTimeoutMs: options.reviewSummaryTimeoutMs ?? DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS,
       lifetimeSignal: runtimeLifetimeAbort.signal,
+      secretOutput: () => agentThreads?.secrets.output,
     },
   );
   startProjectAutoPull({
@@ -706,6 +707,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const conversationTitles = createConversationTitleRuntime({
     store, providers, backendProfileController, broadcastSnapshot, signal: runtimeLifetimeAbort.signal,
     track: admitBackgroundWork,
+    redactTitle: (value) => agentThreads?.secrets.output.text(value) ?? value,
   });
   let queuedMessages: ReturnType<typeof createQueuedMessageRuntime> | undefined;
   const watcherPolicy = createWatcherTurnPolicy(store, (input) => agentThreads?.manager.contextOnlyBridgeFor(input));
@@ -1063,6 +1065,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     inputs: () => pendingInputs.values(),
   });
 
+  await agentThreads.secrets.whenRestored();
   currentSnapshot();
   return {
     runPackageSmokeImage: (inputPath, resultPath, signal) =>

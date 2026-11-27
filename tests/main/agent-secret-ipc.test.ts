@@ -12,6 +12,7 @@ import {
 import { AGENT_SECRET_SAVE_ERRORS } from "../../src/shared/agent-secret-save-errors";
 import {
   CredentialVault,
+  CredentialVaultError,
   type CredentialEncryptionBackend,
   type CredentialVaultPersistence,
   type AgentSecretVaultWrite,
@@ -33,11 +34,13 @@ type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknow
 
 class FakeVault implements AgentSecretVault {
   readonly writes: string[] = [];
+  readonly writeCalls: Array<{ requestId: string; secret: string }> = [];
   readonly deletes: string[] = [];
   write: AgentSecretVaultWrite | Error = "stored";
 
-  async setAgentSecret(requestId: string): Promise<AgentSecretVaultWrite> {
+  async setAgentSecret(requestId: string, secret: string): Promise<AgentSecretVaultWrite> {
     this.writes.push(requestId);
+    this.writeCalls.push({ requestId, secret });
     if (this.write instanceof Error) throw this.write;
     return this.write;
   }
@@ -92,6 +95,7 @@ function setup(options: {
   vault?: AgentSecretVault | null;
   runtime?: AgentSecretRuntime | null;
   sender?: AgentSecretSender | Error;
+  onVaultWriteError?: (code: string) => void;
 } = {}) {
   const handlers = new Map<string, Handler>();
   const vault = options.vault === undefined ? new FakeVault() : options.vault;
@@ -106,6 +110,7 @@ function setup(options: {
     assertTrusted,
     vault: () => vault,
     runtime: () => runtime,
+    ...(options.onVaultWriteError ? { onVaultWriteError: options.onVaultWriteError } : {}),
   });
   const handler = handlers.get(DESKTOP_IPC.saveAgentSecret);
   if (!handler) throw new Error("The save handler was not registered");
@@ -306,5 +311,141 @@ describe("agent secret save IPC storage", () => {
     await failure(invoke({ ...kept, secret: "replacement-secret" }));
     await expect(vault.resolve(agentSecretReference(kept.requestId))).resolves.toBe(SECRET);
     expect(persistence.value).not.toContain(SECRET);
+  });
+
+  it("deletes the vault entry immediately when unavailable rejection was not dispatched", async () => {
+    const encryption = new TestEncryption();
+    const persistence = new MemoryPersistence();
+    const vault = new CredentialVault(encryption, persistence);
+    const runtime = new FakeRuntime();
+    const { invoke } = setup({ vault, runtime });
+
+    const save = request();
+    runtime.outcome = { status: "rejected", reason: "unavailable", dispatched: false };
+    expect((await failure(invoke(save))).message).toBe(AGENT_SECRET_SAVE_ERRORS.runtimeUnavailable);
+    await expect(vault.status(agentSecretReference(save.requestId))).resolves.toEqual({
+      hasSecret: false,
+      credentialGeneration: null,
+    });
+
+    const replacement = "retry-token-zP8wK4vB1qR9";
+    runtime.outcome = null;
+    await expect(invoke({ ...save, secret: replacement })).resolves.toEqual({
+      status: "saved",
+      expiresAt: EXPIRES_AT,
+      storage: "keychain",
+    });
+    expect(runtime.deliveries.at(-1)).toMatchObject({ requestId: save.requestId, secret: replacement, vaulted: true });
+    await expect(vault.resolve(agentSecretReference(save.requestId))).resolves.toBe(replacement);
+  });
+
+  it("preserves the original vault entry after a timed-out delivery when retrying the same or a different secret", async () => {
+    const encryption = new TestEncryption();
+    const persistence = new MemoryPersistence();
+    const vault = new CredentialVault(encryption, persistence);
+    const runtime = new FakeRuntime();
+    const { invoke } = setup({ vault, runtime });
+
+    // Attempt 1 times out after dispatch; runtime may have committed SECRET.
+    const save = request();
+    runtime.outcome = { status: "rejected", reason: "unavailable", dispatched: true };
+    expect((await failure(invoke(save))).message).toBe(AGENT_SECRET_SAVE_ERRORS.runtimeUnavailable);
+    await expect(vault.resolve(agentSecretReference(save.requestId))).resolves.toBe(SECRET);
+
+    // Retry with a different secret when runtime already committed (rejects not-pending):
+    // must NOT overwrite and must NOT delete the committed vault entry.
+    runtime.outcome = { status: "rejected", reason: "not-pending" };
+    expect((await failure(invoke({ ...save, secret: "edited-secret-999999" }))).message).toBe(AGENT_SECRET_SAVE_ERRORS.notPending);
+    expect(runtime.deliveries.at(-1)).toMatchObject({ requestId: save.requestId, secret: "edited-secret-999999", vaulted: false });
+    await expect(vault.resolve(agentSecretReference(save.requestId))).resolves.toBe(SECRET);
+
+    // Retry with the same secret succeeds idempotently with vaulted: true without overwriting.
+    runtime.outcome = null;
+    await expect(invoke(save)).resolves.toEqual({
+      status: "saved",
+      expiresAt: EXPIRES_AT,
+      storage: "keychain",
+    });
+    expect(runtime.deliveries.at(-1)).toMatchObject({ requestId: save.requestId, secret: SECRET, vaulted: true });
+    await expect(vault.resolve(agentSecretReference(save.requestId))).resolves.toBe(SECRET);
+
+    // When the first delivery timed out without committing and an edited retry succeeds
+    // in memory, the stale original vault entry is deleted immediately.
+    const edited = request();
+    runtime.outcome = { status: "rejected", reason: "unavailable", dispatched: true };
+    await failure(invoke(edited));
+    await expect(vault.resolve(agentSecretReference(edited.requestId))).resolves.toBe(SECRET);
+
+    runtime.outcome = null;
+    await expect(invoke({ ...edited, secret: "edited-memory-only-5678" })).resolves.toEqual({
+      status: "saved",
+      expiresAt: EXPIRES_AT,
+      storage: "memory",
+    });
+    expect(runtime.deliveries.at(-1)).toMatchObject({
+      requestId: edited.requestId,
+      secret: "edited-memory-only-5678",
+      vaulted: false,
+    });
+    await expect(vault.status(agentSecretReference(edited.requestId))).resolves.toEqual({
+      hasSecret: false,
+      credentialGeneration: null,
+    });
+  });
+
+  it("clears uncertain vault entry only when runtime proves the request stayed pending, and bounds tracking to 128", async () => {
+    const vault = new FakeVault();
+    const runtime = new FakeRuntime();
+    const { invoke } = setup({ vault, runtime });
+
+    const first = request();
+    runtime.outcome = { status: "rejected", reason: "unavailable", dispatched: true };
+    await failure(invoke(first));
+    expect(vault.writeCalls).toHaveLength(1);
+
+    // file-failed proves the request was still pending (Attempt 1 did not commit), so clean up vault entry.
+    runtime.outcome = { status: "rejected", reason: "file-failed" };
+    await failure(invoke(first));
+    expect(vault.writeCalls).toHaveLength(1);
+    expect(vault.deletes).toContain(first.requestId);
+
+    // Next attempt for `first` writes fresh to the vault.
+    runtime.outcome = null;
+    await expect(invoke(first)).resolves.toMatchObject({ status: "saved", storage: "keychain" });
+    expect(vault.writeCalls).toHaveLength(2);
+
+    // Fill 129 distinct uncertain entries; the 1st should be evicted so retrying it tries vault write again.
+    runtime.outcome = { status: "rejected", reason: "unavailable", dispatched: true };
+    const oldest = request();
+    await failure(invoke(oldest));
+    for (let i = 0; i < 128; i += 1) {
+      await failure(invoke(request()));
+    }
+    const writesBeforeEvictedRetry = vault.writeCalls.length;
+    runtime.outcome = null;
+    await invoke(oldest);
+    expect(vault.writeCalls.length).toBe(writesBeforeEvictedRetry + 1);
+  });
+
+  it("emits only the error code to onVaultWriteError without leaking the secret or breaking fallback", async () => {
+    const codes: string[] = [];
+    const vault = new FakeVault();
+    vault.write = new CredentialVaultError("persistence-failed", `failed while handling ${SECRET}`);
+    const { invoke, runtime } = setup({
+      vault,
+      onVaultWriteError: (code) => {
+        codes.push(code);
+        throw new Error("diagnostic hook failure");
+      },
+    });
+
+    await expect(invoke(request())).resolves.toEqual({ status: "saved", expiresAt: EXPIRES_AT, storage: "memory" });
+    expect((runtime as FakeRuntime).deliveries[0]?.vaulted).toBe(false);
+    expect(codes).toEqual(["persistence-failed"]);
+
+    vault.write = new Error(`unexpected ${SECRET}`);
+    await expect(invoke(request())).resolves.toEqual({ status: "saved", expiresAt: EXPIRES_AT, storage: "memory" });
+    expect(codes).toEqual(["persistence-failed", "unknown"]);
+    expect(codes.join(",")).not.toContain(SECRET);
   });
 });

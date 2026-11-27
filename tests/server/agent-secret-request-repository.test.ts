@@ -238,4 +238,20 @@ describe("AgentSecretRequestRepository", () => {
       database.close();
     }
   });
+
+  it("uses the conversation_id index for create() limit checks without scanning the table", async () => {
+    const { databasePath, turn } = await openStore();
+    const database = new Database(databasePath, { readonly: true });
+    try {
+      const plan = database.prepare(`EXPLAIN QUERY PLAN SELECT
+          COALESCE(SUM(status = 'pending'), 0) AS pending,
+          COALESCE(SUM(turn_id = ?), 0) AS inTurn
+        FROM agent_secret_requests WHERE conversation_id = ?`)
+        .all(turn.id, turn.conversationId) as Array<{ detail: string }>;
+      expect(plan.some(({ detail }) => detail.includes("SEARCH agent_secret_requests USING INDEX"))).toBe(true);
+      expect(plan.some(({ detail }) => detail.includes("SCAN agent_secret_requests"))).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
 });

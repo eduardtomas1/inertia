@@ -44,6 +44,7 @@ import {
   recordsForConversation,
   sameAgentPlan,
   sameAgentPlanSteps,
+  storedMessageSupersedesLive,
   terminalEventMatchesCurrentTurn,
   turnEventOwner,
   withoutHydratedBaseline,
@@ -466,7 +467,7 @@ export function useConversationProjection({
         if (!existing) return current;
         const remaining = existing.filter((message) => {
           const stored = authoritativeMessages.get(message.id);
-          return !stored || stored.content !== message.content;
+          return !stored || !storedMessageSupersedesLive(stored, message);
         });
         if (remaining.length === existing.length) return current;
         const next = { ...current };

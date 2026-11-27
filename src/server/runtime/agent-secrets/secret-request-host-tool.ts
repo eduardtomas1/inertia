@@ -18,18 +18,22 @@ import type { AgentSecretRequestErrorCode } from "../../persistence/agent-secret
 import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../../provider/contracts";
 
 export const SECRET_REQUEST_DECLINED_MESSAGE =
-  "The user declined. Continue without it, or explain in chat why you need it.";
-export const SECRET_REQUEST_ENDED_MESSAGE = "No answer arrived. Ask again only if still needed.";
+  "The user declined. Don't ask for it in chat or another way; say what's blocked and continue without it.";
+export const SECRET_REQUEST_ENDED_MESSAGE =
+  "No answer arrived. Don't ask in chat; call inertia_request_secret again only if still needed.";
 
 export type SecretRequestEndReason = "timed_out" | "cancelled" | "stopped";
 
 const DESCRIPTION = [
-  "Ask the user to type a secret (API key, token, password) into a private card, and wait.",
+  "Ask the user to type a secret (API key, token, password, PIN, pairing code, sudo password) into a private card, and wait.",
+  "Open it, don't offer it.",
+  "Asked how to provide a secret: call now.",
   "You never see the value.",
   "If saved, you get the path of a private file that your shell commands can read until `expiresAt`.",
-  "Use it only inside a command, e.g. `TOKEN=\"$(cat '<file>')\" tool login`.",
+  "Use it only inside a command, e.g. `TOKEN=\"$(cat '<file>')\" tool login` or `sudo -S -p '' <cmd> < '<file>'`.",
   "Never print, echo or copy it into chat, files, logs or commits.",
-  "Never ask for a secret in chat; call this instead.",
+  "Never reuse a secret from an older chat; ask again with this tool.",
+  "Never ask in chat or question tools.",
 ].join(" ");
 
 export const SECRET_REQUEST_TOOL_DEFINITION: ProviderHostToolDefinition = {
@@ -111,7 +115,9 @@ export function secretRequestLimitFailure(code: AgentSecretRequestErrorCode): Pr
 }
 
 export function secretFileUseExample(file: string, platform: NodeJS.Platform): string {
-  if (platform === "win32") return `$key = Get-Content -Raw '${file.replaceAll("'", "''")}'`;
+  if (platform === "win32") {
+    return `PowerShell: $key = Get-Content -Raw '${file.replaceAll("'", "''")}' | Git Bash: KEY="$(cat '${file.replaceAll("'", "'\\''")}')"`;
+  }
   return `KEY="$(cat '${file.replaceAll("'", "'\\''")}')"`;
 }
 

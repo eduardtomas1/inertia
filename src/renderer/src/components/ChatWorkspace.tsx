@@ -67,6 +67,7 @@ import {
 } from "../hooks/useStreamingAgentState";
 import { turnEventOwner, type TerminalTurnProjections } from "../utils/terminalTurnProjection";
 import { PendingRequestNotices } from "./PendingRequestNotices";
+import { createPendingRequestRevealer } from "../utils/agentInputNavigation";
 import { pendingSecretRequest, type SecretRequestCommandRunner } from "../utils/response-timeline/secretRequests";
 import { DuoJudgeNoticeSlot } from "./DuoJudgeNoticeContext";
 import {
@@ -377,9 +378,6 @@ export function ChatWorkspace({
   onClearPromptContext,
   onLatestContentVisibilityChange,
 }: ChatWorkspaceProps): React.JSX.Element {
-  useNativePreviewSuspension(
-    approvals.length > 0 || inputRequests.length > 0,
-  );
   const ResponseTimeline = useLoadedSurface(loadResponseTimeline, Boolean(project && conversation));
   const Root = embedded ? "section" : "main";
   const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
@@ -583,7 +581,8 @@ export function ChatWorkspace({
     : null, [conversationId, latestTurnSummary]);
   const pendingInputRequest = visibleInputRequests.at(-1) ?? null;
   const pendingSecret = useMemo(() => pendingSecretRequest(ownedMessages), [ownedMessages]);
-  const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${ownedApprovals.length}:${ownedInputRequests.length}`;
+  useNativePreviewSuspension(approvals.length > 0 || inputRequests.length > 0 || pendingSecret !== null);
+  const contentSignal = `${ownedTurns.length}:${ownedTurns.at(-1)?.updatedAt ?? ""}:${ownedMessages.length}:${ownedMessages.at(-1)?.content.length ?? 0}:${ownedActivities.length}:${ownedSubagents.length}:${ownedSubagents.at(-1)?.updatedAt ?? ""}:${ownedPlans.length}:${ownedCheckpoints.length}:${ownedTurnGitArtifacts.length}:${ownedTurnGitArtifacts.at(-1)?.status ?? ""}:${ownedTurnGitArtifacts.at(-1)?.capturedAt ?? ""}:${ownedApprovals.length}:${ownedInputRequests.length}:${pendingSecret?.secretRequest.requestId ?? ""}`;
 
   const clearReaderIntent = useCallback((): void => {
     readerIntentRef.current = false;
@@ -667,6 +666,15 @@ export function ChatWorkspace({
     performScrollToLatest,
   ]);
 
+  const cancelFollowCorrection = useCallback((): void => {
+    smoothSettleRef.current?.();
+    smoothSettleRef.current = null;
+    if (followCorrectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(followCorrectionFrameRef.current);
+      followCorrectionFrameRef.current = null;
+    }
+  }, []);
+
   const onFinalAnswerAutoScroll = useCallback((
     event: FinalAnswerAutoScrollEvent,
   ): void => {
@@ -675,12 +683,7 @@ export function ChatWorkspace({
       if (navigationRef.current.conversationId !== event.conversationId) return;
       clearPendingFinalAnswerNavigation();
       finalAnswerAutoScrollOwnerRef.current = owner;
-      smoothSettleRef.current?.();
-      smoothSettleRef.current = null;
-      if (followCorrectionFrameRef.current !== null) {
-        window.cancelAnimationFrame(followCorrectionFrameRef.current);
-        followCorrectionFrameRef.current = null;
-      }
+      cancelFollowCorrection();
       return;
     }
     if (finalAnswerAutoScrollOwnerRef.current !== owner) return;
@@ -703,22 +706,18 @@ export function ChatWorkspace({
       intentional: true,
     });
     onLatestContentVisibilityChange?.(event.followsLatest);
-  }, [clearPendingFinalAnswerNavigation, navigate, onLatestContentVisibilityChange]);
+  }, [cancelFollowCorrection, clearPendingFinalAnswerNavigation, navigate, onLatestContentVisibilityChange]);
 
+  const revealControllerRef = useRef<ReturnType<typeof createPendingRequestRevealer> | null>(null);
   const revealPendingRequest = useCallback((reveal: () => boolean): void => {
-    let remainingFrames = 4;
-    const attempt = (): boolean => {
-      if (reveal()) return true;
-      remainingFrames -= 1;
-      if (remainingFrames > 0) window.requestAnimationFrame(() => attempt());
-      return false;
-    };
-    attempt();
-    scrollToLatest("auto");
-    window.requestAnimationFrame(() => attempt());
-  }, [scrollToLatest]);
+    (revealControllerRef.current ??= createPendingRequestRevealer()).reveal(reveal, {
+      onScrollToLatest: () => scrollToLatest("auto"),
+      onRevealed: cancelFollowCorrection,
+    });
+  }, [cancelFollowCorrection, scrollToLatest]);
 
   useLayoutEffect(() => {
+    revealControllerRef.current?.cancel();
     smoothSettleRef.current?.();
     smoothSettleRef.current = null;
     finalAnswerAutoScrollOwnerRef.current = null;
@@ -754,14 +753,11 @@ export function ChatWorkspace({
 
   useEffect(
     () => () => {
-      if (followCorrectionFrameRef.current !== null) {
-        window.cancelAnimationFrame(followCorrectionFrameRef.current);
-      }
-      smoothSettleRef.current?.();
-      smoothSettleRef.current = null;
+      revealControllerRef.current?.cancel();
+      cancelFollowCorrection();
       onLatestContentVisibilityChange?.(false);
     },
-    [onLatestContentVisibilityChange],
+    [cancelFollowCorrection, onLatestContentVisibilityChange],
   );
 
   useEffect(
@@ -1134,7 +1130,7 @@ export function ChatWorkspace({
 
       <div ref={composerRegionRef} className="composer-region">
         <TimelineJumpToLatest visible={showJump} scrollElementRef={scrollRef} onJump={scrollToLatest} />
-        <PendingRequestNotices inputRequest={pendingInputRequest} secretRequest={pendingSecret} onReveal={revealPendingRequest} />
+        <PendingRequestNotices inputRequest={pendingInputRequest} secretRequest={pendingSecret} secretRequestAnswerable={Boolean(onSecretRequestCommand && typeof (window as Partial<Window>).inertia?.saveAgentSecret === "function")} onReveal={revealPendingRequest} />
         <DuoJudgeNoticeSlot
           conversationId={conversation.id}
           conversationStatus={conversation.status}

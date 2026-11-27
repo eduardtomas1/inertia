@@ -175,9 +175,13 @@ export class TurnStreamProjection {
 
   private assistantCreatedAt(active: ActiveTurn): string {
     const now = this.options.now();
-    const boundary = active.followUpBoundary?.at;
-    if (!boundary) return now;
-    return new Date(Math.max(Date.parse(now), Date.parse(boundary) + 1)).toISOString();
+    const floor = [active.followUpBoundary?.at, active.latestSecretCardAt]
+      .reduce<number>((max, value) => {
+        const parsed = value ? Date.parse(value) : Number.NaN;
+        return Number.isFinite(parsed) && parsed > max ? parsed : max;
+      }, Number.NEGATIVE_INFINITY);
+    if (!Number.isFinite(floor)) return now;
+    return new Date(Math.max(Date.parse(now), floor + 1)).toISOString();
   }
 
   appendReasoning(active: ActiveTurn, text: string): void {

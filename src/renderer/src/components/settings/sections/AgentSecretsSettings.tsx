@@ -43,18 +43,33 @@ export function AgentSecretsSettings({
   const listRef = useRef<HTMLUListElement>(null);
   const emptyRef = useRef<HTMLParagraphElement>(null);
   const restoreFocus = useRef(false);
+  const generationRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+    };
+  }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
     try {
       const secrets = listedSecrets(await requestRef.current({ type: "secret-request.list", payload: {} }));
+      if (!mountedRef.current || generation !== generationRef.current) return;
       setState(secrets ? { status: "ready", secrets } : { status: "failed" });
     } catch {
+      if (!mountedRef.current || generation !== generationRef.current) return;
       setState({ status: "failed" });
     }
     setNow(Date.now());
   }, []);
 
   useEffect(() => {
+    if (disabled) return;
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, AGENT_SECRETS_REFRESH_MS);
     const onFocus = (): void => { void refresh(); };
@@ -63,7 +78,7 @@ export function AgentSecretsSettings({
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refresh]);
+  }, [disabled, refresh]);
 
   useLayoutEffect(() => {
     if (!restoreFocus.current || state.status !== "ready") return;
@@ -75,6 +90,7 @@ export function AgentSecretsSettings({
 
   const revoke = async (secrets: readonly SecretRequestListEntry[]): Promise<void> => {
     if (disabled || action.busy || secrets.length === 0) return;
+    generationRef.current += 1;
     restoreFocus.current = true;
     await action.run(async () => {
       let revoked = 0;
@@ -95,7 +111,7 @@ export function AgentSecretsSettings({
       success: (revoked) => revoked === 0 ? null : revoked === 1 ? "Secret revoked." : `${revoked} secrets revoked.`,
       failure: (error) => secretRevokeFailure(error, "The secret could not be revoked."),
     });
-    await refresh();
+    if (mountedRef.current) await refresh();
   };
 
   const revokeButton = (targets: readonly SecretRequestListEntry[], key: string, label: string, name?: string): React.JSX.Element => (
@@ -123,7 +139,7 @@ export function AgentSecretsSettings({
         {state.status === "failed" && (
           <p className="agent-secrets-empty" role="status">
             Agent secrets could not be read.
-            <button type="button" className="text-button" onClick={() => void refresh()}>Try again</button>
+            <button type="button" className="text-button" disabled={disabled} onClick={() => { if (!disabled) void refresh(); }}>Try again</button>
           </p>
         )}
         {state.status === "ready" && secrets.length === 0 && (
@@ -144,7 +160,11 @@ export function AgentSecretsSettings({
                               type="button"
                               className="agent-secret-chat"
                               aria-label={`Open chat ${chatTitle}`}
-                              onClick={() => onOpenConversation(secret.conversationId)}
+                              onClick={() => {
+                                if (!onOpenConversation(secret.conversationId)) {
+                                  action.report({ tone: "info", text: "This chat is archived or unavailable." });
+                                }
+                              }}
                             >
                               {chatTitle}
                             </button>

@@ -25,7 +25,8 @@ export interface RuntimeAgentSecretDelivery {
 
 export type RuntimeAgentSecretDeliveryOutcome =
   | { status: "delivered"; expiresAt: string; storage: SecretRequestStorage }
-  | { status: "rejected"; reason: RuntimeAgentSecretRejectionReason | "unavailable" };
+  | { status: "rejected"; reason: RuntimeAgentSecretRejectionReason }
+  | { status: "rejected"; reason: "unavailable"; dispatched?: boolean };
 
 interface PendingAgentSecretDelivery {
   record: RuntimeProcessRecord;
@@ -50,7 +51,16 @@ interface RuntimeAgentSecretCoordinatorOptions {
   post: (record: RuntimeProcessRecord, command: RuntimeWorkerCommand) => boolean;
 }
 
-const UNAVAILABLE: RuntimeAgentSecretDeliveryOutcome = Object.freeze({ status: "rejected", reason: "unavailable" });
+const UNAVAILABLE_NOT_DISPATCHED: RuntimeAgentSecretDeliveryOutcome = Object.freeze({
+  status: "rejected",
+  reason: "unavailable",
+  dispatched: false,
+});
+const UNAVAILABLE_DISPATCHED: RuntimeAgentSecretDeliveryOutcome = Object.freeze({
+  status: "rejected",
+  reason: "unavailable",
+  dispatched: true,
+});
 
 function isAgentSecretEvent(event: RuntimeWorkerEvent): event is RuntimeAgentSecretEvent {
   return event.type === "runtime.agent-secret-delivered"
@@ -67,7 +77,7 @@ export class RuntimeAgentSecretCoordinator {
 
   deliver(delivery: RuntimeAgentSecretDelivery): Promise<RuntimeAgentSecretDeliveryOutcome> {
     const record = this.options.readyRecord();
-    if (record instanceof Error) return Promise.resolve(UNAVAILABLE);
+    if (record instanceof Error) return Promise.resolve(UNAVAILABLE_NOT_DISPATCHED);
     for (const pending of this.pending.values()) {
       if (pending.requestId === delivery.requestId) {
         return Promise.resolve({ status: "rejected", reason: "not-pending" });
@@ -78,7 +88,7 @@ export class RuntimeAgentSecretCoordinator {
       const timer = this.options.setTimer(() => {
         if (this.pending.get(transportId)?.timer !== timer) return;
         this.pending.delete(transportId);
-        resolve(UNAVAILABLE);
+        resolve(UNAVAILABLE_DISPATCHED);
       }, this.options.timeoutMs);
       this.pending.set(transportId, { record, requestId: delivery.requestId, timer, settle: resolve });
       const posted = this.options.post(record, {
@@ -89,7 +99,7 @@ export class RuntimeAgentSecretCoordinator {
         secret: delivery.secret,
         vaulted: delivery.vaulted,
       });
-      if (!posted) this.settle(transportId, UNAVAILABLE);
+      if (!posted) this.settle(transportId, UNAVAILABLE_NOT_DISPATCHED);
     });
   }
 
@@ -122,7 +132,7 @@ export class RuntimeAgentSecretCoordinator {
   reject(record: RuntimeProcessRecord | null): void {
     drainRuntimeRecordRequests(this.pending, record, (pending) => {
       this.options.clearTimer(pending.timer);
-      pending.settle(UNAVAILABLE);
+      pending.settle(UNAVAILABLE_DISPATCHED);
     });
     drainRuntimeRecordRequests(this.reconciles, record, (pending) => {
       this.options.clearTimer(pending.timer);

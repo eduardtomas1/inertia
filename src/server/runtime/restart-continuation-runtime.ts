@@ -15,9 +15,10 @@ export interface RestartContinuationRuntime {
 }
 
 export function createRestartContinuationRuntime(dependencies: TurnInteractionCommandDependencies,
-  options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T> }): RestartContinuationRuntime {
+  options: { signal: AbortSignal; track<T>(operation: () => Promise<T>): Promise<T>; hasPendingSecret?: (conversationId: string) => boolean }): RestartContinuationRuntime {
   const pending = (conversationId: string): boolean => [...dependencies.pendingApprovals.values(), ...dependencies.pendingInputs.values()]
-    .some((request) => request.conversationId === conversationId);
+    .some((request) => request.conversationId === conversationId)
+    || (options.hasPendingSecret?.(conversationId) ?? dependencies.turns.secretRequests?.hasPending(conversationId) ?? false);
   const scheduler = new RestartContinuationScheduler({
     store: dependencies.store, signal: options.signal, enabled: dependencies.enableProviders, held: isHeld,
     busy: (conversationId) => dependencies.turns.isActive(conversationId)

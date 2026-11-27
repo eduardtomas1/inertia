@@ -103,7 +103,10 @@ const budgets = {
   // Performance/reliability/security pass: streaming coalescing, sidebar/shell
   // caches, composer keystroke isolation, incremental timeline delta patching,
   // and sync WS delivery add 5,444 bytes (1,013,929 measured on Linux x64).
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889 + 1_054 + 256 + 454 + 38 + 57 + 466 + 6_979 + 1_159 + 277 + 284 + 5_724 + 191 + 2_098 + 139 + 644 + 111 + 14_605 + 240 + 286 + 5_444,
+  // Agent secret request reliability fixes (monotonic live status retention,
+  // bounded single-loop reveal, native preview suspension, passive scene retry):
+  // +1,013 bytes; keep 256 bytes headroom.
+  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889 + 1_054 + 256 + 454 + 38 + 57 + 466 + 6_979 + 1_159 + 277 + 284 + 5_724 + 191 + 2_098 + 139 + 644 + 111 + 14_605 + 240 + 286 + 5_444 + 1_013 + 256,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -119,7 +122,8 @@ const budgets = {
   // Messages to the user add the same 644 bytes to the detached chat (875,741
   // measured on macOS ARM64).
   // Performance/reliability/security pass adds 5,372 bytes (896,021 measured on Linux x64).
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 417 + 38 + 57 + 6_950 + 790 + 3_222 + 271 + 284 + 5_490 + 191 + 2_002 + 139 + 644 + 111 + 14_391 + 240 + 286 + 5_372,
+  // Agent secret request reliability fixes add 1,013 bytes; keep 256 bytes headroom.
+  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 417 + 38 + 57 + 6_950 + 790 + 3_222 + 271 + 284 + 5_490 + 191 + 2_002 + 139 + 644 + 111 + 14_391 + 240 + 286 + 5_372 + 1_013 + 256,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -140,7 +144,9 @@ const budgets = {
   // Custom agents: the settings section entry and its search rows add 843
   // bytes over main's cap (102,199 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505 + 843 + 3_672 + 124 + 256 + 8_421,
+  // AgentSecretsSettings refresh generation guard, reconnect reload & archived
+  // chat notice add 307 bytes (114,979 measured on Linux x64); keep 256 bytes.
+  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505 + 843 + 3_672 + 124 + 256 + 8_421 + 307 + 256,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2 + 1_623,
@@ -207,7 +213,10 @@ const budgets = {
   // Performance/reliability/security pass: incremental reasoning summary,
   // streaming markdown block cache, and virtualized scroll tracking add 2,340
   // bytes (660,833 measured on Linux x64).
-  transcriptJavaScript: 600 * kibibyte + 2_515 + 26_419 + 7_839 + 186 + 204 + 9 + 457 + 3 + 308 + 1_466 + 64 + 829 + 4_050 + 2_340,
+  // Agent secret request reliability fixes (chronological stream interleaving,
+  // caret-preserving mask toggle, decline UX, min-length validation): +2,055
+  // bytes; keep 256 bytes headroom.
+  transcriptJavaScript: 600 * kibibyte + 2_515 + 26_419 + 7_839 + 186 + 204 + 9 + 457 + 3 + 308 + 1_466 + 64 + 829 + 4_050 + 2_340 + 2_055 + 256,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -309,7 +318,9 @@ const budgets = {
   // In-place subagent groups add 1,554 bytes (2,678,914 measured on Linux x64); keep 64.
   // Messages to the user add 1,612 core bytes (2,680,526 measured on macOS ARM64).
   // Performance/reliability/security pass adds 7,721 core bytes (2,724,181 measured on Linux x64).
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549 + 712 + 256 + 139 + 1_554 + 64 + 1_612 + 111 + 34_987 + 307 + 372 + 349 + 7_721,
+  // Agent secret request reliability fixes add 2,467 core bytes (2,726,904
+  // measured on Linux x64); keep 256 bytes headroom.
+  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549 + 712 + 256 + 139 + 1_554 + 64 + 1_612 + 111 + 34_987 + 307 + 372 + 349 + 7_721 + 2_467 + 256,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -31,6 +31,7 @@ export interface ConversationTitleServiceDependencies {
   updateTitle(conversationId: string, title: string): void;
   sources: ConversationTitleSources;
   isExternalTurn(turn: AgentTurn): boolean;
+  redactTitle?: (value: string) => string;
   track(operation: () => Promise<void>): Promise<void>;
   signal: AbortSignal;
 }
@@ -85,7 +86,7 @@ export function createConversationTitleService(
     return () => dependencies.sources.codex({
       conversationId: turn.conversationId,
       ...(turn.model === "provider-default" ? {} : { model: turn.model }),
-      prompt: current.message.content,
+      prompt: dependencies.redactTitle ? dependencies.redactTitle(current.message.content) : current.message.content,
       signal: dependencies.signal,
     });
   };
@@ -105,7 +106,8 @@ export function createConversationTitleService(
       pending.add(conversationId);
       void Promise.resolve()
         .then(() => dependencies.track(async () => {
-          const title = normalizeGeneratedTitle(await source() ?? "");
+          const raw = await source() ?? "";
+          const title = normalizeGeneratedTitle(dependencies.redactTitle ? dependencies.redactTitle(raw) : raw);
           const current = title ? replaceableFirstMessage(conversationId) : null;
           if (!title || !current) return;
           applied.add(conversationId);
@@ -145,6 +147,7 @@ export function createConversationTitleRuntime(dependencies: {
   providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">;
   backendProfileController: Pick<BackendProfileController, "isExternalSelection">;
   broadcastSnapshot(): void;
+  redactTitle?: (value: string) => string;
   track(operation: () => Promise<void>): Promise<void>;
   signal: AbortSignal;
 }): ConversationTitleService {
@@ -161,6 +164,7 @@ export function createConversationTitleRuntime(dependencies: {
     },
     sources: conversationTitleSources(dependencies),
     isExternalTurn: (turn) => backendProfileController.isExternalSelection(turn.modelSelection),
+    ...(dependencies.redactTitle ? { redactTitle: dependencies.redactTitle } : {}),
     track: dependencies.track,
     signal: dependencies.signal,
   });

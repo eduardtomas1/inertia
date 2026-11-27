@@ -1104,11 +1104,11 @@ export function claudeSupportsThinkingDisplay(
   return true;
 }
 
-function claudeRunEnvironment(
+export function claudeRunEnvironment(
   environment: NodeJS.ProcessEnv | undefined,
   readOnlyProfile?: ProviderRunInput["readOnlyProfile"],
 ): NodeJS.ProcessEnv {
-  const run = {
+  const run: NodeJS.ProcessEnv = {
     ...CLAUDE_SUBAGENT_LIMITS,
     ...CLAUDE_STARTUP_FAILURE_RESULTS,
     ...CLAUDE_TRANSCRIPT_FLUSH,

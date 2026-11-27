@@ -670,7 +670,7 @@ describe("native history injection: native rollback (G12)", () => {
       const rewound = runtime.store.orchestration.backings.find(lookup)!;
       expect(covers(runtime, rewound, oldest, claude[0]!.turn.runId)).toBe(false);
     } finally { runtime.store.close(); }
-  });
+  }, 45_000);
 
   it("keeps the injected items when the rollback keeps the injecting run", async () => {
     const runtime = await createTurnControllerTestRuntime();

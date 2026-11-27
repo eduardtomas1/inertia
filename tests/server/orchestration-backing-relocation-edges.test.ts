@@ -1,6 +1,6 @@
 // @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -323,7 +323,7 @@ describe("native history control after a relocation", () => {
       const [request, , options] = deps.providers.nativeConversation.mock.calls[0]!;
       expect(request).toMatchObject({ kind: "rollback", boundary: { kind: "turn", nativeTurnId: "first" },
         source: { nativeConversationId: "source-native", expectedHeadId: "third" } });
-      expect(options).toMatchObject({ cwd: moved });
+      expect(options).toMatchObject({ cwd: await realpath(moved) });
       expect(runtime.store.orchestration.backings.get(relocated.id)?.status).toBe("ready");
       expect(runtime.store.orchestration.history.rolledBack(third.turn.id)).toBe(true);
       const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "After the rollback" });
@@ -354,7 +354,7 @@ describe("native history control after a relocation", () => {
         .resolves.toMatchObject({ transfer: "native", retainedTurnId: second.turn.id });
       const [request, , options] = deps.providers.nativeConversation.mock.calls[0]!;
       expect(request).toMatchObject({ boundary: { kind: "turn", nativeTurnId: "second" }, source: { expectedHeadId: "fourth" } });
-      expect(options).toMatchObject({ cwd: runtime.workspace });
+      expect(options).toMatchObject({ cwd: await realpath(runtime.workspace) });
       expect(runtime.store.orchestration.history.rolledBack(fourth.turn.id)).toBe(true);
     } finally { runtime.store.close(); }
   });

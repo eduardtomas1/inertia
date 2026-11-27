@@ -74,6 +74,7 @@ export default function App({
   const scheduledTasksAuthorityGenRef = useRef(0);
   const scheduledTasksRequestSeqRef = useRef(0);
   const transportGenerationRef = useRef(0);
+  const socketRef = useRef<PrivateConnectSocket | null>(null);
 
   const clearWorkspace = useCallback((): void => {
     scheduledTasksAuthorityGenRef.current += 1;
@@ -98,6 +99,7 @@ export default function App({
   }, []);
   const demoteSocket = useCallback((candidate: PrivateConnectSocket, error: unknown): void => {
     if (!isSocketOnlyFailure(error)) return;
+    if (socketRef.current === candidate) socketRef.current = null;
     setSocket((current) => current === candidate ? null : current);
     candidate.close();
   }, []);
@@ -227,6 +229,7 @@ export default function App({
   const readyCsrf = pair.kind === "ready" ? pair.csrf : null;
   useEffect(() => {
     if (pair.kind !== "ready" || !readyCsrf) {
+      socketRef.current = null;
       setSocket(null);
       return;
     }
@@ -236,6 +239,7 @@ export default function App({
     let unsubscribeClose: (() => void) | null = null;
     const retry = (): void => {
       if (cancelled || retryTimer !== null) return;
+      socketRef.current = null;
       setSocket(null);
       retryTimer = window.setTimeout(() => {
         retryTimer = null;
@@ -260,6 +264,7 @@ export default function App({
             retry();
           }
         });
+        socketRef.current = next;
         transportGenerationRef.current += 1;
         setSocket(next);
         setConnectionGeneration((current) => current + 1);
@@ -279,6 +284,7 @@ export default function App({
       if (retryTimer !== null) window.clearTimeout(retryTimer);
       unsubscribeClose?.();
       current?.close();
+      socketRef.current = null;
       setSocket(null);
     };
   }, [clearWorkspace, noteRequestFailure, pair.kind, readyCsrf]);
@@ -287,8 +293,9 @@ export default function App({
     value: Parameters<PrivateConnectSocket["request"]>[0],
     csrf: string,
     isFresh?: () => boolean,
+    preferredSocket?: PrivateConnectSocket | null,
   ) => {
-    const currentSocket = socket;
+    const currentSocket = preferredSocket !== undefined ? preferredSocket : socketRef.current;
     const transportGen = transportGenerationRef.current;
     const transportFresh = (): boolean =>
       transportGen === transportGenerationRef.current && (!isFresh || isFresh());
@@ -305,7 +312,7 @@ export default function App({
       }
       throw error;
     }
-  }, [demoteSocket, noteRequestFailure, socket]);
+  }, [demoteSocket, noteRequestFailure]);
 
   useEffect(() => {
     if (pair.kind !== "waiting") return;
@@ -334,12 +341,12 @@ export default function App({
         type: "state.get",
         requestId: crypto.randomUUID(),
         ifNoneMatch: stateValidatorRef.current,
-      }, readyCsrf);
+      }, readyCsrf, undefined, socket);
       if (!cancelled) applyStateResponse(response);
     };
     void load().catch((error) => { if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "State could not be loaded." } : current); });
     return () => { cancelled = true; };
-  }, [applyStateResponse, readyCsrf, request]);
+  }, [applyStateResponse, readyCsrf, request, socket]);
 
   useEffect(() => {
     if (!readyCsrf || !selectedConversation) return;
@@ -350,13 +357,13 @@ export default function App({
       requestId: crypto.randomUUID(),
       conversationId: selectedConversation,
       ifNoneMatch: conversationValidatorsRef.current.get(selectedConversation) ?? null,
-    }, readyCsrf).then((response) => {
+    }, readyCsrf, undefined, socket).then((response) => {
       if (!cancelled) applyConversationResponse(response, selectedConversation);
     }).catch((error) => {
       if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Conversation could not be loaded." } : current);
     });
     return () => { cancelled = true; };
-  }, [applyConversationResponse, readyCsrf, request, selectedConversation]);
+  }, [applyConversationResponse, readyCsrf, request, selectedConversation, socket]);
 
   useEffect(() => {
     if (!readyCsrf || !socket) return;

@@ -461,6 +461,7 @@ export class ScheduledTaskService {
         lastRunStatus: "running",
         ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
         lastTurnId: turnId,
+        lastError: null,
       });
       this.broadcastChanged(task.projectId);
     }
@@ -760,7 +761,8 @@ export class ScheduledTaskService {
           lastRunAt: updatedAt,
           lastRunStatus: "queued",
           lastConversationId: resolved.conversationId,
-          ...(dispatched.turnId ? { lastTurnId: dispatched.turnId } : {}),
+          lastTurnId: dispatched.turnId ?? null,
+          lastError: null,
         });
       this.trackRun({
         runId: updatedRun.id,
@@ -904,6 +906,8 @@ export class ScheduledTaskService {
           lastRunAt: input.requestedAt,
           lastRunStatus: "queued",
           lastConversationId: input.conversationId,
+          lastTurnId: null,
+          lastError: null,
         });
       },
     });
@@ -1050,6 +1054,7 @@ export class ScheduledTaskService {
               now: nowIso,
               lastRunStatus: "queued",
               lastTurnId: null,
+              lastError: null,
             });
           }
           return task?.projectId ?? null;

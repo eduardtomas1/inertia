@@ -427,12 +427,13 @@ export async function executeManagedQueueMutation(
       });
       publish();
     }
+    const movedFirst = dependencies.store.orchestration.queue.getState(target.id)?.activeItemIds[0] === itemId;
     return json({
       conversationId: target.id,
       action: "promote_to_steer",
       itemId,
       disposition: "queued",
-      movedFirst: true,
+      movedFirst,
       accepted: true,
       message: COMMAND_ONLY_STEER_REFUSED,
     });
@@ -525,12 +526,13 @@ export async function executeManagedQueueMutation(
         });
       }
       publish();
+      const movedFirst = queue.getState(target.id)?.activeItemIds[0] === itemId;
       return json({
         conversationId: target.id,
         action: "promote_to_steer",
         itemId,
         disposition: "queued",
-        movedFirst: true,
+        movedFirst,
         accepted: true,
         message: COMMAND_ONLY_STEER_REFUSED,
       });

@@ -39,6 +39,10 @@ afterEach(() => {
   projectedConversationId = "33333333-3333-4333-8333-333333333333";
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.mocked(apiRequest).mockReset();
+  vi.mocked(apiRequest).mockImplementation((request) => socket.request(request) as ReturnType<typeof apiRequest>);
+  vi.mocked(connectPrivateConnectSocket).mockReset();
+  vi.mocked(connectPrivateConnectSocket).mockImplementation(async () => socket as never);
   vi.useRealTimers();
 });
 
@@ -218,22 +222,8 @@ describe("Private Connect browser lifecycle", () => {
     }));
   });
 
-  it("S52 + S58 + S59: reloads on socket reconnect and ignores stale HTTP failure/response after authority reset", async () => {
+  it("S52: reloads scheduled tasks on ordinary socket reconnect", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
-    const staleTask = {
-      id: "11111111-1111-4111-8111-111111111111",
-      projectId: "proj-1",
-      projectName: "Repo",
-      title: "Stale task",
-      scheduleLabel: "Every 30 minutes",
-      enabled: true,
-      nextRunAt: "2030-01-01T00:30:00.000Z",
-      lastRunAt: null,
-      lastRunStatus: null,
-      lastError: null,
-      consecutiveFailures: 0,
-      boundConversationId: null,
-    };
     const countListCalls = (): number =>
       socket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length
       + vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
@@ -251,70 +241,88 @@ describe("Private Connect browser lifecycle", () => {
       await vi.advanceTimersByTimeAsync(3_000);
     });
     expect(countListCalls()).toBeGreaterThan(beforeReconnect);
+  });
 
-    // 2. S58 + S65: Disconnect socket so Refresh uses HTTP apiRequest; accept a DISTINCT replacement socket
-    // while state.get is still pending (before the replacement list starts!), then reject the old HTTP list -> workspace stays online!
+  it("S65/S71: stale HTTP request rejected after replacement socket connects with no cached shell stays online", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    vi.mocked(connectPrivateConnectSocket).mockRejectedValueOnce(Object.assign(
+      new Error("Private Connect could not open a live connection."),
+      { privateConnectTransport: "private-connect-websocket" },
+    ));
     let rejectStaleHttp!: (err: unknown) => void;
-    const staleHttpRejectPromise = new Promise((_, reject) => { rejectStaleHttp = reject; });
+    const staleHttpPromise = new Promise((_, reject) => { rejectStaleHttp = reject; });
     vi.mocked(apiRequest).mockImplementation((req) => {
-      if ((req as { type?: string }).type === "scheduled-tasks.list") {
-        return staleHttpRejectPromise as ReturnType<typeof apiRequest>;
+      if ((req as { type?: string }).type === "state.get") {
+        return staleHttpPromise as ReturnType<typeof apiRequest>;
       }
-      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof apiRequest>;
+      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "scheduled-tasks", tasks: [] } }) as ReturnType<typeof apiRequest>;
     });
-    const httpCallsBefore = vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
-    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
-    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
-    expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(httpCallsBefore + 1);
 
-    // Distinct replacement socket with one-shot close listener & pending state.get (so replacement list has NOT started yet).
     const replacementCloseListeners = new Set<(code: number) => void>();
-    let replacementNotifyClose: ((code: number) => void) | null = null;
-    const baseSocketImpl = socket.request.getMockImplementation()!;
     const replacementSocket = {
       request: vi.fn((req: { type: string; requestId?: string }) => {
         if (req.type === "state.get") return new Promise<unknown>(() => undefined) as ReturnType<typeof socket.request>;
-        return baseSocketImpl(req);
+        return Promise.resolve({ type: "response", requestId: req.requestId ?? "r1", ok: true, result: { kind: "scheduled-tasks", tasks: [] } });
       }),
       onClose: vi.fn((listener: (code: number) => void) => {
         replacementCloseListeners.add(listener);
-        replacementNotifyClose = (code: number) => {
-          const snapshot = [...replacementCloseListeners];
-          replacementCloseListeners.clear();
-          for (const fn of snapshot) fn(code);
-        };
         return () => replacementCloseListeners.delete(listener);
       }),
       close: vi.fn(),
     };
     vi.mocked(connectPrivateConnectSocket).mockResolvedValueOnce(replacementSocket as never);
-    // Clear workspace via authorityChanged on next socket ONLY AFTER verifying S65 while shell is empty:
+
+    vi.useFakeTimers();
+    render(<App initialPairingFragment={null} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // Confirm we started with NO cached shell (no projects/conversations rendered) and HTTP state.get is in flight.
+    expect(screen.queryByRole("button", { name: /Conversation/u })).not.toBeInTheDocument();
+    expect(vi.mocked(apiRequest)).toHaveBeenCalledWith(expect.objectContaining({ type: "state.get" }), "csrf-token");
+
+    // Advance retry timer -> distinct replacement socket connects while shell is still null (NO scheduled-tasks.list issued!).
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
-    // Now reject the old HTTP request BEFORE replacement list starts -> transportGeneration guard keeps workspace online!
+    expect(replacementSocket.request).toHaveBeenCalledWith(expect.objectContaining({ type: "state.get" }));
+    expect(replacementSocket.request).not.toHaveBeenCalledWith(expect.objectContaining({ type: "scheduled-tasks.list" }));
+
+    // Reject the superseded HTTP state.get -> transportGenerationRef guard must prevent offline state!
     await act(async () => {
-      rejectStaleHttp(new TypeError("Old HTTP transport failed before replacement list"));
+      rejectStaleHttp(new TypeError("Old HTTP transport failed before any replacement list"));
       await Promise.resolve();
     });
     expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
+  });
 
-    // 3. S59 + S66: Start a deferred HTTP list while disconnected, establish a distinct replacement socket with one-shot close,
-    // close THAT replacement socket with authorityChanged while HTTP response is pending, then resolve stale HTTP -> discarded!
-    let resolveStaleAuth!: (value: unknown) => void;
-    const staleAuthPromise = new Promise((resolve) => { resolveStaleAuth = resolve; });
-    vi.mocked(apiRequest).mockImplementation((req) => {
-      if ((req as { type?: string }).type === "scheduled-tasks.list") {
-        return staleAuthPromise as ReturnType<typeof apiRequest>;
-      }
-      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof apiRequest>;
-    });
-    act(() => replacementNotifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
-    const authHttpBefore = vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
-    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
-    expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(authHttpBefore + 1);
+  it("S66/S72: authorityChanged discards a still-current scheduled-tasks.list resolved before any new list starts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    const staleTask = {
+      id: "11111111-1111-4111-8111-111111111111",
+      projectId: "proj-1",
+      projectName: "Repo",
+      title: "Stale task",
+      scheduleLabel: "Every 30 minutes",
+      enabled: true,
+      nextRunAt: "2030-01-01T00:30:00.000Z",
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastError: null,
+      consecutiveFailures: 0,
+      boundConversationId: null,
+    };
+    const baseSocketImpl = socket.request.getMockImplementation()!;
+    let resolveInFlightList!: (value: unknown) => void;
+    let deferNextList = false;
     const authCloseListeners = new Set<(code: number) => void>();
     let authNotifyClose: ((code: number) => void) | null = null;
     const authSocket = {
-      request: vi.fn((req: { type: string; requestId?: string }) => baseSocketImpl(req)),
+      request: vi.fn((req: { type: string; requestId?: string }) => {
+        if (req.type === "scheduled-tasks.list") {
+          if (deferNextList) {
+            return new Promise<unknown>((resolve) => { resolveInFlightList = resolve; });
+          }
+          return Promise.resolve({ type: "response", requestId: req.requestId ?? "init", ok: true, result: { kind: "scheduled-tasks", tasks: [] } });
+        }
+        return baseSocketImpl(req);
+      }),
       onClose: vi.fn((listener: (code: number) => void) => {
         authCloseListeners.add(listener);
         authNotifyClose = (code: number) => {
@@ -326,11 +334,39 @@ describe("Private Connect browser lifecycle", () => {
       }),
       close: vi.fn(),
     };
-    vi.mocked(connectPrivateConnectSocket).mockResolvedValueOnce(authSocket as never);
-    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    const postAuthSocket = {
+      request: vi.fn((req: { type: string; requestId?: string }) => {
+        if (req.type === "scheduled-tasks.list") {
+          // Keep the post-reconnect list pending so stale tasks would stay visible if authority invalidation failed!
+          return new Promise<unknown>(() => undefined);
+        }
+        return baseSocketImpl(req);
+      }),
+      onClose: vi.fn(() => () => undefined),
+      close: vi.fn(),
+    };
+    vi.mocked(connectPrivateConnectSocket)
+      .mockResolvedValueOnce(authSocket as never)
+      .mockResolvedValueOnce(postAuthSocket as never);
+
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    await waitFor(() => expect(authSocket.request).toHaveBeenCalledWith(expect.objectContaining({ type: "scheduled-tasks.list" })));
+
+    // Start a deferred Refresh list so it is the ONLY current list request when authorityChanged arrives.
+    vi.useFakeTimers();
+    deferNextList = true;
+    const listCallsBefore = authSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/i }));
+    expect(authSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(listCallsBefore + 1);
+
+    // Close with authorityChanged -> clears workspace and bumps authority generation; NO new list has started yet!
     act(() => authNotifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged));
+    expect(postAuthSocket.request).not.toHaveBeenCalled();
+
+    // Resolve the old list BEFORE any reconnect / new list starts.
     await act(async () => {
-      resolveStaleAuth({
+      resolveInFlightList({
         type: "response",
         requestId: "stale-auth",
         ok: true,
@@ -338,7 +374,115 @@ describe("Private Connect browser lifecycle", () => {
       });
       await Promise.resolve();
     });
+
+    // Reconnect with postAuthSocket (whose own list stays pending) -> shell renders, staleTask must NEVER appear!
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument();
     expect(screen.queryByText("Stale task")).not.toBeInTheDocument();
+  });
+
+  it("S70: HTTP Run now resolves its follow-up scheduled-tasks.list on a newly connected replacement socket", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    const task = {
+      id: "44444444-4444-4444-8444-444444444444",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      projectName: "Project",
+      title: "Nightly check",
+      scheduleLabel: "Every 30 minutes",
+      enabled: true,
+      nextRunAt: "2030-01-01T00:30:00.000Z",
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastError: null,
+      consecutiveFailures: 0,
+      boundConversationId: null,
+    };
+    const promptCapableState = (requestId = "state-1") => ({
+      type: "response",
+      requestId,
+      ok: true,
+      result: {
+        kind: "state",
+        validator: STATE_VALIDATOR,
+        state: {
+          generatedAt: "2030-01-01T00:00:00.000Z",
+          projects: [{ id: "22222222-2222-4222-8222-222222222222", name: "Project" }],
+          conversations: [{ id: "33333333-3333-4333-8333-333333333333", projectId: "22222222-2222-4222-8222-222222222222", title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, pendingLocalAction: false, updatedAt: "2030-01-01T00:00:00.000Z" }],
+          capabilities: { scopes: ["private:read", "private:prompt"], preset: "collaborate", expiresAt: "2030-02-01T00:00:00.000Z" },
+        },
+      },
+    });
+    const firstCloseListeners = new Set<(code: number) => void>();
+    let firstNotifyClose: ((code: number) => void) | null = null;
+    const firstSocket = {
+      request: vi.fn(async (req: { type: string; requestId?: string }) => {
+        if (req.type === "state.get") return promptCapableState(req.requestId);
+        if (req.type === "scheduled-tasks.list") {
+          return { type: "response", requestId: req.requestId ?? "l1", ok: true, result: { kind: "scheduled-tasks", tasks: [task] } };
+        }
+        return { type: "response", requestId: req.requestId ?? "o1", ok: true, result: { kind: "not-modified", validator: STATE_VALIDATOR } };
+      }),
+      onClose: vi.fn((listener: (code: number) => void) => {
+        firstCloseListeners.add(listener);
+        firstNotifyClose = (code: number) => {
+          const snapshot = [...firstCloseListeners];
+          firstCloseListeners.clear();
+          for (const fn of snapshot) fn(code);
+        };
+        return () => firstCloseListeners.delete(listener);
+      }),
+      close: vi.fn(),
+    };
+    const replacementSocket = {
+      request: vi.fn(async (req: { type: string; requestId?: string }) => {
+        if (req.type === "state.get") return promptCapableState(req.requestId);
+        if (req.type === "scheduled-tasks.list") {
+          return { type: "response", requestId: req.requestId ?? "l2", ok: true, result: { kind: "scheduled-tasks", tasks: [task] } };
+        }
+        return { type: "response", requestId: req.requestId ?? "o2", ok: true, result: { kind: "not-modified", validator: STATE_VALIDATOR } };
+      }),
+      onClose: vi.fn(() => () => undefined),
+      close: vi.fn(),
+    };
+    vi.mocked(connectPrivateConnectSocket)
+      .mockResolvedValueOnce(firstSocket as never)
+      .mockResolvedValueOnce(replacementSocket as never);
+
+    let resolveRunNow!: (value: unknown) => void;
+    vi.mocked(apiRequest).mockImplementation((req) => {
+      const typed = req as { type?: string; requestId?: string };
+      if (typed.type === "scheduled-task.run-now") {
+        return new Promise<unknown>((resolve) => { resolveRunNow = resolve; }) as ReturnType<typeof apiRequest>;
+      }
+      if (typed.type === "scheduled-tasks.list") {
+        return Promise.reject(new TypeError("Old HTTP list transport is down")) as ReturnType<typeof apiRequest>;
+      }
+      return Promise.resolve(promptCapableState(typed.requestId)) as ReturnType<typeof apiRequest>;
+    });
+
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByText("Nightly check")).toBeInTheDocument());
+
+    // Disconnect socket -> click Run now over HTTP.
+    vi.useFakeTimers();
+    act(() => firstNotifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable));
+    fireEvent.click(screen.getByRole("button", { name: /Run Nightly check now/i }));
+    expect(vi.mocked(apiRequest)).toHaveBeenCalledWith(expect.objectContaining({ type: "scheduled-task.run-now", taskId: task.id }), "csrf-token");
+
+    // Replacement socket connects while HTTP Run now is still in flight.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    const replacementListBefore = replacementSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+    const httpListBefore = vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+
+    // Resolve HTTP Run now -> follow-up list MUST use replacementSocket, NOT failing HTTP!
+    await act(async () => {
+      resolveRunNow({ type: "response", requestId: "rn-1", ok: true, result: { kind: "scheduled-task-run" } });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(replacementSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBeGreaterThan(replacementListBefore);
+    expect(vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length).toBe(httpListBefore);
+    expect(screen.queryByText(/Offline — showing only data/iu)).not.toBeInTheDocument();
   });
 
   it("S59: discards out-of-order scheduled-tasks.list responses when a newer request completes first", async () => {

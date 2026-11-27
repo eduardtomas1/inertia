@@ -1264,8 +1264,9 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         new AbortController().signal,
       );
       expect(steerSpy).not.toHaveBeenCalled();
-      const s53Parsed = JSON.parse(s53Res.text) as { disposition: string; message: string };
+      const s53Parsed = JSON.parse(s53Res.text) as { disposition: string; movedFirst: boolean; message: string };
       expect(s53Parsed.disposition).toBe("queued");
+      expect(s53Parsed.movedFirst).toBe(false);
       expect(s53Parsed.message).toContain("Commands must run as a separate turn.");
       expect(store.orchestration.queue.getItem(s53ItemId)?.state).toBe("waiting");
       expect(store.orchestration.queue.getState(s53Child.id)?.activeItemIds).toEqual([
@@ -1294,13 +1295,15 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         randomUUID(),
         new AbortController().signal,
       );
-      expect(JSON.parse(s64PreLeaseRes.text).disposition).toBe("queued");
+      const s64PreLeaseParsed = JSON.parse(s64PreLeaseRes.text) as { disposition: string; movedFirst: boolean };
+      expect(s64PreLeaseParsed.disposition).toBe("queued");
+      expect(s64PreLeaseParsed.movedFirst).toBe(false);
       expect(store.orchestration.queue.getState(s53Child.id)?.activeItemIds).toEqual([
         s53OrdinaryId,
         s53DelegatedId,
         s53ItemId,
       ]);
-      // Dispatching barrier test: [A, dispatchingItem, /cmd2] -> /cmd2 must NOT cross dispatchingItem!
+      // Dispatching barrier test (pre-lease AND post-claim): [A, dispatchingItem, /cmd2] -> /cmd2 must NOT cross dispatchingItem and movedFirst must be false!
       const s64DispConv = store.createConversation(project.id, "S64 Dispatching barrier");
       store.agentThreadManagement.attachManaged({
         childConversationId: s64DispConv.id,
@@ -1337,8 +1340,64 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         randomUUID(),
         new AbortController().signal,
       );
-      expect(JSON.parse(s64BarrierRes.text).disposition).toBe("queued");
+      const s64BarrierParsed = JSON.parse(s64BarrierRes.text) as { disposition: string; movedFirst: boolean };
+      expect(s64BarrierParsed.disposition).toBe("queued");
+      expect(s64BarrierParsed.movedFirst).toBe(false);
       expect(store.orchestration.queue.getState(s64DispConv.id)?.activeItemIds).toEqual([s64A, s64Disp, s64Cmd]);
+
+      // S73: Post-claim dispatching barrier — ordinary item edited to slash command during admission stays behind dispatching item with movedFirst: false!
+      const s73PostDispCmd = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s64DispConv.id,
+        itemId: s73PostDispCmd,
+        content: "Ordinary prompt edited during admission",
+        kind: "message",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const s73PostDispRes = await executeManagedQueueMutation(
+        {
+          store,
+          turns: {
+            isActive: (id: string) => id === s64DispConv.id,
+            activeIdentity: () => ({ turnId: "active-turn", runId: "active-run" }),
+            acquireFollowUpAdmission: () => ({
+              conversationId: s64DispConv.id,
+              turnId: "active-turn",
+              runId: "active-run",
+              ready: Promise.resolve().then(() => {
+                store.orchestration.queue.edit({
+                  conversationId: s64DispConv.id,
+                  itemId: s73PostDispCmd,
+                  expectedRevision: 0,
+                  content: "/compact",
+                });
+              }),
+              release: vi.fn(),
+            }),
+            steer: steerSpy,
+          } as never,
+          broadcastConversationShell: vi.fn(),
+          broadcastSnapshot: vi.fn(),
+          broadcast: vi.fn(),
+          now: () => "2026-11-27T12:00:00.000Z",
+        } as never,
+        s53Parent,
+        s64DispConv,
+        { conversationId: s64DispConv.id, action: "promote_to_steer", itemId: s73PostDispCmd },
+        randomUUID(),
+        new AbortController().signal,
+      );
+      const s73PostDispParsed = JSON.parse(s73PostDispRes.text) as { disposition: string; movedFirst: boolean };
+      expect(s73PostDispParsed.disposition).toBe("queued");
+      expect(s73PostDispParsed.movedFirst).toBe(false);
+      expect(store.orchestration.queue.getItem(s73PostDispCmd)?.state).toBe("waiting");
+      expect(store.orchestration.queue.getState(s64DispConv.id)?.activeItemIds).toEqual([
+        s64A,
+        s64Disp,
+        s73PostDispCmd,
+        s64Cmd,
+      ]);
 
       // S61: Boot requeue updates scheduled_task_runs + scheduled_tasks atomically and rolls back both if the second write fails!
       const s61Conv = store.createConversation(project.id, "S61 Rollback");
@@ -1437,6 +1496,48 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       });
       expect(() => store.orchestration.events.rebuildProjections()).not.toThrow();
       expect(store.orchestration.queue.getItem(s54ItemId)?.state).toBe("dispatching");
+
+      // S74: Queueing another occurrence after a failed turn clears stale lastTurnId and lastError!
+      const s74Conv = store.createConversation(project.id, "S74 Clear stale failure");
+      const s74Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s74Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const s74Task = s74Service.create({
+        projectId: project.id,
+        title: "Retry after failure",
+        prompt: "Check again",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s74Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const priorFailedTurnId = randomUUID();
+      store.scheduledTasks.recordTaskOutcome(s74Task.id, {
+        lastRunAt: s48NowIso,
+        lastRunStatus: "failed",
+        lastConversationId: s74Conv.id,
+        lastTurnId: priorFailedTurnId,
+        lastError: "Prior scheduled run failed",
+        consecutiveFailures: 1,
+        updatedAt: s48NowIso,
+      });
+      const beforeRequeue = store.scheduledTasks.get(s74Task.id);
+      expect(beforeRequeue?.lastRunStatus).toBe("failed");
+      expect(beforeRequeue?.lastTurnId).toBe(priorFailedTurnId);
+      expect(beforeRequeue?.lastError).toBe("Prior scheduled run failed");
+      const s74RunResult = await s74Service.runNow(s74Task.id);
+      expect(s74RunResult.task.lastRunStatus).toBe("queued");
+      expect(s74RunResult.task.lastTurnId).toBeNull();
+      expect(s74RunResult.task.lastError).toBeNull();
+      const s74Persisted = store.scheduledTasks.get(s74Task.id);
+      expect(s74Persisted?.lastRunStatus).toBe("queued");
+      expect(s74Persisted?.lastTurnId).toBeNull();
+      expect(s74Persisted?.lastError).toBeNull();
     } finally {
       store.close();
     }

@@ -1667,7 +1667,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       failure: {
         reason: "provider-error",
         technicalDetail: expect.stringMatching(
-          /\n\[POSIX cleanup stop-never-observed: reason=exit-unconfirmed rootStop=sent rootState=running .* reads=9 timedOutReads=0 elapsedMs=\d+\]$/u,
+          /\n\[POSIX cleanup stop-never-observed: reason=exit-unconfirmed rootStop=sent rootState=running .* reads=15 timedOutReads=0 elapsedMs=\d+\]$/u,
         ),
       },
     });

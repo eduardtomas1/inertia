@@ -114,8 +114,38 @@ describe("POSIX process tree root observation", () => {
       rootState: "running",
       scanStabilized: false,
     });
-    expect(spawnProcessSync).toHaveBeenCalledTimes(9);
-    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([1, 2, 4, 8, 16, 32, 64, 128]);
+    expect(spawnProcessSync).toHaveBeenCalledTimes(15);
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([
+      1, 2, 4, 8, 16, 32, 64, 128, 128, 128, 128, 128, 128, 128,
+    ]);
+  });
+
+  it("confirms a root that stays running past 255 ms under load before acting on its stop", () => {
+    let clock = 0;
+    const spawnProcessSync = vi.fn(() => {
+      clock += 2;
+      return { status: 0, stdout: clock >= 500 ? "4242 1 Tl\n" : "4242 1 Rl\n" };
+    });
+    const pause = vi.fn((ms: number) => { clock += ms; });
+    const result = forceKillPosixProcessTreeWithStatus(4_242, {
+      kill: vi.fn(() => true) as never,
+      spawnProcessSync: spawnProcessSync as never,
+      rootProcessGroup: true,
+      deadlineAt: 2_000,
+      now: () => clock,
+      pause,
+    });
+    expect(result).toMatchObject({
+      rootStop: "sent",
+      rootState: "stopped",
+      rootRunningObserved: true,
+      scanStabilized: true,
+      snapshotConfirmed: true,
+    });
+    expect(pause.mock.calls.map(([ms]) => ms)).toEqual([
+      1, 2, 4, 8, 16, 32, 64, 128, 128, 128,
+    ]);
+    expect(spawnProcessSync).toHaveBeenCalledTimes(11);
   });
 
   it("confirms a root that acts on its stop only after nine back-to-back reads", () => {

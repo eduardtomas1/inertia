@@ -11,8 +11,9 @@ const NARROW_SEND = "@container (max-width: 420px)";
 const styles = readRendererCss("styles.css");
 const surface = readRendererCss("components/composer/ComposerSurface.css");
 const sendActions = readRendererCss("components/composer/ComposerSendActions.css");
+const queueStyles = readRendererCss("components/composer/RuntimeComposerQueuedActions.css");
 const tasks = readRendererCss("components/TasksView.css");
-const all = [styles, surface, sendActions, tasks].join("\n");
+const all = [styles, surface, sendActions, queueStyles, tasks].join("\n");
 const rules = parseCssRules(all);
 const surfaceRules = parseCssRules(surface);
 const CHIP = ".composer-shell .composer-chip";
@@ -60,6 +61,7 @@ describe("glass floating layers", () => {
     }
     expect(surface).not.toMatch(/--glass|backdrop-filter/u);
     expect(sendActions).not.toMatch(/--glass|backdrop-filter/u);
+    expect(queueStyles).not.toMatch(/--glass|backdrop-filter/u);
   });
 
   it("puts the palette, dialogs, menus, popovers and toasts on glass and keeps tooltips, the composer, the model chooser and the thread menus solid", () => {

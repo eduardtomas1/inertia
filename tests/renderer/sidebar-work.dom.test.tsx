@@ -383,15 +383,19 @@ describe("compact Work sidebar", () => {
     expect(tasks.querySelector("span")).toHaveTextContent(/^Tasks$/u);
     expect(tasks.querySelector(".lucide-list-todo")).toHaveAttribute("aria-hidden", "true");
     expect(tasks.previousElementSibling).toBe(primaryRow);
+    const schedules = screen.getByRole("button", { name: "Schedules" });
+    expect(tasks.nextElementSibling).toBe(schedules);
+    expect(schedules).toHaveClass("sidebar-primary-action");
+    expect(schedules.querySelector(".lucide-clock")).toHaveAttribute("aria-hidden", "true");
     const library = screen.getByRole("button", { name: "Library" });
-    expect(tasks.nextElementSibling).toBe(library);
+    expect(schedules.nextElementSibling).toBe(library);
     expect(library).toHaveClass("sidebar-primary-action");
     expect(library.querySelector(".lucide-bookmark")).toHaveAttribute("aria-hidden", "true");
     expect(library.nextElementSibling).toHaveClass("sidebar-search-wrap");
     const order = [...view.container.querySelectorAll<HTMLElement>("button, input")]
       .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim());
     const start = order.indexOf("New chat");
-    expect(order.slice(start, start + 5)).toEqual(["New chat", "New duo", "Tasks", "Library", "Search projects and conversations"]);
+    expect(order.slice(start, start + 6)).toEqual(["New chat", "New duo", "Tasks", "Schedules", "Library", "Search projects and conversations"]);
     expect(tasks).not.toHaveAttribute("aria-current");
     expect(tasks).not.toHaveClass("is-active");
     fireEvent.click(tasks);

@@ -6,7 +6,7 @@ import type { AgentTurn, CheckpointSummary } from "../../shared/contracts";
 import type { RollbackFiles } from "../../shared/orchestration-history";
 import { CheckpointError, createCheckpoint, deleteCheckpoint } from "../checkpoints";
 import type { RuntimeStore } from "../database";
-import { captureGitArtifactState, compareGitSnapshots } from "../git/artifacts";
+import { captureGitArtifactState, compareGitSnapshots, listIndexedGitPaths } from "../git/artifacts";
 import { MAX_DIFF_FILES } from "../git/constants";
 import { canonicalDirectoryPath, isContained, repositoryRoot, validatedEntryPaths } from "../git/paths";
 import { GitError } from "../git/types";
@@ -29,6 +29,8 @@ export type RollbackFileRestoreResult = RollbackFiles & { recoveryCheckpointId: 
 interface RecordedScope {
   target: { turn: AgentTurn; beforeRef: string; createdAt: string };
   finalRef: string | null;
+  unrecordedAfter: boolean;
+  gaps: Array<{ afterRef: string; beforeRef: string }>;
   repositoryIdentity: string;
   worktreeIdentity: string;
   paths: Set<string>;
@@ -63,6 +65,8 @@ function failed(error: unknown, recovery: CheckpointSummary | null): RollbackFil
 function recordedScope(store: RuntimeStore, turnIds: readonly string[]): RecordedScope | RollbackFileRestoreResult | null {
   let scope: RecordedScope | null = null;
   let finalRef: string | null = null;
+  let previousAfterRef: string | null = null;
+  let unrecordedAfter = false;
   for (const turnId of turnIds) {
     const turn = store.agentTurn(turnId);
     const artifact = store.turnGitArtifact(turnId);
@@ -73,21 +77,39 @@ function recordedScope(store: RuntimeStore, turnIds: readonly string[]): Recorde
     if (artifact.absenceReason === "not-repository") continue;
     if (artifact.status !== "ready" || artifact.completeness !== "complete") return outcome("refused", UNRECORDED);
     const { beforeRef, afterRef, createdAt } = store.turnGitArtifactStorage(turnId);
-    if (afterRef) finalRef = afterRef;
-    if (artifact.files.length === 0) continue;
+    const gapBeforeRef = beforeRef ?? (artifact.files.length === 0 ? afterRef : null);
+    if (scope && previousAfterRef && gapBeforeRef && previousAfterRef !== gapBeforeRef) {
+      scope.gaps.push({ afterRef: previousAfterRef, beforeRef: gapBeforeRef });
+    } else if (scope && !previousAfterRef && gapBeforeRef) {
+      unrecordedAfter = true;
+    }
+    if (artifact.files.length === 0) {
+      if (afterRef) {
+        finalRef = afterRef;
+        if (scope) previousAfterRef = afterRef;
+      }
+      continue;
+    }
     if (!beforeRef || !artifact.repositoryIdentity || !artifact.worktreeIdentity) return outcome("refused", UNRECORDED);
-    scope ??= { target: { turn, beforeRef, createdAt }, finalRef: null, repositoryIdentity: artifact.repositoryIdentity,
-      worktreeIdentity: artifact.worktreeIdentity, paths: new Set(), additions: new Set() };
+    scope ??= { target: { turn, beforeRef, createdAt }, finalRef: null, unrecordedAfter: false, gaps: [],
+      repositoryIdentity: artifact.repositoryIdentity, worktreeIdentity: artifact.worktreeIdentity,
+      paths: new Set(), additions: new Set() };
     if (scope.repositoryIdentity !== artifact.repositoryIdentity || scope.worktreeIdentity !== artifact.worktreeIdentity) {
       return outcome("refused", UNOWNED);
     }
+    finalRef = afterRef;
+    previousAfterRef = afterRef;
+    if (!afterRef) unrecordedAfter = true;
     for (const file of artifact.files) {
       scope.paths.add(file.path);
       if (file.previousPath) scope.paths.add(file.previousPath);
       if (file.status === "added" || file.status === "renamed" || file.status === "copied") scope.additions.add(file.path);
     }
   }
-  if (scope) scope.finalRef = finalRef;
+  if (scope) {
+    scope.finalRef = finalRef;
+    scope.unrecordedAfter = unrecordedAfter;
+  }
   return scope;
 }
 
@@ -115,15 +137,29 @@ async function withSnapshot<T>(repositoryPath: string, conversationId: string, s
   finally { await deleteCheckpoint(repositoryPath, current.ref, conversationId).catch(() => undefined); }
 }
 
-function restoredTargets(files: readonly { path: string; previousPath: string | null; status: string }[]): string[] {
+async function restoredTargets(
+  repositoryPath: string,
+  files: readonly { path: string; previousPath: string | null; status: string }[],
+  deadlineAt: number,
+): Promise<string[]> {
   const targets = new Set<string>();
+  const maybeIndexed: string[] = [];
   for (const file of files) {
-    if (file.status === "added" || file.status === "copied") continue;
+    if (file.status === "added" || file.status === "copied") {
+      maybeIndexed.push(file.path);
+      continue;
+    }
     if (file.status === "renamed") {
       if (file.previousPath) targets.add(file.previousPath);
+      maybeIndexed.push(file.path);
       continue;
     }
     targets.add(file.path);
+  }
+  if (maybeIndexed.length > 0) {
+    for (const path of await listIndexedGitPaths(repositoryPath, maybeIndexed, { deadlineAt })) {
+      targets.add(path);
+    }
   }
   return [...targets];
 }
@@ -141,7 +177,7 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
       editedAfter: [] as string[],
     };
   }
-  const overwriteTargets = restoredTargets(comparison.files);
+  const overwriteTargets = await restoredTargets(repositoryPath, comparison.files, deadlineAt);
   if (overwriteTargets.length === 0) {
     return {
       truncated: false,
@@ -151,7 +187,7 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
       editedAfter: [] as string[],
     };
   }
-  if (!scope.finalRef) {
+  if (!scope.finalRef || scope.unrecordedAfter) {
     return {
       truncated: false,
       files: comparison.files,
@@ -160,17 +196,24 @@ async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: s
       editedAfter: [] as string[],
     };
   }
-  const sinceFinal = await compareGitSnapshots(repositoryPath, scope.finalRef, ref, { deadlineAt, maxBytes: 1_024 });
-  if (sinceFinal.summaryTruncated) {
-    return {
-      truncated: false,
-      files: comparison.files,
-      finalMissing: false,
-      finalTruncated: true,
-      editedAfter: [] as string[],
-    };
+  const intervals = [...scope.gaps, { afterRef: scope.finalRef, beforeRef: ref }];
+  const changedAfter = new Set<string>();
+  for (const interval of intervals) {
+    const diff = await compareGitSnapshots(repositoryPath, interval.afterRef, interval.beforeRef, { deadlineAt, maxBytes: 1_024 });
+    if (diff.summaryTruncated) {
+      return {
+        truncated: false,
+        files: comparison.files,
+        finalMissing: false,
+        finalTruncated: true,
+        editedAfter: [] as string[],
+      };
+    }
+    for (const file of diff.files) {
+      changedAfter.add(file.path);
+      if (file.previousPath) changedAfter.add(file.previousPath);
+    }
   }
-  const changedAfter = new Set(sinceFinal.files.flatMap(({ path, previousPath }) => previousPath ? [path, previousPath] : [path]));
   return {
     truncated: false,
     files: comparison.files,

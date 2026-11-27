@@ -1,7 +1,7 @@
 // @inertia-test-suite portable
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +25,15 @@ import { conversationRollbackResultSchema } from "../../src/shared/orchestration
 import { cleanupTurnControllerTestDirectories, createTurnControllerTestRuntime,
   turnControllerTestIdentity, turnControllerTestProviderInfo, type TurnControllerTestRuntime } from "../support/turn-controller-runtime";
 
-afterEach(() => { vi.restoreAllMocks(); return cleanupTurnControllerTestDirectories(); });
+const artifactManagers: TurnGitArtifactManager[] = [];
+
+afterEach(async () => {
+  vi.restoreAllMocks();
+  for (const manager of artifactManagers.splice(0).reverse()) {
+    await manager.settleShutdown().catch(() => undefined);
+  }
+  return cleanupTurnControllerTestDirectories();
+});
 
 const wait = { timeout: 20_000, interval: 20 };
 
@@ -41,6 +49,7 @@ async function gitRuntime(): Promise<TurnControllerTestRuntime> {
     captureGitArtifacts: (input) => manager.finalize(input),
   });
   manager = new TurnGitArtifactManager(runtime.store, join(runtime.directory, "data"));
+  artifactManagers.push(manager);
   git(runtime.workspace, "init", "-b", "main");
   git(runtime.workspace, "config", "core.autocrlf", "false");
   git(runtime.workspace, "config", "user.name", "Inertia Test");
@@ -339,6 +348,113 @@ describe("chat rollback with file restore", () => {
       expect(read(runtime, "notes.txt")).toBe("rolled back plus user edit\n");
       expect(runtime.store.orchestration.history.rolledBack(second.id)).toBe(true);
       expect(filesRecord(runtime.store, result.rollbackId)).toMatchObject({ state: "refused" });
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it.each(["staged", "committed"] as const)(
+    "refuses the file restore when an added file that was %s by a rolled-back turn is edited afterwards",
+    async (mode) => {
+      const runtime = await gitRuntime();
+      try {
+        const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+        const runs = runtime.provider.runCount;
+        const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "second request", turnCheckpoint: true });
+        runtime.controller.start(queued.turn.id);
+        await vi.waitFor(() => expect(runtime.provider.runCount).toBe(runs + 1), wait);
+        writeFileSync(join(runtime.workspace, "made.txt"), "agent added\n");
+        git(runtime.workspace, "add", "made.txt");
+        if (mode === "committed") git(runtime.workspace, "commit", "-m", "agent commit");
+        runtime.provider.resolve({ text: "second answer", sessionId: "source-native" });
+        await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), wait);
+        await vi.waitFor(() => expect(runtime.store.turnGitArtifact(queued.turn.id)?.status).toBe("ready"), wait);
+        writeFileSync(join(runtime.workspace, "made.txt"), "agent added plus user edit\n");
+        const restore = vi.fn(restoreConversationCheckpoint);
+        const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+        expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 1, files: { outcome: "refused" } });
+        expect(result.files.message).toContain("made.txt");
+        expect(restore).not.toHaveBeenCalled();
+        expect(read(runtime, "made.txt")).toBe("agent added plus user edit\n");
+      } finally { runtime.store.close(); }
+    }, 120_000);
+
+  it("refuses the file restore when a staged rename destination is edited afterwards", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      const runs = runtime.provider.runCount;
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "rename request", turnCheckpoint: true });
+      runtime.controller.start(queued.turn.id);
+      await vi.waitFor(() => expect(runtime.provider.runCount).toBe(runs + 1), wait);
+      git(runtime.workspace, "mv", "notes.txt", "renamed.txt");
+      runtime.provider.resolve({ text: "rename answer", sessionId: "source-native" });
+      await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), wait);
+      await vi.waitFor(() => expect(runtime.store.turnGitArtifact(queued.turn.id)?.status).toBe("ready"), wait);
+      writeFileSync(join(runtime.workspace, "renamed.txt"), "retained plus user edit\n");
+      const restore = vi.fn(restoreConversationCheckpoint);
+      const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 1, files: { outcome: "refused" } });
+      expect(result.files.message).toContain("renamed.txt");
+      expect(restore).not.toHaveBeenCalled();
+      expect(read(runtime, "renamed.txt")).toBe("retained plus user edit\n");
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it("refuses the file restore when a tracked file was edited between rolled-back turns", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      await finish(runtime, "second", { "notes.txt": "turn two\n" });
+      writeFileSync(join(runtime.workspace, "notes.txt"), "turn two plus manual\n");
+      await finish(runtime, "third", { "base.txt": "turn three\n" });
+      const restore = vi.fn(restoreConversationCheckpoint);
+      const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 2, files: { outcome: "refused" } });
+      expect(result.files.message).toContain("notes.txt");
+      expect(restore).not.toHaveBeenCalled();
+      expect(read(runtime, "notes.txt")).toBe("turn two plus manual\n");
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it("refuses the file restore when a tracked file deleted by a rolled-back turn is recreated afterwards", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      const runs = runtime.provider.runCount;
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "delete request", turnCheckpoint: true });
+      runtime.controller.start(queued.turn.id);
+      await vi.waitFor(() => expect(runtime.provider.runCount).toBe(runs + 1), wait);
+      unlinkSync(join(runtime.workspace, "base.txt"));
+      runtime.provider.resolve({ text: "delete answer", sessionId: "source-native" });
+      await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), wait);
+      await vi.waitFor(() => expect(runtime.store.turnGitArtifact(queued.turn.id)?.status).toBe("ready"), wait);
+      writeFileSync(join(runtime.workspace, "base.txt"), "recreated by user\n");
+      const restore = vi.fn(restoreConversationCheckpoint);
+      const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 1, files: { outcome: "refused" } });
+      expect(result.files.message).toContain("base.txt");
+      expect(restore).not.toHaveBeenCalled();
+      expect(read(runtime, "base.txt")).toBe("recreated by user\n");
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
+  it("refuses with the unrecorded wording when the last rolled-back turn's post-turn snapshot was pruned", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      await finish(runtime, "second", { "notes.txt": "turn two\n" });
+      const third = await finish(runtime, "third", { "base.txt": "turn three\n" });
+      const originalStorage = runtime.store.turnGitArtifactStorage.bind(runtime.store);
+      vi.spyOn(runtime.store, "turnGitArtifactStorage").mockImplementation((turnId) => {
+        const stored = originalStorage(turnId);
+        return turnId === third.id ? { ...stored, afterRef: null } : stored;
+      });
+      const restore = vi.fn(restoreConversationCheckpoint);
+      const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 2, files: { outcome: "refused" } });
+      expect(result.files.message).toContain("could not establish every file");
+      expect(result.files.message).not.toContain("modified afterwards");
+      expect(restore).not.toHaveBeenCalled();
+      expect(read(runtime, "base.txt")).toBe("turn three\n");
     } finally { runtime.store.close(); }
   }, 120_000);
 

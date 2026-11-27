@@ -1,10 +1,12 @@
 .composer-queue-slot {
+  position: absolute;
+  z-index: -2;
+  right: 0;
+  bottom: calc(100% + 4px);
+  left: 0;
   display: flex;
   min-width: 0;
-  max-width: var(--composer-max-width);
   flex-direction: column;
-  margin: 0 auto;
-  padding: 0 clamp(12px, 3%, 22px);
 }
 
 .composer-queue-slot:empty {
@@ -14,15 +16,15 @@
 .composer-queue {
   min-width: 0;
   border: 1px solid var(--line-soft);
-  border-bottom: 0;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  border-radius: var(--radius-md) var(--radius-md) var(--radius-sm) var(--radius-sm);
   color: var(--text-muted);
-  background: var(--fill);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
   overflow: hidden;
 }
 
 .composer-queue + .composer-queue {
-  border-radius: 0;
+  margin-top: 4px;
 }
 
 .composer-queue-held {

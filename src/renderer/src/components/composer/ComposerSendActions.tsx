@@ -175,9 +175,9 @@ export function ComposerSendActions({
   const primaryRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
     if (explicitQueueHost !== undefined) return;
-    const shell = primaryRef.current?.closest<HTMLElement>(".composer-shell");
-    const slot = shell?.querySelector<HTMLElement>(":scope > .composer-queue-slot") ?? null;
-    setFallbackQueueHost(slot ?? primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
+    const composer = primaryRef.current?.closest<HTMLElement>(".composer");
+    const slot = composer?.querySelector<HTMLElement>(":scope > .composer-queue-slot") ?? null;
+    setFallbackQueueHost(slot ?? composer ?? null);
   }, [conversationId, explicitQueueHost]);
   const queueHost = explicitQueueHost !== undefined ? explicitQueueHost : fallbackQueueHost;
   const focusedElement = document.activeElement;

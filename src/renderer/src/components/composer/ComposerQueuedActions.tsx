@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
 
@@ -223,6 +223,15 @@ export function ComposerQueuedActions({
   onReleaseAttachment,
   onFocusInput,
 }: ComposerQueuedActionsProps): React.JSX.Element {
+  useLayoutEffect(() => {
+    const dock = queueHost?.classList.contains("composer-queue-slot") ? queueHost.parentElement : null;
+    if (!dock || !queueHost) return;
+    const sync = (): void => { dock.style.marginTop = queueHost.offsetHeight ? `${queueHost.offsetHeight + 4}px` : ""; };
+    sync();
+    const ro = typeof ResizeObserver < "u" ? new ResizeObserver(sync) : null;
+    ro?.observe(queueHost);
+    return () => { ro?.disconnect(); dock.style.marginTop = ""; };
+  }, [queueHost]);
   return (
     <>
       {onQueueCommand && (

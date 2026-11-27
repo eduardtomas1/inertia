@@ -1054,7 +1054,6 @@ export const Composer = memo(function Composer({
   </Suspense>;
   return (
     <div className="composer-shell">
-      <div className="composer-queue-slot" ref={setQueueHost} />
       <section
         ref={composerRef}
         className={clsx(
@@ -1069,6 +1068,7 @@ export const Composer = memo(function Composer({
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
         onDrop={(event) => { if (!event.dataTransfer.files.length) return; event.preventDefault(); void importAttachments([...event.dataTransfer.files]); }}
       >
+        <div className="composer-queue-slot" ref={setQueueHost} />
         <span className="composer-surface" aria-hidden="true" />
         <span className="composer-ultra-glow" aria-hidden="true" />
         <div className="composer-edit-banner-slot" ref={setEditBannerHost} />

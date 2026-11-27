@@ -562,8 +562,21 @@ export class TurnGitArtifactManager {
     return task;
   }
 
-  reconcile(): Promise<boolean> {
-    return runDatabaseWrite(this.#databaseWrites, () => this.#reconcileArtifacts());
+  async reconcile(): Promise<boolean> {
+    let existingConversationIds: ReadonlySet<string> = new Set();
+    let projectPaths: string[] = [];
+    const changed = await runDatabaseWrite(this.#databaseWrites, async () => {
+      const result = await this.#reconcileArtifacts();
+      if (!this.#lifetime.signal.aborted) {
+        existingConversationIds = new Set(this.store.conversationIds());
+        projectPaths = this.store.projects().map((project) => project.path).filter(Boolean);
+      }
+      return result;
+    });
+    if (!this.#lifetime.signal.aborted && projectPaths.length > 0) {
+      await this.#pruneOrphanedCheckpointRefs(existingConversationIds, projectPaths);
+    }
+    return changed;
   }
 
   async #reconcileArtifacts(): Promise<boolean> {
@@ -595,7 +608,6 @@ export class TurnGitArtifactManager {
         createdAt: turn.completedAt ?? turn.updatedAt,
       }));
       await this.prune();
-      await this.#pruneOrphanedCheckpointRefs();
     }
     return this.store.turnGitArtifactRevision() !== beforeArtifacts
       || this.store.checkpointExpirationRevision() !== beforeCheckpoints;
@@ -982,14 +994,15 @@ export class TurnGitArtifactManager {
     }
   }
 
-  async #pruneOrphanedCheckpointRefs(): Promise<void> {
+  async #pruneOrphanedCheckpointRefs(
+    existingConversationIds: ReadonlySet<string>,
+    projectPaths: readonly string[],
+  ): Promise<void> {
     if (this.#lifetime.signal.aborted) return;
     const operation = this.#operationOptions(this.#finalizationTimeoutMs);
-    const existingConversationIds = new Set(this.store.conversationIds());
     const visited = new Set<string>();
-    for (const project of this.store.projects()) {
+    for (const projectPath of projectPaths) {
       if (this.#lifetime.signal.aborted || operation.signal.aborted) break;
-      const projectPath = project.path;
       if (!projectPath || visited.has(projectPath) || !(await mayBeInsideGitRepository(projectPath))) continue;
       visited.add(projectPath);
       try {

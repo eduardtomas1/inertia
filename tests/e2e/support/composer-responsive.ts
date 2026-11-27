@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../../src/server/database";
@@ -297,20 +298,15 @@ export async function exerciseComposerQueue({
     store.close();
     throw new Error("Composer queue fixture has no active conversation.");
   }
+  const itemId = randomUUID();
   const originalStatus = store.conversation(conversationId).status;
   store.updateConversation(conversationId, { status: "running" });
+  store.orchestration.queue.enqueue({
+    conversationId,
+    itemId,
+    content: "After this pass, update the release notes and run the full gate",
+  });
   store.close();
-  await page.evaluate(({ targetId }) => {
-    window.localStorage.setItem(
-      `inertia:queued-prompts:v2:${targetId}`,
-      JSON.stringify([{
-        id: "queued-responsive-proof",
-        content: "After this pass, update the release notes and run the full gate",
-        createdAt: "2026-08-21T10:00:00.000Z",
-        attachments: [],
-      }]),
-    );
-  }, { targetId: conversationId });
   await page.reload();
   try {
     const dock = page.getByRole("region", { name: "Message composer" });
@@ -334,11 +330,13 @@ export async function exerciseComposerQueue({
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,
     });
+    cleanup.orchestration.queue.cancel({
+      conversationId,
+      itemId,
+      reason: "user",
+    });
     cleanup.updateConversation(conversationId, { status: originalStatus });
     cleanup.close();
-    await page.evaluate(({ targetId }) => {
-      window.localStorage.removeItem(`inertia:queued-prompts:v2:${targetId}`);
-    }, { targetId: conversationId });
     await page.reload();
   }
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();

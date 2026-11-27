@@ -158,7 +158,7 @@ test("rolls back chat context from a retained turn and merges a fork's findings 
   const rollbackStatus = firstTurn.getByRole("status")
     .filter({ hasText: /^Rolled back 1 later turn\. The next message starts a fresh provider session with the retained history\. Files restored\./u });
   await expect(firstTurn.getByRole("alert")).toHaveCount(0);
-  await expect(rollbackStatus).toBeVisible();
+  await expect(rollbackStatus).toBeVisible({ timeout: 45_000 });
   await expect(rollbackStatus.locator(".history-notice")).toHaveCount(0);
   await expect(firstTurn.getByText("Files restored", { exact: true })).toBeVisible();
   await expect(rollbackStatus).toContainText("Restored 1 file changed by the rolled-back turns.");

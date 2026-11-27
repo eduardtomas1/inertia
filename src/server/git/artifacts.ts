@@ -5,6 +5,7 @@ import type { TurnGitArtifactFile } from "../../shared/contracts";
 import {
   DEFAULT_OUTPUT_BYTES,
   MAX_DIFF_BYTES,
+  MAX_DIFF_FILES,
   MAX_PATH_LENGTH,
 } from "./constants";
 import {
@@ -12,6 +13,7 @@ import {
   literalPathspecs,
   repositoryRoot,
   type GitPathInspectionOptions,
+  validatedEntryPaths,
   validatedPaths,
 } from "./paths";
 import {
@@ -437,4 +439,36 @@ export async function compareGitSnapshots(
     patchTruncated,
     truncated: summaryTruncated || patchTruncated,
   };
+}
+
+export async function listIndexedGitPaths(
+  repositoryPath: string,
+  paths: readonly string[],
+  options: GitPathInspectionOptions = {},
+): Promise<Set<string>> {
+  const unique = [...new Set(paths)];
+  if (unique.length === 0) return new Set();
+  const root = await repositoryRoot(repositoryPath, options);
+  const indexed = new Set<string>();
+  for (let offset = 0; offset < unique.length; offset += MAX_DIFF_FILES) {
+    const batch = await validatedEntryPaths(
+      root,
+      unique.slice(offset, offset + MAX_DIFF_FILES),
+      options,
+    );
+    const listed = await runGitInspection(
+      root,
+      ["ls-files", "-z", "--", ...literalPathspecs(batch)],
+      {
+        deadlineAt: options.deadlineAt,
+        signal: options.signal,
+        maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+        failureMessage: "Unable to inspect indexed repository files.",
+      },
+    );
+    for (const entry of listed.stdout.toString("utf8").split("\0")) {
+      if (entry) indexed.add(entry);
+    }
+  }
+  return indexed;
 }

@@ -54,16 +54,18 @@ function mediaLabel(attachments: QueuedMessage["attachments"]): string {
   return `${attachments.length} ${attachments.length === 1 ? noun : `${noun}s`}`;
 }
 
+const HOLD_REASONS: Record<QueueHoldReason, string> = {
+  stopped: "Stopped",
+  "provider-failed": "Provider failed",
+  restart: "Restarted",
+  "usage-limit": "Usage limit",
+  "workspace-setup": "Workspace setup",
+  "busy-session": "Busy session",
+};
+
 export function holdReasonLabel(reason: QueueHoldReason | null): string {
-  switch (reason) {
-    case "stopped": return "Queue paused · Stopped";
-    case "provider-failed": return "Queue paused · Provider failed";
-    case "restart": return "Queue paused · Restarted";
-    case "usage-limit": return "Queue paused · Usage limit";
-    case "workspace-setup": return "Queue paused · Workspace setup";
-    case "busy-session": return "Queue paused · Busy session";
-    default: return "Queue paused";
-  }
+  const detail = reason ? HOLD_REASONS[reason] : undefined;
+  return detail ? `Queue paused · ${detail}` : "Queue paused";
 }
 
 export type QueueEntrySendMode = "send-now" | "stop-and-send" | "queue" | "none";

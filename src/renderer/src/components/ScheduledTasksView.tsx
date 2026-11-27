@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, CalendarClock, ChevronRight, MessageSquare, Pause, Pencil, Play, Plus, RefreshCw, Trash2, X,
+  CalendarClock, ChevronRight, CircleAlert, MessageSquare, Pause, Pencil, Play, Plus, RefreshCw, Trash2, X,
 } from "lucide-react";
 import type { AppSnapshot, Conversation, Project, ServerEvent } from "@shared/contracts";
 import {
@@ -435,10 +435,10 @@ export function ScheduledTasksView({
             </p>
           </div>
           <IconButton label="Refresh" disabled={offline || loading} onClick={() => { void loadTasks(); }}>
-            <RefreshCw size={15} aria-hidden="true" />
+            <RefreshCw size={16} aria-hidden="true" />
           </IconButton>
           <button type="button" className="secondary-button" disabled={offline || projects.length === 0} onClick={openCreateForm}>
-            <Plus size={15} aria-hidden="true" />New schedule
+            <Plus size={16} aria-hidden="true" />New schedule
           </button>
         </header>
 
@@ -446,14 +446,14 @@ export function ScheduledTasksView({
 
         {offline && (
           <p className="scheduled-banner" role="status">
-            <AlertCircle size={14} aria-hidden="true" />
+            <CircleAlert size={14} aria-hidden="true" />
             Offline — reconnect to create, edit, run, or remove scheduled tasks.
           </p>
         )}
 
         {loadError && (
           <p className="scheduled-banner is-error" role="alert">
-            <AlertCircle size={14} aria-hidden="true" />
+            <CircleAlert size={14} aria-hidden="true" />
             <span>{loadError}</span>
             <button type="button" className="text-button" disabled={offline} onClick={() => { void loadTasks(); }}>Retry</button>
           </p>
@@ -464,14 +464,14 @@ export function ScheduledTasksView({
             <div className="scheduled-form-header">
               <h2 id={formHeadingId}>{isEditing ? "Edit schedule" : "New schedule"}</h2>
               <IconButton label="Close schedule form" onClick={closeForm}>
-                <X size={15} aria-hidden="true" />
+                <X size={16} aria-hidden="true" />
               </IconButton>
             </div>
 
             <form className="scheduled-form" noValidate onSubmit={(e) => { void handleSubmit(e); }}>
               {formError && (
                 <p className="scheduled-banner is-error" role="alert">
-                  <AlertCircle size={14} aria-hidden="true" /><span>{formError}</span>
+                  <CircleAlert size={14} aria-hidden="true" /><span>{formError}</span>
                 </p>
               )}
 
@@ -613,7 +613,7 @@ export function ScheduledTasksView({
         ) : summaries.length === 0 && !loadError ? (
           formOpen ? null : (
             <div className="scheduled-state scheduled-empty">
-              <CalendarClock size={20} strokeWidth={1.5} aria-hidden="true" />
+              <CalendarClock size={16} aria-hidden="true" />
               <h2>No scheduled tasks yet</h2>
               <p>Run a prompt on an interval, at a set time each day, or once.</p>
             </div>
@@ -654,14 +654,14 @@ export function ScheduledTasksView({
                         <span className="scheduled-task-actions">
                           <button type="button" className="text-button" disabled={locked} onClick={() => { handleRunNow(task); }}>Run now</button>
                           <IconButton label={task.enabled ? "Pause" : "Resume"} disabled={locked} onClick={() => { handleToggleEnabled(task); }}>
-                            {task.enabled ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
+                            {task.enabled ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}
                           </IconButton>
                           <IconButton label="Edit" disabled={locked} onClick={() => { openEditForm(task); }}>
-                            <Pencil size={15} aria-hidden="true" />
+                            <Pencil size={14} aria-hidden="true" />
                           </IconButton>
                           {targetConv && (
                             <IconButton label="Open latest chat" onClick={() => { onOpenConversation(targetConv); }}>
-                              <MessageSquare size={15} aria-hidden="true" />
+                              <MessageSquare size={14} aria-hidden="true" />
                             </IconButton>
                           )}
                           <IconButton
@@ -674,7 +674,7 @@ export function ScheduledTasksView({
                             disabled={locked}
                             onClick={() => { setConfirmDeleteId(task.id); }}
                           >
-                            <Trash2 size={15} aria-hidden="true" />
+                            <Trash2 size={14} aria-hidden="true" />
                           </IconButton>
                         </span>
                       )}
@@ -702,7 +702,7 @@ export function ScheduledTasksView({
 
                     {task.lastError && (
                       <p className="scheduled-task-error">
-                        <AlertCircle size={13} aria-hidden="true" /><span>{task.lastError}</span>
+                        <CircleAlert size={14} aria-hidden="true" /><span>{task.lastError}</span>
                       </p>
                     )}
 
@@ -712,7 +712,7 @@ export function ScheduledTasksView({
                         aria-expanded={runsOpen} aria-controls={runsPanelId}
                         onClick={() => { toggleRuns(task.id); }}
                       >
-                        <ChevronRight size={13} aria-hidden="true" />Recent runs ({recentRuns.length})
+                        <ChevronRight size={14} aria-hidden="true" />Recent runs ({recentRuns.length})
                       </button>
                     )}
 

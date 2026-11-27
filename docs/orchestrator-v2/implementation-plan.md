@@ -56,12 +56,22 @@ tests, not just interfaces, documentation, or a disconnected prototype.
   recovery with stop/snooze precedence.
   (Phases 1–5, 2026-11-26: `reconcileQueueOnBoot` H5-restart hold, N8
   per-provider usage-limit hold, D.6 stop/parent/fresh-id hardening.)
-- [ ] Typed agent tools for threads, history/search, queues, delegation,
+- [x] Typed agent tools for threads, history/search, queues, delegation,
   forks/merge-back, configuration, questions, project/worktree operations,
   attachments, previews and scheduled tasks. Agents cannot approve permissions.
-  (Managed thread/delegation/queue `inertia_queue` tools shipped; agent fork,
-  merge-back, and scheduled-task tools remain for later phases.)
-- [ ] General scheduled tasks and durable scheduling/claim/recovery semantics.
+  (Phases 4–5 + Waves A & B, 2026-11-27: managed thread, delegation, `inertia_queue`,
+  5 extended managed tools [`inertia_fork_conversation`, `inertia_merge_back_fork`,
+  `inertia_configure_conversation`, `inertia_search_messages`, `inertia_read_conversation`],
+  and 4 scheduled-task tools [`inertia_list_scheduled_tasks`, `inertia_schedule_task`,
+  `inertia_delete_scheduled_task`, `inertia_run_scheduled_task_now`], all enforcing
+  effective turn/chat access & interaction ceilings and non-auto-approval below Full Access.)
+- [x] General scheduled tasks and durable scheduling/claim/recovery semantics.
+  (Wave B, 2026-11-27: append-only Migration 132 `PersistScheduledTasks`, durable
+  local-first `interval` >= 60s / `fixed_time` / `once` schedules, atomic enqueue + run
+  linking, strict `turnId` settlement, boot recovery, desktop `Schedules` view in a
+  dedicated deferred chunk, and Private Connect Monitor/Collaborate controls enforcing
+  conversation grants and prompt safety. Intentionally local-only without unauthenticated
+  public localhost webhook listeners.)
 - [x] Pi integration, official Cursor SDK integration, OpenCode 2 integration
   and ACP registry/discovery/authentication, in addition to Codex/Claude and
   existing Inertia providers. Capability gaps are explicit, never fabricated.
@@ -70,14 +80,14 @@ tests, not just interfaces, documentation, or a disconnected prototype.
 - [x] Client projection/subscription/reconnect, provider changes in timeline,
   lineage/results/queue/fork/scheduling UI, accessible interaction and mobile
   Private Connect equivalents where applicable.
-  (Phases 3–5, 2026-11-26: push `conversation.queue.changed`, accessible
-  fork/rollback/delegation/queue/edit UI, Private Connect Monitor/Collaborate
-  queue parity; general scheduled-task UI remains with general scheduling.)
+  (Phases 3–5 + Wave B, 2026-11-27: push `conversation.queue.changed`, accessible
+  fork/rollback/delegation/queue/edit UI, lazy-loaded WCAG 2.2 AA `Schedules` desktop view,
+  and Private Connect Monitor/Collaborate queue & scheduled-tasks parity.)
 - [x] Append-only upgrade migrations, representative legacy fixtures,
   deterministic provider fixtures, race/crash/replay coverage, complete
   `npm run check` and required portable/platform checks.
-  (130 verified immutable migrations, full Vitest + portable + 17/17 real
-  Electron E2E on Linux x64; Windows/macOS runners verified via CI.)
+  (132 verified immutable migrations, full portable suite + targeted regressions +
+  real Electron E2E on Linux x64; Windows/macOS runners verified via CI.)
 - [ ] PR updated with implementation, evidence and exercised/unexercised
   environments; branch pushed and merged after CI and review gates pass.
 

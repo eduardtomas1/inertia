@@ -875,5 +875,57 @@
         "headroom": 512
       }
     }
+  },
+  "waveBScheduledTasksAndMainSynccd0949a8": {
+    "date": "2026-11-27",
+    "checkpoint": "Orchestrator V2 Waves A & B (General Scheduled Tasks) + origin/main cd0949a8 (#784 media preview polish)",
+    "platform": "Linux x64, Node 22.23.2",
+    "measurement": "Full electron-vite + private-connect production build; ScheduledTasksView and its CSS live strictly in dedicated deferred chunk schedules-*.js (23,906 / 24,418 bytes), entryCss (259,481 / 259,805 bytes) and detachedChatCss (1,448 / 1,612 bytes) remain under budget, and deferredComposerQueueJavaScript stays 20,773 / 21,029 bytes.",
+    "added": {
+      "deferredScheduledTasksJavaScript": {
+        "bytes": 23906,
+        "limit": 24418,
+        "headroom": 512
+      }
+    },
+    "raised": {
+      "mainWorkbenchFirstLoadJavaScript": {
+        "bytes": 1014344,
+        "previousLimit": 1012101,
+        "limit": 1014856,
+        "headroom": 512
+      },
+      "detachedChatFirstLoadJavaScript": {
+        "bytes": 895907,
+        "previousLimit": 893996,
+        "limit": 896419,
+        "headroom": 512
+      },
+      "deferredMarkdownJavaScript": {
+        "bytes": 462045,
+        "previousLimit": 460474,
+        "limit": 462585,
+        "headroom": 540
+      },
+      "transcriptJavaScript": {
+        "bytes": 728947,
+        "previousLimit": 727438,
+        "limit": 729510,
+        "headroom": 563
+      },
+      "deferredWorkspaceMediaPreviewJavaScript": {
+        "bytes": 38969,
+        "previousLimit": 30070,
+        "limit": 39420,
+        "headroom": 451
+      },
+      "coreJavaScript": {
+        "bytes": 2854516,
+        "previousRecordedLimit": 2847060,
+        "previousLimit": 2854605,
+        "limit": 2855028,
+        "headroom": 512
+      }
+    }
   }
 }

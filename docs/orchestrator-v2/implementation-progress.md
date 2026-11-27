@@ -5959,3 +5959,72 @@ audited Phases 1–4 UI/a11y/core/provider hardening on top of `origin/main` `29
   `transcript-turn-anchor`, `runtime-stranded-profile`): **17/17 passed**.
 - **Unexercised locally:** Windows/macOS runners (covered by PR #686 CI matrix), real
   Codex/Claude/Pi/Cursor/Kimi/OpenCode live accounts, and packaged installer artifacts.
+
+## Waves A & B completion, adversarial hardening (S23–S42), and `origin/main` sync (`cd0949a8`) — 2026-11-27
+
+Completed all remaining Orchestrator V2 plan items on `orchestrator-v2` (PR #686), synced
+through `origin/main` `cd0949a8` (PRs #779–#784), and resolved every finding from `sol-loop`
+Wave A+B Round 1 (`gpt-6.2-sol` high: `S23–S35`) and independent Claude Opus 5.5 (`high`)
+Rounds 2–3 (`S36–S42`):
+
+### Wave A — Checkpoints, Boot Resend, Attribution, Typed Agent Tools & Provider Polish
+- **Checkpoints (D.5):** Per-workspace capture timeout streak tracking and post-ready
+  orphaned checkpoint ref sweep (`src/server/checkpoints.ts`, wired into
+  `src/server/turn-git-artifacts.ts`), using batched `git update-ref --no-deref --stdin`
+  so symbolic refs are never dereferenced outside `refs/inertia/checkpoints/` (`S30`/`S36`)
+  and abort-safe lock handoff serialization (`S31`).
+- **Unattended Boot Resend (D.6):** `reconcileQueueOnBoot` (`queue-boot-reconciliation.ts`)
+  marks unattended never-started and waiting/released dispatching claims with
+  `bootAutoResend: true` and persists `processLossCount` while preserving `H1-stop` Stop
+  precedence (`S29`).
+- **Attribution, Stop Cause & Child-Question Wakes:** Unified `agent-sender-note.ts` for
+  agent/scheduled attribution (preserving stored user text and leading `/command`/`$skill`),
+  persisted Stop cause/reason, delegation timeout hints + `childConversationId` headers, and
+  persisted `childQuestionWake` parent wakes withdrawn when stale across resolution, turn
+  settlement, and archive (`child-question-wake.ts`, `delegation-runtime.ts`, `S28`).
+- **Extended Typed Agent Tools:** Added 5 typed host tools in `managed-extended-tools.ts`
+  (`inertia_fork_conversation`, `inertia_merge_back_fork`, `inertia_configure_conversation`,
+  `inertia_search_messages`, `inertia_read_conversation`), all inheriting effective narrowed
+  turn/chat mode ceilings (`S37`/`S42`).
+- **Provider Polish (D.4):** Claude 90 s startup init timeout, stderr-only missing session
+  handling, pre-attachment refusal (`claude-agent-sdk-harness.ts`), and Codex native
+  `reasoningSummary` (`"auto" | "concise" | "detailed" | "none"`) allowlisted and wired
+  through `native-provider-options.ts`, `adapters.ts`, and `codex-app-server-harness.ts` (`S34`).
+
+### Wave B — General Scheduled Tasks (Local-First Durable Scheduling)
+- **Contract & Persistence (Migration 132):** Pure schedule math (`src/shared/scheduled-tasks.ts`)
+  for `interval` (`>= 60_000 ms`), `fixed_time` (`HH:MM` + optional weekdays `0..6`), and
+  `once` (`runAt`) — intentionally local-first without public unauthenticated localhost
+  webhook listeners. Append-only Migration 132 `PersistScheduledTasks` (`scheduled-tasks.ts`,
+  `CURRENT_DATABASE_SCHEMA_VERSION = 132`, 132 verified lineage entries) +
+  `ScheduledTaskRepository` exposed on `RuntimeStore.scheduledTasks`.
+- **Durable Runtime & Safety:** `ScheduledTaskService` + `scheduled-task-runtime.ts` +
+  `scheduled-task-commands.ts` + 4 typed agent host tools (`scheduled-task-host-tools.ts`,
+  `MAX_CAPABILITY_TOOLS = 72`, re-baselined `agent-surface-budget.json`).
+  - Atomic enqueue + `scheduled_task_runs` link inside one SQLite transaction via `afterInsert`
+    (`S25`), automatic `explicitSendAuthority` for unheld scheduled items preserving Stop
+    (`H1-stop`) and update holds (`S23`), strict `turnId` settlement (`S24`), execution-time
+    `freshContext` suppression and sender note (`S32`), strict `min(chat, task)` mode
+    intersection enforced at both turn admission (`S26`) and `AgentThreadManager` host-tool
+    ceilings & auto-approval (`S37`/`S42`), atomic bound-task deletion on chat delete +
+    active-run settlement on ephemeral chat delete (`S33`/`S38`/`S41`), and immediate +
+    dispatch-time queue withdrawal when a task is deleted (`S39`).
+- **Desktop & Private Connect UI:** Lazy-loaded WCAG 2.2 AA `ScheduledTasksView.tsx` mapped
+  to dedicated deferred `schedules-*.js` chunk (`23,906 / 24,418` B), flush `28px` sidebar
+  navigation item (`workspace-navigation.css`), and Private Connect `scheduled-tasks-gateway.ts`
+  + `ScheduledTasksSection.tsx` enforcing per-conversation and future-conversation grants,
+  prompt safety, error separation without retry loops, and reconnect reload (`S27`/`S35`/`S40`).
+
+### Verification (Linux x64, Node 22.23.2)
+- `npm run check:quality`: passed (`132` verified immutable migrations, `2,234` architecture
+  files / `9,896` edges, `0/0` `lint:standard`, `0/0` `lint:type-aware`, `5/5` `tsc` projects).
+- `npm run build:bundle`: passed (all `60` renderer bundle budgets + Private Connect build).
+- Full portable suite (`CI=1 npm run test:portable`): `301/304` passed on `0b9bacbb`; the
+  `3` drifted tests (`claude-steer-read-and-manifest`, `delegation-boot-order`,
+  `delegation-follow-up-wake`) were fixed and re-verified (`9/9` suites / `74/74` tests +
+  `2/2` S41–S42 suites / `22/22` tests passing).
+- Real Electron Playwright E2E: `scheduled-tasks.spec.ts` (including sidebar geometry check
+  and `Recent runs (1)` → `Completed`), `queue-edit.spec.ts`, `composer-stop-and-send.spec.ts`,
+  and `delegation-wake.spec.ts` (`5/5`) — **8/8 passed**.
+- **Unexercised locally:** Windows/macOS runners (verified via PR #686 CI matrix), live
+  Codex/Claude/Pi/Cursor/Kimi/OpenCode provider accounts, and packaged installer artifacts.

@@ -793,6 +793,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
+  const recordWorktreeCreation = store.conversationWorktrees.recordCreation.bind(store.conversationWorktrees);
+  store.conversationWorktrees.recordCreation = (conversationId, plannedPath, plannedBranch, identity) => {
+    recordWorktreeCreation(conversationId, plannedPath, plannedBranch, identity);
+    queuedMessages?.onWorktreeSetupRetried(conversationId);
+  };
+  const rejectWorktreeCreation = store.conversationWorktrees.rejectCreation.bind(store.conversationWorktrees);
+  store.conversationWorktrees.rejectCreation = (conversationId) => {
+    rejectWorktreeCreation(conversationId);
+    queuedMessages?.onWorktreeSetupRetried(conversationId);
+  };
   void queuedMessages.start(() => delegation?.recover());
   const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork });
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,

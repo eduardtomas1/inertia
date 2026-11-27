@@ -28,6 +28,7 @@ import {
   QUEUE_STATE_PROJECTION,
   queueItemProjectionSchema,
   queueStateProjectionSchema,
+  type QueueItemProjection,
 } from "../../shared/orchestration-queue";
 import { OrchestrationEventStore, type EventStoreVerification, type QueueContentMismatch } from "./event-store";
 import { OrchestrationQueueRepository } from "./queue-repository";
@@ -85,6 +86,34 @@ function readableProjection(kind: string, value: JsonValue): boolean {
   if (kind === QUEUE_ITEM_PROJECTION) return queueItemProjectionSchema.safeParse(value).success;
   if (kind === QUEUE_STATE_PROJECTION) return queueStateProjectionSchema.safeParse(value).success;
   return true;
+}
+
+function extractExpectedQueuedClaim(
+  queuedMessageId: string | undefined,
+  source: CommandSource | undefined,
+): { dispatchOrdinal: number | null; editRevision: number | null } {
+  if (!queuedMessageId || !source) return { dispatchOrdinal: null, editRevision: null };
+  let dispatchOrdinal: number | null = null;
+  let editRevision: number | null = null;
+  const cmd = source.command;
+  if (cmd !== null && typeof cmd === "object" && !Array.isArray(cmd)) {
+    const rawOrdinal = (cmd as { queuedDispatchOrdinal?: unknown }).queuedDispatchOrdinal;
+    if (typeof rawOrdinal === "number" && Number.isSafeInteger(rawOrdinal) && rawOrdinal > 0) {
+      dispatchOrdinal = rawOrdinal;
+    }
+    const rawRevision = (cmd as { queuedEditRevision?: unknown }).queuedEditRevision;
+    if (typeof rawRevision === "number" && Number.isSafeInteger(rawRevision) && rawRevision >= 0) {
+      editRevision = rawRevision;
+    }
+  }
+  if (dispatchOrdinal === null) {
+    const prefix = `queue:${queuedMessageId}:`;
+    if (source.commandId.startsWith(prefix)) {
+      const parsed = Number(source.commandId.slice(prefix.length));
+      if (Number.isSafeInteger(parsed) && parsed > 0) dispatchOrdinal = parsed;
+    }
+  }
+  return { dispatchOrdinal, editRevision };
 }
 
 /** Bridges existing transcript/execution projections into the V2 transaction. */
@@ -172,6 +201,24 @@ export class OrchestratedTurnRepository {
         if (preparedWorkspaceKey !== undefined && preparedWorkspaceKey !== this.access.conversationPath(conversation.id)) {
           throw new OrchestrationConflict("checkout-changed");
         }
+        const expectedQueuedClaim = extractExpectedQueuedClaim(input.queuedMessageId, source);
+        let dispatchingQueueItem: QueueItemProjection | null = null;
+        if (input.queuedMessageId) {
+          const queueItemRow = this.events.projection(QUEUE_ITEM_PROJECTION, input.queuedMessageId);
+          if (queueItemRow) {
+            const queueItem = queueItemProjectionSchema.parse(queueItemRow.value);
+            if (
+              queueItem.threadId !== conversation.id
+              || queueItem.state !== "dispatching"
+              || queueItem.queueHeld
+              || (expectedQueuedClaim.dispatchOrdinal !== null && queueItem.dispatchOrdinal !== expectedQueuedClaim.dispatchOrdinal)
+              || (expectedQueuedClaim.editRevision !== null && queueItem.contentRef.editRevision !== expectedQueuedClaim.editRevision)
+            ) {
+              throw new OrchestrationConflict("revision-conflict");
+            }
+            dispatchingQueueItem = queueItem;
+          }
+        }
         if (this.forks.get(conversation.id)?.transfer === "pending") {
           this.nativeControls.selectPortable(conversation.id, conversation.projectId, "portable-first-send");
         }
@@ -223,11 +270,7 @@ export class OrchestratedTurnRepository {
             nativeThreadId: null, nativeTurnId: null, interruptRequestedAt: null,
             cleanup: "not-started", runtimeId: this.runtimeId },
         } });
-        const queueItemRow = input.queuedMessageId ? this.events.projection("queue-item", input.queuedMessageId) : null;
-        const queueItemState = queueItemRow && typeof queueItemRow.value === "object" && queueItemRow.value !== null
-          ? (queueItemRow.value as { state?: unknown }).state
-          : null;
-        if (input.queuedMessageId && queueItemState === "dispatching") {
+        if (input.queuedMessageId && dispatchingQueueItem !== null) {
           const deliveryRow = this.database.prepare("SELECT delivery_mode FROM queued_messages WHERE id = ? AND conversation_id = ?")
             .get(input.queuedMessageId, conversation.id) as { delivery_mode: string | null } | undefined;
           events.push({

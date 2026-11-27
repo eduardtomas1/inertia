@@ -1,14 +1,7 @@
 import type { AgentTurn, Conversation } from "../../../shared/contracts";
 import { continuationIdentityForSelection } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
-import type { ProviderSteerReadCallback } from "../../provider/types";
 import type { ActiveTurn } from "./turn-controller-types";
-
-declare module "../../provider/contracts" {
-  interface ProviderRunCallbacks {
-    onSteerRead?: ProviderSteerReadCallback;
-  }
-}
 
 function sameConversationContinuationIdentity(
   conversation: Conversation,
@@ -77,31 +70,4 @@ export function persistActiveTurnConversationSession(
     continuationIdentity: active.turn.continuationIdentity,
   });
   return true;
-}
-
-/**
- * Routes a harness's `onSteerRead(steerId, readAt)` callback to the durable
- * `run-control.steer-read` projection for the active turn's current attempt.
- */
-export function recordActiveTurnSteerRead(
-  store: RuntimeStore,
-  active: ActiveTurn,
-  fallbackAttemptId: string | null,
-  steerId: string,
-  readAt: string,
-): boolean {
-  const attemptId = active.attemptId ?? fallbackAttemptId;
-  if (!attemptId || !steerId) return false;
-  try {
-    return store.orchestration.runControl.recordSteerRead({
-      conversationId: active.conversation.id,
-      projectId: active.conversation.projectId,
-      runId: active.turn.runId,
-      attemptId,
-      effectId: steerId,
-      readAt,
-    });
-  } catch {
-    return false;
-  }
 }

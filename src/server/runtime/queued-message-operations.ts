@@ -13,23 +13,35 @@ import { QUEUED_ROUTE_CHANGED_ERROR, type MessageQueueResult, type QueuedMessage
 import type { WatcherNoteAttribution } from "../../shared/watcher";
 import type { RuntimeStore } from "../database";
 import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
-import { RuntimeRequestError } from "../runtime-errors";
+import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { hasIncompleteWorktreeSetup } from "../workspace-path-authority";
 import type { CommandTicket } from "../orchestration-v2/command-authority";
 import { OrchestrationConflict, type CommandSource } from "../orchestration-v2/types";
 import { commandRejection } from "./commands/command-rejection";
 import { requestAgentStop, SUPERSEDED_STOP_CODE } from "./commands/agent-stop-command";
-import { awaitMessageSendPreparation, messageSendPreparationDeadline } from "./commands/message-send-preparation";
+import { QUEUE_CLAIM_SUPERSEDED_CODE } from "./commands/message-send-command";
+import {
+  awaitMessageSendPreparation,
+  MessageSendPreparationTimeoutError,
+  messageSendPreparationDeadline,
+} from "./commands/message-send-preparation";
 import type { TurnInteractionCommandDependencies } from "./commands/turn-interaction-types";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
 import {
+  CheckoutMoveBackgroundWorkError,
+  ContextHandoffBackgroundWorkError,
+  QueuedSelectionProviderUnavailableError,
+} from "./turns/turn-request-preparation";
+import {
+  isResumeIntentFulfilled,
   isUserQueueFull,
   isWatcherQueueFull,
   listQueueEntries,
-  PROMPTED_RESUME_TEXT,
+  nextQueuedSelectionForConversation,
   queueItemRouteMatches,
   resolveQueueTailSelection,
+  resolveResumeContinuation,
   RESUME_USAGE_LIMIT_ERROR,
   RESUME_WORKTREE_SETUP_ERROR,
   routeIdentityForSelection,
@@ -130,6 +142,7 @@ export interface QueueOperationsContext {
   dependencies: TurnInteractionCommandDependencies;
   running: Map<string, Promise<void>>;
   inFlightEditText: Map<string, string>;
+  isCompacting(conversationId: string): boolean;
   requireConversation(conversationId: string): Conversation;
   hasPendingInteraction(conversationId: string): boolean;
   result(conversationId: string, id?: string): MessageQueueResult;
@@ -313,11 +326,12 @@ export async function editInPlaceOperation(
   if (start.kind === "replay") return ctx.result(conversation.id, payload.id);
 
   const { ticket, intake } = start;
-  const prepared = payload.attachments !== undefined
-    ? await prepareAttachmentsForQueue(dependencies, payload.attachments, requestId, intake.existing.attachments)
-    : null;
+  let prepared: PreparedQueueAttachments | null = null;
   let committed = false;
   try {
+    prepared = payload.attachments !== undefined
+      ? await prepareAttachmentsForQueue(dependencies, payload.attachments, requestId, intake.existing.attachments)
+      : null;
     await ticket.inLane(() => {
       const current = ctx.requireConversation(conversation.id);
       const selection = payload.modelSelection !== undefined ? payload.modelSelection : undefined;
@@ -348,7 +362,9 @@ export async function editInPlaceOperation(
     ticket.finish(null);
     return ctx.result(conversation.id, payload.id);
   } catch (error) {
-    if (!committed) await prepared?.release();
+    if (!committed && prepared) {
+      await prepared.release().catch(() => undefined);
+    }
     ticket.fail(error);
     throw error;
   } finally {
@@ -396,7 +412,32 @@ export async function reconfirmOperation(
   await ctx.dispatch(conversationId, id);
 }
 
-/** Phase 5 R3 + N7: releases held queue items or continues the interrupted/stopped thread. */
+/** Executes the N7 continuation plan (native-first, prompted fallback, or next waiting queued item). */
+export async function executeResumeContinuationOperation(
+  ctx: QueueOperationsContext,
+  conversationId: string,
+  requestId: string,
+  socket?: WebSocket,
+): Promise<boolean> {
+  const { store } = ctx.dependencies;
+  const plan = resolveResumeContinuation(store, conversationId);
+  if (plan.kind === "native" || plan.kind === "prompted") {
+    if (!ctx.dependencies.enableProviders) return false;
+    await ctx.directTurnInteraction(socket ?? (null as unknown as WebSocket), {
+      type: "message.send",
+      requestId: `${requestId}:continue`,
+      payload: { conversationId, content: plan.content, attachments: [], activate: false },
+    }, { kind: "main" });
+    return true;
+  }
+  await ctx.running.get(conversationId)?.catch(() => undefined);
+  const nextWaiting = listQueueEntries(store, conversationId).find((entry) => entry.state === "waiting" && !entry.queueHeld);
+  if (!nextWaiting) return false;
+  await ctx.dispatch(conversationId, nextWaiting.id);
+  return true;
+}
+
+/** Phase 5 R3 + N7: releases held queue items and continues the interrupted/stopped thread natively first. */
 export async function resumeQueueOperation(
   ctx: QueueOperationsContext,
   conversationId: string,
@@ -414,7 +455,8 @@ export async function resumeQueueOperation(
   if (hasIncompleteWorktreeSetup(db, conversationId)) {
     throw new RuntimeRequestError(RESUME_WORKTREE_SETUP_ERROR);
   }
-  if (usageLimitHoldsQueue(store, conversationId)) {
+  const targetSelection = nextQueuedSelectionForConversation(store, conversationId);
+  if (usageLimitHoldsQueue(store, conversationId, targetSelection)) {
     throw new RuntimeRequestError(RESUME_USAGE_LIMIT_ERROR);
   }
   if (ctx.hasPendingInteraction(conversationId)) {
@@ -427,7 +469,7 @@ export async function resumeQueueOperation(
     commandId: requestId,
     command: { type: "message.queue.resume", requestId, payload: { conversationId } },
   };
-  const start = await store.orchestration.authority.begin<{ shouldContinueTurn: boolean }>({
+  const start = await store.orchestration.authority.begin<void>({
     source,
     threadId: conversation.id,
     projectId: conversation.projectId,
@@ -447,8 +489,6 @@ export async function resumeQueueOperation(
         for (const heldId of heldIds) update.run(heldId, conversationId);
       }
     });
-    const hasWaitingAfterRelease = queue.listActive(conversationId).some((item) => item.state === "waiting" && !item.queueHeld);
-    return { shouldContinueTurn: !hasWaitingAfterRelease };
   });
 
   if (start.kind === "rejected") throw new RuntimeRequestError(start.detail);
@@ -456,26 +496,40 @@ export async function resumeQueueOperation(
     await start.result;
     return ctx.result(conversationId);
   }
-  if (start.kind === "replay") return ctx.result(conversationId);
+  if (start.kind === "replay") {
+    if (!turns.isActive(conversationId)) {
+      const pending = queue.getState(conversationId)?.pendingSendIntent;
+      if (pending?.kind === "resume" && pending.requestId === requestId && !isResumeIntentFulfilled(store, conversationId, pending)) {
+        if (ctx.isCompacting(conversationId) || store.orchestration.hasPendingCleanup(conversationId)) {
+          ctx.retryAfterCleanup(conversationId);
+        } else {
+          await ctx.schedule(conversationId);
+        }
+      }
+    }
+    return ctx.result(conversationId);
+  }
 
-  const { ticket, intake } = start;
+  const { ticket } = start;
   try {
     ctx.changed(conversationId);
-    if (intake.shouldContinueTurn) {
-      const latest = store.latestAgentTurnForConversation(conversationId);
-      const canContinue = latest !== null
-        && (latest.status === "cancelled" || latest.status === "interrupted" || latest.status === "failed");
-      if (canContinue && ctx.dependencies.enableProviders) {
-        await ctx.directTurnInteraction(socket ?? (null as unknown as WebSocket), {
-          type: "message.send",
-          requestId: `${requestId}:continue`,
-          payload: { conversationId, content: PROMPTED_RESUME_TEXT, attachments: [], activate: false },
-        }, { kind: "main" });
-      }
-    } else {
-      await ctx.running.get(conversationId);
-      const nextWaiting = listQueueEntries(store, conversationId).find((entry) => entry.state === "waiting" && !entry.queueHeld);
-      if (nextWaiting) await ctx.dispatch(conversationId, nextWaiting.id);
+    if (ctx.isCompacting(conversationId) || store.orchestration.hasPendingCleanup(conversationId)) {
+      ctx.retryAfterCleanup(conversationId);
+      ticket.finish(null);
+      return ctx.result(conversationId);
+    }
+    if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
+      ctx.retryAfterCleanup(conversationId);
+      ticket.finish(null);
+      return ctx.result(conversationId);
+    }
+    if (ctx.isCompacting(conversationId) || store.orchestration.hasPendingCleanup(conversationId)) {
+      ctx.retryAfterCleanup(conversationId);
+      ticket.finish(null);
+      return ctx.result(conversationId);
+    }
+    if (!turns.isActive(conversationId)) {
+      await executeResumeContinuationOperation(ctx, conversationId, requestId, socket);
     }
     ticket.finish(null);
     return ctx.result(conversationId);
@@ -653,4 +707,138 @@ export function withdrawWatcherNoteOperation(ctx: QueueOperationsContext, conver
   const removed = store.queuedMessages.cancel(conversationId, id);
   if (removed) ctx.changed(conversationId);
   return removed !== null;
+}
+
+export const isTransientDispatchFailure = (error: unknown): boolean =>
+  error instanceof MessageSendPreparationTimeoutError
+  || (error instanceof RuntimeRequestError && error.code === MESSAGE_ADMISSION_UNAVAILABLE);
+
+export function handleQueuedDispatchErrorOperation(
+  ctx: QueueOperationsContext,
+  input: {
+    conversationId: string;
+    entry: QueuedMessage;
+    claim: { dispatchOrdinal: number; editRevision: number };
+    error: unknown;
+    aborted: boolean;
+    manualSendRetryKey: string | null;
+    unreadRouteChangedError: string;
+    retriedManualSend: Set<string>;
+    releaseClaimItem(
+      conversationId: string,
+      id: string,
+      reason: "transient" | "runtime-lost" | "steer-declined" | "turn-ended",
+    ): boolean;
+    blockItem(
+      conversationId: string,
+      entry: { id: string; watcherNote?: WatcherNoteAttribution },
+      blockedReason: string,
+      detail: string,
+    ): void;
+  },
+): void {
+  const { store, turns } = ctx.dependencies;
+  const queue = store.orchestration.queue;
+  const { conversationId, entry, claim, error } = input;
+  const currentV2 = queue.getItem(entry.id);
+  const claimSuperseded = (error instanceof RuntimeRequestError && error.code === QUEUE_CLAIM_SUPERSEDED_CODE)
+    || (currentV2 !== null && (
+      currentV2.queueHeld
+      || currentV2.state !== "dispatching"
+      || currentV2.dispatchOrdinal !== claim.dispatchOrdinal
+      || currentV2.contentRef.editRevision !== claim.editRevision
+    ));
+  if (input.aborted || turns.isClosing()) {
+    input.releaseClaimItem(conversationId, entry.id, "runtime-lost");
+  } else if (claimSuperseded) {
+    if (currentV2 && currentV2.state === "dispatching" && currentV2.dispatchOrdinal === claim.dispatchOrdinal) {
+      input.releaseClaimItem(conversationId, entry.id, "transient");
+    }
+  } else if (error instanceof ContextHandoffBackgroundWorkError || error instanceof CheckoutMoveBackgroundWorkError) {
+    input.releaseClaimItem(conversationId, entry.id, "transient");
+    const unheld = queue.listActive(conversationId).filter((item) => !item.queueHeld);
+    if (unheld.length > 0) queue.hold({ conversationId, cause: "H6-busy-session", itemIds: unheld.map(({ id }) => id) });
+  } else if (error instanceof QueuedSelectionProviderUnavailableError) {
+    input.blockItem(conversationId, entry, "provider-disabled", publicRuntimeError(error));
+    const unheld = queue.listActive(conversationId).filter((item) => !item.queueHeld);
+    if (unheld.length > 0) queue.hold({ conversationId, cause: "H4-start-failure", itemIds: unheld.map(({ id }) => id) });
+  } else if (isTransientDispatchFailure(error) && input.releaseClaimItem(conversationId, entry.id, "transient")) {
+    if (input.manualSendRetryKey !== null) input.retriedManualSend.add(input.manualSendRetryKey);
+    else ctx.retryAfterCleanup(conversationId);
+  } else {
+    const routeBroken = !queueItemRouteMatches(store, entry, store.conversation(conversationId));
+    input.blockItem(
+      conversationId,
+      entry,
+      routeBroken ? "route-changed" : "dispatch-failed",
+      routeBroken
+        ? (entry.userMessageId === null ? QUEUED_ROUTE_CHANGED_ERROR : input.unreadRouteChangedError)
+        : publicRuntimeError(error),
+    );
+    if (!routeBroken) {
+      const remainingUnheld = queue.listActive(conversationId)
+        .filter((item) => item.id !== entry.id && !item.queueHeld && item.kind === "message");
+      if (remainingUnheld.length > 0) {
+        queue.hold({ conversationId, cause: "H4-start-failure", itemIds: remainingUnheld.map(({ id }) => id) });
+      }
+    }
+  }
+}
+
+export function onTurnSettledOperation(
+  ctx: QueueOperationsContext,
+  turn: AgentTurn,
+  hasDispatchableItem: (conversationId: string) => boolean,
+): void {
+  const { store } = ctx.dependencies;
+  const db = store.orchestration.effects.connection;
+  const queue = store.orchestration.queue;
+  const runControl = store.orchestration.runControl;
+  const conversationId = turn.conversationId;
+  db.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE conversation_id = ? AND steer_when_ready_run_id = ?")
+    .run(conversationId, turn.runId);
+  let queueMutated = false;
+
+  const target = runControl.target(turn.runId);
+  const wasStopped = turn.status === "cancelled" || target?.interruptRequested === true;
+  const nextSelection = nextQueuedSelectionForConversation(store, conversationId);
+  if (turn.status === "completed" && !wasStopped
+    && !hasIncompleteWorktreeSetup(db, conversationId)
+    && !usageLimitHoldsQueue(store, conversationId, nextSelection)) {
+    const released = queue.release({ conversationId, cause: "R2-run-completed" });
+    if (released.events.length > 0) queueMutated = true;
+  }
+
+  if (adoptSettledUnreadFollowUps(store, turn)) queueMutated = true;
+
+  if (turn.status === "failed" && !usageLimitHoldsQueue(store, conversationId, turn.modelSelection)) {
+    const held = queue.hold({ conversationId, cause: "H4-start-failure" });
+    if (held.events.length > 0) queueMutated = true;
+  }
+
+  if (turn.status === "cancelled") {
+    const toHold = listQueueEntries(store, conversationId)
+      .filter((entry) => !entry.queueHeld && entry.deliveryMode !== "after-stop" && queue.getItem(entry.id) !== null)
+      .map(({ id }) => id);
+    if (toHold.length > 0) {
+      const held = queue.hold({ conversationId, cause: "H1-stop", itemIds: toHold });
+      if (held.events.length > 0) queueMutated = true;
+    }
+  }
+
+  if (turn.status === "interrupted" && turn.terminalReason !== "app-update") {
+    const toHold = listQueueEntries(store, conversationId)
+      .filter((entry) => !entry.queueHeld && entry.deliveryMode !== "after-stop" && queue.getItem(entry.id) !== null)
+      .map(({ id }) => id);
+    if (toHold.length > 0) {
+      const held = queue.hold({ conversationId, cause: "H5-restart", itemIds: toHold });
+      if (held.events.length > 0) queueMutated = true;
+    }
+  }
+
+  if (queueMutated) ctx.changed(conversationId);
+  if (hasDispatchableItem(conversationId)) {
+    if (turn.status === "cancelled") ctx.retryAfterCleanup(conversationId);
+    else void ctx.schedule(conversationId).catch(() => undefined);
+  }
 }

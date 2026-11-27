@@ -72,7 +72,7 @@ import { PromptInstructionDeliveries, recordDeferredSessionInstruction } from ".
 import {
   observeProviderPromptDropped, providerEventMatchesActiveTurn, providerFailureCause, providerTerminalResultMatchesActiveTurn, recordProviderStopReason,
 } from "./turn-provider-result";
-import { recordUnreadFollowUps, TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
+import { recordActiveTurnSteerRead, recordUnreadFollowUps, TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
 import {
@@ -93,7 +93,7 @@ import { TurnSecretRequests } from "./turn-secret-output";
 import { activeTurnIdentity, sameTurnOwner, type TurnOwnerIdentity } from "./turn-ownership";
 import { applyFreshSessionFallback, importedSessionUnavailableMessage, providerSessionUnavailable, recordRejectedProviderResume, releaseUnavailableProviderSession, reportsReplacedSession, REUSED_PROVIDER_SESSION_MESSAGE, reusedProviderSessionFailure } from "./turn-fresh-session-fallback";
 import { turnHistoryInjection } from "./turn-history-injection";
-import { persistActiveTurnConversationSession, recordActiveTurnSteerRead } from "./turn-session-persistence";
+import { persistActiveTurnConversationSession } from "./turn-session-persistence";
 
 export type {
   QueuedTurn,
@@ -862,7 +862,7 @@ export class TurnController {
           }
         },
         onEvent: (event) => { this.handleProviderEvent(event, startedAttemptId); },
-        onSteerRead: (steerId, readAt) => { recordActiveTurnSteerRead(this.store, active, startedAttemptId, steerId, readAt); },
+        onSteerRead: (steerId, readAt) => { recordActiveTurnSteerRead(this.store, active, steerId, readAt, startedAttemptId); },
         freshSessionFallback: (prior) => applyFreshSessionFallback(this.store, this.hooks, active, this.now(), prior,
           (attemptId) => (event) => { this.handleProviderEvent(event, attemptId); }),
       });

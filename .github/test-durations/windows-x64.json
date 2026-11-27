@@ -1561,6 +1561,7 @@
     "tests/server/source-control-nested-repository.test.ts": 26100,
     "tests/server/sql-identifiers.test.ts": 5,
     "tests/server/statement-cache.test.ts": 437,
+    "tests/server/steer-read-mapping.test.ts": 7200,
     "tests/server/stream-text-storage.test.ts": 5559,
     "tests/server/subagent-step-labels.test.ts": 14,
     "tests/server/subagent-task-telemetry-migration.test.ts": 2236,

@@ -1,30 +1,95 @@
-import type { AgentTurn, ChatAttachment, Conversation, ModelSelection } from "../../shared/contracts";
+import type { AgentTurn, ChatAttachment, Conversation, ModelSelection, ProviderId } from "../../shared/contracts";
 import { supportsNativeResume } from "../../shared/follow-up-steer";
+import { providerIdForHarness } from "../../shared/model-routing";
 import {
   MAX_QUEUED_USER_AND_AGENT_ITEMS,
   MAX_QUEUED_WATCHER_NOTES,
   type QueueHoldReason,
   type QueueItemProjection,
+  type QueuePendingSendIntent,
 } from "../../shared/orchestration-queue";
 import type { MessageQueueResult, QueuedMessage } from "../../shared/queued-messages";
 import type { RuntimeStore } from "../database";
+import { providerInstanceId } from "../orchestration-v2/provider-instance";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
 import { hasIncompleteWorktreeSetup } from "../workspace-path-authority";
 
 export const RESUME_WORKTREE_SETUP_ERROR = "Retry worktree setup or choose a workspace before resuming the queue.";
 export const RESUME_USAGE_LIMIT_ERROR = "Continue the limited thread before resuming its queue.";
 export const PROMPTED_RESUME_TEXT = "Continue where you left off.";
+export const NATIVE_RESUME_TEXT = "Continue from where you stopped.";
+
+/** Resolves the effective ModelSelection for a queued item (per-item override vs thread selection). */
+export function resolveEffectiveQueuedSelection(
+  entry: Pick<QueuedMessage, "modelSelection" | "followsThreadSelection" | "delegatedCompletion" | "watcherNote">,
+  conversation: Pick<Conversation, "modelSelection">,
+): ModelSelection {
+  if (!entry.followsThreadSelection && !entry.delegatedCompletion && !entry.watcherNote && entry.modelSelection) {
+    return entry.modelSelection;
+  }
+  return conversation.modelSelection;
+}
+
+/** Returns the effective selection of the next active queue item, falling back to the conversation's selection. */
+export function nextQueuedSelectionForConversation(
+  store: RuntimeStore,
+  conversationId: string,
+): ModelSelection | null {
+  let conversation: Conversation;
+  try {
+    conversation = store.conversation(conversationId);
+  } catch {
+    return null;
+  }
+  const entries = listQueueEntries(store, conversationId);
+  const next = entries.find((entry) => entry.state === "waiting" && !entry.queueHeld) ?? entries[0];
+  return next ? resolveEffectiveQueuedSelection(next, conversation) : conversation.modelSelection;
+}
+
+export function latestTurnForProvider(
+  store: RuntimeStore,
+  conversationId: string,
+  providerId: ProviderId,
+): AgentTurn | null {
+  const turns = store.agentTurnsForConversation(conversationId);
+  let latest: AgentTurn | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const turn of turns) {
+    if (turn.providerId !== providerId) continue;
+    const requestedAtMs = Date.parse(turn.requestedAt);
+    const comparable = Number.isFinite(requestedAtMs) ? requestedAtMs : Number.NEGATIVE_INFINITY;
+    if (latest === null || comparable >= latestMs) {
+      latest = turn;
+      latestMs = comparable;
+    }
+  }
+  return latest;
+}
 
 /**
  * Computes whether a provider usage limit currently holds automatic queue dispatch
- * for this chat (Phase 5 N8). Computed, never stored:
- * - Only applies when the latest turn failed with a usage-limit record carrying a
- *   future `resetsAt`.
- * - An unknown/null `resetsAt` lifts the hold.
- * - A newer user turn lifts the hold automatically because it becomes the latest turn.
+ * for the target selection's provider (Phase 5 N8). Computed, never stored:
+ * - Evaluates the latest turn for the target provider specifically so another
+ *   provider running in between neither falsely holds a different provider's items
+ *   nor clears an active reset window for the limited provider.
+ * - An unknown/null or expired `resetsAt` lifts the hold.
+ * - A newer turn on that provider lifts the hold automatically.
  */
-export function usageLimitHoldsQueue(store: RuntimeStore, conversationId: string, nowMs: number = Date.now()): boolean {
-  const latest = store.latestAgentTurnForConversation(conversationId);
+export function usageLimitHoldsQueue(
+  store: RuntimeStore,
+  conversationId: string,
+  targetSelection?: ModelSelection | null,
+  nowMs: number = Date.now(),
+): boolean {
+  let conversation: Conversation;
+  try {
+    conversation = store.conversation(conversationId);
+  } catch {
+    return false;
+  }
+  const effectiveSelection = targetSelection ?? conversation.modelSelection;
+  const targetProviderId = providerIdForHarness(effectiveSelection.harnessId) ?? conversation.providerId;
+  const latest = latestTurnForProvider(store, conversationId, targetProviderId);
   if (!latest || latest.status !== "failed") return false;
   if (!store.limitResets.usageLimited(latest.id)) return false;
   const plan = store.limitResets.get(conversationId);
@@ -36,16 +101,173 @@ export function usageLimitHoldsQueue(store: RuntimeStore, conversationId: string
     const resetMs = Date.parse(plan.resetsAt);
     if (Number.isFinite(resetMs) && resetMs > nowMs) return true;
   }
-  try {
-    const conversation = store.conversation(conversationId);
-    if (conversation.providerId === latest.providerId && conversation.snoozedUntil) {
-      const snoozeMs = Date.parse(conversation.snoozedUntil);
-      if (Number.isFinite(snoozeMs) && snoozeMs > nowMs) return true;
-    }
-  } catch {
-    return false;
+  if (conversation.providerId === targetProviderId && conversation.snoozedUntil) {
+    const snoozeMs = Date.parse(conversation.snoozedUntil);
+    if (Number.isFinite(snoozeMs) && snoozeMs > nowMs) return true;
   }
   return false;
+}
+
+export type ResumeContinuationPlan =
+  | { kind: "native"; content: string }
+  | { kind: "prompted"; content: string }
+  | { kind: "queue" };
+
+/**
+ * N7: decides whether `message.queue.resume` continues the latest stopped/interrupted/failed
+ * run natively first, falls back to prompted continuation (e.g. missed-run images or empty queue),
+ * or dispatches the next waiting queued item directly.
+ */
+export function resolveResumeContinuation(
+  store: RuntimeStore,
+  conversationId: string,
+): ResumeContinuationPlan {
+  let conversation: Conversation;
+  try {
+    conversation = store.conversation(conversationId);
+  } catch {
+    return { kind: "queue" };
+  }
+  const latest = store.latestAgentTurnForConversation(conversationId);
+  if (
+    !latest
+    || (latest.status !== "cancelled" && latest.status !== "interrupted" && latest.status !== "failed")
+  ) {
+    return { kind: "queue" };
+  }
+  const v2Active = store.orchestration.queue.listActive(conversationId);
+  // If the stopped/interrupted run's undelivered prompt was requeued, dispatching that item continues it.
+  if (v2Active.some((item) => item.requeuedFromTurnId === latest.id)) {
+    return { kind: "queue" };
+  }
+  const nativeSupported = supportsNativeResume(latest.harnessId);
+  const sessionId = latest.providerSessionAfter
+    ?? latest.providerSessionBefore
+    ?? (conversation.providerId === latest.providerId ? conversation.providerSessionId : null);
+  const hasResumableSession = conversation.providerId === latest.providerId
+    && sessionId !== null
+    && !store.orchestration.backings.sessionRetired({
+      threadId: conversationId,
+      providerId: latest.providerId,
+      identity: latest.continuationIdentity,
+      nativeSessionId: sessionId,
+    });
+  const missedImages = hasMissedRunImages(store, latest)
+    || store.orchestration.missedRunImages({
+      threadId: conversationId,
+      providerInstanceId: providerInstanceId(latest.providerId, latest.continuationIdentity),
+    }).length > 0;
+  if (nativeSupported && hasResumableSession && !missedImages) {
+    return { kind: "native", content: NATIVE_RESUME_TEXT };
+  }
+  if (nativeSupported && missedImages) {
+    return { kind: "prompted", content: PROMPTED_RESUME_TEXT };
+  }
+  const hasWaiting = listQueueEntries(store, conversationId).some((entry) => entry.state === "waiting" && !entry.queueHeld);
+  if (hasWaiting) return { kind: "queue" };
+  return { kind: "prompted", content: PROMPTED_RESUME_TEXT };
+}
+
+/** Returns true once a run has already been accepted/started after the stored resume intent. */
+export function isResumeIntentFulfilled(
+  store: RuntimeStore,
+  conversationId: string,
+  intent: QueuePendingSendIntent,
+): boolean {
+  const db = store.orchestration.effects.connection;
+  const intentEvent = db.prepare(`
+    SELECT sequence, created_at FROM orchestration_v2_events
+    WHERE thread_id = ? AND type = 'queue.send-requested'
+      AND json_extract(payload_json, '$.requestId') = ?
+    ORDER BY sequence DESC LIMIT 1
+  `).get(conversationId, intent.requestId) as { sequence: number; created_at: string } | undefined;
+  if (intentEvent) {
+    const newerV2Run = db.prepare(`
+      SELECT 1 FROM orchestration_v2_events
+      WHERE thread_id = ? AND type = 'run.accepted' AND sequence > ?
+      LIMIT 1
+    `).get(conversationId, intentEvent.sequence);
+    return newerV2Run !== undefined;
+  }
+  const latestTurn = store.latestAgentTurnForConversation(conversationId);
+  if (!latestTurn) return false;
+  const intentMs = Date.parse(intent.requestedAt);
+  const turnMs = Date.parse(latestTurn.requestedAt);
+  return Number.isFinite(intentMs) && Number.isFinite(turnMs) && turnMs > intentMs;
+}
+
+/** R4: preparation retry releases held items only while no newer executed run exists after the hold. */
+export function canReleaseWorktreeSetupRetry(
+  store: RuntimeStore,
+  conversationId: string,
+): boolean {
+  const db = store.orchestration.effects.connection;
+  if (hasIncompleteWorktreeSetup(db, conversationId)) return false;
+  const holdEvent = db.prepare(`
+    SELECT sequence, created_at FROM orchestration_v2_events
+    WHERE thread_id = ?
+      AND (
+        type = 'queue.items-held'
+        OR (type = 'queue.item-enqueued' AND json_extract(payload_json, '$.queueHeld') = 1)
+      )
+    ORDER BY sequence DESC LIMIT 1
+  `).get(conversationId) as { sequence: number; created_at: string } | undefined;
+  if (!holdEvent) return true;
+  const newerV2Run = db.prepare(`
+    SELECT 1 FROM orchestration_v2_events
+    WHERE thread_id = ? AND type = 'run.accepted' AND sequence > ?
+    LIMIT 1
+  `).get(conversationId, holdEvent.sequence);
+  if (newerV2Run !== undefined) return false;
+  const latestTurn = store.latestAgentTurnForConversation(conversationId);
+  if (latestTurn) {
+    const turnV2 = db.prepare(`
+      SELECT sequence FROM orchestration_v2_events
+      WHERE thread_id = ? AND type = 'run.accepted'
+        AND json_extract(payload_json, '$.run.id') = ?
+      ORDER BY sequence DESC LIMIT 1
+    `).get(conversationId, latestTurn.runId) as { sequence: number } | undefined;
+    if (turnV2) return turnV2.sequence <= holdEvent.sequence;
+    const holdMs = Date.parse(holdEvent.created_at);
+    const turnMs = Date.parse(latestTurn.requestedAt);
+    if (Number.isFinite(holdMs) && Number.isFinite(turnMs) && turnMs > holdMs) return false;
+  }
+  return true;
+}
+
+/** Returns true if an R4-preparation-retry release occurred after any executed run. */
+export function hasWorktreeRetryReleaseAuthority(
+  store: RuntimeStore,
+  conversationId: string,
+  latestTurn: AgentTurn | null,
+): boolean {
+  const db = store.orchestration.effects.connection;
+  const releaseEvent = db.prepare(`
+    SELECT sequence, created_at FROM orchestration_v2_events
+    WHERE thread_id = ? AND type = 'queue.items-released'
+      AND json_extract(payload_json, '$.cause') = 'R4-preparation-retry'
+    ORDER BY sequence DESC LIMIT 1
+  `).get(conversationId) as { sequence: number; created_at: string } | undefined;
+  if (!releaseEvent) return false;
+  const newerRun = db.prepare(`
+    SELECT 1 FROM orchestration_v2_events
+    WHERE thread_id = ? AND type = 'run.accepted' AND sequence > ?
+    LIMIT 1
+  `).get(conversationId, releaseEvent.sequence);
+  if (newerRun !== undefined) return false;
+  if (latestTurn) {
+    const turnV2 = db.prepare(`
+      SELECT sequence FROM orchestration_v2_events
+      WHERE thread_id = ? AND type = 'run.accepted'
+        AND json_extract(payload_json, '$.run.id') = ?
+      ORDER BY sequence DESC LIMIT 1
+    `).get(conversationId, latestTurn.runId) as { sequence: number } | undefined;
+    if (turnV2) return turnV2.sequence <= releaseEvent.sequence;
+    const releaseMs = Date.parse(releaseEvent.created_at);
+    const turnMs = Date.parse(latestTurn.requestedAt);
+    if (Number.isFinite(releaseMs) && Number.isFinite(turnMs) && turnMs > releaseMs) return false;
+  }
+  return true;
 }
 
 /**
@@ -61,7 +283,8 @@ export function computeQueueHoldReason(
 ): QueueHoldReason | null {
   const db = store.orchestration.effects.connection;
   if (hasIncompleteWorktreeSetup(db, conversationId)) return "workspace-setup";
-  if (usageLimitHoldsQueue(store, conversationId, nowMs)) return "usage-limit";
+  const nextSelection = nextQueuedSelectionForConversation(store, conversationId);
+  if (usageLimitHoldsQueue(store, conversationId, nextSelection, nowMs)) return "usage-limit";
   const hasHeldItem = activeItems.some((item) => item.queueHeld);
   if (!hasHeldItem) return null;
   const lastHold = db.prepare(`

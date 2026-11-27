@@ -40,8 +40,16 @@ export type SteerRequest =
   | { kind: "closed" }
   | { kind: "requested"; effectId: string };
 
+export interface SteerSettledNotification {
+  effectId: string;
+  runId: string;
+  attemptId: string;
+  outcome: RunSteerOutcome;
+}
+
 export class RunControlRepository {
   private effectRuntime: OrchestrationEffectRuntime | null = null;
+  private readonly steerSettledListeners = new Set<(event: SteerSettledNotification) => void>();
 
   constructor(
     private readonly events: OrchestrationEventStore,
@@ -53,6 +61,13 @@ export class RunControlRepository {
 
   attachEffectRuntime(runtime: OrchestrationEffectRuntime | null): void {
     this.effectRuntime = runtime;
+  }
+
+  onSteerSettled(listener: (event: SteerSettledNotification) => void): () => void {
+    this.steerSettledListeners.add(listener);
+    return () => {
+      this.steerSettledListeners.delete(listener);
+    };
   }
 
   dispatchesViaEffectRuntime(kind: "provider.interrupt" | "provider.steer"): boolean {
@@ -207,6 +222,13 @@ export class RunControlRepository {
       expectedRevision: this.events.revision(target.threadId), events: [event], result: null }, () => {
       this.settleEffectRow(effectId, failureCode);
     });
+    for (const listener of Array.from(this.steerSettledListeners)) {
+      try {
+        listener({ effectId, runId: steer.runId, attemptId: steer.attemptId, outcome });
+      } catch {
+        // Steer-settlement observers must never fail an already-committed settlement.
+      }
+    }
   }
 
   recordSteerRead(input: {

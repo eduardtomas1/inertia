@@ -93,14 +93,19 @@ import type {
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
 
-declare module "./turn-controller-types" {
-  interface QueueTurnRequest {
-    /**
-     * Explicit per-item model selection carried by a queued message (Phase 5 Pkg 3).
-     * Resolved for this turn without mutating the user's live composer selection on
-     * `conversations`.
-     */
-    modelSelectionOverride?: ModelSelection | null;
+/**
+ * Thrown when a queued item's explicit `modelSelectionOverride` switches away
+ * from a previous native session that still has background work running (H6).
+ * Extends `ContextHandoffBackgroundWorkError` so queue runtimes catching H6
+ * busy-session errors hold the queue cleanly without ending that work.
+ */
+export class ProviderSwitchBackgroundWorkError extends ContextHandoffBackgroundWorkError {
+  constructor(
+    message = "The previous provider session still has background work running. Wait for it to finish or stop it before switching.",
+  ) {
+    super("rejected-native-history");
+    this.name = "ProviderSwitchBackgroundWorkError";
+    this.message = message;
   }
 }
 
@@ -854,7 +859,7 @@ export function resolveTurnRequest(
     return { ...assembled, ...(contextHandoff ? { contextHandoff } : {}) };
   };
   const importNote = latestTurn?.origin === "cli-import"
-    ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
+    ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) !== null)
     : null;
   const startsFreshInEstablishedChat = !canResume
     && (continuation.reasonCode !== "first-turn"
@@ -908,6 +913,27 @@ export function resolveTurnRequest(
   if (canResume && relocation
     && providerBackgroundWork(dependencies.providers, exhaustedBackingSession(relocation)) === "pending") {
     throw new CheckoutMoveBackgroundWorkError();
+  }
+  // H6: a queued per-item selection switch must not interrupt background work still running on the replaced session.
+  if (
+    hasSelectionOverride
+    && request.goalStart === undefined
+    && latestTurn !== null
+    && latestTurn.providerSessionAfter !== null
+    && (
+      !canResume
+      || resumeSessionId !== latestTurn.providerSessionAfter
+      || route.providerId !== latestTurn.providerId
+      || route.harnessId !== latestTurn.harnessId
+    )
+    && providerBackgroundWork(dependencies.providers, {
+      conversationId: conversation.id,
+      providerId: latestTurn.providerId,
+      harnessId: latestTurn.harnessId,
+      nativeSessionId: latestTurn.providerSessionAfter,
+    }) === "pending"
+  ) {
+    throw new ProviderSwitchBackgroundWorkError();
   }
   let assembled: ReturnType<typeof assembleOnFreshSession>;
   try {
@@ -1077,7 +1103,10 @@ export function resolveTurnRequest(
       instructionDelivery.recordPromptPack(queued.turn.id);
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
-      const activeConversation = providerSessionInvalidation
+      const isolateOverrideSession = hasSelectionOverride
+        && !canResume
+        && !selectionsMatch(conversation.modelSelection, routeSelection);
+      const activeConversation = providerSessionInvalidation || isolateOverrideSession
         ? {
             ...conversation,
             providerSessionId: null,

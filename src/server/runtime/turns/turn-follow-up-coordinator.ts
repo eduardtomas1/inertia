@@ -29,48 +29,189 @@ function providerTurnStarted(active: ActiveTurn, signal?: AbortSignal): Promise<
   });
 }
 
+interface PendingSteerRead {
+  steerId: string;
+  readAt: string;
+  runId: string;
+  attemptId: string;
+  unsubscribe?: () => void;
+}
+
 const steerEffectByLease = new WeakMap<FollowUpAdmissionLease, string>();
 const steerEffectByTurn = new WeakMap<ActiveTurn, Map<string, string>>();
+const pendingSteerReadsByTurn = new WeakMap<ActiveTurn, Map<string, PendingSteerRead>>();
 
 /** Associates a V2 `provider.steer` effectId with a follow-up admission lease before calling `turns.steer(...)`. */
 export function bindSteerEffectId(lease: FollowUpAdmissionLease, effectId: string): void {
   steerEffectByLease.set(lease, effectId);
 }
 
-/** Records a durable `run-control.steer-read` mark when the provider starts reading an accepted steer. */
+function registerSteerEffect(active: ActiveTurn, steerId: string, effectId: string): void {
+  let map = steerEffectByTurn.get(active);
+  if (!map) {
+    map = new Map();
+    steerEffectByTurn.set(active, map);
+  }
+  map.set(steerId, effectId);
+}
+
+function unregisterSteerEffect(active: ActiveTurn, steerId: string): void {
+  steerEffectByTurn.get(active)?.delete(steerId);
+}
+
+function clearPendingSteerRead(active: ActiveTurn, effectId: string | undefined): void {
+  if (!effectId) return;
+  const pending = pendingSteerReadsByTurn.get(active);
+  const entry = pending?.get(effectId);
+  if (!entry) return;
+  entry.unsubscribe?.();
+  entry.unsubscribe = undefined;
+  pending!.delete(effectId);
+}
+
+function clearAllPendingSteerReads(active: ActiveTurn): void {
+  const pending = pendingSteerReadsByTurn.get(active);
+  if (!pending) return;
+  for (const entry of pending.values()) {
+    entry.unsubscribe?.();
+    entry.unsubscribe = undefined;
+  }
+  pending.clear();
+}
+
+function flushPendingSteerRead(store: RuntimeStore, active: ActiveTurn, effectId: string | undefined): boolean {
+  if (!effectId) return false;
+  const pending = pendingSteerReadsByTurn.get(active);
+  const entry = pending?.get(effectId);
+  if (!entry) return false;
+  const runControl = store.orchestration.runControl;
+  try {
+    const recorded = runControl.recordSteerRead({
+      conversationId: active.conversation.id,
+      projectId: active.conversation.projectId,
+      runId: entry.runId,
+      attemptId: entry.attemptId,
+      effectId,
+      readAt: entry.readAt,
+    });
+    if (recorded) {
+      clearPendingSteerRead(active, effectId);
+      return true;
+    }
+    const current = runControl.steer(effectId);
+    if (!current || current.state !== "dispatching") {
+      clearPendingSteerRead(active, effectId);
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function flushAllPendingSteerReads(store: RuntimeStore, active: ActiveTurn): void {
+  const pending = pendingSteerReadsByTurn.get(active);
+  if (!pending || pending.size === 0) return;
+  for (const effectId of Array.from(pending.keys())) {
+    flushPendingSteerRead(store, active, effectId);
+  }
+}
+
+/**
+ * Records a durable `run-control.steer-read` mark when the provider starts reading an accepted steer.
+ * If the callback arrives before durable acceptance commits (`state === "dispatching"`), the read
+ * timestamp is preserved per active turn and flushed immediately once durable acceptance lands.
+ */
 export function recordActiveTurnSteerRead(
   store: RuntimeStore,
   active: ActiveTurn,
   steerId: string,
   readAt?: string,
+  fallbackAttemptId?: string | null,
 ): boolean {
-  const effectId = steerEffectByTurn.get(active)?.get(steerId);
-  const target = effectId ? store.orchestration.runControl.target(active.turn.runId) : null;
-  if (!effectId || !target) return false;
+  if (!steerId) return false;
+  if (fallbackAttemptId && active.attemptId && fallbackAttemptId !== active.attemptId) return false;
+  const runControl = store.orchestration.runControl;
+  const mappedEffectId = steerEffectByTurn.get(active)?.get(steerId);
+  const effectId = mappedEffectId ?? (runControl.steer(steerId) ? steerId : undefined);
+  if (!effectId) return false;
+  const target = runControl.target(active.turn.runId);
+  const runId = target?.runId ?? active.turn.runId;
+  const attemptId = active.attemptId ?? target?.attemptId ?? fallbackAttemptId ?? null;
+  if (!attemptId) return false;
+  const effectiveReadAt = readAt ?? new Date().toISOString();
   try {
-    return store.orchestration.runControl.recordSteerRead({
+    const recorded = runControl.recordSteerRead({
       conversationId: active.conversation.id,
       projectId: active.conversation.projectId,
-      runId: target.runId,
-      attemptId: target.attemptId,
+      runId,
+      attemptId,
       effectId,
-      readAt,
+      readAt: effectiveReadAt,
     });
+    if (recorded) {
+      clearPendingSteerRead(active, effectId);
+      return true;
+    }
+    const current = runControl.steer(effectId);
+    if (
+      current
+      && current.runId === runId
+      && current.attemptId === attemptId
+      && current.state === "dispatching"
+    ) {
+      let pending = pendingSteerReadsByTurn.get(active);
+      if (!pending) {
+        pending = new Map();
+        pendingSteerReadsByTurn.set(active, pending);
+      }
+      if (!pending.has(effectId)) {
+        const entry: PendingSteerRead = {
+          steerId,
+          readAt: effectiveReadAt,
+          runId,
+          attemptId,
+        };
+        if (typeof runControl.onSteerSettled === "function") {
+          entry.unsubscribe = runControl.onSteerSettled((settled) => {
+            if (settled.effectId !== effectId) return;
+            clearPendingSteerRead(active, effectId);
+            if (settled.outcome === "accepted") {
+              try {
+                runControl.recordSteerRead({
+                  conversationId: active.conversation.id,
+                  projectId: active.conversation.projectId,
+                  runId: settled.runId,
+                  attemptId: settled.attemptId,
+                  effectId,
+                  readAt: entry.readAt,
+                });
+              } catch {
+                // Replaying a buffered steer-read must never break settlement.
+              }
+            }
+          });
+        }
+        pending.set(effectId, entry);
+      }
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
 /** Lets a provider's report of an unread follow-up (by steer id) find its persisted message and V2 effect. */
-function recordFollowUpMessage(active: ActiveTurn, steerId: string, messageId: string, effectId?: string): void {
+function recordFollowUpMessage(
+  store: RuntimeStore,
+  active: ActiveTurn,
+  steerId: string,
+  messageId: string,
+  effectId?: string,
+): void {
   (active.followUpMessagesBySteerId ??= new Map()).set(steerId, messageId);
   if (effectId) {
-    let map = steerEffectByTurn.get(active);
-    if (!map) {
-      map = new Map();
-      steerEffectByTurn.set(active, map);
-    }
-    map.set(steerId, effectId);
+    registerSteerEffect(active, steerId, effectId);
+    flushPendingSteerRead(store, active, effectId);
   }
 }
 
@@ -83,6 +224,7 @@ export const STEER_DELIVERY_NOT_CONFIRMED_TITLE = "Steer delivery not confirmed"
  * recorded with each steer's text so the user can resend it if needed.
  */
 export function recordUnreadFollowUps(store: RuntimeStore, active: ActiveTurn, result: ProviderRunResult): void {
+  flushAllPendingSteerReads(store, active);
   const fromResult = (result.unreadFollowUps ?? [])
     .flatMap((steerId) => active.followUpMessagesBySteerId?.get(steerId) ?? []);
   const durableUnread = active.turn.providerId === "claude"
@@ -228,6 +370,9 @@ export class TurnFollowUpCoordinator {
     active.freshSessionRequest = null;
     const steerId = randomUUID();
     const effectId = steerEffectByLease.get(lease);
+    if (effectId) {
+      registerSteerEffect(active, steerId, effectId);
+    }
     let accepted: boolean;
     try {
       accepted = await this.options.providers.steer(
@@ -236,7 +381,9 @@ export class TurnFollowUpCoordinator {
         { runId: active.turn.runId, turnId: active.turn.id },
       );
     } catch (error) {
+      clearPendingSteerRead(active, effectId);
       if (!(error instanceof ProviderSteerDeliveryUnknownError)) {
+        unregisterSteerEffect(active, steerId);
         active.freshSessionRequest ??= freshSessionRequest;
         throw error;
       }
@@ -247,6 +394,8 @@ export class TurnFollowUpCoordinator {
       throw new RuntimeRequestError(UNKNOWN_FOLLOW_UP_DELIVERY, undefined, "ambiguous");
     }
     if (!accepted) {
+      clearPendingSteerRead(active, effectId);
+      unregisterSteerEffect(active, steerId);
       active.freshSessionRequest ??= freshSessionRequest;
       return { kind: "refused" };
     }
@@ -255,6 +404,7 @@ export class TurnFollowUpCoordinator {
       const outcome = active.runState.terminalRequest()
         ?? this.options.store.agentTurn(active.turn.id).status;
       if (outcome !== "completed") {
+        clearPendingSteerRead(active, effectId);
         return { kind: "unconfirmed", message: "The follow-up was accepted as its turn ended. Check this chat before retrying." };
       }
       const message = this.options.store.createAcknowledgedFollowUpMessage(
@@ -267,7 +417,7 @@ export class TurnFollowUpCoordinator {
         options.queuedMessageId,
         ...messageOptions,
       );
-      recordFollowUpMessage(active, steerId, message.id, effectId);
+      recordFollowUpMessage(this.options.store, active, steerId, message.id, effectId);
       return { kind: "accepted", message };
     }
     const boundary = this.options.answerBoundary?.prepare(active);
@@ -282,7 +432,7 @@ export class TurnFollowUpCoordinator {
       ...messageOptions,
     );
     this.options.answerBoundary?.record(active, message.createdAt, boundary?.deferred ?? false);
-    recordFollowUpMessage(active, steerId, message.id, effectId);
+    recordFollowUpMessage(this.options.store, active, steerId, message.id, effectId);
     return { kind: "accepted", message };
   }
 
@@ -305,6 +455,7 @@ export class TurnFollowUpCoordinator {
     while (active.followUpAdmissions.size > 0) {
       await Promise.allSettled(active.followUpAdmissions);
     }
+    clearAllPendingSteerReads(active);
     const cleanups = this.attachmentCleanups.get(active);
     for (const cleanup of cleanups ?? []) {
       await cleanup();

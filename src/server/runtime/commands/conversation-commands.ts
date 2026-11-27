@@ -146,6 +146,7 @@ export interface ConversationCommandDependencies {
   decorateDelegation?(delegation: ConversationDelegation): ConversationDelegation | undefined;
   queuedMessages?: {
     schedule(conversationId: string): void | Promise<void>;
+    onWorktreeSetupRetried?(conversationId: string): void;
   };
 }
 
@@ -248,6 +249,9 @@ export function createConversationCommandHandler(
           command.payload,
           command.requestId,
         );
+        if (command.payload.useWorktree || command.payload.worktreePath) {
+          dependencies.queuedMessages?.onWorktreeSetupRetried?.(conversation.id);
+        }
         if (command.payload.activate !== false) return "mutation";
         dependencies.broadcastSnapshot();
         dependencies.send(socket, {

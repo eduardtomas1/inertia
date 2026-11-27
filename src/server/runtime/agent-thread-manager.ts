@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import type {
-  AccessMode,
   AgentApprovalRequest,
   AgentInputRequest,
   AgentTurn,
@@ -87,13 +86,14 @@ import type { DelegationTaskService } from "./delegation/task-service";
 import {
   assertInteractionWithinParent, CANCEL_TASK_TOOL, DELEGATE_TASK_TOOL, delegateApprovalSuffix,
   delegateCreateInput, delegatedTaskTitle, delegateTaskSchema, delegateWake, delegationToolFailure, followUpApprovalSuffix,
-  ModeEscalationError, TASK_STATUS_TOOL, TASK_WAIT_TOOL, taskCancelSchema, taskReadSchema, taskWaitSchema,
+  TASK_STATUS_TOOL, TASK_WAIT_TOOL, taskCancelSchema, taskReadSchema, taskWaitSchema,
   type DelegateTaskInput,
 } from "./delegation/task-tools";
 import { DelegatedWaitAbortedError, delegatedWaitTimeout } from "./delegation/task-wait";
 import {
-  RESTART_IDLE, agentSenderHiddenInstruction, dispatchManagedSend, managedSendApprovalDetail,
-  preflightManagedSend, sendSchema, type ManagedFollowUpLink, type ManagedMessageQueue, type SendMode,
+  RESTART_IDLE, agentSenderHiddenInstruction, assertAccessWithinParent, assertManagedDispatchCeiling,
+  dispatchManagedSend, managedSendApprovalDetail, preflightManagedSend, sendSchema,
+  type ManagedFollowUpLink, type ManagedMessageQueue, type SendMode,
 } from "./managed-send-modes";
 import {
   MANAGED_QUEUE_TOOL_NAME, executeManagedQueueMutation, executeManagedQueueRead, isManagedQueueReadAction,
@@ -193,16 +193,6 @@ function replayOperation(operation: AgentThreadOperation, toolName: AgentThreadM
   }
   if (operation.status === "completed" && operation.resultJson) return { success: true, text: operation.resultJson };
   return failure("operation_not_replayable", `The original operation is ${operation.status}; Inertia will not repeat it.`);
-}
-
-function accessRank(mode: AccessMode): number {
-  return mode === "supervised" ? 0 : mode === "auto-edit" ? 1 : 2;
-}
-
-function assertAccessWithinParent(requested: AccessMode, parent: AccessMode): void {
-  if (accessRank(requested) > accessRank(parent)) {
-    throw new ModeEscalationError("access_mode_escalation_denied", "A managed chat cannot exceed its parent chat's access mode.");
-  }
 }
 
 // Titles and branch names can be authored by another agent run: a parent's
@@ -425,11 +415,13 @@ export class AgentThreadManager {
             this.create(source, call.arguments, operationId, signal));
         case "inertia_send_message": {
           const input = sendSchema.parse(call.arguments);
+          const target = this.managedTarget(current, input.conversationId);
+          assertManagedDispatchCeiling(current, target);
           // A restart stops exactly the turn running now, never a later one.
           // The identity is kept here rather than on the operation, so a
           // parent that fails before approval cannot cancel that turn.
           const restart = input.mode === "restart"
-            ? this.dependencies.turns.activeIdentity(this.managedTarget(current, input.conversationId).id)
+            ? this.dependencies.turns.activeIdentity(target.id)
             : null;
           if (input.mode === "restart" && !restart) throw new Error(RESTART_IDLE);
           return await this.mutate(source, call, call.tool, (operationId, signal) =>
@@ -439,10 +431,15 @@ export class AgentThreadManager {
           const input = managedQueueSchema.parse(call.arguments);
           const target = this.managedTarget(current, input.conversationId);
           if (isManagedQueueReadAction(input)) return executeManagedQueueRead(this.dependencies, target, input);
-          assertAccessWithinParent(target.accessMode, current.accessMode);
+          assertManagedDispatchCeiling(current, target);
           return await this.mutate(source, call, "inertia_send_message",
-            (operationId, signal) => executeManagedQueueMutation({ ...this.dependencies, now: this.now },
-              this.assertSource(source), target, input, operationId, signal),
+            (operationId, signal) => {
+              const liveCaller = this.assertSource(source);
+              const liveTarget = this.managedTarget(liveCaller, input.conversationId);
+              assertManagedDispatchCeiling(liveCaller, liveTarget);
+              return executeManagedQueueMutation({ ...this.dependencies, now: this.now },
+                liveCaller, liveTarget, input, operationId, signal);
+            },
             undefined, managedQueueApprovalDetail(this.dependencies.store, target, input),
             { fingerprintToolName: MANAGED_QUEUE_TOOL_NAME, inputChars: managedQueueInputChars(input),
               autoApproveToolName: MANAGED_QUEUE_TOOL_NAME, skipPreflight: true });
@@ -822,6 +819,7 @@ export class AgentThreadManager {
     if (toolName === "inertia_send_message") {
       const input = sendSchema.parse(args);
       const target = this.managedTarget(current, input.conversationId);
+      assertManagedDispatchCeiling(current, target);
       preflightManagedSend(this.dependencies, target, input.mode ?? "auto");
       await this.assertRouteReady(this.dependencies.backendProfileController.validateSelection(target.modelSelection));
       return;
@@ -1126,15 +1124,19 @@ export class AgentThreadManager {
   ): Promise<ProviderHostToolResult> {
     const input = sendSchema.parse(args);
     const mode = input.mode ?? "auto";
-    const current = this.assertSource(source);
-    const target = this.managedTarget(current, input.conversationId);
+    const checkedCaller = this.assertSource(source);
+    const checkedTarget = this.managedTarget(checkedCaller, input.conversationId);
+    assertManagedDispatchCeiling(checkedCaller, checkedTarget);
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
     await this.assertRouteReady(
       this.dependencies.backendProfileController.validateSelection(
-        target.modelSelection,
+        checkedTarget.modelSelection,
       ),
     );
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+    const current = this.assertSource(source);
+    const target = this.managedTarget(current, input.conversationId);
+    assertManagedDispatchCeiling(current, target);
     const link: ManagedFollowUpLink = async (childTurn, via) =>
       await this.linkFollowUp(source, target.id, operationId, childTurn, via);
     return await dispatchManagedSend(

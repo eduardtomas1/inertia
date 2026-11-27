@@ -229,6 +229,7 @@ export class PrivateConnectRuntimeGateway {
         request,
         this.dependencies.queueHandlers,
         this.dependencies.onQueueMutated,
+        { isActive: this.dependencies.isConversationActive(request.conversationId) },
       );
     } catch (error) {
       return failedResponse(request.requestId, "unavailable", publicPrivateConnectError(error));

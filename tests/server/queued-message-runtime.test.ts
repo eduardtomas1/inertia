@@ -24,6 +24,8 @@ import { join } from "node:path";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { hold, release } from "../../src/server/runtime/update-hold";
 import { createTurnInteractionCommandHandler } from "../../src/server/runtime/commands/turn-interaction-commands";
+import { requestAgentStop } from "../../src/server/runtime/commands/agent-stop-command";
+import { NATIVE_RESUME_TEXT, PROMPTED_RESUME_TEXT } from "../../src/server/runtime/queued-message-runtime-helpers";
 import { watcherNoteDelivery } from "../../src/server/runtime/watcher/watcher-note-instruction";
 import { MAX_UNREAD_FOLLOW_UP_ROWS, messageQueueResultSchema } from "../../src/shared/queued-messages";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
@@ -1964,6 +1966,255 @@ describe("editing, re-confirming and documents in the queue", () => {
           id: secondId,
         },
       })).resolves.toBe("handled");
+    } finally { await f.close(); }
+  });
+});
+
+describe("Phase 5 sol-loop hardening (S3, S5, S11, S12)", () => {
+  it("S3: re-reads edited content, reordered head, and idle Stop (H1) landing during waitForProviderCleanup", async () => {
+    const f = await fixture();
+    let releaseCleanup!: () => void;
+    try {
+      const initial = startRunning(f);
+      const firstId = randomUUID();
+      const secondId = randomUUID();
+      await f.command("message.queue.enqueue", firstId);
+      await f.command("message.queue.enqueue", secondId);
+      await f.drain();
+
+      const realCleanup = f.controller.waitForProviderCleanup.bind(f.controller);
+      const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+      const cleanupSpy = vi.spyOn(f.controller, "waitForProviderCleanup").mockImplementationOnce(async (ids, deadline) => {
+        await cleanupGate;
+        return realCleanup(ids, deadline);
+      });
+
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(cleanupSpy).toHaveBeenCalledOnce());
+
+      // Edit secondId and reorder it ahead of firstId while dispatch awaits cleanup.
+      await f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.edit",
+        requestId: randomUUID(),
+        payload: { conversationId: f.conversationId, id: secondId, expectedRevision: 0, content: "Freshly edited new head." },
+      });
+      await f.queue.reorder(f.conversationId, secondId, firstId, randomUUID());
+      releaseCleanup();
+
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
+      await f.drain();
+      cleanupSpy.mockRestore();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("completed");
+      expect(f.store.orchestration.queue.getItem(secondId)?.state).toBe("delivered");
+      expect(f.provider.input?.prompt).toContain("Freshly edited new head.");
+      expect(f.store.orchestration.queue.getItem(firstId)?.state).toBe("waiting");
+
+      // Now test idle Stop landing during waitForProviderCleanup holds firstId and dispatches nothing.
+      let releaseSecondCleanup!: () => void;
+      const secondGate = new Promise<void>((resolve) => { releaseSecondCleanup = resolve; });
+      const secondSpy = vi.spyOn(f.controller, "waitForProviderCleanup").mockImplementationOnce(async (ids, deadline) => {
+        await secondGate;
+        return realCleanup(ids, deadline);
+      });
+      f.provider.resolve({ status: "completed" });
+      await vi.waitFor(() => expect(secondSpy).toHaveBeenCalledOnce());
+      await requestAgentStop(f.dependencies, {
+        conversationId: f.conversationId,
+        expectedTurnId: null,
+        cause: "user",
+        source: { actorId: "human", commandId: randomUUID(), command: { type: "agent.stop" } },
+        rejection: null,
+      });
+      releaseSecondCleanup();
+      await f.drain();
+      secondSpy.mockRestore();
+      expect(f.provider.runCount).toBe(2);
+      expect(f.store.orchestration.queue.getItem(firstId)).toMatchObject({ state: "waiting", queueHeld: true });
+    } finally { releaseCleanup?.(); await f.close(); }
+  });
+
+  it("S3: aborts turn admission atomically when Stop holds a dispatching item during preparation and enforces claim ordinal/revision in turn-repository", async () => {
+    const f = await fixture();
+    let releaseVerify!: () => void;
+    try {
+      const verifyGate = new Promise<void>((resolve) => { releaseVerify = resolve; });
+      const verify = vi.fn(() => verifyGate);
+      f.dependencies.verifyProviderInstallation = verify;
+
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      const sending = f.command("message.queue.send", id);
+      await vi.waitFor(() => expect(verify).toHaveBeenCalledOnce());
+      expect(f.store.orchestration.queue.getItem(id)?.state).toBe("dispatching");
+
+      // Stop lands mid-preparation: marks the dispatching item queueHeld = true.
+      await requestAgentStop(f.dependencies, {
+        conversationId: f.conversationId,
+        expectedTurnId: null,
+        cause: "user",
+        source: { actorId: "human", commandId: randomUUID(), command: { type: "agent.stop" } },
+        rejection: null,
+      });
+      releaseVerify();
+      await sending;
+      await f.drain();
+
+      expect(f.provider.runCount).toBe(0);
+      expect(f.store.orchestration.queue.getItem(id)).toMatchObject({ state: "waiting", queueHeld: true });
+
+      // Direct turn-repository SQLite transaction guard rejects mismatched dispatchOrdinal/editRevision.
+      f.store.orchestration.queue.release({ conversationId: f.conversationId, cause: "R3-resume", itemIds: [id] });
+      f.store.orchestration.queue.claim({ conversationId: f.conversationId, itemId: id, mode: "run" });
+      const claimed = f.store.orchestration.queue.getItem(id)!;
+      expect(() => f.controller.queue({
+        conversationId: f.conversationId,
+        content: "Stale ordinal",
+        queuedMessageId: id,
+        orchestrationRequest: {
+          actorId: "runtime",
+          commandId: `queue:${id}:${claimed.dispatchOrdinal + 99}`,
+          command: { type: "message.send", queuedDispatchOrdinal: claimed.dispatchOrdinal + 99, queuedEditRevision: claimed.contentRef.editRevision },
+        },
+      })).toThrow(/revision-conflict/u);
+      expect(f.store.agentTurnsForConversation(f.conversationId)).toHaveLength(0);
+    } finally { releaseVerify?.(); await f.close(); }
+  });
+
+  it("S5: Resume continues a stopped native-resume turn first before draining held queued items, and honors deferred resume across compaction & replay", async () => {
+    const f = await fixture();
+    try {
+      const initial = startRunning(f);
+      f.provider.emit({ ...turnControllerTestIdentity(f), type: "session", sessionId: "native-sess-1" });
+      const queuedId = randomUUID();
+      await f.command("message.queue.enqueue", queuedId);
+      await f.drain();
+
+      // Stop Turn 1 -> holds queuedId with H1-stop; Turn 1 has resumable session on codex-app-server.
+      f.provider.resolve({ status: "cancelled", sessionId: "native-sess-1" });
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+      expect(f.store.orchestration.queue.getItem(queuedId)?.queueHeld).toBe(true);
+
+      // Press Resume while compacting: releases hold, records durable resume intent, defers start.
+      f.compaction.active = true;
+      const resumeRequestId = randomUUID();
+      await f.queue.resume(f.conversationId, resumeRequestId);
+      await f.drain();
+      expect(f.provider.runCount).toBe(1);
+      expect(f.store.orchestration.queue.getItem(queuedId)).toMatchObject({ state: "waiting", queueHeld: false });
+      expect(f.store.orchestration.queue.getState(f.conversationId)?.pendingSendIntent).toMatchObject({
+        kind: "resume",
+        requestId: resumeRequestId,
+      });
+
+      // Compaction ends -> automatic drainer honors pending resume and runs NATIVE continuation FIRST!
+      f.compaction.active = false;
+      f.queue.onCompactionSettled(f.conversationId);
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
+      await f.drain();
+      expect(f.provider.input).toMatchObject({
+        sessionId: "native-sess-1",
+        prompt: expect.stringContaining(NATIVE_RESUME_TEXT),
+      });
+      expect(f.provider.input?.prompt).not.toContain(PROMPTED_RESUME_TEXT);
+      expect(f.store.orchestration.queue.getItem(queuedId)?.state).toBe("waiting");
+
+      // Replaying the same resume requestId does not start a duplicate continuation turn.
+      await f.queue.resume(f.conversationId, resumeRequestId);
+      expect(f.provider.runCount).toBe(2);
+
+      // Once the continued turn completes, the released queued item drains automatically next!
+      f.provider.resolve({ status: "completed", sessionId: "native-sess-1" });
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(3));
+      await f.drain();
+      expect(f.store.orchestration.queue.getItem(queuedId)?.state).toBe("delivered");
+      expect(f.provider.input?.prompt).toContain("Do the next task.");
+    } finally { await f.close(); }
+  });
+
+  it("S11: editInPlaceOperation fails cleanly when attachment prep throws and clears in-flight ticket so retry with same requestId succeeds", async () => {
+    const f = await fixture();
+    try {
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+      const image = { id: randomUUID(), name: "expired.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
+      const retryRequestId = randomUUID();
+      const resolveSpy = vi.spyOn(f.dependencies.attachmentResolver!, "resolvePayloads")
+        .mockRejectedValueOnce(new Error("Attachment expired."));
+
+      await expect(f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.edit",
+        requestId: retryRequestId,
+        payload: { conversationId: f.conversationId, id, expectedRevision: 0, content: "Edited with retry", attachments: [image] },
+      })).rejects.toThrow("Attachment expired.");
+      resolveSpy.mockRestore();
+
+      // Retry with the exact same requestId MUST complete instead of hanging on a stuck ticket!
+      await expect(f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.edit",
+        requestId: retryRequestId,
+        payload: { conversationId: f.conversationId, id, expectedRevision: 0, content: "Edited with retry", attachments: [image] },
+      })).resolves.toBe("handled");
+      expect(f.store.queuedMessages.get(f.conversationId, id)).toMatchObject({
+        content: "Edited with retry",
+        editRevision: 1,
+        attachments: [expect.objectContaining({ id: image.id })],
+      });
+    } finally { await f.close(); }
+  });
+
+  it("S12: R4 onWorktreeSetupRetried releases held items after setup completes, but releases nothing when a newer executed run already exists", async () => {
+    const f = await fixture();
+    try {
+      const firstId = randomUUID();
+      await f.command("message.queue.enqueue", firstId);
+      await f.drain();
+
+      // Simulate incomplete worktree setup -> dispatch holds the item with H3-created-held.
+      f.store.conversationWorktrees.beginCreation(
+        f.conversationId,
+        join(f.directory, "worktrees", f.conversationId),
+        `inertia/${f.conversationId.slice(0, 8)}`,
+        randomUUID(),
+      );
+      f.queue.onCompactionSettled(f.conversationId);
+      await f.drain();
+      expect(f.store.orchestration.queue.getItem(firstId)?.queueHeld).toBe(true);
+      expect(f.provider.runCount).toBe(0);
+
+      // Still incomplete -> onWorktreeSetupRetried does nothing.
+      f.queue.onWorktreeSetupRetried(f.conversationId);
+      expect(f.store.orchestration.queue.getItem(firstId)?.queueHeld).toBe(true);
+
+      // Complete/resolve worktree setup -> onWorktreeSetupRetried releases with R4 and dispatches!
+      f.store.conversationWorktrees.rejectCreation(f.conversationId);
+      f.queue.onWorktreeSetupRetried(f.conversationId);
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(1));
+      await f.drain();
+      expect(f.store.orchestration.queue.getItem(firstId)?.state).toBe("delivered");
+      f.provider.resolve({ status: "completed" });
+      await f.drain();
+
+      // Now simulate another hold followed by a newer executed run -> onWorktreeSetupRetried MUST NOT release!
+      const secondId = randomUUID();
+      f.store.orchestration.queue.enqueue({
+        conversationId: f.conversationId,
+        itemId: secondId,
+        content: "Held before newer run",
+        queueHeld: true,
+      });
+      const newerTurn = f.controller.queue({ conversationId: f.conversationId, content: "Newer manual turn" });
+      f.controller.start(newerTurn.turn.id);
+      f.provider.resolve({ status: "completed" });
+      await f.drain();
+      expect(f.store.orchestration.queue.getItem(secondId)?.queueHeld).toBe(true);
+
+      f.queue.onWorktreeSetupRetried(f.conversationId);
+      await f.drain();
+      expect(f.store.orchestration.queue.getItem(secondId)).toMatchObject({ state: "waiting", queueHeld: true });
+      expect(f.provider.runCount).toBe(2);
     } finally { await f.close(); }
   });
 });

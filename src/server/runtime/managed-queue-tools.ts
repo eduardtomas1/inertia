@@ -5,14 +5,22 @@ import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
 import {
   MAX_QUEUED_CONTENT_CHARS,
   queueAgentCommandId,
+  queueContentCharCount,
   type QueueItemProjection,
 } from "../../shared/orchestration-queue";
 import type { RuntimeStore } from "../database";
 import { OrchestrationConflict } from "../orchestration-v2/types";
-import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../provider/contracts";
+import {
+  ProviderSteerDeliveryUnknownError,
+  type ProviderHostToolDefinition,
+  type ProviderHostToolResult,
+} from "../provider/contracts";
+import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { MULTILINE_PATTERN, idSchema, safeMultilineSchema } from "./managed-chat-schemas";
 import { withAgentSenderNote, type ManagedMessageQueue } from "./managed-send-modes";
+import { executeSteerViaEffectRuntime } from "./run-control-effect-handlers";
 import type { TurnController } from "./turns/turn-controller";
+import { bindSteerEffectId } from "./turns/turn-follow-up-coordinator";
 import { neutralizeUntrustedAgentText } from "./untrusted-agent-text";
 
 export const MANAGED_QUEUE_TOOL_NAME = "inertia_queue";
@@ -105,6 +113,25 @@ function boundedNeutralText(text: string, maxChars: number): { text: string; tru
     return { text: neutralized, truncated: false, totalChars: chars.length };
   }
   return { text: chars.slice(0, maxChars).join(""), truncated: true, totalChars: chars.length };
+}
+
+function summarizeMutationItem(item: QueueItemProjection) {
+  return {
+    itemId: item.id,
+    kind: item.kind,
+    state: item.state,
+    queuePosition: item.queuePosition,
+    queueHeld: item.queueHeld,
+    createdBy: item.createdBy,
+    creationSource: item.creationSource,
+    editRevision: item.contentRef.editRevision,
+    chars: item.contentRef.chars,
+    attachmentCount: item.attachmentIds.length,
+    editable: item.kind === "message" && (item.state === "waiting" || item.state === "blocked"),
+    requestedAt: item.requestedAt,
+    editedAt: item.editedAt,
+    ...(item.blockedReason ? { blockedReason: item.blockedReason } : {}),
+  };
 }
 
 function summarizeItem(store: RuntimeStore, conversationId: string, item: QueueItemProjection) {
@@ -272,14 +299,20 @@ export async function executeManagedQueueMutation(
         source: {
           actorId: "runtime",
           commandId,
-          command: { type: "message.queue.edit", conversationId: target.id, id: itemId, expectedRevision, content },
+          command: {
+            type: "message.queue.edit",
+            conversationId: target.id,
+            id: itemId,
+            expectedRevision,
+            content: { chars: queueContentCharCount(content) },
+          },
         },
       });
       publish();
       return json({
         conversationId: target.id,
         action: "edit",
-        item: summarizeItem(dependencies.store, target.id, edited.value),
+        item: summarizeMutationItem(edited.value),
       });
     } catch (error) {
       mapQueueConflictError("edit", error);
@@ -331,7 +364,7 @@ export async function executeManagedQueueMutation(
         conversationId: target.id,
         action: "reorder",
         movedItemId: itemId,
-        items: reordered.value.map((item) => summarizeItem(dependencies.store, target.id, item)),
+        items: reordered.value.map((item) => summarizeMutationItem(item)),
       });
     } catch (error) {
       mapQueueConflictError("reorder", error);
@@ -368,9 +401,15 @@ export async function executeManagedQueueMutation(
   if (!lease) {
     throw new Error("The managed chat cannot accept a steer right now.");
   }
+  const runControl = dependencies.store.orchestration.runControl;
+  const queue = dependencies.store.orchestration.queue;
+  let claimed = false;
+  let acknowledged = false;
+  let steerEffectId: string | null = null;
   try {
+    let dispatchOrdinal: number;
     try {
-      dependencies.store.orchestration.queue.claim({
+      const claimResult = queue.claim({
         conversationId: target.id,
         itemId,
         mode: "steer",
@@ -381,20 +420,57 @@ export async function executeManagedQueueMutation(
           command: { type: "message.queue.promote-to-steer", conversationId: target.id, id: itemId, turnId: lease.turnId },
         },
       });
+      dispatchOrdinal = claimResult.value.dispatchOrdinal;
+      claimed = true;
     } catch (error) {
       mapQueueConflictError("promote_to_steer", error);
     }
-    const steered = await dependencies.turns.steer(
-      lease,
-      { content, imagePaths: [] },
-      [],
-      undefined,
-      signal,
-      { providerContent: withAgentSenderNote(content, source), queuedMessageId: itemId },
-    );
+    const steerStart = await dependencies.store.orchestration.authority.begin<
+      { kind: "requested"; effectId: string } | { kind: "closed" } | { kind: "untracked" }
+    >({
+      source: {
+        actorId: "runtime",
+        commandId: `queue-steer:${itemId}:${dispatchOrdinal}:${operationId}`,
+        command: { type: "queue.steer", conversationId: target.id, itemId, dispatchOrdinal },
+      },
+      threadId: target.id,
+      projectId: target.projectId,
+      commandType: "queue.steer",
+      rejection: null,
+    }, (steerTicket) => runControl.requestSteer(steerTicket, lease.runId, lease.turnId, { queuedMessageId: itemId }));
+
+    if (steerStart.kind === "lead") {
+      if (steerStart.intake.kind === "requested") {
+        steerEffectId = steerStart.intake.effectId;
+        bindSteerEffectId(lease, steerEffectId);
+      }
+      steerStart.ticket.finish(null);
+    } else if (steerStart.kind === "joined") {
+      await steerStart.result;
+    }
+    const steerClosed = steerStart.kind === "lead" && steerStart.intake.kind === "closed";
+    const steered = steerClosed
+      ? { kind: "turn-ended" as const }
+      : await executeSteerViaEffectRuntime(
+        dependencies.store,
+        steerEffectId,
+        () => dependencies.turns.steer(
+          lease,
+          { content, imagePaths: [] },
+          [],
+          () => { acknowledged = true; },
+          signal,
+          { providerContent: withAgentSenderNote(content, source), queuedMessageId: itemId },
+        ),
+      );
     if (steered.kind === "accepted" && steered.message.turnId) {
+      const settledEffectId = steerEffectId;
+      if (settledEffectId) {
+        steerEffectId = null;
+        runControl.settleSteer(settledEffectId, "accepted", { messageId: steered.message.id, queuedMessageId: itemId });
+      }
       const attemptId = dependencies.store.orchestration.currentAttemptId(lease.runId) ?? lease.runId;
-      dependencies.store.orchestration.queue.deliver({
+      queue.deliver({
         conversationId: target.id,
         itemId,
         delivery: {
@@ -403,9 +479,11 @@ export async function executeManagedQueueMutation(
           attemptId,
           turnId: lease.turnId,
           messageId: steered.message.id,
+          ...(settledEffectId ? { steerEffectId: settledEffectId } : {}),
           deliveredAt: dependencies.now(),
         },
       });
+      claimed = false;
       publish();
       return json({
         conversationId: target.id,
@@ -417,11 +495,17 @@ export async function executeManagedQueueMutation(
       });
     }
     if (steered.kind === "refused" || steered.kind === "turn-ended") {
-      dependencies.store.orchestration.queue.releaseClaim({
+      if (steerEffectId) {
+        const effectId = steerEffectId;
+        steerEffectId = null;
+        runControl.settleSteer(effectId, steered.kind === "turn-ended" ? "turn-ended" : "refused", { queuedMessageId: itemId });
+      }
+      queue.releaseClaim({
         conversationId: target.id,
         itemId,
         reason: steered.kind === "turn-ended" ? "turn-ended" : "steer-declined",
       });
+      claimed = false;
       void Promise.resolve(dependencies.messageQueue?.()?.schedule?.(target.id)).catch(() => undefined);
       publish();
       throw new Error(
@@ -430,18 +514,66 @@ export async function executeManagedQueueMutation(
           : "The provider declined the promoted steer; it remains queued.",
       );
     }
+    const outcome = steered.kind === "unconfirmed" ? "unconfirmed" : "unavailable";
     const reason = steered.kind === "unconfirmed" ? "steer-unconfirmed" : "steer-unavailable";
     const detail = steered.kind === "unconfirmed"
       ? steered.message
       : "The managed chat could not deliver the promoted steer.";
-    dependencies.store.orchestration.queue.block({
+    if (steerEffectId) {
+      const effectId = steerEffectId;
+      steerEffectId = null;
+      runControl.settleSteer(effectId, outcome, { queuedMessageId: itemId });
+    }
+    queue.block({
       conversationId: target.id,
       itemId,
       blockedReason: reason,
       detail,
     });
+    claimed = false;
     publish();
     throw new Error(detail);
+  } catch (error) {
+    const ambiguous = acknowledged
+      || (error instanceof RuntimeRequestError && error.delivery === "ambiguous")
+      || error instanceof ProviderSteerDeliveryUnknownError;
+    if (steerEffectId) {
+      const effectId = steerEffectId;
+      steerEffectId = null;
+      try {
+        runControl.settleSteer(effectId, ambiguous ? "unconfirmed" : "unavailable", { queuedMessageId: itemId });
+      } catch {
+        // Best-effort settle; never mask the original steer failure.
+      }
+    }
+    if (claimed) {
+      try {
+        if (queue.getItem(itemId)?.state === "dispatching") {
+          if (ambiguous) {
+            const detail = acknowledged
+              ? "The agent received this message, but Inertia could not record it. Check the chat before sending it again."
+              : publicRuntimeError(error);
+            queue.block({
+              conversationId: target.id,
+              itemId,
+              blockedReason: "steer-unconfirmed",
+              detail,
+            });
+          } else {
+            queue.releaseClaim({
+              conversationId: target.id,
+              itemId,
+              reason: "steer-declined",
+            });
+            void Promise.resolve(dependencies.messageQueue?.()?.schedule?.(target.id)).catch(() => undefined);
+          }
+          publish();
+        }
+      } catch {
+        // Best-effort claim cleanup; never mask the original steer failure.
+      }
+    }
+    throw error;
   } finally {
     lease.release();
   }

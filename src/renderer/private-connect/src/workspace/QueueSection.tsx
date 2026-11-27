@@ -96,7 +96,6 @@ function itemStateLabel(item: PrivateConnectQueueItem): string {
 function sendButtonText(sendLabel: PrivateConnectQueueItem["sendLabel"]): string | null {
   switch (sendLabel) {
     case "send-now": return "Send now";
-    case "stop-and-send": return "Stop and send";
     case "queue": return "Queue";
     default: return null;
   }
@@ -128,7 +127,10 @@ export function QueueSection({
   onResume,
 }: QueueSectionProps): React.JSX.Element | null {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingBaseRevision, setEditingBaseRevision] = useState<number | null>(null);
+  const [editingBaseContent, setEditingBaseContent] = useState("");
   const [editDraft, setEditDraft] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   if (queue.items.length === 0) return null;
@@ -146,24 +148,47 @@ export function QueueSection({
   const startEdit = (item: PrivateConnectQueueItem): void => {
     if (!canMutate || !item.editable || item.attachmentCount > 0) return;
     setEditingId(item.id);
+    setEditingBaseRevision(item.editRevision);
+    setEditingBaseContent(item.content);
     setEditDraft(item.content);
+    setEditError(null);
   };
 
   const cancelEdit = (): void => {
     setEditingId(null);
+    setEditingBaseRevision(null);
+    setEditingBaseContent("");
     setEditDraft("");
+    setEditError(null);
   };
 
   const saveEdit = async (item: PrivateConnectQueueItem): Promise<void> => {
     const trimmed = editDraft.trim();
     if (!trimmed || !onEditItem || savingEdit) return;
+    const expectedRevision = editingBaseRevision ?? item.editRevision;
     setSavingEdit(true);
+    setEditError(null);
     try {
-      const ok = await onEditItem(item.id, item.editRevision, trimmed);
-      if (ok !== false) {
-        setEditingId(null);
-        setEditDraft("");
+      const ok = await onEditItem(item.id, expectedRevision, trimmed);
+      if (ok === false) {
+        setEditError(
+          item.editRevision !== expectedRevision
+            ? "This message changed on the desktop. Copy your draft or cancel to reload the latest version."
+            : "Could not save your changes. Your draft is still here so you can retry or cancel.",
+        );
+        return;
       }
+      setEditingId(null);
+      setEditingBaseRevision(null);
+      setEditingBaseContent("");
+      setEditDraft("");
+      setEditError(null);
+    } catch (error) {
+      setEditError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Could not save your changes. Your draft is still here so you can retry or cancel.",
+      );
     } finally {
       setSavingEdit(false);
     }
@@ -193,8 +218,11 @@ export function QueueSection({
         {queue.items.map((item, index) => {
           const isEditing = activeEditItem?.id === item.id;
           const attribution = attributionLabel(item.attribution);
-          const sendText = sendButtonText(item.sendLabel);
+          const sendText = item.attachmentCount === 0 ? sendButtonText(item.sendLabel) : null;
           const canEditThis = canMutate && item.editable && item.attachmentCount === 0 && item.state !== "dispatching";
+          const updatedOnDesktop = isEditing
+            && editingBaseRevision !== null
+            && item.editRevision !== editingBaseRevision;
           const attachmentBadge = item.attachmentCount > 0
             ? `${item.attachmentCount} ${item.attachmentCount === 1 ? "attachment" : "attachments"}`
             : null;
@@ -261,13 +289,29 @@ export function QueueSection({
                     maxLength={PRIVATE_CONNECT_LIMITS.promptCharacters}
                     value={editDraft}
                     disabled={busy || offline || savingEdit}
-                    onChange={(event) => setEditDraft(event.target.value)}
+                    onChange={(event) => {
+                      setEditDraft(event.target.value);
+                      setEditError(null);
+                    }}
                   />
+                  {editError ? (
+                    <p className="queue-item-error" role="alert">{editError}</p>
+                  ) : updatedOnDesktop ? (
+                    <p className="queue-item-error" role="status">
+                      Updated on desktop — saving will check for conflicts.
+                    </p>
+                  ) : null}
                   <div className="queue-edit-actions">
                     <button
                       type="submit"
                       className="queue-action-button"
-                      disabled={busy || offline || savingEdit || !editDraft.trim() || editDraft.trim() === item.content.trim()}
+                      disabled={
+                        busy
+                        || offline
+                        || savingEdit
+                        || !editDraft.trim()
+                        || (editDraft.trim() === editingBaseContent.trim() && !updatedOnDesktop)
+                      }
                     >
                       {savingEdit ? "Saving…" : "Save"}
                     </button>

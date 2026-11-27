@@ -40,6 +40,11 @@ import {
 } from "../../src/server/runtime/turns/turn-request-preparation";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
+import type WebSocket from "ws";
+import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
+import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
+import { computeQueueHoldReason, usageLimitHoldsQueue } from "../../src/server/runtime/queued-message-runtime-helpers";
+import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { LimitResetScheduler } from "../../src/server/usage/limit-reset-scheduler";
 import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
 import { providerInstanceId } from "../../src/server/orchestration-v2/provider-instance";
@@ -609,6 +614,333 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
       abort.abort();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("S1: dispatches a queued item with pinned Provider A selection after switching chat to Provider B, and holds cleanly on disabled provider (H4) and busy session (H6)", async () => {
+    const { directory, store, conversation, codexSelection, claudeSelection } = createEnv();
+    const attachments = await ConversationAttachmentStore.open(directory);
+    const abort = new AbortController();
+    const runs: Array<{ providerId: string; prompt: string }> = [];
+    let currentProviders = makeProviderInfo();
+    let resolveTurn1!: (result: ProviderRunResult) => void;
+    let busyBackground = false;
+    const { runtime } = makeProviderRuntime({
+      onRun: async (input, callbacks) => {
+        runs.push({ providerId: input.providerId, prompt: input.prompt });
+        callbacks.onStarted?.();
+        if (runs.length === 1) {
+          return await new Promise<ProviderRunResult>((resolve) => { resolveTurn1 = resolve; });
+        }
+        return {
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          status: "completed",
+          terminalReason: { outcome: "completed", reason: "provider-completed" },
+          text: "Done",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      },
+    });
+    const tasks = new Set<Promise<unknown>>();
+    let queue!: ReturnType<typeof createQueuedMessageRuntime>;
+    const controller = new TurnController(
+      store,
+      runtime,
+      new Map<string, AgentApprovalRequest>(),
+      new Map<string, AgentInputRequest>(),
+      new Map<string, AgentPlan>(),
+      {
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        providerInfo: () => currentProviders,
+        onTurnSettled: (turn) => queue.onTurnSettled(turn),
+      },
+    );
+    const dependencies: TurnInteractionCommandDependencies = {
+      store,
+      turns: controller,
+      conversationAttachments: attachments,
+      backendProfileController: {
+        validateSelection: (selection: ModelSelection) => selection,
+        isExternalSelection: () => false,
+        readiness: async () => null,
+      } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+      isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+      workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      dataDirectory: directory,
+      enableProviders: true,
+      attachmentResolver: null,
+      generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+      workflows: { resolveTurnSkills: async () => ({ inputs: [], routeKey: null }), assertTurnSkillsCurrent: () => undefined } as unknown as TurnInteractionCommandDependencies["workflows"],
+      providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+      providerInfo: () => currentProviders,
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      send: () => undefined,
+    };
+    queue = createQueuedMessageRuntime(dependencies, {
+      signal: abort.signal,
+      track: (op) => {
+        const task = op();
+        tasks.add(task);
+        void task.finally(() => tasks.delete(task));
+        return task;
+      },
+    });
+    const drain = async () => {
+      await Promise.resolve();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+      await controller.drainSettlementTasks();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+    };
+
+    try {
+      // Turn 1 starts on Codex.
+      const turn1 = controller.queue({ conversationId: conversation.id, content: "Turn 1 on Codex" });
+      expect(controller.start(turn1.turn.id)).toBe(true);
+      await vi.waitFor(() => expect(runs).toHaveLength(1));
+
+      // Enqueue pinned Codex item while Turn 1 runs, then switch chat to Claude mid-turn.
+      const pinnedCodexId = randomUUID();
+      await queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.enqueue",
+        requestId: randomUUID(),
+        payload: { conversationId: conversation.id, id: pinnedCodexId, content: "Pinned for Codex", attachments: [] },
+      });
+      store.updateConversation(conversation.id, { providerId: "claude", modelSelection: claudeSelection });
+      expect(store.conversation(conversation.id).providerId).toBe("claude");
+
+      // Complete Turn 1 -> pinned Codex item MUST still run on Codex, not Claude!
+      resolveTurn1({
+        providerId: "codex",
+        conversationId: conversation.id,
+        runId: turn1.turn.runId,
+        turnId: turn1.turn.id,
+        status: "completed",
+        terminalReason: { outcome: "completed", reason: "provider-completed" },
+        text: "Turn 1 done",
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+        cleanupConfirmed: true,
+      });
+      await vi.waitFor(() => expect(runs).toHaveLength(2));
+      await drain();
+      expect(runs[1]!.providerId).toBe("codex");
+      expect(runs[1]!.prompt).toContain("Pinned for Codex");
+      expect(store.conversation(conversation.id).providerId).toBe("claude");
+
+      // Disabled provider blocks item with provider-disabled and holds queue with H4-start-failure.
+      const disabledId = randomUUID();
+      const followerId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: disabledId,
+        content: "Needs disabled Codex",
+        modelSelection: codexSelection,
+      });
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: followerId,
+        content: "Follower item",
+        modelSelection: claudeSelection,
+      });
+      currentProviders = makeProviderInfo({ codex: { canRun: false, statusMessage: "Codex is disabled." } });
+      await queue.sendNow(conversation.id, disabledId, randomUUID());
+      await drain();
+      expect(store.orchestration.queue.getItem(disabledId)).toMatchObject({
+        state: "blocked",
+        blockedReason: "provider-disabled",
+        queueHeld: true,
+      });
+      expect(store.orchestration.queue.getItem(followerId)).toMatchObject({
+        state: "waiting",
+        queueHeld: true,
+      });
+      expect(computeQueueHoldReason(store, conversation.id, store.orchestration.queue.listActive(conversation.id))).toBe("provider-failed");
+
+      // Busy replaced session (H6) returns item to waiting (not lost/blocked) and holds queue with H6-busy-session.
+      store.orchestration.queue.cancel({ conversationId: conversation.id, itemId: disabledId, reason: "user" });
+      store.orchestration.queue.release({ conversationId: conversation.id, cause: "R3-resume", itemIds: [followerId] });
+      currentProviders = makeProviderInfo();
+      const queueSpy = vi.spyOn(controller, "queue").mockImplementationOnce(() => {
+        busyBackground = true;
+        throw new ContextHandoffBackgroundWorkError();
+      });
+      await queue.sendNow(conversation.id, followerId, randomUUID());
+      await drain();
+      queueSpy.mockRestore();
+      expect(busyBackground).toBe(true);
+      expect(store.orchestration.queue.getItem(followerId)).toMatchObject({
+        state: "waiting",
+        queueHeld: true,
+      });
+      expect(computeQueueHoldReason(store, conversation.id, store.orchestration.queue.listActive(conversation.id))).toBe("busy-session");
+    } finally {
+      abort.abort();
+      await drain();
+      await controller.dispose();
+      await attachments.close();
+    }
+  });
+
+  it("S10: usageLimitHoldsQueue is provider-scoped — Provider B dispatches immediately while Provider A stays held even after Provider B succeeds", async () => {
+    const { directory, store, conversation, codexSelection, claudeSelection } = createEnv();
+    const attachments = await ConversationAttachmentStore.open(directory);
+    const abort = new AbortController();
+    const runs: Array<{ providerId: string; prompt: string }> = [];
+    const { runtime } = makeProviderRuntime({
+      onRun: async (input, callbacks) => {
+        runs.push({ providerId: input.providerId, prompt: input.prompt });
+        callbacks.onStarted?.();
+        return {
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          status: "completed",
+          terminalReason: { outcome: "completed", reason: "provider-completed" },
+          text: "Completed",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      },
+    });
+    const tasks = new Set<Promise<unknown>>();
+    let queue!: ReturnType<typeof createQueuedMessageRuntime>;
+    const controller = new TurnController(
+      store,
+      runtime,
+      new Map<string, AgentApprovalRequest>(),
+      new Map<string, AgentInputRequest>(),
+      new Map<string, AgentPlan>(),
+      {
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        providerInfo: () => makeProviderInfo(),
+        onTurnSettled: (turn) => queue.onTurnSettled(turn),
+      },
+    );
+    const dependencies: TurnInteractionCommandDependencies = {
+      store,
+      turns: controller,
+      conversationAttachments: attachments,
+      backendProfileController: {
+        validateSelection: (selection: ModelSelection) => selection,
+        isExternalSelection: () => false,
+        readiness: async () => null,
+      } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+      isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+      workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      dataDirectory: directory,
+      enableProviders: true,
+      attachmentResolver: null,
+      generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+      workflows: { resolveTurnSkills: async () => ({ inputs: [], routeKey: null }), assertTurnSkillsCurrent: () => undefined } as unknown as TurnInteractionCommandDependencies["workflows"],
+      providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+      providerInfo: () => makeProviderInfo(),
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      send: () => undefined,
+    };
+    queue = createQueuedMessageRuntime(dependencies, {
+      signal: abort.signal,
+      track: (op) => {
+        const task = op();
+        tasks.add(task);
+        void task.finally(() => tasks.delete(task));
+        return task;
+      },
+    });
+    const drain = async () => {
+      await Promise.resolve();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+      await controller.drainSettlementTasks();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+    };
+
+    try {
+      const now = Date.now();
+      const futureReset = new Date(now + 15 * 60_000).toISOString();
+      // Turn 1 on Codex fails with usage limit + active future reset plan.
+      const t1 = store.beginAgentTurn({
+        conversationId: conversation.id,
+        runId: randomUUID(),
+        content: "Codex turn 1",
+        providerId: "codex",
+        modelSelection: codexSelection,
+        model: "gpt-5",
+        reasoningEffort: "high",
+        interactionMode: "build",
+        accessMode: "supervised",
+        configurationRevision: 0,
+        association: "authoritative",
+        requestedAt: new Date(now - 5_000).toISOString(),
+      }).turn;
+      store.updateAgentTurnLifecycle(t1.id, { status: "failed", startedAt: t1.requestedAt, completedAt: new Date(now - 4_000).toISOString() });
+      store.limitResets.markUsageLimited(t1.id);
+      store.limitResets.save({
+        id: randomUUID(),
+        conversationId: conversation.id,
+        failedTurnId: t1.id,
+        resetsAt: futureReset,
+        routeIdentity: "",
+        accountIdentity: "codex-acct",
+        nextAttemptAt: futureReset,
+        attempts: 0,
+        state: "waiting",
+        error: null,
+        turnId: null,
+      });
+
+      expect(usageLimitHoldsQueue(store, conversation.id, codexSelection, now)).toBe(true);
+      expect(usageLimitHoldsQueue(store, conversation.id, claudeSelection, now)).toBe(false);
+
+      // Enqueue Claude item first, then Codex item second.
+      const claudeItemId = randomUUID();
+      const codexItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: claudeItemId,
+        content: "Run on Claude while Codex is limited",
+        modelSelection: claudeSelection,
+      });
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: codexItemId,
+        content: "Wait for Codex reset",
+        modelSelection: codexSelection,
+      });
+
+      // Settle notification triggers drain: Claude item MUST dispatch immediately!
+      queue.onTurnSettled(store.agentTurn(t1.id));
+      await vi.waitFor(() => expect(runs).toHaveLength(1));
+      await drain();
+      expect(runs[0]!.providerId).toBe("claude");
+      expect(runs[0]!.prompt).toContain("Run on Claude while Codex is limited");
+      expect(store.orchestration.queue.getItem(claudeItemId)?.state).toBe("delivered");
+
+      // After Claude completes, Codex item MUST STILL be held because Codex's reset window is still active!
+      expect(usageLimitHoldsQueue(store, conversation.id, codexSelection, Date.now())).toBe(true);
+      expect(store.orchestration.queue.getItem(codexItemId)?.state).toBe("waiting");
+      expect(runs).toHaveLength(1);
+    } finally {
+      abort.abort();
+      await drain();
+      await controller.dispose();
+      await attachments.close();
     }
   });
 });

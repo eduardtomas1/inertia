@@ -34,6 +34,13 @@ import type {
   ProviderRunResult,
   ProviderSteerInput,
 } from "../../provider/contracts";
+import type { ProviderSteerReadCallback } from "../../provider/types";
+
+declare module "../../provider/contracts" {
+  interface ProviderRunCallbacks {
+    onSteerRead?: ProviderSteerReadCallback;
+  }
+}
 import type { SubagentBackgroundResult, SubagentStopOutcome } from "../../provider/agent-harness";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
 import type { HarnessCapabilityTurnOffer } from "../harness-capabilities";
@@ -326,6 +333,12 @@ export interface QueueTurnRequest {
     objective?: string;
     tokenBudget?: number | null;
   };
+  /**
+   * Explicit per-item model selection carried by a queued message (Phase 5 Pkg 3).
+   * Resolved for this turn without mutating the user's live composer selection on
+   * `conversations`.
+   */
+  modelSelectionOverride?: ModelSelection | null;
 }
 
 export interface QueuedTurn {

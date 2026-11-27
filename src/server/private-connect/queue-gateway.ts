@@ -1,8 +1,5 @@
 import type { Conversation } from "../../shared/contracts";
-import {
-  supportsActiveParentFollowUp,
-  supportsSteerAttachments,
-} from "../../shared/follow-up-steer";
+import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
 import type { QueueItemProjection } from "../../shared/orchestration-queue";
 import type {
   PrivateConnectQueueHoldReason,
@@ -40,6 +37,10 @@ export interface PrivateConnectQueueCommandHandlers {
   resume?(conversationId: string, deviceId: string, requestId: string): Promise<void> | void;
 }
 
+export interface PrivateConnectQueueCommandOptions {
+  isActive?: boolean;
+}
+
 const MAX_PROJECTED_QUEUE_ITEMS = 30;
 const MAX_QUEUE_ITEM_CONTENT_CHARS = 20_000;
 
@@ -74,21 +75,28 @@ function itemModelLabel(item: QueueItemProjection): string | null {
   return sanitizePrivateConnectLabel(raw, 120);
 }
 
+function activeHarnessIdForConversation(
+  store: PrivateConnectQueueStore,
+  conversation: Conversation,
+): string | null {
+  const latestTurn = store.latestAgentTurnForConversation(conversation.id);
+  return latestTurn?.harnessId ?? conversation.modelSelection.harnessId ?? null;
+}
+
 function itemSendLabel(
   item: QueueItemProjection,
   isActive: boolean,
   activeHarnessId: string | null,
 ): PrivateConnectQueueItem["sendLabel"] {
-  if (item.kind !== "message" || item.state === "dispatching") return "none";
+  if (item.kind !== "message" || item.state === "dispatching" || item.attachmentIds.length > 0) {
+    return "none";
+  }
   if (!isActive) return "send-now";
   if (item.steerFollowUpOfRunId !== undefined) return "none";
-  if (
-    supportsActiveParentFollowUp(activeHarnessId)
-    && (item.attachmentIds.length === 0 || supportsSteerAttachments(activeHarnessId))
-  ) {
+  if (supportsActiveParentFollowUp(activeHarnessId)) {
     return "send-now";
   }
-  return "stop-and-send";
+  return "none";
 }
 
 function deriveHoldReason(
@@ -116,8 +124,7 @@ export function projectPrivateConnectQueue(
   const queue = store.orchestration.queue;
   const revision = queue.revision(conversation.id);
   const activeItems = queue.listActive(conversation.id).slice(0, MAX_PROJECTED_QUEUE_ITEMS);
-  const latestTurn = store.latestAgentTurnForConversation(conversation.id);
-  const activeHarnessId = latestTurn?.harnessId ?? conversation.modelSelection.harnessId ?? null;
+  const activeHarnessId = activeHarnessIdForConversation(store, conversation);
   const items: PrivateConnectQueueItem[] = activeItems.map((item) => {
     const contentRow = queue.getContent(conversation.id, item.id);
     const content = sanitizePrivateConnectContent(
@@ -231,6 +238,7 @@ export async function handlePrivateConnectQueueCommand(
   request: PrivateConnectRuntimeQueueCommand,
   handlers?: PrivateConnectQueueCommandHandlers,
   onMutated?: (conversationId: string) => void,
+  options?: PrivateConnectQueueCommandOptions,
 ): Promise<PrivateConnectRuntimeResponse> {
   const queue = store.orchestration.queue;
   const actorId = privateConnectDeviceActorId(subject.deviceId);
@@ -342,8 +350,18 @@ export async function handlePrivateConnectQueueCommand(
     if (item.kind !== "message") {
       return fail("forbidden", "Automatic queue items cannot be sent manually from a paired device.");
     }
+    if (item.attachmentIds.length > 0) {
+      return fail("forbidden", "Queued messages with attachments cannot be sent from a paired device.");
+    }
     if (item.state !== "waiting" && item.state !== "blocked") {
       return fail("stale", "That queued message has already been dispatched.");
+    }
+    const isActive = options?.isActive ?? false;
+    if (isActive && item.steerFollowUpOfRunId !== undefined) {
+      return fail("forbidden", "Unread follow-ups cannot be sent while a turn is active.");
+    }
+    if (isActive && !supportsActiveParentFollowUp(activeHarnessIdForConversation(store, conversation))) {
+      return fail("forbidden", "This provider does not support sending queued messages while a turn is active.");
     }
     if (handlers?.send) {
       await handlers.send(conversation.id, request.id, subject.deviceId, request.requestId);

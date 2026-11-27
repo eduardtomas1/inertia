@@ -2,30 +2,40 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import type { Conversation } from "../../shared/contracts";
+import type { AccessMode, Conversation, RuntimeMutationEvent } from "../../shared/contracts";
 import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
 import {
   MAX_QUEUED_USER_AND_AGENT_ITEMS,
   queueAgentCommandId,
+  queueContentCharCount,
   type QueueEnqueuePlacement,
+  type QueueEvent,
 } from "../../shared/orchestration-queue";
 import type { MessageQueueResult } from "../../shared/queued-messages";
 import type { RuntimeStore } from "../database";
+import { ensureOrchestrationThread } from "../orchestration-v2/thread-registration";
 import { OrchestrationConflict } from "../orchestration-v2/types";
-import { QueuedMessageLimitError } from "../persistence/queued-message-repository";
+import {
+  QueuedMessageLimitError,
+  queuedIntentDigest,
+  queuedRouteIdentity,
+} from "../persistence/queued-message-repository";
 import type { ProviderHostToolDefinition, ProviderHostToolResult } from "../provider/contracts";
 import type { ProviderTerminalResumeRegistry } from "../provider/terminal-resume";
 import type { ProviderManager } from "../providers";
+import { RuntimeRequestError } from "../runtime-errors";
+import { requestAgentStop, SUPERSEDED_STOP_CODE } from "./commands/agent-stop-command";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
+import { assertInteractionWithinParent, ModeEscalationError } from "./delegation/task-tools";
 import { prepareForkSession } from "./fork-session-service";
 import { MAX_PROMPT_CHARS, MULTILINE_PATTERN, idSchema, safeMultilineSchema } from "./managed-chat-schemas";
 import {
   MANAGED_TURN_GONE_MESSAGE,
   recordManagedTurn,
   recordQueuedManagedTurn,
-  stopManagedTurnForAgent,
 } from "./managed-turn-ownership";
 import type { HiddenProviderInstruction } from "./turns/request-context";
+import { liveProviderRunOwnership } from "./turns/turn-checkout-activity";
 import type { TurnController } from "./turns/turn-controller";
 import { sameTurnOwner, type TurnOwnerIdentity } from "./turns/turn-ownership";
 import { neutralizeUntrustedAgentText } from "./untrusted-agent-text";
@@ -103,7 +113,30 @@ export interface ManagedDispatchDependencies {
   messageQueue?(): ManagedMessageQueue | undefined;
   isCompacting?(conversationId: string): boolean;
   broadcastSnapshot(): void;
+  broadcast?(event: RuntimeMutationEvent): void;
   now(): string;
+}
+
+function accessRank(mode: AccessMode): number {
+  return mode === "supervised" ? 0 : mode === "auto-edit" ? 1 : 2;
+}
+
+export function assertAccessWithinParent(requested: AccessMode, parent: AccessMode): void {
+  if (accessRank(requested) > accessRank(parent)) {
+    throw new ModeEscalationError("access_mode_escalation_denied", "A managed chat cannot exceed its parent chat's access mode.");
+  }
+}
+
+/**
+ * N15 / DispatchModeLimit: a calling chat can never send into or mutate the queue
+ * of a managed chat whose accessMode or interactionMode exceeds the caller's own.
+ */
+export function assertManagedDispatchCeiling(
+  caller: Pick<Conversation, "accessMode" | "interactionMode">,
+  target: Pick<Conversation, "accessMode" | "interactionMode">,
+): void {
+  assertAccessWithinParent(target.accessMode, caller.accessMode);
+  assertInteractionWithinParent(target.interactionMode, caller.interactionMode);
 }
 
 function json(value: unknown): ProviderHostToolResult {
@@ -388,7 +421,7 @@ export function queueManagedMessage(
           type: "message.queue.enqueue",
           conversationId: target.id,
           id: itemId,
-          content,
+          content: { chars: queueContentCharCount(content.trim()) },
           createdBy: "agent",
           creationSource: "mcp",
         },
@@ -416,12 +449,26 @@ export function queueManagedMessage(
   return { result, itemId, queueHeld: enqueued.value.queueHeld, position };
 }
 
+async function confirmRestartStop(
+  store: RuntimeStore,
+  turns: TurnController,
+  conversationId: string,
+  owner: TurnOwnerIdentity,
+): Promise<void> {
+  await turns.waitForProviderCleanup([conversationId]);
+  const ownsProvider = liveProviderRunOwnership(store, store.providerRunOwnership.forConversation(conversationId))
+    .some((run) => sameTurnOwner(run, owner));
+  if (ownsProvider || sameTurnOwner(turns.activeIdentity(conversationId), owner)) {
+    throw new Error("Stop was requested, but exact provider cleanup was not confirmed.");
+  }
+}
+
 /**
  * N19 row `b` & `c`: `mode: "restart"` routes through Stop-and-send at position
  * 1 while keeping the turn identity captured before approval (recorded
- * deviation c). Stops only the exact captured turn, enqueues at position 1
- * unheld under `agent-queue:<operationId>`, and starts it immediately once
- * cleanup is confirmed (unless an earlier delegated delivery precedes it).
+ * deviation c). Atomically stops only the exact captured turn and enqueues the
+ * replacement at position 1 unheld in the same V2 transaction, then starts it
+ * once cleanup is confirmed (unless an earlier delegated delivery precedes it).
  */
 export async function restartManagedTurn(
   dependencies: ManagedDispatchDependencies,
@@ -438,47 +485,122 @@ export async function restartManagedTurn(
   if (!sameTurnOwner(dependencies.turns.activeIdentity(target.id), restart)) {
     throw new Error(MANAGED_TURN_GONE_MESSAGE);
   }
-  const stopped = await stopManagedTurnForAgent(
-    dependencies.store,
-    dependencies.turns,
-    target.id,
-    restart,
-    operationId,
+  const itemId = deterministicAgentQueueItemId(operationId);
+  const trimmed = content.trim();
+  const requestedAt = dependencies.now();
+  const routeIdentity = queuedRouteIdentity(target);
+  const digest = queuedIntentDigest(trimmed, []);
+  const db = dependencies.store.orchestration.effects.connection;
+  const queue = dependencies.store.orchestration.queue;
+  const enqueueEvent: QueueEvent = {
+    type: "queue.item-enqueued",
+    payload: {
+      itemId,
+      kind: "message",
+      userMessageId: null,
+      createdBy: "agent",
+      creationSource: "mcp",
+      contentRef: { chars: queueContentCharCount(trimmed), editRevision: 0 },
+      attachmentIds: [],
+      routeIdentity,
+      followsThreadSelection: true,
+      placement: "front",
+      queueHeld: false,
+      skipHoldInheritance: true,
+      requestedAt,
+      origin: "command",
+    },
+  };
+  const syncRow = (): void => {
+    const projected = queue.getItem(itemId);
+    if (!projected) return;
+    db.prepare(`INSERT OR REPLACE INTO queued_messages (
+      id, conversation_id, content, attachments_json, intent_digest, creation_digest, route_identity, state,
+      created_at, user_message_id, watcher_note_json, delegated_completion_json,
+      queue_position, queue_held, kind, created_by, creation_source, device_id, steer_follow_up_of_run_id,
+      edit_revision, edited_at, dispatch_ordinal, run_id, delivery_mode, steer_when_ready_run_id,
+      selection_json, follows_thread_selection
+    ) VALUES (?, ?, ?, '[]', ?, ?, ?, 'waiting', ?, NULL, NULL, NULL, ?, 0, 'message', 'agent', 'mcp', NULL, NULL, 0, NULL, 0, NULL, 'after-stop', NULL, NULL, 1)`).run(
+      projected.id, target.id, trimmed, digest, digest, routeIdentity,
+      requestedAt, projected.queuePosition,
+    );
+    const state = queue.getState(target.id);
+    if (state) {
+      const update = db.prepare("UPDATE queued_messages SET queue_position = ?, queue_held = ? WHERE id = ? AND conversation_id = ?");
+      for (const activeId of state.activeItemIds) {
+        const activeItem = queue.getItem(activeId);
+        if (activeItem) update.run(activeItem.queuePosition, activeItem.queueHeld ? 1 : 0, activeItem.id, target.id);
+      }
+    }
+  };
+  dispatching(dependencies, operationId, target);
+  ensureOrchestrationThread(
+    dependencies.store.orchestration.events,
+    target,
+    dependencies.store.conversationPath(target.id),
   );
-  if (stopped !== "stopped") throw new Error(MANAGED_TURN_GONE_MESSAGE);
+  const commandId = `agent-stop:${operationId}`;
+  const command = {
+    type: "agent.stop",
+    requestId: commandId,
+    payload: {
+      conversationId: target.id,
+      expectedTurnId: restart.turnId,
+      expectedRunId: restart.runId,
+      queuedMessageId: itemId,
+    },
+  };
+  let disposition: Awaited<ReturnType<typeof requestAgentStop>>;
+  try {
+    disposition = await requestAgentStop(
+      {
+        store: dependencies.store,
+        turns: dependencies.turns,
+        ...(dependencies.broadcast ? { broadcast: dependencies.broadcast } : {}),
+      },
+      {
+        conversationId: target.id,
+        expectedTurnId: restart.turnId,
+        expectedRunId: restart.runId,
+        cause: "agent",
+        rejection: null,
+        source: { actorId: "agent", commandId, command },
+        extraEvents: [enqueueEvent],
+        extraAfterCommit: syncRow,
+      },
+    );
+  } catch (error) {
+    if (error instanceof RuntimeRequestError && error.code === SUPERSEDED_STOP_CODE) {
+      throw new Error(MANAGED_TURN_GONE_MESSAGE);
+    }
+    if (error instanceof QueuedMessageLimitError || (error instanceof OrchestrationConflict && error.code === "revision-conflict")) {
+      throw new Error(QUEUE_FULL);
+    }
+    throw error;
+  }
+  const withdrawQueuedRestartItem = (): void => {
+    try {
+      if (queue.getItem(itemId)?.state === "waiting") {
+        queue.cancel({ conversationId: target.id, itemId, reason: "withdrawn" });
+      }
+    } catch {
+      // Best-effort withdrawal if the restart did not stop the expected turn.
+    }
+  };
+  if (disposition === "isolated") {
+    withdrawQueuedRestartItem();
+    throw new Error(MANAGED_TURN_GONE_MESSAGE);
+  }
+  await confirmRestartStop(dependencies.store, dependencies.turns, target.id, restart);
+  if (disposition === "idle" || disposition === "releasing" || disposition === "ended") {
+    withdrawQueuedRestartItem();
+    throw new Error(MANAGED_TURN_GONE_MESSAGE);
+  }
   if (signal.aborted) {
+    withdrawQueuedRestartItem();
     throw new Error("The parent turn ended after the managed chat stopped; the new message was not sent.");
   }
-  const itemId = deterministicAgentQueueItemId(operationId);
-  dispatching(dependencies, operationId, target);
-  dependencies.store.orchestration.queue.enqueue({
-    conversationId: target.id,
-    itemId,
-    content,
-    kind: "message",
-    createdBy: "agent",
-    creationSource: "mcp",
-    followsThreadSelection: true,
-    placement: "front",
-    queueHeld: false,
-    skipHoldInheritance: true,
-    requestedAt: dependencies.now(),
-    commandType: "message.queue.stop-and-send",
-    source: {
-      actorId: "runtime",
-      commandId: queueAgentCommandId(operationId),
-      command: {
-        type: "message.queue.stop-and-send",
-        conversationId: target.id,
-        id: itemId,
-        turnId: restart.turnId,
-        content,
-        createdBy: "agent",
-        creationSource: "mcp",
-      },
-    },
-  });
-  const ordered = dependencies.store.orchestration.queue.listActive(target.id);
+  const ordered = queue.listActive(target.id);
   const firstUnheld = ordered.find((item) => item.state === "waiting" && !item.queueHeld);
   const canStartNow = !dependencies.turns.isActive(target.id)
     && firstUnheld?.id === itemId
@@ -495,7 +617,7 @@ export async function restartManagedTurn(
       stoppedTurnId: restart.turnId,
     });
   }
-  dependencies.store.orchestration.queue.claim({
+  queue.claim({
     conversationId: target.id,
     itemId,
     mode: "after-stop",
@@ -507,26 +629,31 @@ export async function restartManagedTurn(
       link,
       alreadyDispatching: true,
     });
-    const attemptId = dependencies.store.orchestration.currentAttemptId(started.runId) ?? started.runId;
-    dependencies.store.orchestration.queue.deliver({
-      conversationId: target.id,
-      itemId,
-      delivery: {
-        mode: "after-stop",
-        outcome: "restarted",
-        runId: started.runId,
-        attemptId,
-        turnId: started.turnId,
-        messageId: started.messageId,
-        deliveredAt: dependencies.now(),
-      },
-    });
+    // Real V2 turn admission (`turn-repository.ts`) records `queue.item-delivered`
+    // atomically inside `turns.queue(...)`. Only fall back when a non-V2 turn
+    // admission path left the claimed item in `dispatching`.
+    if (queue.getItem(itemId)?.state === "dispatching") {
+      const attemptId = dependencies.store.orchestration.currentAttemptId(started.runId) ?? started.runId;
+      queue.deliver({
+        conversationId: target.id,
+        itemId,
+        delivery: {
+          mode: "after-stop",
+          outcome: "restarted",
+          runId: started.runId,
+          attemptId,
+          turnId: started.turnId,
+          messageId: started.messageId,
+          deliveredAt: dependencies.now(),
+        },
+      });
+    }
     return started.result;
   } catch (error) {
     try {
-      const currentItem = dependencies.store.orchestration.queue.getItem(itemId);
+      const currentItem = queue.getItem(itemId);
       if (currentItem?.state === "dispatching") {
-        dependencies.store.orchestration.queue.releaseClaim({
+        queue.releaseClaim({
           conversationId: target.id,
           itemId,
           reason: "transient",

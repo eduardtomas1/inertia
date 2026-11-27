@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import type WebSocket from "ws";
 
-import type { Conversation, TurnRequestContext } from "../../../shared/contracts";
+import type { Conversation, ModelSelection, TurnRequestContext } from "../../../shared/contracts";
 import { MAX_CHAT_ATTACHMENT_BYTES, isExtractedDocumentAttachmentMimeType } from "../../../shared/attachments";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 import { hasIncompleteWorktreeSetup } from "../../workspace-path-authority";
 import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
@@ -21,6 +22,7 @@ import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { TurnController } from "../turns/turn-controller";
 import type { FollowUpAdmissionLease } from "../turns/turn-controller-types";
 import { UNKNOWN_FOLLOW_UP_DELIVERY } from "../turns/turn-follow-up-coordinator";
+import { QueuedSelectionProviderUnavailableError } from "../turns/turn-request-preparation";
 import { ConversationContextService } from "../conversation-context-service";
 import { isUntitledConversationTitle, quickConversationTitle } from "../conversation-title";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
@@ -52,7 +54,64 @@ type SendRoute =
   | { kind: "follow-up"; admission: FollowUpAdmissionLease }
   | { kind: "new-turn"; handedOff: boolean; contextPacketIds: readonly string[]; resolvedTurnContext: TurnRequestContext | undefined };
 
+export const QUEUE_CLAIM_SUPERSEDED_CODE = "queue-claim-superseded";
+
 const inFlightSendContent = new Map<string, string>();
+
+function queuedSelectionOverrideFor(
+  dependencies: TurnInteractionCommandDependencies,
+): ModelSelection | null {
+  const queued = dependencies.queuedMessage;
+  if (!queued || queued.followsThreadSelection || queued.delegatedCompletion || queued.watcherNote) {
+    return null;
+  }
+  return queued.modelSelection ?? null;
+}
+
+function effectiveSelectionFor(
+  dependencies: TurnInteractionCommandDependencies,
+  conversation: Conversation,
+): ModelSelection {
+  return queuedSelectionOverrideFor(dependencies) ?? conversation.modelSelection;
+}
+
+function effectiveProviderIdFor(
+  dependencies: TurnInteractionCommandDependencies,
+  conversation: Conversation,
+): Conversation["providerId"] {
+  const override = queuedSelectionOverrideFor(dependencies);
+  return override
+    ? (providerIdForHarness(override.harnessId) ?? conversation.providerId)
+    : conversation.providerId;
+}
+
+function assertQueuedClaimCurrent(
+  dependencies: TurnInteractionCommandDependencies,
+  conversation: Conversation,
+): void {
+  const queued = dependencies.queuedMessage;
+  if (!queued) return;
+  const item = dependencies.store.queuedMessages.get(conversation.id, queued.id);
+  const v2Item = dependencies.store.orchestration?.queue?.getItem(queued.id) ?? null;
+  const claimInvalid = v2Item
+    ? (
+        v2Item.threadId !== conversation.id
+        || v2Item.state !== "dispatching"
+        || v2Item.queueHeld
+        || (queued.dispatchOrdinal !== undefined && v2Item.dispatchOrdinal !== queued.dispatchOrdinal)
+        || (queued.editRevision !== undefined && v2Item.contentRef.editRevision !== queued.editRevision)
+      )
+    : item?.state !== "dispatching";
+  if (claimInvalid || item?.state !== "dispatching") {
+    throw new RuntimeRequestError(
+      "The queued message claim was held or superseded before admission.",
+      QUEUE_CLAIM_SUPERSEDED_CODE,
+    );
+  }
+  if (conversation.archivedAt !== null || !queuedWorkspaceMatches(dependencies, conversation)) {
+    throw new RuntimeRequestError("The chat changed while its queued message was being prepared.");
+  }
+}
 
 function verifyMessageSendReplayContent(
   dependencies: TurnInteractionCommandDependencies,
@@ -152,7 +211,23 @@ export async function sendMessageCommand(
 ): Promise<"handled"> {
   if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
   const origin = internalDispatchOrigin(dependencies);
-  const orchestrationRequest = messageSendSource(command, origin, dependencies.queuedMessage?.dispatchOrdinal);
+  const baseRequest = messageSendSource(command, origin, dependencies.queuedMessage?.dispatchOrdinal);
+  const orchestrationRequest: CommandSource = dependencies.queuedMessage
+    ? {
+        ...baseRequest,
+        command: {
+          ...(typeof baseRequest.command === "object" && baseRequest.command !== null && !Array.isArray(baseRequest.command)
+            ? baseRequest.command
+            : { value: baseRequest.command }),
+          ...(dependencies.queuedMessage.dispatchOrdinal !== undefined
+            ? { queuedDispatchOrdinal: dependencies.queuedMessage.dispatchOrdinal }
+            : {}),
+          ...(dependencies.queuedMessage.editRevision !== undefined
+            ? { queuedEditRevision: dependencies.queuedMessage.editRevision }
+            : {}),
+        },
+      }
+    : baseRequest;
   let messageSendStage: MessageSendStage = "conversation-state";
   let conversation: Conversation;
   try {
@@ -386,12 +461,15 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
     conversation = dependencies.store.conversation(conversation.id);
   }
   messageSendStage = "attachments";
+  const queuedSelectionOverride = queuedSelectionOverrideFor(dependencies);
+  const effectiveSelection = effectiveSelectionFor(dependencies, conversation);
+  const effectiveProviderId = effectiveProviderIdFor(dependencies, conversation);
   let resolvedAttachments: Awaited<
     ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
   > = [];
   if (dependencies.queuedMessage) {
     const queuedImageLimit = dependencies.enableProviders
-      ? providerImageRequestLimitError(conversation.providerId, dependencies.queuedMessage.attachments)
+      ? providerImageRequestLimitError(effectiveProviderId, dependencies.queuedMessage.attachments)
       : null;
     if (queuedImageLimit) throw new RuntimeRequestError(queuedImageLimit);
     for (const attachment of dependencies.queuedMessage.attachments) {
@@ -430,7 +508,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
     ({ attachment }) => attachment,
   );
   const imageLimit = dependencies.enableProviders
-    ? providerImageRequestLimitError(conversation.providerId, sourceAttachments)
+    ? providerImageRequestLimitError(effectiveProviderId, sourceAttachments)
     : null;
   if (imageLimit) {
     await dependencies.attachmentResolver?.relinquishAll(sourceAttachments.map(({ id }) => id));
@@ -502,7 +580,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   if (dependencies.enableProviders) {
     try {
       await awaitMessageSendPreparation(
-        dependencies.verifyProviderInstallation?.(conversation.providerId)
+        dependencies.verifyProviderInstallation?.(effectiveProviderId)
           ?? Promise.resolve(),
         preparationDeadlineAt,
       );
@@ -511,11 +589,25 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       throw classifiedMessageSendError(error, "backend-readiness");
     }
     const selectedProvider = dependencies.providerInfo().find(
-      ({ id }) => id === conversation.providerId,
+      ({ id }) => id === effectiveProviderId,
     );
     try {
-      const validatedSelection = dependencies.backendProfileController
-        .validateSelection(conversation.modelSelection);
+      let validatedSelection: ModelSelection;
+      try {
+        validatedSelection = dependencies.backendProfileController
+          .validateSelection(effectiveSelection);
+      } catch (error) {
+        if (queuedSelectionOverride) {
+          throw new QueuedSelectionProviderUnavailableError(
+            error instanceof Error && error.message.trim().length > 0
+              ? error.message
+              : "The selected model backend is unavailable.",
+            effectiveProviderId,
+            { cause: error },
+          );
+        }
+        throw error;
+      }
       const selectedModel = validatedSelection.modelId === "provider-default"
         ? selectedProvider?.models.find(({ isDefault }) => isDefault)
           ?? selectedProvider?.models[0]
@@ -547,16 +639,17 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
         preparationDeadlineAt,
       );
       if (backendReadiness && !backendReadiness.ready) {
-        throw new RuntimeRequestError(
-          backendReadiness.message
-            ?? "The selected model backend is unavailable.",
-        );
+        const message = backendReadiness.message ?? "The selected model backend is unavailable.";
+        throw queuedSelectionOverride
+          ? new QueuedSelectionProviderUnavailableError(message, effectiveProviderId)
+          : new RuntimeRequestError(message);
       }
       if (!backendReadiness && !selectedProvider?.canRun) {
-        throw new RuntimeRequestError(
-          selectedProvider?.statusMessage
-            ?? "This agent is not ready. Open Settings to finish setup.",
-        );
+        const message = selectedProvider?.statusMessage
+          ?? "This agent is not ready. Open Settings to finish setup.";
+        throw queuedSelectionOverride
+          ? new QueuedSelectionProviderUnavailableError(message, effectiveProviderId)
+          : new RuntimeRequestError(message);
       }
       // The authoritative selection validator owns native model and
       // reasoning admission; the legacy conversation model fields must
@@ -680,12 +773,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   try {
     scheduledDispatch?.assertCurrent();
     if (dependencies.queuedMessage) {
-      const current = dependencies.store.conversation(conversation.id);
-      const item = dependencies.store.queuedMessages.get(conversation.id, dependencies.queuedMessage.id);
-      if (current.archivedAt !== null || item?.state !== "dispatching"
-        || !queuedWorkspaceMatches(dependencies, current)) {
-        throw new RuntimeRequestError("The chat changed while its queued message was being prepared.");
-      }
+      assertQueuedClaimCurrent(dependencies, dependencies.store.conversation(conversation.id));
     }
     // A real first-message title can itself equal an untitled placeholder.
     // Capture history before queue/createMessage persists this message.
@@ -695,6 +783,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       ? dependencies.turns.queue({
           orchestrationRequest,
           queuedMessageId: dependencies.queuedMessage?.id,
+          ...(queuedSelectionOverride ? { modelSelectionOverride: queuedSelectionOverride } : {}),
           // A queue row that names an unread follow-up starts its turn on that persisted message.
           ...(dependencies.queuedMessage?.userMessageId
             ? { adoptedFollowUp: { messageId: dependencies.queuedMessage.userMessageId } } : {}),
@@ -730,6 +819,12 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       dependencies.providerTerminalResumes.release(conversation.id);
     }
     await relinquishAttachments();
+    if (dependencies.queuedMessage && error instanceof OrchestrationConflict && error.code === "revision-conflict") {
+      throw new RuntimeRequestError(
+        "The queued message claim was held or superseded before admission.",
+        QUEUE_CLAIM_SUPERSEDED_CODE,
+      );
+    }
     throw error;
   }
   messageSendStage = "turn-publication";

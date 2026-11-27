@@ -469,7 +469,12 @@ export default function App({
         conversationId: selectedConversation,
         ...payload,
       } as Parameters<PrivateConnectSocket["request"]>[0], pair.csrf);
-      if (!response.ok) throw new Error(response.message);
+      if (!response.ok) {
+        if (response.code === "stale") {
+          await refreshSelectedConversation(selectedConversation, pair.csrf).catch(() => undefined);
+        }
+        throw new Error(response.message);
+      }
       await refreshSelectedConversation(selectedConversation, pair.csrf).catch(() => undefined);
       return true;
     } catch (error) {

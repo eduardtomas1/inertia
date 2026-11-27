@@ -36,7 +36,11 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-function createFixture(options: { active?: boolean; accessMode?: "supervised" | "full" } = {}) {
+function createFixture(options: {
+  active?: boolean;
+  accessMode?: "supervised" | "full";
+  providerId?: "codex" | "claude" | "kimi";
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "inertia-pc-queue-"));
   directories.push(directory);
   const store = new RuntimeStore(join(directory, "inertia.sqlite"), directory);
@@ -44,6 +48,7 @@ function createFixture(options: { active?: boolean; accessMode?: "supervised" | 
   const project = store.createProject("Queue Project", directory);
   const conversation = store.createConversation(project.id, "Queue Chat", {
     accessMode: options.accessMode ?? "supervised",
+    ...(options.providerId ? { providerId: options.providerId } : {}),
   });
   let active = options.active ?? false;
   const promptSafety = () => privateConnectPromptSafetyForHarness("codex-app-server");
@@ -149,6 +154,7 @@ describe("Private Connect queue protocol, main bridge, and runtime gateway", () 
       content: "Inspect this screenshot",
       attachmentCount: 1,
       editable: false,
+      sendLabel: "none",
       attribution: "user",
     });
     expect(queue.items[1]).toMatchObject({
@@ -156,6 +162,7 @@ describe("Private Connect queue protocol, main bridge, and runtime gateway", () 
       content: "Follow up on tests",
       attachmentCount: 0,
       editable: true,
+      sendLabel: "send-now",
       attribution: "device",
       steerWaiting: true,
     });
@@ -392,6 +399,141 @@ describe("Private Connect queue protocol, main bridge, and runtime gateway", () 
       kind: "send-now",
       itemId: textId,
     });
+  });
+
+  it("enforces text-only queue.send and never projects stop-and-send for attachment rows or non-steerable active harnesses", async () => {
+    const steerable = createFixture({ active: true, providerId: "codex" });
+    const textId = randomUUID();
+    const attachedId = randomUUID();
+    const followUpId = randomUUID();
+
+    steerable.store.orchestration.queue.enqueue({
+      conversationId: steerable.conversation.id,
+      itemId: textId,
+      content: "Plain text follow-up",
+    });
+    steerable.store.orchestration.queue.enqueue({
+      conversationId: steerable.conversation.id,
+      itemId: attachedId,
+      content: "Attached screenshot",
+      attachments: [{
+        id: randomUUID(),
+        name: "capture.png",
+        mimeType: "image/png",
+        size: 256,
+        path: "/tmp/capture.png",
+      }],
+    });
+    steerable.store.orchestration.queue.enqueue({
+      conversationId: steerable.conversation.id,
+      itemId: followUpId,
+      content: "Unread steer follow-up",
+      steerFollowUpOfRunId: "run-active-1",
+    });
+
+    const activeDetail = await steerable.gateway.request(steerable.monitor, {
+      type: "conversation.get",
+      requestId: randomUUID(),
+      conversationId: steerable.conversation.id,
+    });
+    if (!activeDetail.ok || activeDetail.result.kind !== "conversation") {
+      throw new Error("expected conversation detail");
+    }
+    expect(activeDetail.result.detail.queue?.items.map(({ id, sendLabel }) => ({ id, sendLabel }))).toEqual([
+      { id: textId, sendLabel: "send-now" },
+      { id: attachedId, sendLabel: "none" },
+      { id: followUpId, sendLabel: "none" },
+    ]);
+
+    // Attachment rows are forbidden on queue.send both while active and when idle.
+    const sendAttachedActive = await steerable.gateway.request(steerable.collaborate, {
+      type: "queue.send",
+      requestId: randomUUID(),
+      conversationId: steerable.conversation.id,
+      id: attachedId,
+    });
+    expect(sendAttachedActive).toMatchObject({ ok: false, code: "forbidden" });
+
+    // Unread follow-up items cannot be sent manually while a turn is active.
+    const sendFollowUpActive = await steerable.gateway.request(steerable.collaborate, {
+      type: "queue.send",
+      requestId: randomUUID(),
+      conversationId: steerable.conversation.id,
+      id: followUpId,
+    });
+    expect(sendFollowUpActive).toMatchObject({ ok: false, code: "forbidden" });
+
+    // Even when idle, attachment rows stay non-sendable from a paired device.
+    steerable.setActive(false);
+    const idleDetail = await steerable.gateway.request(steerable.monitor, {
+      type: "conversation.get",
+      requestId: randomUUID(),
+      conversationId: steerable.conversation.id,
+    });
+    if (!idleDetail.ok || idleDetail.result.kind !== "conversation") {
+      throw new Error("expected conversation detail");
+    }
+    expect(idleDetail.result.detail.queue?.items.map(({ id, sendLabel }) => ({ id, sendLabel }))).toEqual([
+      { id: textId, sendLabel: "send-now" },
+      { id: attachedId, sendLabel: "none" },
+      { id: followUpId, sendLabel: "send-now" },
+    ]);
+    const sendAttachedIdle = await steerable.gateway.request(steerable.collaborate, {
+      type: "queue.send",
+      requestId: randomUUID(),
+      conversationId: steerable.conversation.id,
+      id: attachedId,
+    });
+    expect(sendAttachedIdle).toMatchObject({ ok: false, code: "forbidden" });
+
+    // Non-steerable harness (kimi-acp) never projects stop-and-send while active and rejects active queue.send.
+    const nonSteerable = createFixture({ active: true, providerId: "kimi" });
+    const kimiItemId = randomUUID();
+    nonSteerable.store.orchestration.queue.enqueue({
+      conversationId: nonSteerable.conversation.id,
+      itemId: kimiItemId,
+      content: "Queued for non-steerable harness",
+    });
+
+    const kimiActiveDetail = await nonSteerable.gateway.request(nonSteerable.monitor, {
+      type: "conversation.get",
+      requestId: randomUUID(),
+      conversationId: nonSteerable.conversation.id,
+    });
+    if (!kimiActiveDetail.ok || kimiActiveDetail.result.kind !== "conversation") {
+      throw new Error("expected conversation detail");
+    }
+    expect(kimiActiveDetail.result.detail.queue?.items).toEqual([
+      expect.objectContaining({ id: kimiItemId, sendLabel: "none" }),
+    ]);
+    const kimiActiveSend = await nonSteerable.gateway.request(nonSteerable.collaborate, {
+      type: "queue.send",
+      requestId: randomUUID(),
+      conversationId: nonSteerable.conversation.id,
+      id: kimiItemId,
+    });
+    expect(kimiActiveSend).toMatchObject({ ok: false, code: "forbidden" });
+
+    // Once idle, text-only item on non-steerable harness projects send-now and executes cleanly.
+    nonSteerable.setActive(false);
+    const kimiIdleDetail = await nonSteerable.gateway.request(nonSteerable.monitor, {
+      type: "conversation.get",
+      requestId: randomUUID(),
+      conversationId: nonSteerable.conversation.id,
+    });
+    if (!kimiIdleDetail.ok || kimiIdleDetail.result.kind !== "conversation") {
+      throw new Error("expected conversation detail");
+    }
+    expect(kimiIdleDetail.result.detail.queue?.items).toEqual([
+      expect.objectContaining({ id: kimiItemId, sendLabel: "send-now" }),
+    ]);
+    const kimiIdleSend = await nonSteerable.gateway.request(nonSteerable.collaborate, {
+      type: "queue.send",
+      requestId: randomUUID(),
+      conversationId: nonSteerable.conversation.id,
+      id: kimiItemId,
+    });
+    expect(kimiIdleSend).toMatchObject({ ok: true, result: { kind: "queue.updated" } });
   });
 
   it("enforces supervised access / prompt safety on queue mutations and trims queue to plaintext byte budget", async () => {

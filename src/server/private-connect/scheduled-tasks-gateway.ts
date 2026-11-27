@@ -138,11 +138,13 @@ function mapScheduledTaskError(
   error: unknown,
 ): PrivateConnectRuntimeResponse {
   if (error instanceof RuntimeRequestError) {
-    const code = error.code === "busy" || /\bbusy\b|\balready running\b/iu.test(error.message)
-      ? "busy"
-      : error.code === "invalid" || error.code === USER_CORRECTABLE_REQUEST
-        ? "invalid"
-        : "unavailable";
+    const code = error.code === "forbidden"
+      ? "forbidden"
+      : error.code === "busy" || /\bbusy\b|\balready running\b/iu.test(error.message)
+        ? "busy"
+        : error.code === "invalid" || error.code === USER_CORRECTABLE_REQUEST
+          ? "invalid"
+          : "unavailable";
     return fail(requestId, code, error.message);
   }
   if (error instanceof Error) {

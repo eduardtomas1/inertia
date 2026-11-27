@@ -89,11 +89,11 @@ export function createScheduledTaskRuntime(
         ?? (input.requirePrivateConnectPromptSafety ? effectiveSelection : undefined);
       if (input.requirePrivateConnectPromptSafety) {
         if (input.accessMode !== "supervised") {
-          throw new RuntimeRequestError("PrivateConnect prompting requires Supervised access on the desktop.");
+          throw new RuntimeRequestError("PrivateConnect prompting requires Supervised access on the desktop.", "forbidden");
         }
         const safety = privateConnectPromptSafetyForHarness(effectiveSelection.harnessId);
         if (!privateConnectPromptSafetyIsUsable(safety)) {
-          throw new RuntimeRequestError(safety.explanation);
+          throw new RuntimeRequestError(safety.explanation, "forbidden");
         }
       }
       const providerId = selection ? providerIdForHarness(selection.harnessId) : null;
@@ -153,7 +153,9 @@ export function createScheduledTaskRuntime(
     service,
     privateConnectHandlers,
     start: () => {
-      try { service.start(); } catch { /* boot retry scheduled by service */ }
+      try { service.start(); } catch (error) {
+        console.warn("[scheduled-tasks] Startup reconciliation deferred for retry:", error instanceof Error ? error.message : String(error));
+      }
     },
     onTurnSettled: (turn: AgentTurn) => service.onTurnSettled(turn),
     dispose: () => service.dispose(),

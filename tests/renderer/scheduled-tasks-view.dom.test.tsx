@@ -482,4 +482,34 @@ describe("ScheduledTasksView", () => {
     expect(updatePayload.patch.title).toBe("Renamed 90s job");
     expect("schedule" in updatePayload.patch).toBe(false);
   });
+
+  it("R1-B2 + R1-B3: manages focus across inline delete confirmation and omits role=alert from persisted errors", async () => {
+    const user = userEvent.setup();
+    mountView([{
+      task: makeTask({
+        lastRunStatus: "failed",
+        lastError: "Stored previous failure",
+        consecutiveFailures: 1,
+      }),
+      recentRuns: [makeRun({ state: "failed", error: "Stored run error" })],
+    }]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Stored previous failure")).toBeVisible();
+    });
+    // R1-B3: persisted errors must NOT have role="alert"
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Recent runs \(1\)/i }));
+    expect(screen.getByText("Stored run error")).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // R1-B2: clicking Delete focuses Cancel; clicking Cancel returns focus to Delete
+    const deleteBtn = screen.getByRole("button", { name: "Delete" });
+    await user.click(deleteBtn);
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(document.activeElement).toBe(cancelBtn);
+    await user.click(cancelBtn);
+    const restoredDeleteBtn = screen.getByRole("button", { name: "Delete" });
+    expect(document.activeElement).toBe(restoredDeleteBtn);
+  });
 });

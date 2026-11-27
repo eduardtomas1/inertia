@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type {
-  AgentTurn, Conversation, ModelSelection, Project, RuntimeMutationEvent,
-} from "../../../shared/contracts";
+import type { AgentTurn, Conversation } from "../../../shared/contracts";
 import { queueContentCharCount } from "../../../shared/orchestration-queue";
 import {
   privateConnectPromptSafetyForHarness,
@@ -25,121 +23,36 @@ import {
   type ScheduledTaskRunTrigger,
   type ScheduledTaskSummary,
 } from "../../../shared/scheduled-tasks";
-import type { OrchestrationQueueRepository } from "../../orchestration-v2/queue-repository";
 import { OrchestrationConflict } from "../../orchestration-v2/types";
 import { RecordNotFoundError } from "../../persistence/errors";
 import { RuntimeRequestError, USER_CORRECTABLE_REQUEST } from "../../runtime-errors";
 import { withAgentSenderNote } from "../agent-sender-note";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "../update-hold";
+import { ScheduledTaskRetryQueue } from "./scheduled-task-retry-queue";
+import {
+  MAX_CONVERSATION_TITLE_CHARS,
+  MAX_DUE_PER_TICK,
+  MAX_TIMER_DELAY_MS,
+  SCHEDULED_TASK_ALREADY_RUNNING_MESSAGE,
+  SCHEDULED_TASK_BOUND_CHAT_ARCHIVED_MESSAGE,
+  SCHEDULED_TASK_BOUND_CHAT_MISSING_MESSAGE,
+  SCHEDULED_TASK_BOUND_CHAT_PROJECT_MESSAGE,
+  SCHEDULED_TASK_IN_FLIGHT_MESSAGE,
+  SCHEDULED_TASK_MISSED_BOOT_ERROR,
+  SCHEDULED_TASK_NOT_FOUND_MESSAGE,
+  SCHEDULED_TASK_PAST_ONCE_MESSAGE,
+  SCHEDULED_TASK_PROJECT_MISSING_MESSAGE,
+  SCHEDULED_TASK_STRANDED_BOOT_ERROR,
+  UPDATE_HOLD_RETRY_DELAY_MS,
+  type ScheduledTaskEnqueuePromptInput,
+  type ScheduledTaskEnqueuePromptResult,
+  type ScheduledTaskRunNowResult,
+  type ScheduledTaskServiceDependencies,
+  type ScheduledTaskStoreLike,
+  type TrackedScheduledRun,
+} from "./scheduled-task-service-types";
 
-export const MAX_TIMER_DELAY_MS = 60_000;
-const UPDATE_HOLD_RETRY_DELAY_MS = 5_000;
-const MAX_DUE_PER_TICK = 25;
-const MAX_CONVERSATION_TITLE_CHARS = 120;
-
-export const SCHEDULED_TASK_NOT_FOUND_MESSAGE = "Scheduled task not found.";
-export const SCHEDULED_TASK_PROJECT_MISSING_MESSAGE = "Project not found for scheduled task.";
-export const SCHEDULED_TASK_BOUND_CHAT_MISSING_MESSAGE = "Target chat not found for scheduled task.";
-export const SCHEDULED_TASK_BOUND_CHAT_PROJECT_MESSAGE = "Target chat does not belong to the scheduled task's project.";
-export const SCHEDULED_TASK_BOUND_CHAT_ARCHIVED_MESSAGE = "Archived chats cannot receive scheduled runs.";
-export const SCHEDULED_TASK_PAST_ONCE_MESSAGE = "One-time scheduled tasks must be scheduled in the future.";
-export const SCHEDULED_TASK_ALREADY_RUNNING_MESSAGE = "This scheduled task already has an active queued or running occurrence.";
-export const SCHEDULED_TASK_IN_FLIGHT_MESSAGE = "This scheduled task is already starting a run.";
-export const SCHEDULED_TASK_MISSED_BOOT_ERROR = "Missed scheduled time while Inertia was closed.";
-export const SCHEDULED_TASK_STRANDED_BOOT_ERROR = "Inertia restarted before the scheduled run could be queued.";
-
-export interface ScheduledTaskRepositoryLike {
-  list(projectId?: string): ScheduledTask[];
-  get(taskId: string): ScheduledTask | null;
-  create(input: ScheduledTaskCreateInput & { id: string; nextRunAt: string | null; now: string }): ScheduledTask;
-  update(taskId: string, patch: ScheduledTaskPatch & { nextRunAt?: string | null; now: string; lastError?: string | null; consecutiveFailures?: number; lastRunAt?: string | null; lastRunStatus?: ScheduledTaskRunStatus | null; lastConversationId?: string | null; lastTurnId?: string | null }): ScheduledTask;
-  delete(taskId: string): boolean;
-  listDue(nowIso: string, limit?: number): ScheduledTask[];
-  listRuns(taskId: string, limit?: number): ScheduledTaskRun[];
-  listActiveRuns(): ScheduledTaskRun[];
-  getRun(runId: string): ScheduledTaskRun | null;
-  findRunByTurnId(turnId: string): ScheduledTaskRun | null;
-  hasActiveQueuedOrRunningOccurrence(taskId: string): boolean;
-  claimRun(input: { runId: string; taskId: string; claimKey: string; trigger: ScheduledTaskRunTrigger; scheduledFor: string | null; claimedAt: string; nextRunAtAfterClaim: string | null; disableTaskAfterClaim?: boolean }): ScheduledTaskRun | null;
-  updateRun(runId: string, patch: { state?: ScheduledTaskRunStatus; conversationId?: string | null; turnId?: string | null; queueItemId?: string | null; error?: string | null; finishedAt?: string | null; updatedAt: string }): ScheduledTaskRun | null;
-  recordTaskOutcome(taskId: string, outcome: { lastRunAt: string; lastRunStatus: ScheduledTaskRunStatus; lastConversationId?: string | null; lastTurnId?: string | null; lastError: string | null; consecutiveFailures: number; updatedAt: string }): ScheduledTask | null;
-  reconcileStrandedRuns(nowIso: string, errorMessage: string): ScheduledTaskRun[];
-  disableTasksForMissingOrArchivedTarget(nowIso: string): string[];
-  runInTransaction?<T>(work: () => T): T;
-}
-
-export interface ScheduledTaskStoreLike {
-  project(projectId: string): Pick<Project, "id" | "name">;
-  conversation(conversationId: string): Pick<Conversation, "id" | "projectId" | "title" | "archivedAt" | "accessMode" | "interactionMode" | "modelSelection">;
-  agentTurn?(turnId: string): Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">;
-  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> & Partial<Pick<OrchestrationQueueRepository, "getItem" | "cancel" | "listActiveByScheduledTask">> };
-}
-
-export interface ScheduledTaskConversationCreateInput {
-  projectId: string;
-  title: string;
-  modelSelection: ModelSelection | null;
-  interactionMode: ScheduledTask["interactionMode"];
-  accessMode: ScheduledTask["accessMode"];
-  requestId: string;
-  requirePrivateConnectPromptSafety?: boolean;
-}
-
-export interface ScheduledTaskEnqueuePromptInput {
-  task: ScheduledTask;
-  run: ScheduledTaskRun;
-  conversationId: string;
-  content: string;
-  providerContent: string;
-  modelSelection: ModelSelection | null;
-  followsThreadSelection: boolean;
-  freshContext: boolean;
-  queueItemId: string;
-  requestedAt: string;
-  requirePrivateConnectPromptSafety?: boolean;
-}
-
-export interface ScheduledTaskEnqueuePromptResult {
-  queueItemId: string;
-  turnId?: string | null;
-  linkedRun?: ScheduledTaskRun | null;
-  linkedTask?: ScheduledTask | null;
-}
-
-export interface ScheduledTaskMessageQueueLike {
-  schedule?(conversationId: string): void | Promise<void>;
-  onExternalQueueChanged?(conversationId: string): void;
-}
-
-export interface ScheduledTaskServiceDependencies {
-  repository: ScheduledTaskRepositoryLike;
-  store: ScheduledTaskStoreLike;
-  createConversation(input: ScheduledTaskConversationCreateInput): Promise<Pick<Conversation, "id" | "projectId" | "title" | "archivedAt">>;
-  enqueueScheduledPrompt?(input: ScheduledTaskEnqueuePromptInput): Promise<ScheduledTaskEnqueuePromptResult> | ScheduledTaskEnqueuePromptResult;
-  resetConversationSession?(conversationId: string): Promise<void> | void;
-  messageQueue?(): ScheduledTaskMessageQueueLike | undefined;
-  isUpdateHeld?(): boolean;
-  broadcast(event: RuntimeMutationEvent): void;
-  now?(): Date;
-  createId?(): string;
-  enableProviders?: boolean;
-}
-
-export interface ScheduledTaskRunNowResult {
-  task: ScheduledTask;
-  run: ScheduledTaskRun;
-  conversationId: string;
-}
-
-interface TrackedScheduledRun {
-  runId: string;
-  taskId: string;
-  conversationId: string;
-  queueItemId: string;
-  turnId: string | null;
-  claimedAt: string;
-  providerContent: string;
-}
+export * from "./scheduled-task-service-types";
 
 class MissingOrArchivedTargetError extends Error {}
 
@@ -175,10 +88,10 @@ export class ScheduledTaskService {
   private readonly trackedByRunId = new Map<string, TrackedScheduledRun>();
   private readonly trackedByQueueItemId = new Map<string, string>();
   private readonly trackedByTurnId = new Map<string, string>();
-  private readonly pendingTurnSettlements = new Map<string, Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">>();
+  private readonly retryQueue = new ScheduledTaskRetryQueue<
+    Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">
+  >();
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private settlementRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  private bootRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private disposed = false;
   private tickInProgress = false;
@@ -340,6 +253,7 @@ export class ScheduledTaskService {
         throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
       }
     });
+    this.retryQueue.purgeForTask(taskId);
     for (const [runId, tracked] of this.trackedByRunId) {
       if (tracked.taskId === taskId) this.untrackRun(runId);
     }
@@ -354,6 +268,7 @@ export class ScheduledTaskService {
 
   onConversationDeleted(conversationId: string, projectId: string): void {
     const now = this.now();
+    this.retryQueue.purgeForConversation(conversationId);
     for (const run of this.dependencies.repository.listActiveRuns()) {
       if (run.conversationId === conversationId) {
         this.settleNonTurnRun(run, "skipped", "The run's chat was deleted.", now, false);
@@ -421,7 +336,7 @@ export class ScheduledTaskService {
     if (this.dependencies.enableProviders === false) {
       throw new RuntimeRequestError("Scheduled tasks require an available provider runtime.");
     }
-    this.flushPendingTurnSettlements();
+    this.flushPendingRetries();
     if (!this.dependencies.repository.get(taskId)) throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
     if (this.inFlightTaskIds.has(taskId)) throw userError(SCHEDULED_TASK_IN_FLIGHT_MESSAGE);
     if (this.dependencies.repository.hasActiveQueuedOrRunningOccurrence(taskId)) {
@@ -434,6 +349,9 @@ export class ScheduledTaskService {
       if (!liveTask) throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
       if (this.dependencies.repository.hasActiveQueuedOrRunningOccurrence(taskId)) {
         throw userError(SCHEDULED_TASK_ALREADY_RUNNING_MESSAGE);
+      }
+      if (options?.requirePrivateConnectPromptSafety) {
+        this.assertPrivateConnectPromptSafety(liveTask);
       }
       const result = await this.claimAndDispatch(liveTask, "manual", options);
       if (!result) throw userError(SCHEDULED_TASK_IN_FLIGHT_MESSAGE);
@@ -448,26 +366,37 @@ export class ScheduledTaskService {
     const resolvedRunId = this.trackedByQueueItemId.get(runIdOrQueueItemId) ?? runIdOrQueueItemId;
     const existing = this.dependencies.repository.getRun(resolvedRunId);
     if (!existing || existing.state === "completed" || existing.state === "failed" || existing.state === "skipped") {
+      this.retryQueue.clearBinding(resolvedRunId);
       return null;
     }
 
     const nowIso = this.now().toISOString();
-    const { updatedRun, projectId } = this.runInTransaction(() => {
-      const nextRun = this.dependencies.repository.updateRun(existing.id, {
-        state: "running", turnId, updatedAt: nowIso,
-      });
-      const task = this.dependencies.repository.get(existing.taskId);
-      if (task && this.isLatestRunForTask(task.id, existing.id)) {
-        this.dependencies.repository.update(task.id, {
-          now: nowIso,
-          lastRunStatus: "running",
-          ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
-          lastTurnId: turnId,
-          lastError: null,
+    let updatedRun: ScheduledTaskRun | null = null;
+    let projectId: string | null = null;
+    try {
+      const committed = this.runInTransaction(() => {
+        const nextRun = this.dependencies.repository.updateRun(existing.id, {
+          state: "running", turnId, updatedAt: nowIso,
         });
-      }
-      return { updatedRun: nextRun, projectId: task?.projectId ?? null };
-    });
+        const task = this.dependencies.repository.get(existing.taskId);
+        if (task && this.isLatestRunForTask(task.id, existing.id)) {
+          this.dependencies.repository.update(task.id, {
+            now: nowIso,
+            lastRunStatus: "running",
+            ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
+            lastTurnId: turnId,
+            lastError: null,
+          });
+        }
+        return { updatedRun: nextRun, projectId: task?.projectId ?? null };
+      });
+      updatedRun = committed.updatedRun;
+      projectId = committed.projectId;
+    } catch (error) {
+      this.retryQueue.recordBindingFailure(existing.id, existing.taskId, turnId, error, () => this.flushPendingRetries());
+      throw error;
+    }
+    this.retryQueue.clearBinding(existing.id);
     const tracked = this.trackedByRunId.get(existing.id);
     if (tracked) tracked.turnId = turnId;
     this.trackedByTurnId.set(turnId, existing.id);
@@ -528,9 +457,12 @@ export class ScheduledTaskService {
   ): void {
     if (!isTerminalTurnStatus(turn.status)) return;
     const run = this.resolveRunForTurn(turn);
-    if (!run) return;
+    if (!run) {
+      this.retryQueue.clearSettlement(turn.id);
+      return;
+    }
     if (run.state === "completed" || run.state === "failed" || run.state === "skipped") {
-      this.pendingTurnSettlements.delete(turn.id);
+      this.retryQueue.clearSettlement(turn.id);
       this.untrackRun(run.id);
       return;
     }
@@ -572,22 +504,35 @@ export class ScheduledTaskService {
         return task.projectId;
       });
     } catch (error) {
-      this.pendingTurnSettlements.set(turn.id, turn);
-      this.scheduleSettlementRetry();
+      this.retryQueue.recordSettlementFailure(
+        turn,
+        run.taskId,
+        error,
+        () => {
+          this.dependencies.repository.updateRun(run.id, {
+            state: "failed",
+            error: "Scheduled run settlement failed repeatedly.",
+            finishedAt: settledAt,
+            updatedAt: settledAt,
+          });
+          this.untrackRun(run.id);
+        },
+        () => this.flushPendingRetries(),
+      );
       throw error;
     }
-    this.pendingTurnSettlements.delete(turn.id);
+    this.retryQueue.clearSettlement(turn.id);
     this.untrackRun(run.id);
     if (projectId) this.broadcastChanged(projectId);
   }
 
   start(): void {
     if (this.started || this.disposed) return;
-    if (this.bootRetryTimer !== null) { clearTimeout(this.bootRetryTimer); this.bootRetryTimer = null; }
+    this.retryQueue.clearBootRetry();
     const now = this.now();
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
-    const affectedProjects = new Set<string>();
+    const affectedProjects = new Set<string>(this.retryQueue.drainBootBroadcastProjects());
     try {
       for (const run of this.dependencies.repository.listActiveRuns()) {
         const projectId = this.reconcileActiveRunOnBoot(run, now);
@@ -628,19 +573,25 @@ export class ScheduledTaskService {
         affectedProjects.add(task.projectId);
       }
       this.started = true;
+      this.rescheduleTimer();
+      for (const projectId of affectedProjects) this.broadcastChanged(projectId);
     } catch (error) {
-      this.scheduleBootRetry();
+      this.started = false;
+      this.retryQueue.addBootBroadcastProjects(affectedProjects);
+      this.retryQueue.scheduleBootRetry(error, () => {
+        if (!this.disposed && !this.started) {
+          try { this.start(); } catch { /* retry re-armed by start */ }
+        }
+      });
       throw error;
     }
-    for (const projectId of affectedProjects) this.broadcastChanged(projectId);
-    this.rescheduleTimer();
   }
 
   async tick(): Promise<void> {
     if (this.disposed || this.tickInProgress) return;
     this.tickInProgress = true;
     try {
-      this.flushPendingTurnSettlements();
+      this.flushPendingRetries();
       if (this.isUpdateHeld() || this.dependencies.enableProviders === false) return;
       const dueTasks = this.dependencies.repository.listDue(this.now().toISOString(), MAX_DUE_PER_TICK);
       for (const task of dueTasks) {
@@ -684,39 +635,17 @@ export class ScheduledTaskService {
     this.disposed = true;
     this.started = false;
     if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
-    if (this.settlementRetryTimer !== null) { clearTimeout(this.settlementRetryTimer); this.settlementRetryTimer = null; }
-    if (this.bootRetryTimer !== null) { clearTimeout(this.bootRetryTimer); this.bootRetryTimer = null; }
-    this.pendingTurnSettlements.clear();
+    this.retryQueue.dispose();
     this.trackedByRunId.clear();
     this.trackedByQueueItemId.clear();
     this.trackedByTurnId.clear();
   }
 
-  private scheduleSettlementRetry(): void {
-    if (this.disposed || this.settlementRetryTimer !== null || this.pendingTurnSettlements.size === 0) return;
-    this.settlementRetryTimer = setTimeout(() => {
-      this.settlementRetryTimer = null;
-      this.flushPendingTurnSettlements();
-    }, 500);
-    this.settlementRetryTimer.unref?.();
-  }
-
-  private flushPendingTurnSettlements(): void {
-    if (this.disposed || this.pendingTurnSettlements.size === 0) return;
-    for (const pendingTurn of Array.from(this.pendingTurnSettlements.values())) {
-      try { this.onTurnSettled(pendingTurn); } catch { /* retry re-armed by onTurnSettled */ }
-    }
-  }
-
-  private scheduleBootRetry(): void {
-    if (this.disposed || this.started || this.bootRetryTimer !== null) return;
-    this.bootRetryTimer = setTimeout(() => {
-      this.bootRetryTimer = null;
-      if (!this.disposed && !this.started) {
-        try { this.start(); } catch { /* retry re-armed by start */ }
-      }
-    }, 500);
-    this.bootRetryTimer.unref?.();
+  private flushPendingRetries(): void {
+    this.retryQueue.flush(
+      (binding) => { this.bindRunTurn(binding.runId, binding.turnId); },
+      (pendingTurn) => { this.onTurnSettled(pendingTurn); },
+    );
   }
 
   private rescheduleTimer(): void {
@@ -726,18 +655,26 @@ export class ScheduledTaskService {
     }
     if (!this.started || this.disposed || this.dependencies.enableProviders === false) return;
 
-    let earliestMs: number | null = null;
-    for (const task of this.dependencies.repository.list()) {
-      if (!task.enabled || task.nextRunAt === null) continue;
-      const ms = Date.parse(task.nextRunAt);
-      if (Number.isFinite(ms) && (earliestMs === null || ms < earliestMs)) earliestMs = ms;
+    let delayMs: number | null = null;
+    try {
+      let earliestMs: number | null = null;
+      for (const task of this.dependencies.repository.list()) {
+        if (!task.enabled || task.nextRunAt === null) continue;
+        const ms = Date.parse(task.nextRunAt);
+        if (Number.isFinite(ms) && (earliestMs === null || ms < earliestMs)) earliestMs = ms;
+      }
+      if (earliestMs === null) return;
+      const rawDelay = earliestMs - this.now().getTime();
+      delayMs = this.isUpdateHeld() && rawDelay <= 0
+        ? UPDATE_HOLD_RETRY_DELAY_MS
+        : Math.max(0, Math.min(MAX_TIMER_DELAY_MS, rawDelay));
+    } catch (error) {
+      console.warn(
+        "[scheduled-tasks] Failed to reschedule timer; falling back to periodic tick:",
+        error instanceof Error ? error.message : String(error),
+      );
+      delayMs = MAX_TIMER_DELAY_MS;
     }
-    if (earliestMs === null) return;
-
-    const rawDelay = earliestMs - this.now().getTime();
-    const delayMs = this.isUpdateHeld() && rawDelay <= 0
-      ? UPDATE_HOLD_RETRY_DELAY_MS
-      : Math.max(0, Math.min(MAX_TIMER_DELAY_MS, rawDelay));
     this.timer = setTimeout(() => {
       this.timer = null;
       void this.tick().catch(() => undefined);
@@ -887,6 +824,28 @@ export class ScheduledTaskService {
     }
   }
 
+  private assertPrivateConnectPromptSafety(task: ScheduledTask): void {
+    if (task.accessMode !== "supervised") {
+      throw new RuntimeRequestError("PrivateConnect prompting requires Supervised access on the desktop.", "forbidden");
+    }
+    if (task.boundConversationId !== null) {
+      const conversation = this.readBoundConversationOrThrow(task.boundConversationId, task.projectId);
+      if (conversation.accessMode !== "supervised") {
+        throw new RuntimeRequestError("PrivateConnect prompting requires Supervised access on the desktop.", "forbidden");
+      }
+      const effectiveHarness = task.modelSelection?.harnessId ?? conversation.modelSelection.harnessId;
+      const safety = privateConnectPromptSafetyForHarness(effectiveHarness);
+      if (!privateConnectPromptSafetyIsUsable(safety)) {
+        throw new RuntimeRequestError(safety.explanation, "forbidden");
+      }
+    } else if (task.modelSelection !== null) {
+      const safety = privateConnectPromptSafetyForHarness(task.modelSelection.harnessId);
+      if (!privateConnectPromptSafetyIsUsable(safety)) {
+        throw new RuntimeRequestError(safety.explanation, "forbidden");
+      }
+    }
+  }
+
   private async resolveTargetConversation(
     task: ScheduledTask,
     run: ScheduledTaskRun,
@@ -896,14 +855,7 @@ export class ScheduledTaskService {
     if (task.boundConversationId !== null) {
       const conversation = this.readBoundConversationOrThrow(task.boundConversationId, task.projectId);
       if (requirePrivateConnectPromptSafety) {
-        if (conversation.accessMode !== "supervised" || task.accessMode !== "supervised") {
-          throw new RuntimeRequestError("PrivateConnect prompting requires Supervised access on the desktop.");
-        }
-        const effectiveHarness = task.modelSelection?.harnessId ?? conversation.modelSelection.harnessId;
-        const safety = privateConnectPromptSafetyForHarness(effectiveHarness);
-        if (!privateConnectPromptSafetyIsUsable(safety)) {
-          throw new RuntimeRequestError(safety.explanation);
-        }
+        this.assertPrivateConnectPromptSafety(task);
       }
       return { conversationId: conversation.id, freshContext: task.freshSession };
     }

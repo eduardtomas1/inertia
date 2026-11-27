@@ -564,4 +564,88 @@ describe("Private Connect browser lifecycle", () => {
       socket.request.mockImplementation(baseImpl);
     }
   });
+
+  it("R1-B1..R1-B5: failed remote delete surfaces per-row error, preserves focus on cancel, formats one-shot locally, omits role=alert on stored error, and refreshes on live poll", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    const onceTask = {
+      id: "77777777-7777-4777-8777-777777777777",
+      projectId: "22222222-2222-4222-8222-222222222222",
+      projectName: "Project",
+      title: "Release cutover",
+      scheduleLabel: "Once at 2030-11-27T09:00:00.000Z",
+      enabled: true,
+      nextRunAt: "2030-11-27T09:00:00.000Z",
+      lastRunAt: "2030-11-26T09:00:00.000Z",
+      lastRunStatus: "failed" as "failed" | "completed",
+      lastError: "Stored remote error" as string | null,
+      consecutiveFailures: 1,
+      boundConversationId: null,
+    };
+    const promptState = (requestId = "st-b") => ({
+      type: "response",
+      requestId,
+      ok: true,
+      result: {
+        kind: "state",
+        validator: STATE_VALIDATOR,
+        state: {
+          generatedAt: "2030-01-01T00:00:00.000Z",
+          projects: [{ id: "22222222-2222-4222-8222-222222222222", name: "Project" }],
+          conversations: [{ id: "33333333-3333-4333-8333-333333333333", projectId: "22222222-2222-4222-8222-222222222222", title: "Conversation", providerLabel: "Test", runId: null, status: "idle", pendingLocalApproval: false, pendingLocalAction: false, updatedAt: "2030-01-01T00:00:00.000Z" }],
+          capabilities: { scopes: ["private:read", "private:prompt"], preset: "collaborate", expiresAt: "2030-02-01T00:00:00.000Z" },
+        },
+      },
+    });
+    let listResponses = [onceTask];
+    const liveSocket = {
+      request: vi.fn(async (req: { type: string; requestId?: string }) => {
+        if (req.type === "state.get") return promptState(req.requestId);
+        if (req.type === "scheduled-tasks.list") {
+          return { type: "response", requestId: req.requestId ?? "lb", ok: true, result: { kind: "scheduled-tasks", tasks: listResponses } };
+        }
+        if (req.type === "scheduled-task.delete") {
+          return { type: "response", requestId: req.requestId ?? "db", ok: false, code: "not-found", message: "That scheduled task was not found." };
+        }
+        return { type: "response", requestId: req.requestId ?? "ob", ok: true, result: { kind: "not-modified", validator: STATE_VALIDATOR } };
+      }),
+      onClose: vi.fn(() => () => undefined),
+      close: vi.fn(),
+    };
+    vi.mocked(connectPrivateConnectSocket).mockResolvedValueOnce(liveSocket as never);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByText("Release cutover")).toBeInTheDocument());
+
+    // R1-B4: one-shot schedule label is formatted locally (no raw UTC ISO string)
+    expect(screen.queryByText(/2030-11-27T09:00:00\.000Z/u)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Once · /u)).toBeInTheDocument();
+
+    // R1-B3: stored lastError is rendered without role="alert"
+    expect(screen.getByText("Stored remote error")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    // R1-B2: Delete focuses Cancel, Cancel returns focus to Delete
+    fireEvent.click(screen.getByRole("button", { name: /Delete Release cutover/i }));
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(document.activeElement).toBe(cancelBtn);
+    fireEvent.click(cancelBtn);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Delete Release cutover/i }));
+
+    // R1-B1: failed delete keeps confirmation visible, displays per-row role="alert" error, and refreshes list
+    const listBeforeDelete = liveSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+    fireEvent.click(screen.getByRole("button", { name: /Delete Release cutover/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Confirm delete Release cutover/i }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("That scheduled task was not found."));
+    expect(screen.getByRole("button", { name: /Confirm delete Release cutover/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(liveSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length)
+        .toBeGreaterThan(listBeforeDelete);
+    });
+
+    // R1-B5: 5s live poll passively refreshes scheduled tasks so desktop changes appear without manual Refresh
+    listResponses = [{ ...onceTask, enabled: false, lastRunStatus: "completed", lastError: null }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+  });
 });

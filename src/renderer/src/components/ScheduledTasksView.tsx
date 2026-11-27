@@ -213,6 +213,9 @@ export function ScheduledTasksView({
   const formHeadingId = useId();
   const kindGroupId = useId();
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const restoreDeleteFocusIdRef = useRef<string | null>(null);
   const loadSeqRef = useRef(0);
 
   const [summaries, setSummaries] = useState<ScheduledTaskSummary[]>([]);
@@ -273,6 +276,16 @@ export function ScheduledTasksView({
     if (offline) { setLoading(false); return; }
     void loadTasks();
   }, [loadTasks, offline, refreshNonce]);
+
+  useEffect(() => {
+    if (confirmDeleteId !== null) {
+      cancelDeleteRef.current?.focus();
+    } else if (restoreDeleteFocusIdRef.current !== null) {
+      const targetId = restoreDeleteFocusIdRef.current;
+      restoreDeleteFocusIdRef.current = null;
+      deleteButtonRefs.current.get(targetId)?.focus();
+    }
+  }, [confirmDeleteId]);
 
   const openForm = useCallback((nextDraft: FormDraft): void => {
     setDraft(nextDraft);
@@ -609,7 +622,18 @@ export function ScheduledTasksView({
                       <h3 className="scheduled-task-title">{task.title}</h3>
                       {confirmDeleteId === task.id ? (
                         <span className="scheduled-task-actions" role="group" aria-label={`Delete ${task.title}`}>
-                          <button type="button" className="text-button" disabled={busy} onClick={() => { setConfirmDeleteId(null); }}>Cancel</button>
+                          <button
+                            ref={cancelDeleteRef}
+                            type="button"
+                            className="text-button"
+                            disabled={busy}
+                            onClick={() => {
+                              restoreDeleteFocusIdRef.current = task.id;
+                              setConfirmDeleteId(null);
+                            }}
+                          >
+                            Cancel
+                          </button>
                           <button type="button" className="text-button is-danger" disabled={locked} onClick={() => { handleDelete(task); }}>Confirm delete</button>
                         </span>
                       ) : (
@@ -626,7 +650,16 @@ export function ScheduledTasksView({
                               <MessageSquare size={15} aria-hidden="true" />
                             </IconButton>
                           )}
-                          <IconButton label="Delete" className="scheduled-delete" disabled={locked} onClick={() => { setConfirmDeleteId(task.id); }}>
+                          <IconButton
+                            ref={(el) => {
+                              if (el) deleteButtonRefs.current.set(task.id, el);
+                              else deleteButtonRefs.current.delete(task.id);
+                            }}
+                            label="Delete"
+                            className="scheduled-delete"
+                            disabled={locked}
+                            onClick={() => { setConfirmDeleteId(task.id); }}
+                          >
                             <Trash2 size={15} aria-hidden="true" />
                           </IconButton>
                         </span>
@@ -654,7 +687,7 @@ export function ScheduledTasksView({
                     </p>
 
                     {task.lastError && (
-                      <p className="scheduled-task-error" role="alert">
+                      <p className="scheduled-task-error">
                         <AlertCircle size={13} aria-hidden="true" /><span>{task.lastError}</span>
                       </p>
                     )}
@@ -681,7 +714,7 @@ export function ScheduledTasksView({
                               {runConv && (
                                 <button type="button" className="text-button" onClick={() => { onOpenConversation(runConv); }}>Open chat</button>
                               )}
-                              {run.error && <span className="scheduled-run-error" role="alert">{run.error}</span>}
+                              {run.error && <span className="scheduled-run-error">{run.error}</span>}
                             </li>
                           );
                         })}

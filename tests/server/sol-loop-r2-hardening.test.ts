@@ -9,7 +9,9 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { privateConnectPromptSafetyForHarness } from "../../src/shared/private-connect/prompt-safety";
 import { RuntimeStore } from "../../src/server/database";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
+import { runAuditedPrivateConnectMutation } from "../../src/main/private-connect/audit";
 import { handlePrivateConnectQueueCommand, projectPrivateConnectQueue } from "../../src/server/private-connect/queue-gateway";
+import { handlePrivateConnectScheduledTaskRequest } from "../../src/server/private-connect/scheduled-tasks-gateway";
 import { PrivateConnectRuntimeGateway } from "../../src/server/private-connect/runtime-gateway";
 import { sendMessageCommand, QUEUE_ATTRIBUTION_STALE_CODE } from "../../src/server/runtime/commands/message-send-command";
 import { executeManagedQueueMutation } from "../../src/server/runtime/managed-queue-tools";
@@ -1458,6 +1460,7 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         enableProviders: false,
       });
       expect(() => s61Service.start()).toThrow("Simulated summary update failure");
+      s61Service.dispose();
       s61UpdateSpy.mockRestore();
       // Both rows rolled back together — occurrence stayed running instead of drifting from summary!
       expect(store.scheduledTasks.getRun(s61RunId)?.state).toBe("running");
@@ -2115,6 +2118,240 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(store.scheduledTasks.listRuns(s86MissedTask.id)[0]?.state).toBe("skipped");
       s86Service.dispose();
     } finally {
+      vi.useRealTimers();
+      store.close();
+    }
+  });
+
+  it("Opus R1 (R1-A1..A4, R1-B6, R1-B8): retries bindRunTurn, purges deleted settlements, survives rescheduleTimer failure, caps settlement retries, rejects forbidden PC runNow pre-claim, and audits scheduled-task actions distinctly", async () => {
+    const { store, workspace } = createTempStore();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const project = store.createProject("Opus R1 Project", workspace);
+      vi.useFakeTimers();
+
+      // R1-A1: Transient bindRunTurn failure is retried and settles an already-terminal turn!
+      const a1Conv = store.createConversation(project.id, "R1-A1 Bind retry");
+      const a1Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => a1Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const a1Task = a1Service.create({
+        projectId: project.id,
+        title: "Bind retry task",
+        prompt: "Run bind test",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: a1Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const a1Run = await a1Service.runNow(a1Task.id);
+      const a1Turn = store.beginAgentTurn({
+        id: randomUUID(),
+        conversationId: a1Conv.id,
+        runId: `run-${randomUUID()}`,
+        content: "Run bind test",
+        activateConversation: false,
+        providerId: a1Conv.providerId,
+        harnessId: a1Conv.modelSelection.harnessId,
+        backendProfileId: a1Conv.modelSelection.backendProfileId,
+        model: a1Conv.modelSelection.modelId,
+        modelAlias: a1Conv.modelSelection.alias,
+        reasoningEffort: a1Conv.modelSelection.reasoningEffort ?? "",
+        interactionMode: a1Conv.interactionMode,
+        accessMode: a1Conv.accessMode,
+        providerSessionBefore: null,
+        usageAtStart: null,
+        configurationRevision: a1Conv.modelSelection.backendConfigurationRevision,
+        association: "authoritative",
+      }).turn;
+      const a1UpdateRunSpy = vi.spyOn(store.scheduledTasks, "updateRun").mockImplementationOnce(() => {
+        throw new Error("Transient SQLITE_BUSY during bindRunTurn");
+      });
+      expect(() => a1Service.bindRunTurn(a1Run.run.id, a1Turn.id)).toThrow("Transient SQLITE_BUSY");
+      a1UpdateRunSpy.mockRestore();
+      // Turn completes while run is still unbound -> onTurnSettled cannot find it yet
+      store.settleAgentTurn(a1Turn.id, { status: "completed" });
+      a1Service.onTurnSettled(store.agentTurn(a1Turn.id));
+      expect(store.scheduledTasks.getRun(a1Run.run.id)?.state).toBe("queued");
+      // Retry timer flushes pending binding -> binds AND immediately settles the already-terminal turn!
+      await vi.advanceTimersByTimeAsync(500);
+      expect(store.scheduledTasks.getRun(a1Run.run.id)?.state).toBe("completed");
+      expect(store.scheduledTasks.get(a1Task.id)?.lastRunStatus).toBe("completed");
+      // Subsequent Run now succeeds!
+      const a1Next = await a1Service.runNow(a1Task.id);
+      expect(a1Next.run.state).toBe("queued");
+      a1Service.dispose();
+
+      // R1-A2 + R1-A4: Deleted task purges pending settlement, and 8 repeated failures mark run failed so task is unblocked!
+      const a2Conv = store.createConversation(project.id, "R1-A2/A4 Settlement hygiene");
+      const a2Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => a2Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const a2Task = a2Service.create({
+        projectId: project.id,
+        title: "Deleted pending settlement",
+        prompt: "Check delete purge",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: a2Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const a2Run = await a2Service.runNow(a2Task.id);
+      const a2TurnId = randomUUID();
+      a2Service.bindRunTurn(a2Run.run.id, a2TurnId);
+      const a2OutcomeSpy = vi.spyOn(store.scheduledTasks, "recordTaskOutcome").mockImplementation(() => {
+        throw new Error("Permanent DB constraint failure");
+      });
+      expect(() => a2Service.onTurnSettled({
+        id: a2TurnId,
+        conversationId: a2Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: "2030-10-01T10:01:00.000Z",
+        updatedAt: "2030-10-01T10:01:00.000Z",
+      })).toThrow("Permanent DB constraint failure");
+      const findSpy = vi.spyOn(store.scheduledTasks, "findRunByTurnId");
+      a2Service.delete(a2Task.id);
+      findSpy.mockClear();
+      await a2Service.tick();
+      expect(findSpy).not.toHaveBeenCalled();
+      findSpy.mockRestore();
+
+      // Now verify R1-A4 cap: after 8 failed settlement attempts, fallback marks run failed and unblocks task!
+      const a4Task = a2Service.create({
+        projectId: project.id,
+        title: "Capped settlement retries",
+        prompt: "Check retry cap",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: a2Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const a4Run = await a2Service.runNow(a4Task.id);
+      const a4TurnId = randomUUID();
+      a2Service.bindRunTurn(a4Run.run.id, a4TurnId);
+      const a4Turn = {
+        id: a4TurnId,
+        conversationId: a2Conv.id,
+        status: "completed" as const,
+        terminalReason: null,
+        completedAt: "2030-10-01T10:05:00.000Z",
+        updatedAt: "2030-10-01T10:05:00.000Z",
+      };
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        expect(() => a2Service.onTurnSettled(a4Turn)).toThrow("Permanent DB constraint failure");
+      }
+      a2OutcomeSpy.mockRestore();
+      expect(store.scheduledTasks.getRun(a4Run.run.id)?.state).toBe("failed");
+      expect(store.scheduledTasks.hasActiveQueuedOrRunningOccurrence(a4Task.id)).toBe(false);
+      a2Service.dispose();
+
+      // R1-A3: rescheduleTimer throwing inside tick() falls back to periodic tick without killing scheduler!
+      const a3Broadcasts: string[] = [];
+      const a3Conv = store.createConversation(project.id, "R1-A3 Timer resilience");
+      const a3Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => a3Conv,
+        broadcast: (ev) => {
+          if (ev.type === "scheduled-tasks.changed" && ev.projectId) a3Broadcasts.push(ev.projectId);
+        },
+        enableProviders: true,
+        now: () => new Date("2030-10-01T10:00:00.000Z"),
+      });
+      a3Service.start();
+      const a3ListSpy = vi.spyOn(store.scheduledTasks, "list").mockImplementationOnce(() => {
+        throw new Error("Transient list failure during rescheduleTimer");
+      });
+      await a3Service.tick();
+      a3ListSpy.mockRestore();
+      // Fallback 60s timer must still fire tick() cleanly!
+      const tickSpy = vi.spyOn(a3Service, "tick");
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(tickSpy).toHaveBeenCalled();
+      tickSpy.mockRestore();
+      a3Service.dispose();
+
+      // R1-B6: Private Connect runNow on a bound chat switched to Full access rejects pre-claim as forbidden (0 run rows, 0 consecutiveFailures)!
+      const b6Conv = store.createConversation(project.id, "R1-B6 Full access chat");
+      store.updateConversation(b6Conv.id, { accessMode: "full" });
+      const b6Runtime = createScheduledTaskRuntime({
+        store,
+        creation: () => undefined,
+        messageQueue: () => undefined,
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        broadcastConversationShell: () => undefined,
+        enableProviders: true,
+      });
+      const b6Task = b6Runtime.service.create({
+        projectId: project.id,
+        title: "Supervised task on full chat",
+        prompt: "Check forbidden pre-claim",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: b6Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const b6Resp = await handlePrivateConnectScheduledTaskRequest(
+        {
+          deviceId: randomUUID(),
+          scopes: ["view", "prompt"],
+          projectIds: [project.id],
+          grants: [{ conversationId: b6Conv.id, projectId: project.id }],
+        } as never,
+        { type: "scheduled-task.run-now", requestId: randomUUID(), taskId: b6Task.id },
+        b6Runtime.privateConnectHandlers,
+        {
+          conversation: (id) => store.conversation(id),
+          isConversationAuthorized: () => true,
+          // Simulate race where gateway pre-check passed just before chat switched to full access:
+          promptSafetyRejection: () => null,
+        },
+      );
+      expect(b6Resp.ok).toBe(false);
+      if (!b6Resp.ok) expect(b6Resp.code).toBe("forbidden");
+      expect(store.scheduledTasks.listRuns(b6Task.id)).toHaveLength(0);
+      expect(store.scheduledTasks.get(b6Task.id)?.consecutiveFailures).toBe(0);
+      b6Runtime.dispose();
+
+      // R1-B8: Audit trail logs distinct scheduled-task.accepted / scheduled-task.deleted types (never prompt.accepted)!
+      const auditTypes: string[] = [];
+      for (const req of [
+        { protocolVersion: 1 as const, requestId: randomUUID(), type: "scheduled-task.toggle" as const, taskId: randomUUID(), enabled: false },
+        { protocolVersion: 1 as const, requestId: randomUUID(), type: "scheduled-task.run-now" as const, taskId: randomUUID() },
+        { protocolVersion: 1 as const, requestId: randomUUID(), type: "scheduled-task.delete" as const, taskId: randomUUID() },
+      ]) {
+        const expectedKind = req.type === "scheduled-task.toggle"
+          ? "scheduled-task.updated"
+          : req.type === "scheduled-task.run-now"
+            ? "scheduled-task.ran"
+            : "scheduled-task.deleted";
+        await runAuditedPrivateConnectMutation(req, {
+          record: (type) => auditTypes.push(type),
+          persist: async () => undefined,
+          dispatch: async () => ({ type: "response", requestId: req.requestId, ok: true, result: { kind: expectedKind } }),
+        });
+      }
+      expect(auditTypes).toEqual([
+        "request.started", "scheduled-task.accepted",
+        "request.started", "scheduled-task.accepted",
+        "request.started", "scheduled-task.deleted",
+      ]);
+    } finally {
+      warnSpy.mockRestore();
       vi.useRealTimers();
       store.close();
     }

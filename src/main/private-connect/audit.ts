@@ -102,19 +102,19 @@ const MUTATION_META: Readonly<Record<PrivateConnectAuditedMutationRequest["type"
   "scheduled-task.toggle": {
     started: "A remote scheduled-task update was requested.",
     expectedKind: "scheduled-task.updated",
-    acceptedType: "prompt.accepted",
+    acceptedType: "scheduled-task.accepted",
     acceptedDetail: "A remote scheduled-task update was accepted.",
   },
   "scheduled-task.run-now": {
     started: "A remote scheduled-task run was requested.",
     expectedKind: "scheduled-task.ran",
-    acceptedType: "prompt.accepted",
+    acceptedType: "scheduled-task.accepted",
     acceptedDetail: "A remote scheduled-task run was accepted.",
   },
   "scheduled-task.delete": {
     started: "A remote scheduled-task deletion was requested.",
     expectedKind: "scheduled-task.deleted",
-    acceptedType: "prompt.accepted",
+    acceptedType: "scheduled-task.deleted",
     acceptedDetail: "A remote scheduled-task deletion was accepted.",
   },
 };

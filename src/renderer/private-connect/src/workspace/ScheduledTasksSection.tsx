@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PrivateConnectScheduledTask } from "../../../../shared/private-connect/runtime-contract";
 
 export interface ScheduledTasksSectionProps {
@@ -24,6 +24,15 @@ function formatTimestamp(iso: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+function formatScheduleLabel(scheduleLabel: string): string {
+  if (scheduleLabel.startsWith("Once at ")) {
+    const raw = scheduleLabel.slice("Once at ".length).trim();
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return `Once · ${formatTimestamp(raw)}`;
+  }
+  return scheduleLabel;
 }
 
 function formatRunStatus(
@@ -52,6 +61,19 @@ export function ScheduledTasksSection({
   const [inFlight, setInFlight] = useState<InFlightAction | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ taskId: string; message: string } | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
+  const restoreDeleteFocusIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (confirmDeleteId !== null) {
+      cancelButtonRef.current?.focus();
+    } else if (restoreDeleteFocusIdRef.current !== null) {
+      const targetId = restoreDeleteFocusIdRef.current;
+      restoreDeleteFocusIdRef.current = null;
+      deleteButtonRefs.current.get(targetId)?.focus();
+    }
+  }, [confirmDeleteId]);
 
   const showControls = canPrompt && !offline;
   const activeCount = tasks.filter((task) => task.enabled).length;
@@ -143,7 +165,7 @@ export function ScheduledTasksSection({
                   <div className="queue-chips">
                     <span className="queue-chip queue-state">{statusText}</span>
                     <span className="queue-chip">{task.projectName}</span>
-                    <span className="queue-chip">{task.scheduleLabel}</span>
+                    <span className="queue-chip">{formatScheduleLabel(task.scheduleLabel)}</span>
                     {task.lastRunStatus && (
                       <span className="queue-chip">
                         Last: {formatRunStatus(task.lastRunStatus)}
@@ -168,10 +190,14 @@ export function ScheduledTasksSection({
                             {isDeleting ? "Deleting…" : "Confirm delete"}
                           </button>
                           <button
+                            ref={cancelButtonRef}
                             type="button"
                             className="queue-action-button"
                             disabled={isDeleting}
-                            onClick={() => setConfirmDeleteId(null)}
+                            onClick={() => {
+                              restoreDeleteFocusIdRef.current = task.id;
+                              setConfirmDeleteId(null);
+                            }}
                           >
                             Cancel
                           </button>
@@ -207,6 +233,10 @@ export function ScheduledTasksSection({
                             {isRunningNow ? "Running…" : "Run now"}
                           </button>
                           <button
+                            ref={(el) => {
+                              if (el) deleteButtonRefs.current.set(task.id, el);
+                              else deleteButtonRefs.current.delete(task.id);
+                            }}
                             type="button"
                             className="queue-action-button"
                             disabled={busy || !onDelete}
@@ -233,7 +263,7 @@ export function ScheduledTasksSection({
                   </small>
                 )}
                 {task.lastError && (
-                  <p className="queue-item-error" role="alert">{task.lastError}</p>
+                  <p className="queue-item-error">{task.lastError}</p>
                 )}
                 {actionError?.taskId === task.id && (
                   <p className="queue-item-error" role="alert">{actionError.message}</p>

@@ -293,8 +293,7 @@ select.scheduled-control option:focus-visible {
   outline-offset: 1px;
 }
 
-.scheduled-weekdays-header,
-.scheduled-weekday-row {
+.scheduled-weekdays-header {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
@@ -321,7 +320,11 @@ select.scheduled-control option:focus-visible {
 }
 
 .scheduled-weekday-row {
+  display: flex;
+  min-width: 0;
   flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
   padding: 2px;
   border-radius: var(--radius-sm);
   background: var(--fill-strong);
@@ -344,9 +347,9 @@ select.scheduled-control option:focus-visible {
 }
 
 .scheduled-day-btn[aria-pressed="true"] {
-  color: var(--text);
-  background: var(--surface-raised);
-  box-shadow: 0 1px 2px rgb(0 0 0 / calc(var(--shadow-float-alpha) / 2));
+  color: var(--bg);
+  background: var(--text);
+  font-weight: 600;
 }
 
 .scheduled-run-grid {

@@ -75,6 +75,7 @@ export default function App({
   const scheduledTasksRequestSeqRef = useRef(0);
   const transportGenerationRef = useRef(0);
   const socketRef = useRef<PrivateConnectSocket | null>(null);
+  const refreshScheduledTasksRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
 
   const clearWorkspace = useCallback((): void => {
     scheduledTasksAuthorityGenRef.current += 1;
@@ -391,6 +392,7 @@ export default function App({
       if (cancelled) return;
       if (stateOutcome.status === "rejected") throw stateOutcome.reason;
       applyStateResponse(stateOutcome.value);
+      void refreshScheduledTasksRef.current({ silent: true });
       if (
         selectedConversation
         && authorizedConversationIdsRef.current.has(selectedConversation)
@@ -535,14 +537,14 @@ export default function App({
   const resumeQueue = (): Promise<void> =>
     mutateQueue({ type: "queue.resume" }, "The queue could not be resumed.").then(() => undefined);
 
-  const refreshScheduledTasks = useCallback(async (): Promise<void> => {
+  const refreshScheduledTasks = useCallback(async (options?: { silent?: boolean }): Promise<void> => {
     if (hostUnavailable || !readyCsrf) return;
     const authorityGen = scheduledTasksAuthorityGenRef.current;
     const reqSeq = ++scheduledTasksRequestSeqRef.current;
     const isFresh = (): boolean =>
       authorityGen === scheduledTasksAuthorityGenRef.current
       && reqSeq === scheduledTasksRequestSeqRef.current;
-    setScheduledTasksLoading(true);
+    if (!options?.silent) setScheduledTasksLoading(true);
     try {
       const response = await request(
         { protocolVersion: 1, type: "scheduled-tasks.list", requestId: crypto.randomUUID() },
@@ -564,15 +566,18 @@ export default function App({
       if (authorityGen !== scheduledTasksAuthorityGenRef.current || reqSeq !== scheduledTasksRequestSeqRef.current) {
         return;
       }
-      setScheduledTasksError(
-        error instanceof Error ? error.message : "Scheduled tasks could not be loaded.",
-      );
+      if (!options?.silent) {
+        setScheduledTasksError(
+          error instanceof Error ? error.message : "Scheduled tasks could not be loaded.",
+        );
+      }
     } finally {
-      if (authorityGen === scheduledTasksAuthorityGenRef.current && reqSeq === scheduledTasksRequestSeqRef.current) {
+      if (!options?.silent && authorityGen === scheduledTasksAuthorityGenRef.current && reqSeq === scheduledTasksRequestSeqRef.current) {
         setScheduledTasksLoading(false);
       }
     }
   }, [hostUnavailable, readyCsrf, request]);
+  refreshScheduledTasksRef.current = refreshScheduledTasks;
 
   useEffect(() => {
     if (!readyCsrf || !shell || hostUnavailable) {
@@ -600,7 +605,8 @@ export default function App({
       if (!response.ok) throw new Error(response.message);
       await refreshScheduledTasks();
     } catch (error) {
-      setScheduledTasksError(error instanceof Error ? error.message : fallbackError);
+      void refreshScheduledTasks({ silent: true });
+      throw error instanceof Error && error.message ? error : new Error(fallbackError);
     } finally {
       setBusy(false);
     }

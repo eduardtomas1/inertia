@@ -392,7 +392,7 @@ export async function reconfirmOperation(
     void ctx.schedule(conversationId).catch(() => undefined);
     return;
   }
-  await ctx.running.get(conversationId);
+  await ctx.running.get(conversationId)?.catch(() => undefined);
   await ctx.dispatch(conversationId, id);
 }
 

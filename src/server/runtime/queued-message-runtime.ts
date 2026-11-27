@@ -244,6 +244,8 @@ export function createQueuedMessageRuntime(
     if (!isManual && (first.state !== "waiting" || first.queueHeld)) return false;
     if (isManual && first.state === "dispatching") return false;
 
+    if (options.signal.aborted || turns.isClosing() || turns.isActive(conversationId)) return false;
+    if (options.compacting?.(conversationId)) return false;
     if (!await turns.waitForProviderCleanup([conversationId], Date.now() + 30_000)) {
       retryAfterCleanup(conversationId);
       return false;
@@ -687,7 +689,12 @@ export function createQueuedMessageRuntime(
       if (steerEffectId) runControl.settleSteer(steerEffectId, steered.kind === "turn-ended" ? "turn-ended" : "refused", { queuedMessageId: first.id });
       releaseClaimItem(conversationId, first.id, steered.kind === "turn-ended" ? "turn-ended" : "steer-declined");
       claimed = false;
-      if (steered.kind === "turn-ended") retryAfterCleanup(conversationId);
+      if (steered.kind === "turn-ended") {
+        if (queue.getItem(first.id)?.queueHeld) {
+          queue.release({ conversationId, cause: "R3-resume", itemIds: [first.id] });
+        }
+        retryAfterCleanup(conversationId);
+      }
       else throw new RuntimeRequestError("The agent did not take this message now. It will send when the turn ends.");
     } catch (error) {
       if (steerEffectId) runControl.settleSteer(steerEffectId, acknowledged ? "unconfirmed" : "unavailable", { queuedMessageId: first.id });
@@ -1062,7 +1069,7 @@ export function createQueuedMessageRuntime(
       queueHeld: false,
       skipHoldInheritance: true,
     });
-    await running.get(conversationId);
+    await running.get(conversationId)?.catch(() => undefined);
     const currentDelivery = listQueueEntries(store, conversationId).find(({ id }) => id === delivery.id);
     if (currentDelivery?.state === "waiting") await dispatch(conversationId, delivery.id);
     for (let attempt = 0; attempt <= MAX_QUEUED_USER_AND_AGENT_ITEMS + 1 && !turns.isActive(conversationId); attempt += 1) {
@@ -1074,7 +1081,7 @@ export function createQueuedMessageRuntime(
       const head = listQueueEntries(store, conversationId)
         .find((entry) => !entry.delegatedCompletion && !entry.queueHeld && entry.state === "waiting");
       if (!head) break;
-      await running.get(conversationId);
+      await running.get(conversationId)?.catch(() => undefined);
       await dispatch(conversationId, head.id);
       const after = listQueueEntries(store, conversationId).find(({ id }) => id === head.id);
       if (after?.state === "waiting") break;
@@ -1096,7 +1103,7 @@ export function createQueuedMessageRuntime(
     reorder: (conversationId: string, id: string, beforeId: string | null, requestId: string) =>
       reorderQueueOperation(operationsContext, conversationId, id, beforeId, requestId),
     sendNow: async (conversationId: string, id: string, requestId: string): Promise<void> => {
-      await running.get(conversationId);
+      await running.get(conversationId)?.catch(() => undefined);
       if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, id, requestId);
       else await dispatch(conversationId, id);
     },
@@ -1126,7 +1133,7 @@ export function createQueuedMessageRuntime(
       await schedule(conversationId);
     },
     async sendDelegated(conversationId: string): Promise<void> {
-      await running.get(conversationId);
+      await running.get(conversationId)?.catch(() => undefined);
       const entry = listQueueEntries(store, conversationId).find((item) => item.delegatedCompletion !== undefined);
       if (!entry) throw new RuntimeRequestError("No delegated results are waiting to be sent.");
       if (turns.isActive(conversationId)) return;
@@ -1181,7 +1188,8 @@ export function createQueuedMessageRuntime(
 
       if (queueMutated) changed(conversationId);
       if (hasDispatchableItem(conversationId)) {
-        void schedule(conversationId).catch(() => undefined);
+        if (turn.status === "cancelled") retryAfterCleanup(conversationId);
+        else void schedule(conversationId).catch(() => undefined);
       }
     },
     onCompactionSettled(conversationId: string): void {

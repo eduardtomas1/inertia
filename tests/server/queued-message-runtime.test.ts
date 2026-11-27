@@ -1952,7 +1952,7 @@ describe("editing, re-confirming and documents in the queue", () => {
       const secondId = randomUUID();
       await f.command("message.queue.enqueue", secondId);
       await f.drain();
-      f.store.updateConversation(f.conversationId, { accessMode: "full" });
+      f.store.updateConversation(f.conversationId, { worktreePath: join(f.workspace, "other-worktree") });
       f.admission.closed = true;
       f.queue.onCompactionSettled(f.conversationId);
       f.admission.closed = false;
@@ -1962,7 +1962,6 @@ describe("editing, re-confirming and documents in the queue", () => {
         payload: {
           conversationId: f.conversationId,
           id: secondId,
-          confirmed: { interactionMode: "build", accessMode: "full" },
         },
       })).resolves.toBe("handled");
     } finally { await f.close(); }

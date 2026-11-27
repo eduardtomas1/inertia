@@ -175,7 +175,10 @@ export class ScheduledTaskService {
   private readonly trackedByRunId = new Map<string, TrackedScheduledRun>();
   private readonly trackedByQueueItemId = new Map<string, string>();
   private readonly trackedByTurnId = new Map<string, string>();
+  private readonly pendingTurnSettlements = new Map<string, Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">>();
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private settlementRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private bootRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private disposed = false;
   private tickInProgress = false;
@@ -418,6 +421,7 @@ export class ScheduledTaskService {
     if (this.dependencies.enableProviders === false) {
       throw new RuntimeRequestError("Scheduled tasks require an available provider runtime.");
     }
+    this.flushPendingTurnSettlements();
     if (!this.dependencies.repository.get(taskId)) throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
     if (this.inFlightTaskIds.has(taskId)) throw userError(SCHEDULED_TASK_IN_FLIGHT_MESSAGE);
     if (this.dependencies.repository.hasActiveQueuedOrRunningOccurrence(taskId)) {
@@ -526,6 +530,7 @@ export class ScheduledTaskService {
     const run = this.resolveRunForTurn(turn);
     if (!run) return;
     if (run.state === "completed" || run.state === "failed" || run.state === "skipped") {
+      this.pendingTurnSettlements.delete(turn.id);
       this.untrackRun(run.id);
       return;
     }
@@ -540,99 +545,93 @@ export class ScheduledTaskService {
       ? null
       : normalizeScheduledTaskError(turn.terminalReason ?? `Scheduled run ${turn.status}.`);
 
-    const projectId = this.runInTransaction(() => {
-      this.dependencies.repository.updateRun(run.id, {
-        state: succeeded ? "completed" : "failed",
-        conversationId: turn.conversationId,
-        turnId: turn.id,
-        error: errorMessage,
-        finishedAt: settledAt,
-        updatedAt: settledAt,
-      });
-      const task = this.dependencies.repository.get(run.taskId);
-      if (!task) return null;
-      if (this.isLatestRunForTask(task.id, run.id)) {
-        this.dependencies.repository.recordTaskOutcome(task.id, {
-          lastRunAt: settledAt,
-          lastRunStatus: succeeded ? "completed" : "failed",
-          lastConversationId: turn.conversationId,
-          lastTurnId: turn.id,
-          lastError: withinWindow ? errorMessage : null,
-          consecutiveFailures: succeeded
-            ? 0
-            : withinWindow
-              ? task.consecutiveFailures + 1
-              : task.consecutiveFailures,
+    let projectId: string | null = null;
+    try {
+      projectId = this.runInTransaction(() => {
+        this.dependencies.repository.updateRun(run.id, {
+          state: succeeded ? "completed" : "failed",
+          conversationId: turn.conversationId,
+          turnId: turn.id,
+          error: errorMessage,
+          finishedAt: settledAt,
           updatedAt: settledAt,
         });
-      }
-      return task.projectId;
-    });
+        const task = this.dependencies.repository.get(run.taskId);
+        if (!task) return null;
+        if (this.isLatestRunForTask(task.id, run.id)) {
+          this.dependencies.repository.recordTaskOutcome(task.id, {
+            lastRunAt: settledAt,
+            lastRunStatus: succeeded ? "completed" : "failed",
+            lastConversationId: turn.conversationId,
+            lastTurnId: turn.id,
+            lastError: withinWindow ? errorMessage : null,
+            consecutiveFailures: succeeded ? 0 : (withinWindow ? task.consecutiveFailures + 1 : task.consecutiveFailures),
+            updatedAt: settledAt,
+          });
+        }
+        return task.projectId;
+      });
+    } catch (error) {
+      this.pendingTurnSettlements.set(turn.id, turn);
+      this.scheduleSettlementRetry();
+      throw error;
+    }
+    this.pendingTurnSettlements.delete(turn.id);
     this.untrackRun(run.id);
     if (projectId) this.broadcastChanged(projectId);
   }
 
   start(): void {
     if (this.started || this.disposed) return;
-    this.started = true;
-
+    if (this.bootRetryTimer !== null) { clearTimeout(this.bootRetryTimer); this.bootRetryTimer = null; }
     const now = this.now();
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
     const affectedProjects = new Set<string>();
-
-    for (const run of this.dependencies.repository.listActiveRuns()) {
-      const projectId = this.reconcileActiveRunOnBoot(run, now);
-      if (projectId) affectedProjects.add(projectId);
-    }
-    for (const taskId of this.dependencies.repository.disableTasksForMissingOrArchivedTarget(nowIso)) {
-      const task = this.dependencies.repository.get(taskId);
-      if (task) affectedProjects.add(task.projectId);
-    }
-    for (const task of this.dependencies.repository.list()) {
-      if (!task.enabled || task.nextRunAt === null) continue;
-      const dueMs = Date.parse(task.nextRunAt);
-      if (!Number.isFinite(dueMs) || dueMs > nowMs) continue;
-      if (task.schedule.type === "once") {
-        this.runInTransaction(() => {
-          const missedRunId = this.createId();
-          const claimed = this.dependencies.repository.claimRun({
-            runId: missedRunId,
-            taskId: task.id,
-            claimKey: `missed-boot:${task.id}:${task.nextRunAt ?? nowIso}:${missedRunId}`,
-            trigger: "schedule",
-            scheduledFor: task.nextRunAt,
-            claimedAt: nowIso,
-            nextRunAtAfterClaim: null,
-            disableTaskAfterClaim: true,
-          });
-          if (claimed) {
-            this.dependencies.repository.updateRun(claimed.id, {
-              state: "skipped",
-              error: SCHEDULED_TASK_MISSED_BOOT_ERROR,
-              finishedAt: nowIso,
-              updatedAt: nowIso,
-            });
-          }
-          this.dependencies.repository.update(task.id, {
-            enabled: false,
-            nextRunAt: null,
-            now: nowIso,
-            lastRunAt: nowIso,
-            lastRunStatus: "skipped",
-            lastTurnId: null,
-            lastError: SCHEDULED_TASK_MISSED_BOOT_ERROR,
-          });
-        });
-      } else {
-        this.dependencies.repository.update(task.id, {
-          nextRunAt: computeNextScheduledRunAt(task.schedule, now),
-          now: nowIso,
-        });
+    try {
+      for (const run of this.dependencies.repository.listActiveRuns()) {
+        const projectId = this.reconcileActiveRunOnBoot(run, now);
+        if (projectId) affectedProjects.add(projectId);
       }
-      affectedProjects.add(task.projectId);
+      for (const taskId of this.dependencies.repository.disableTasksForMissingOrArchivedTarget(nowIso)) {
+        const task = this.dependencies.repository.get(taskId);
+        if (task) affectedProjects.add(task.projectId);
+      }
+      for (const task of this.dependencies.repository.list()) {
+        if (!task.enabled || task.nextRunAt === null) continue;
+        const dueMs = Date.parse(task.nextRunAt);
+        if (!Number.isFinite(dueMs) || dueMs > nowMs) continue;
+        if (task.schedule.type === "once") {
+          this.runInTransaction(() => {
+            const missedRunId = this.createId();
+            const claimed = this.dependencies.repository.claimRun({
+              runId: missedRunId, taskId: task.id,
+              claimKey: `missed-boot:${task.id}:${task.nextRunAt ?? nowIso}:${missedRunId}`,
+              trigger: "schedule", scheduledFor: task.nextRunAt, claimedAt: nowIso,
+              nextRunAtAfterClaim: null, disableTaskAfterClaim: true,
+            });
+            if (claimed) {
+              this.dependencies.repository.updateRun(claimed.id, {
+                state: "skipped", error: SCHEDULED_TASK_MISSED_BOOT_ERROR, finishedAt: nowIso, updatedAt: nowIso,
+              });
+            }
+            this.dependencies.repository.update(task.id, {
+              enabled: false, nextRunAt: null, now: nowIso, lastRunAt: nowIso,
+              lastRunStatus: "skipped", lastTurnId: null, lastError: SCHEDULED_TASK_MISSED_BOOT_ERROR,
+            });
+          });
+        } else {
+          this.dependencies.repository.update(task.id, {
+            nextRunAt: computeNextScheduledRunAt(task.schedule, now), now: nowIso,
+          });
+        }
+        affectedProjects.add(task.projectId);
+      }
+      this.started = true;
+    } catch (error) {
+      this.scheduleBootRetry();
+      throw error;
     }
-
     for (const projectId of affectedProjects) this.broadcastChanged(projectId);
     this.rescheduleTimer();
   }
@@ -641,6 +640,7 @@ export class ScheduledTaskService {
     if (this.disposed || this.tickInProgress) return;
     this.tickInProgress = true;
     try {
+      this.flushPendingTurnSettlements();
       if (this.isUpdateHeld() || this.dependencies.enableProviders === false) return;
       const dueTasks = this.dependencies.repository.listDue(this.now().toISOString(), MAX_DUE_PER_TICK);
       for (const task of dueTasks) {
@@ -683,13 +683,40 @@ export class ScheduledTaskService {
   dispose(): void {
     this.disposed = true;
     this.started = false;
-    if (this.timer !== null) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
+    if (this.settlementRetryTimer !== null) { clearTimeout(this.settlementRetryTimer); this.settlementRetryTimer = null; }
+    if (this.bootRetryTimer !== null) { clearTimeout(this.bootRetryTimer); this.bootRetryTimer = null; }
+    this.pendingTurnSettlements.clear();
     this.trackedByRunId.clear();
     this.trackedByQueueItemId.clear();
     this.trackedByTurnId.clear();
+  }
+
+  private scheduleSettlementRetry(): void {
+    if (this.disposed || this.settlementRetryTimer !== null || this.pendingTurnSettlements.size === 0) return;
+    this.settlementRetryTimer = setTimeout(() => {
+      this.settlementRetryTimer = null;
+      this.flushPendingTurnSettlements();
+    }, 500);
+    this.settlementRetryTimer.unref?.();
+  }
+
+  private flushPendingTurnSettlements(): void {
+    if (this.disposed || this.pendingTurnSettlements.size === 0) return;
+    for (const pendingTurn of Array.from(this.pendingTurnSettlements.values())) {
+      try { this.onTurnSettled(pendingTurn); } catch { /* retry re-armed by onTurnSettled */ }
+    }
+  }
+
+  private scheduleBootRetry(): void {
+    if (this.disposed || this.started || this.bootRetryTimer !== null) return;
+    this.bootRetryTimer = setTimeout(() => {
+      this.bootRetryTimer = null;
+      if (!this.disposed && !this.started) {
+        try { this.start(); } catch { /* retry re-armed by start */ }
+      }
+    }, 500);
+    this.bootRetryTimer.unref?.();
   }
 
   private rescheduleTimer(): void {
@@ -746,7 +773,10 @@ export class ScheduledTaskService {
       nextRunAtAfterClaim,
       disableTaskAfterClaim: isOnce,
     });
-    if (!claimed) return null;
+    if (!claimed) {
+      if (trigger === "schedule") this.broadcastChanged(task.projectId);
+      return null;
+    }
 
     const dispatchTask = this.dependencies.repository.get(task.id) ?? task;
     let targetConversationId: string | null = null;
@@ -1120,18 +1150,12 @@ export class ScheduledTaskService {
     if (run.state === "running") {
       if (queueItem && (queueItem.state === "waiting" || queueItem.state === "dispatching")) {
         const nowIso = now.toISOString();
-        const runTx = this.dependencies.repository.runInTransaction
-          ? <T>(work: () => T): T => this.dependencies.repository.runInTransaction!(work)
-          : <T>(work: () => T): T => work();
-        const projectId = runTx(() => {
+        const projectId = this.runInTransaction(() => {
           this.dependencies.repository.updateRun(run.id, { state: "queued", turnId: null, updatedAt: nowIso });
           const task = this.dependencies.repository.get(run.taskId);
           if (task && this.isLatestRunForTask(task.id, run.id) && (task.lastTurnId === run.turnId || task.lastRunStatus === "running")) {
             this.dependencies.repository.update(task.id, {
-              now: nowIso,
-              lastRunStatus: "queued",
-              lastTurnId: null,
-              lastError: null,
+              now: nowIso, lastRunStatus: "queued", lastTurnId: null, lastError: null,
             });
           }
           return task?.projectId ?? null;

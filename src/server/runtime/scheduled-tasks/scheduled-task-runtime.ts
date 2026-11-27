@@ -152,7 +152,9 @@ export function createScheduledTaskRuntime(
   return {
     service,
     privateConnectHandlers,
-    start: () => service.start(),
+    start: () => {
+      try { service.start(); } catch { /* boot retry scheduled by service */ }
+    },
     onTurnSettled: (turn: AgentTurn) => service.onTurnSettled(turn),
     dispose: () => service.dispose(),
   };

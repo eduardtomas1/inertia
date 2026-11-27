@@ -1231,9 +1231,7 @@ export function createQueuedMessageRuntime(
       await reconcileQueueOnBoot(store);
       const held = new Set<string>();
       recovering = held;
-      try {
-        await beforeSchedule?.();
-      } finally {
+      try { await beforeSchedule?.(); } catch { /* isolate recovery hook failures from queue startup */ } finally {
         recovering = null;
       }
       const pending = new Set([...store.queuedMessages.pendingConversationIds(), ...held]);

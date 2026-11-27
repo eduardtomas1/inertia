@@ -19,6 +19,7 @@ import { createScheduledTaskRuntime, resolveScheduledTaskEffectiveModelSelection
 import { ScheduledTaskService } from "../../src/server/runtime/scheduled-tasks/scheduled-task-service";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-types";
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
+import { dispatchSettledTurnOwners } from "../../src/server/runtime/turns/turn-settled-orchestration";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 
 const tempDirs: string[] = [];
@@ -1847,6 +1848,274 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(store.scheduledTasks.get(s81Task.id)?.lastRunStatus).toBe("completed");
       expect(store.scheduledTasks.get(s81Task.id)?.lastTurnId).toBe(s81Turn2);
     } finally {
+      store.close();
+    }
+  });
+
+  it("S83–S86: retries failed turn settlement via runtime callback, advances duplicate claims, preserves active runs during pruning, and isolates/retries failed boot recovery", async () => {
+    const { store, workspace } = createTempStore();
+    try {
+      const project = store.createProject("S83-S86 Project", workspace);
+
+      // S83: Transient recordTaskOutcome failure inside dispatchSettledTurnOwners rolls back,
+      // then scheduler-owned retry keyed by turnId settles run + summary so Run now works!
+      vi.useFakeTimers();
+      const s83Conv = store.createConversation(project.id, "S83 Settlement retry");
+      const s83Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s83Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const s83Task = s83Service.create({
+        projectId: project.id,
+        title: "Retryable settlement",
+        prompt: "Check CI",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s83Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const s83Run = await s83Service.runNow(s83Task.id);
+      const s83TurnId = randomUUID();
+      s83Service.bindRunTurn(s83Run.run.id, s83TurnId);
+      const s83Spy = vi.spyOn(store.scheduledTasks, "recordTaskOutcome").mockImplementationOnce(() => {
+        throw new Error("Transient SQLite busy");
+      });
+      const settledTurn = {
+        id: s83TurnId,
+        conversationId: s83Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: "2030-10-01T10:01:00.000Z",
+        updatedAt: "2030-10-01T10:01:00.000Z",
+      };
+      await expect(dispatchSettledTurnOwners(settledTurn as never, [
+        (settled) => s83Service.onTurnSettled(settled),
+      ])).rejects.toThrow("Required turn follow-up did not finish.");
+      s83Spy.mockRestore();
+      expect(store.scheduledTasks.getRun(s83Run.run.id)?.state).toBe("running");
+      expect(store.scheduledTasks.get(s83Task.id)?.lastRunStatus).toBe("running");
+
+      // Advance retry timer -> scheduler-owned retry commits completed on run + task summary!
+      await vi.advanceTimersByTimeAsync(500);
+      expect(store.scheduledTasks.getRun(s83Run.run.id)?.state).toBe("completed");
+      expect(store.scheduledTasks.get(s83Task.id)?.lastRunStatus).toBe("completed");
+      // Subsequent Run now succeeds instead of being blocked by a stuck running row!
+      const s83FollowUp = await s83Service.runNow(s83Task.id);
+      expect(s83FollowUp.run.state).toBe("queued");
+      s83Service.dispose();
+      vi.useRealTimers();
+
+      // S84: Duplicate claim after clock rollback + pause/resume advances nextRunAt instead of spinning at 0ms!
+      const localTenAm = new Date(2030, 9, 10, 10, 0, 0, 0);
+      let s84NowMs = localTenAm.getTime() - 60_000;
+      const s84Conv = store.createConversation(project.id, "S84 Duplicate claim");
+      const s84Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s84Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(s84NowMs),
+      });
+      const s84Daily = s84Service.create({
+        projectId: project.id,
+        title: "Daily 10am",
+        prompt: "Morning summary",
+        schedule: { type: "fixed_time", timeOfDay: "10:00", weekdays: undefined },
+        boundConversationId: s84Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const firstDueIso = s84Daily.nextRunAt!;
+      expect(Date.parse(firstDueIso)).toBe(localTenAm.getTime());
+      s84NowMs = localTenAm.getTime();
+      await s84Service.tick();
+      const s84Run1 = store.scheduledTasks.listRuns(s84Daily.id)[0]!;
+      const s84Turn1 = randomUUID();
+      s84Service.bindRunTurn(s84Run1.id, s84Turn1);
+      s84Service.onTurnSettled({
+        id: s84Turn1,
+        conversationId: s84Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: new Date(s84NowMs + 1_000).toISOString(),
+        updatedAt: new Date(s84NowMs + 1_000).toISOString(),
+      });
+      // Roll clock backward before 10:00, pause + resume -> nextRunAt recomputes to the already-consumed 10:00!
+      s84NowMs = localTenAm.getTime() - 600_000;
+      s84Service.update(s84Daily.id, { enabled: false });
+      const resumedDaily = s84Service.update(s84Daily.id, { enabled: true });
+      expect(resumedDaily.nextRunAt).toBe(firstDueIso);
+      // Advance back to 10:00 and tick -> duplicate claim must NOT enqueue a second run AND must advance nextRunAt!
+      s84NowMs = localTenAm.getTime();
+      await s84Service.tick();
+      expect(store.scheduledTasks.listRuns(s84Daily.id)).toHaveLength(1);
+      const afterDupDaily = store.scheduledTasks.get(s84Daily.id)!;
+      expect(Date.parse(afterDupDaily.nextRunAt!)).toBeGreaterThan(localTenAm.getTime());
+      expect(store.scheduledTasks.listDue(new Date(s84NowMs).toISOString(), 25).some((t) => t.id === s84Daily.id)).toBe(false);
+      // Same duplicate-claim guard for a consumed one-shot schedule -> disables consumed one-shot!
+      const s84OnceAt = new Date(localTenAm.getTime() + 120_000).toISOString();
+      const s84Once = s84Service.create({
+        projectId: project.id,
+        title: "One-shot duplicate",
+        prompt: "Once only",
+        schedule: { type: "once", runAt: s84OnceAt },
+        boundConversationId: s84Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      s84NowMs = Date.parse(s84OnceAt);
+      await s84Service.tick();
+      expect(store.scheduledTasks.listRuns(s84Once.id)).toHaveLength(1);
+      // Roll clock back and re-enable same one-shot timestamp -> duplicate claim disables it cleanly!
+      s84NowMs = Date.parse(s84OnceAt) - 60_000;
+      s84Service.update(s84Once.id, { enabled: true, schedule: { type: "once", runAt: s84OnceAt } });
+      s84NowMs = Date.parse(s84OnceAt);
+      await s84Service.tick();
+      expect(store.scheduledTasks.listRuns(s84Once.id)).toHaveLength(1);
+      expect(store.scheduledTasks.get(s84Once.id)?.enabled).toBe(false);
+      expect(store.scheduledTasks.get(s84Once.id)?.nextRunAt).toBeNull();
+      s84Service.dispose();
+
+      // S85: 30 newer terminal claims on the same task must NOT prune an older active queued run!
+      const s85Conv = store.createConversation(project.id, "S85 Active pruning guard");
+      const s85Task = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Active run vs terminal history",
+        prompt: "Keep active",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s85Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2030-11-01T10:01:00.000Z",
+        now: "2030-11-01T10:00:00.000Z",
+      });
+      const activeRunId = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: activeRunId,
+        taskId: s85Task.id,
+        claimKey: `active:${activeRunId}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: "2030-11-01T10:00:00.000Z",
+        nextRunAtAfterClaim: "2030-11-01T10:01:00.000Z",
+      });
+      store.scheduledTasks.updateRun(activeRunId, {
+        state: "queued",
+        conversationId: s85Conv.id,
+        queueItemId: randomUUID(),
+        updatedAt: "2030-11-01T10:00:01.000Z",
+      });
+      for (let i = 0; i < 30; i += 1) {
+        const missedId = randomUUID();
+        const at = new Date(Date.parse("2030-11-01T10:05:00.000Z") + i * 1_000).toISOString();
+        store.scheduledTasks.claimRun({
+          runId: missedId,
+          taskId: s85Task.id,
+          claimKey: `missed:${i}:${missedId}`,
+          trigger: "schedule",
+          scheduledFor: at,
+          claimedAt: at,
+          nextRunAtAfterClaim: null,
+          disableTaskAfterClaim: true,
+        });
+        store.scheduledTasks.updateRun(missedId, {
+          state: "skipped",
+          error: "Missed while closed",
+          finishedAt: at,
+          updatedAt: at,
+        });
+      }
+      // Older active queued run must STILL exist!
+      expect(store.scheduledTasks.getRun(activeRunId)?.state).toBe("queued");
+      expect(store.scheduledTasks.hasActiveQueuedOrRunningOccurrence(s85Task.id)).toBe(true);
+
+      // S86: Failed missed-boot transaction must NOT abort shared queue startup AND boot reconciliation retries!
+      vi.useFakeTimers();
+      const s86QueuedConv = store.createConversation(project.id, "S86 Pending queue conv");
+      const s86ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s86QueuedConv.id,
+        itemId: s86ItemId,
+        content: "Unattended automatic queued message",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        origin: "automatic",
+      });
+      const s86MissedTask = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Missed once with transient boot error",
+        prompt: "Missed prompt",
+        schedule: { type: "once", runAt: "2030-01-01T08:00:00.000Z" },
+        boundConversationId: null,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2030-01-01T08:00:00.000Z",
+        now: "2030-01-01T07:00:00.000Z",
+      });
+      const s86Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s86QueuedConv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date("2030-01-01T09:00:00.000Z"),
+      });
+      const scheduledConversations: string[] = [];
+      const queueRuntime = createQueuedMessageRuntime({
+        store,
+        enableProviders: true,
+        turns: {
+          isActive: () => false,
+          isClosing: () => false,
+          activeIdentity: () => null,
+          isFinishing: () => false,
+          waitForProviderCleanup: (ids: readonly string[]) => {
+            scheduledConversations.push(...ids);
+            return new Promise<boolean>(() => undefined);
+          },
+        },
+        pendingApprovals: new Map(),
+        pendingInputs: new Map(),
+        conversationAttachments: { retain: vi.fn(), release: vi.fn() },
+        broadcast: () => undefined,
+        broadcastConversationShell: () => undefined,
+        broadcastSnapshot: () => undefined,
+        verifyProviderInstallation: async () => undefined,
+      } as unknown as TurnInteractionCommandDependencies, {
+        signal: new AbortController().signal,
+        track: (fn) => fn(),
+      });
+      const s86ClaimSpy = vi.spyOn(store.scheduledTasks, "claimRun").mockImplementationOnce(() => {
+        throw new Error("Transient boot SQLite lock");
+      });
+      await queueRuntime.start(() => { s86Service.start(); });
+      s86ClaimSpy.mockRestore();
+      // Shared queue startup was NOT aborted — pending conversation was scheduled!
+      await vi.advanceTimersByTimeAsync(10);
+      expect(scheduledConversations).toContain(s86QueuedConv.id);
+      // Missed-boot reconciliation failed transiently first, then succeeded automatically on boot retry!
+      await vi.advanceTimersByTimeAsync(600);
+      const s86Recovered = store.scheduledTasks.get(s86MissedTask.id)!;
+      expect(s86Recovered.enabled).toBe(false);
+      expect(s86Recovered.lastRunStatus).toBe("skipped");
+      expect(store.scheduledTasks.listRuns(s86MissedTask.id)[0]?.state).toBe("skipped");
+      s86Service.dispose();
+    } finally {
+      vi.useRealTimers();
       store.close();
     }
   });

@@ -199,7 +199,18 @@ class InMemoryScheduledTaskRepository implements ScheduledTaskRepositoryLike {
     nextRunAtAfterClaim: string | null;
     disableTaskAfterClaim?: boolean;
   }): ScheduledTaskRun | null {
-    if (this.claimKeys.has(input.claimKey)) return null;
+    if (this.claimKeys.has(input.claimKey)) {
+      const task = this.tasks.get(input.taskId);
+      if (task && input.trigger === "schedule" && input.scheduledFor !== null && task.nextRunAt === input.scheduledFor) {
+        this.tasks.set(task.id, {
+          ...task,
+          nextRunAt: input.disableTaskAfterClaim ? null : input.nextRunAtAfterClaim,
+          ...(input.disableTaskAfterClaim ? { enabled: false } : {}),
+          updatedAt: input.claimedAt,
+        });
+      }
+      return null;
+    }
     const task = this.tasks.get(input.taskId);
     if (!task) return null;
     this.claimKeys.add(input.claimKey);

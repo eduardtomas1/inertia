@@ -595,7 +595,29 @@ export class ScheduledTaskRepository {
         run.claimedAt,
         run.finishedAt,
       );
-      if (inserted.changes === 0) return null;
+      if (inserted.changes === 0) {
+        if (input.trigger === "schedule" && input.scheduledFor !== null) {
+          const dup = this.database.prepare(
+            "SELECT 1 FROM scheduled_task_runs WHERE claim_key = ? AND task_id = ?",
+          ).get(run.claimKey, run.taskId);
+          if (dup) {
+            if (input.disableTaskAfterClaim) {
+              this.database.prepare(`
+                UPDATE scheduled_tasks
+                SET next_run_at = NULL, enabled = 0, updated_at = ?
+                WHERE id = ? AND next_run_at = ?
+              `).run(run.claimedAt, run.taskId, input.scheduledFor);
+            } else {
+              this.database.prepare(`
+                UPDATE scheduled_tasks
+                SET next_run_at = ?, updated_at = ?
+                WHERE id = ? AND next_run_at = ?
+              `).run(input.nextRunAtAfterClaim, run.claimedAt, run.taskId, input.scheduledFor);
+            }
+          }
+        }
+        return null;
+      }
 
       if (input.disableTaskAfterClaim) {
         this.database.prepare(`
@@ -625,10 +647,12 @@ export class ScheduledTaskRepository {
       this.database.prepare(`
         DELETE FROM scheduled_task_runs
         WHERE task_id = ?
+          AND state NOT IN ('claimed', 'queued', 'running')
           AND id NOT IN (
             SELECT id
             FROM scheduled_task_runs
             WHERE task_id = ?
+              AND state NOT IN ('claimed', 'queued', 'running')
             ORDER BY rowid DESC
             LIMIT ?
           )

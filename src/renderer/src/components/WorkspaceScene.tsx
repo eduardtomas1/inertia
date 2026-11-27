@@ -3,6 +3,8 @@ import {
   memo,
   Suspense,
   useCallback,
+  useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentProps,
@@ -155,6 +157,7 @@ export interface SplitPaneDetails {
 
 export interface WorkspaceSceneProps {
   view: "workspace" | "settings";
+  detached?: boolean;
   settings: SettingsViewProps;
   detachedChat?: DetachedConversationPlaceholderProps | null;
   detailState: ComponentProps<typeof ConversationDetailState> | null;
@@ -351,6 +354,7 @@ function ConversationPane({
  */
 function WorkspaceSceneView({
   view,
+  detached,
   settings,
   detachedChat = null,
   detailState,
@@ -363,30 +367,101 @@ function WorkspaceSceneView({
   const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
   const chatColumnRef = useRef<HTMLDivElement>(null);
   const [terminalTarget, setTerminalTarget] = useState<HTMLDivElement | null>(null);
-  const [previewMediaTarget, setPreviewMediaTarget] = useState<WorkspaceMediaPreviewTarget | null>(null);
+  const [previewMediaState, setPreviewMediaState] = useState<{
+    readonly target: WorkspaceMediaPreviewTarget;
+    readonly owner: WorkspacePreviewOwner;
+    readonly originConversationId: string | null;
+  } | null>(null);
+  const previewMediaTarget = previewMediaState?.target ?? null;
   // Suspend any native Browser WebContentsView before the lazy dialog chunk loads.
   useNativePreviewSuspension(previewMediaTarget !== null);
-  const isDetachedWindow = chat.conversationContextHandoffEnabled === false
-    || Boolean(tools?.panel.hiddenSurfaces?.includes("preview"));
+  const isDetachedWindow = detached
+    ?? (chat.conversationContextHandoffEnabled === false
+      || Boolean(tools?.panel.hiddenSurfaces?.includes("preview")));
+
+  const resolvePreviewPane = useCallback((
+    state: {
+      readonly target: WorkspaceMediaPreviewTarget;
+      readonly owner: WorkspacePreviewOwner;
+      readonly originConversationId: string | null;
+    } | null,
+    primaryChat: ComponentProps<typeof ChatWorkspace>,
+    primaryDetachedChat: DetachedConversationPlaceholderProps | null,
+    primaryDetailState: ComponentProps<typeof ConversationDetailState> | null,
+    splitPanes: SplitPaneDetails[] | undefined,
+  ): {
+    readonly chat: ComponentProps<typeof ChatWorkspace>;
+    readonly detachedChat: DetachedConversationPlaceholderProps | null;
+    readonly detailState: ComponentProps<typeof ConversationDetailState> | null;
+  } | null => {
+    if (!state) return null;
+    const matchesTarget = (candidate: ComponentProps<typeof ChatWorkspace>): boolean => {
+      if (candidate.project?.id !== state.target.projectId) return false;
+      if (state.target.conversationId) {
+        return candidate.conversation?.id === state.target.conversationId;
+      }
+      return (candidate.conversation?.id ?? null) === state.originConversationId;
+    };
+    if (splitPanes) {
+      const ownedPane = splitPanes.find((pane) => pane.owner === state.owner);
+      if (!ownedPane) return null;
+      const entry = ownedPane.scene
+        ? {
+            chat: ownedPane.scene.chat,
+            detachedChat: null,
+            detailState: ownedPane.scene.detailState,
+          }
+        : {
+            chat: primaryChat,
+            detachedChat: primaryDetachedChat,
+            detailState: primaryDetailState,
+          };
+      return matchesTarget(entry.chat) ? entry : null;
+    }
+    if (state.owner !== "primary") return null;
+    return matchesTarget(primaryChat)
+      ? { chat: primaryChat, detachedChat: primaryDetachedChat, detailState: primaryDetailState }
+      : null;
+  }, []);
+
+  const matchingPreviewPane = resolvePreviewPane(
+    previewMediaState,
+    chat,
+    detachedChat,
+    detailState,
+    splitScene?.panes,
+  );
+  const matchingPreviewChat = matchingPreviewPane?.chat ?? null;
   const previewOwnerRef = useRef({
-    target: previewMediaTarget,
+    state: previewMediaState,
     primaryChat: chat,
+    primaryDetachedChat: detachedChat,
+    primaryDetailState: detailState,
     splitPanes: splitScene?.panes,
   });
   previewOwnerRef.current = {
-    target: previewMediaTarget,
+    state: previewMediaState,
     primaryChat: chat,
+    primaryDetachedChat: detachedChat,
+    primaryDetailState: detailState,
     splitPanes: splitScene?.panes,
   };
-  const matchingPreviewChat = previewMediaTarget && splitScene?.panes
-    ? splitScene.panes.find((pane) => pane.scene && (
-        previewMediaTarget.conversationId
-          ? pane.conversationId === previewMediaTarget.conversationId
-          : pane.project?.id === previewMediaTarget.projectId
-      ))?.scene?.chat ?? chat
-    : chat;
+
+  useEffect(() => {
+    if (!previewMediaState) return;
+    if (
+      view !== "workspace"
+      || !matchingPreviewPane
+      || matchingPreviewPane.detachedChat !== null
+      || matchingPreviewPane.detailState !== null
+    ) {
+      setPreviewMediaState(null);
+    }
+  }, [matchingPreviewPane, previewMediaState, view]);
+
   const canShowMediaInFiles = Boolean(
     previewMediaTarget
+    && matchingPreviewChat?.onOpenTurnFile
     && !(
       !previewMediaTarget.conversationId
       && matchingPreviewChat.conversation?.worktreePath
@@ -394,32 +469,64 @@ function WorkspaceSceneView({
       && matchingPreviewChat.conversation.worktreePath !== matchingPreviewChat.project.normalizedPath
     ),
   );
-  const onPreviewMedia = useCallback((target: WorkspaceMediaPreviewTarget) => {
-    setPreviewMediaTarget(target);
-  }, []);
+  const openPreviewForOwner = useCallback(
+    (owner: WorkspacePreviewOwner, target: WorkspaceMediaPreviewTarget) => {
+      const { primaryChat, splitPanes } = previewOwnerRef.current;
+      const ownedPane = splitPanes?.find((pane) => pane.owner === owner);
+      const ownerChat = ownedPane?.scene ? ownedPane.scene.chat : primaryChat;
+      setPreviewMediaState({
+        owner,
+        target,
+        originConversationId: ownerChat.conversation?.id ?? null,
+      });
+    },
+    [],
+  );
+  const onPrimaryPreviewMedia = useCallback(
+    (target: WorkspaceMediaPreviewTarget) => openPreviewForOwner("primary", target),
+    [openPreviewForOwner],
+  );
+  const panePreviewHandlers = useMemo(() => {
+    const handlers = new Map<WorkspacePreviewOwner, (target: WorkspaceMediaPreviewTarget) => void>();
+    for (const owner of ["primary", "secondary", "tertiary", "quaternary"] as const) {
+      handlers.set(owner, (target) => openPreviewForOwner(owner, target));
+    }
+    return handlers;
+  }, [openPreviewForOwner]);
   const onCloseMediaPreview = useCallback(() => {
-    setPreviewMediaTarget(null);
+    setPreviewMediaState(null);
   }, []);
   const onShowMediaInFiles = useCallback((relativePath: string) => {
-    const { target, primaryChat, splitPanes } = previewOwnerRef.current;
-    const matchingPane = target && splitPanes
-      ? splitPanes.find((pane) => pane.scene && (
-          target.conversationId
-            ? pane.conversationId === target.conversationId
-            : pane.project?.id === target.projectId
-        ))
-      : undefined;
-    const openTurnFile = matchingPane?.scene?.chat.onOpenTurnFile ?? primaryChat.onOpenTurnFile;
-    openTurnFile?.(relativePath);
-    setPreviewMediaTarget(null);
-  }, []);
-  const onOpenMediaExternally = useCallback((target: WorkspaceMediaPreviewTarget) => {
-    void window.inertia?.openProjectPath({
+    const {
+      state,
+      primaryChat,
+      primaryDetachedChat,
+      primaryDetailState,
+      splitPanes,
+    } = previewOwnerRef.current;
+    const ownerPane = resolvePreviewPane(
+      state,
+      primaryChat,
+      primaryDetachedChat,
+      primaryDetailState,
+      splitPanes,
+    );
+    ownerPane?.chat.onOpenTurnFile?.(relativePath);
+    setPreviewMediaState(null);
+  }, [resolvePreviewPane]);
+  const onOpenMediaExternally = useCallback(async (target: WorkspaceMediaPreviewTarget) => {
+    if (!window.inertia?.openProjectPath) {
+      throw new Error("External file opener is unavailable.");
+    }
+    const result = await window.inertia.openProjectPath({
       projectId: target.projectId,
       ...(target.conversationId ? { conversationId: target.conversationId } : {}),
       relativePath: target.relativePath,
       action: "open-externally",
-    })?.catch(() => undefined);
+    });
+    if (typeof result === "string" && result.trim().length > 0) {
+      throw new Error(result.trim());
+    }
   }, []);
   useChatMinimumHeight(chatColumnRef);
   return (
@@ -443,7 +550,7 @@ function WorkspaceSceneView({
               <ConversationPane
                 owner={pane.owner}
                 {...pane.scene}
-                onPreviewMedia={onPreviewMedia}
+                onPreviewMedia={panePreviewHandlers.get(pane.owner) ?? onPrimaryPreviewMedia}
                 detached={isDetachedWindow}
               />
             ) : (
@@ -455,7 +562,7 @@ function WorkspaceSceneView({
                 checkoutBranch={checkoutBranch}
                 resizeHandle={resizeHandle}
                 tools={tools}
-                onPreviewMedia={onPreviewMedia}
+                onPreviewMedia={onPrimaryPreviewMedia}
                 detached={isDetachedWindow}
               />
             ),
@@ -477,7 +584,7 @@ function WorkspaceSceneView({
               <ChatWorkspace
                 {...chat}
                 {...(isDetachedWindow ? { projectBaseRoot: undefined } : {})}
-                onPreviewMedia={chat.onPreviewMedia ?? onPreviewMedia}
+                onPreviewMedia={chat.onPreviewMedia ?? onPrimaryPreviewMedia}
               />
             </CheckoutBranchControlProvider>
           )}
@@ -494,7 +601,7 @@ function WorkspaceSceneView({
           tools={tools}
           owner="primary"
           terminalTarget={setTerminalTarget}
-          onPreviewMedia={onPreviewMedia}
+          onPreviewMedia={onPrimaryPreviewMedia}
           detached={isDetachedWindow}
         />
       )}

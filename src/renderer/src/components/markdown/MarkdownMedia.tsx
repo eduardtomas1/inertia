@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
+  ChevronRight,
+  CircleAlert,
   ExternalLink,
   FileAudio,
   FileImage,
@@ -27,6 +29,7 @@ import "./MarkdownMedia.css";
 interface MeasuredImageGeometry {
   naturalWidth: number;
   naturalHeight: number;
+  renderedWidth: number;
   renderedHeight: number;
 }
 
@@ -50,6 +53,9 @@ function preservedPlaceholderStyle(source: string): CSSProperties | undefined {
   const geometry = measuredImageGeometries.get(source);
   if (!geometry) return undefined;
   const style: CSSProperties = {};
+  if (geometry.renderedWidth > 0) {
+    style.width = `min(${geometry.renderedWidth}px, 100%)`;
+  }
   if (geometry.renderedHeight > 0) {
     style.minHeight = `${geometry.renderedHeight}px`;
   }
@@ -102,13 +108,45 @@ function documentBadgeLabel(target: WorkspaceMediaPreviewTarget): string {
   }
 }
 
-function detachMediaElement(element: HTMLMediaElement | null): void {
+function mediaFolder(target: WorkspaceMediaPreviewTarget): string {
+  if (target.relativePath === target.name) return "";
+  const folder = target.relativePath.slice(0, target.relativePath.length - target.name.length);
+  return folder.replace(/[\\/]+$/u, "");
+}
+
+function MediaCardHeaderTitle({
+  target,
+  Icon,
+}: {
+  target: WorkspaceMediaPreviewTarget;
+  Icon: LucideIcon;
+}): React.JSX.Element {
+  const folder = mediaFolder(target);
+  return (
+    <span className="response-markdown-media-title" title={target.relativePath}>
+      <span className="response-markdown-media-glyph" aria-hidden="true">
+        <Icon size={14} aria-hidden="true" />
+      </span>
+      <span className="response-markdown-media-filename">{target.name}</span>
+      {folder && (
+        <span className="response-markdown-media-folder" aria-hidden="true">{folder}</span>
+      )}
+    </span>
+  );
+}
+
+function pauseMediaElement(element: HTMLMediaElement | null): void {
   if (!element) return;
   try {
     if (typeof element.pause === "function") element.pause();
   } catch {
-    // Ignore media pause failures during unmount (e.g. jsdom).
+    // Ignore media pause failures in non-media DOM environments (e.g. jsdom).
   }
+}
+
+function detachMediaElement(element: HTMLMediaElement | null): void {
+  if (!element) return;
+  pauseMediaElement(element);
   element.removeAttribute("src");
   try {
     if (typeof element.load === "function") element.load();
@@ -136,6 +174,9 @@ export function MarkdownInlineImageButton({
       onClick={() => onPreviewMedia(target)}
     >
       {children}
+      <span className="response-markdown-image-zoom-cue" aria-hidden="true">
+        <Maximize2 size={14} aria-hidden="true" />
+      </span>
     </button>
   );
 }
@@ -159,7 +200,10 @@ function MediaPlaybackFallback({
   };
   return (
     <span className="response-markdown-media-error" role="status">
-      <span>Couldn&apos;t play {kindLabel} {target.name}.</span>
+      <span className="response-markdown-media-error-message">
+        <CircleAlert size={16} aria-hidden="true" />
+        <span>Couldn&apos;t play {kindLabel} {target.name}.</span>
+      </span>
       <span className="response-markdown-media-error-actions">
         {onOpenProjectFile && (
           <button
@@ -211,12 +255,15 @@ export function MarkdownInlineVideoCard({
       <span
         className="response-markdown-media-card response-markdown-document-card"
         data-markdown-media-kind="video"
+        data-markdown-media-ext={target.extension}
         data-markdown-media-alt={alt}
         data-markdown-media-source={target.relativePath}
         title={title}
       >
         <span className="response-markdown-document-button">
-          <Film className="response-markdown-document-icon" size={16} aria-hidden="true" />
+          <span className="response-markdown-document-tile" aria-hidden="true">
+            <Film className="response-markdown-document-icon" size={16} aria-hidden="true" />
+          </span>
           <span className="response-markdown-document-meta">
             <span className="response-markdown-document-name">{target.name}</span>
           </span>
@@ -229,21 +276,22 @@ export function MarkdownInlineVideoCard({
     <span
       className="response-markdown-media-card response-markdown-video-card"
       data-markdown-media-kind="video"
+      data-markdown-media-ext={target.extension}
       data-markdown-media-alt={alt}
       data-markdown-media-source={target.relativePath}
       title={title}
     >
       <span className="response-markdown-media-header">
-        <span className="response-markdown-media-title" title={target.relativePath}>
-          <Film size={14} aria-hidden="true" />
-          <span className="response-markdown-media-filename">{target.name}</span>
-        </span>
+        <MediaCardHeaderTitle target={target} Icon={Film} />
         {interactive && onPreviewMedia && (
           <button
             type="button"
             className="response-markdown-media-action"
             title={`Expand ${target.name}`}
-            onClick={() => onPreviewMedia(target)}
+            onClick={() => {
+              pauseMediaElement(videoRef.current);
+              onPreviewMedia(target);
+            }}
           >
             <Maximize2 size={14} aria-hidden="true" />
             <span>Expand</span>
@@ -300,12 +348,15 @@ export function MarkdownInlineAudioCard({
       <span
         className="response-markdown-media-card response-markdown-document-card"
         data-markdown-media-kind="audio"
+        data-markdown-media-ext={target.extension}
         data-markdown-media-alt={alt}
         data-markdown-media-source={target.relativePath}
         title={title}
       >
         <span className="response-markdown-document-button">
-          <FileAudio className="response-markdown-document-icon" size={16} aria-hidden="true" />
+          <span className="response-markdown-document-tile" aria-hidden="true">
+            <FileAudio className="response-markdown-document-icon" size={16} aria-hidden="true" />
+          </span>
           <span className="response-markdown-document-meta">
             <span className="response-markdown-document-name">{target.name}</span>
           </span>
@@ -318,21 +369,22 @@ export function MarkdownInlineAudioCard({
     <span
       className="response-markdown-media-card response-markdown-audio-card"
       data-markdown-media-kind="audio"
+      data-markdown-media-ext={target.extension}
       data-markdown-media-alt={alt}
       data-markdown-media-source={target.relativePath}
       title={title}
     >
       <span className="response-markdown-media-header">
-        <span className="response-markdown-media-title" title={target.relativePath}>
-          <FileAudio size={14} aria-hidden="true" />
-          <span className="response-markdown-media-filename">{target.name}</span>
-        </span>
+        <MediaCardHeaderTitle target={target} Icon={FileAudio} />
         {interactive && onPreviewMedia && (
           <button
             type="button"
             className="response-markdown-media-action"
             title={`Expand ${target.name}`}
-            onClick={() => onPreviewMedia(target)}
+            onClick={() => {
+              pauseMediaElement(audioRef.current);
+              onPreviewMedia(target);
+            }}
           >
             <Maximize2 size={14} aria-hidden="true" />
             <span>Expand</span>
@@ -396,7 +448,9 @@ export function MarkdownInlineDocumentCard({
   };
   const cardContent = (
     <>
-      <Icon className="response-markdown-document-icon" size={16} aria-hidden="true" />
+      <span className="response-markdown-document-tile" aria-hidden="true">
+        <Icon className="response-markdown-document-icon" size={16} aria-hidden="true" />
+      </span>
       <span className="response-markdown-document-meta">
         <span className="response-markdown-document-name">{target.name}</span>
         {target.relativePath !== target.name && (
@@ -404,12 +458,16 @@ export function MarkdownInlineDocumentCard({
         )}
       </span>
       <span className="response-markdown-document-badge">{badge}</span>
+      {interactive && (
+        <ChevronRight className="response-markdown-document-chevron" size={16} aria-hidden="true" />
+      )}
     </>
   );
   return (
     <span
       className="response-markdown-media-card response-markdown-document-card"
       data-markdown-media-kind={target.kind}
+      data-markdown-media-ext={target.extension}
       data-markdown-media-alt={alt}
       data-markdown-media-source={target.relativePath}
       title={title}
@@ -458,6 +516,7 @@ export function MarkdownOutsideLocalMediaFallback({
         <button
           type="button"
           className="response-markdown-local-media-link"
+          data-local-media-kind={descriptor?.kind}
           title={title ?? path}
           onClick={() => {
             setError(false);
@@ -466,10 +525,14 @@ export function MarkdownOutsideLocalMediaFallback({
         >
           <Icon size={14} aria-hidden="true" />
           <span className="response-markdown-local-media-label">{label}</span>
-          <ExternalLink size={14} aria-hidden="true" />
+          <ExternalLink className="response-markdown-local-media-external" size={14} aria-hidden="true" />
         </button>
       ) : (
-        <span className="response-markdown-local-media-link" title={title ?? path}>
+        <span
+          className="response-markdown-local-media-link"
+          data-local-media-kind={descriptor?.kind}
+          title={title ?? path}
+        >
           <Icon size={14} aria-hidden="true" />
           <span className="response-markdown-local-media-label">{label}</span>
         </span>
@@ -509,6 +572,7 @@ function ImageUnavailablePlaceholder({
     <span
       className="response-markdown-image-unavailable"
       data-markdown-image-overflow={overflowAttribute}
+      data-markdown-image-preserved={style ? "true" : undefined}
       role="img"
       aria-label={alt}
       title={title}
@@ -521,6 +585,7 @@ function ImageUnavailablePlaceholder({
     <span
       className="response-markdown-image-unavailable"
       data-markdown-image-overflow={overflowAttribute}
+      data-markdown-image-preserved={style ? "true" : undefined}
       aria-hidden="true"
       title={title}
       style={style}
@@ -556,23 +621,39 @@ function MarkdownScheduledImage({
   onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
 }): React.JSX.Element {
   const schedule = useMarkdownImageSchedule(trustedSource);
+  const imgRef = useRef<HTMLImageElement>(null);
   const waitingStyle = schedule.state === "waiting"
     ? preservedPlaceholderStyle(trustedSource)
     : undefined;
+  useEffect(() => {
+    if (schedule.state !== "loading") return;
+    const image = imgRef.current;
+    if (!image || !image.complete || image.naturalWidth <= 0) return;
+    const rect = image.getBoundingClientRect();
+    rememberImageGeometry(trustedSource, {
+      naturalWidth: image.naturalWidth,
+      naturalHeight: image.naturalHeight,
+      renderedWidth: Math.round(rect.width),
+      renderedHeight: Math.round(rect.height),
+    });
+    schedule.complete(false);
+  }, [schedule, schedule.state, trustedSource]);
   const imageNode = (
     <img
+      ref={imgRef}
       src={trustedSource}
       alt={alt}
       title={title}
       className={className}
-      loading="lazy"
       decoding="async"
       onLoad={(event) => {
         const image = event.currentTarget;
+        const rect = image.getBoundingClientRect();
         rememberImageGeometry(trustedSource, {
           naturalWidth: image.naturalWidth,
           naturalHeight: image.naturalHeight,
-          renderedHeight: Math.round(image.getBoundingClientRect().height),
+          renderedWidth: Math.round(rect.width),
+          renderedHeight: Math.round(rect.height),
         });
         schedule.complete(false);
       }}

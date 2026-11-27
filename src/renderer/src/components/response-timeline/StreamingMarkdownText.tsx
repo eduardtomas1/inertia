@@ -1,6 +1,7 @@
 import { useMemo, useRef } from "react";
 import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
 import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
+import { MarkdownImageSchedulerProvider } from "../markdown/MarkdownImageScheduler";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import {
   splitStreamingMarkdown,
@@ -61,11 +62,27 @@ export function StreamingMarkdownText({
     projectRoot,
     settledTexts,
   ]);
-  if (!tail && settledBlocks.length > 0) return <>{settledBlocks}</>;
+  const schedulerIdentity = [
+    projectRoot,
+    projectBaseRoot ?? "",
+    projectId,
+    conversationId ?? "",
+  ].join("\0");
+  if (!tail && settledBlocks.length > 0) {
+    return (
+      <MarkdownImageSchedulerProvider key={schedulerIdentity}>
+        {settledBlocks}
+      </MarkdownImageSchedulerProvider>
+    );
+  }
   const tailBlock = (
     <div className="response-stream-block" data-stream-block="tail" key={settledBlocks.length}>
       {tail}
     </div>
   );
-  return <>{settledBlocks.length === 0 ? [tailBlock] : [...settledBlocks, tailBlock]}</>;
+  return (
+    <MarkdownImageSchedulerProvider key={schedulerIdentity}>
+      {settledBlocks.length === 0 ? [tailBlock] : [...settledBlocks, tailBlock]}
+    </MarkdownImageSchedulerProvider>
+  );
 }

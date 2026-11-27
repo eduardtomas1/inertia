@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { ExternalLink, Music } from "lucide-react";
+import { Check, CircleAlert, Copy, ExternalLink, Music, RotateCw } from "lucide-react";
 import {
   lazy,
   startTransition,
@@ -23,10 +23,13 @@ import {
 } from "@shared/workspace-media-preview";
 import {
   SPREADSHEET_PREVIEW_LIMITS,
+  readDelimitedSpreadsheetWorkbook,
   readSpreadsheetWorkbook,
+  type SpreadsheetPreviewSheet,
   type SpreadsheetPreviewWorkbook,
 } from "@shared/spreadsheet-workbook";
 import { decodeTextAttachment } from "@shared/text-attachment";
+import { useCopiedState } from "../../hooks/useCopiedState";
 import { INTERFACE_LOCALE } from "../../lib/locale";
 import { pdfCanvasLayout } from "../../utils/pdfCanvasLayout";
 import { ZoomableAttachmentImage } from "../ZoomableAttachmentImage";
@@ -40,7 +43,7 @@ const PdfAttachmentPreview = lazy(async () => ({
 export interface WorkspaceMediaViewerProps {
   readonly target: WorkspaceMediaPreviewTarget;
   readonly compact?: boolean;
-  readonly onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void;
+  readonly onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void | Promise<void>;
   readonly onMetadata?: (meta: string) => void;
 }
 
@@ -65,6 +68,50 @@ function columnName(column: number): string {
   return output;
 }
 
+function formatSheetRowCount(sheet: SpreadsheetPreviewSheet): string {
+  if (!sheet.totalRowsExact) {
+    return `${sheet.rows.length.toLocaleString(INTERFACE_LOCALE)}+ rows`;
+  }
+  return `${sheet.totalRows.toLocaleString(INTERFACE_LOCALE)} ${sheet.totalRows === 1 ? "row" : "rows"}`;
+}
+
+function escapeCsvCell(value: string): string {
+  const normalized = value.normalize("NFKC");
+  const safeValue = /^[\t\r]/u.test(normalized)
+    || /^[\s\u0000-\u001f]*[=+@-]/u.test(normalized)
+    ? `'${value}`
+    : value;
+  return /[",\r\n]/u.test(safeValue)
+    ? `"${safeValue.replace(/"/gu, "\"\"")}"`
+    : safeValue;
+}
+
+function sheetAsCsv(sheet: SpreadsheetPreviewSheet): string {
+  const columnCount = Math.max(0, ...sheet.rows.map(({ cells }) => cells.length));
+  return sheet.rows
+    .map(({ cells }) => Array.from(
+      { length: columnCount },
+      (_, index) => escapeCsvCell(cells[index] ?? ""),
+    ).join(","))
+    .join("\n");
+}
+
+function mediaErrorDetail(
+  mediaError: MediaError | null,
+  kind: "video" | "audio",
+): string {
+  if (mediaError?.code === 2) {
+    return `Could not load this ${kind} file from the workspace.`;
+  }
+  if (mediaError?.code === 3) {
+    return `This ${kind} file appears corrupted or could not be decoded.`;
+  }
+  if (kind === "video") {
+    return "This video codec or format cannot be played in the embedded viewer.";
+  }
+  return "This audio format cannot be played in the embedded viewer.";
+}
+
 function trimIncompleteText(bytes: Uint8Array): Uint8Array {
   for (let omitted = 0; omitted <= 4; omitted += 1) {
     const prefix = bytes.subarray(0, bytes.length - omitted);
@@ -78,26 +125,62 @@ function trimIncompleteText(bytes: Uint8Array): Uint8Array {
   return bytes;
 }
 
-async function loadWorkspacePdf(source: string) {
+function emptyTextSpreadsheetWorkbook(
+  name: string,
+  sourceTruncated = false,
+): SpreadsheetPreviewWorkbook {
+  return {
+    sheets: [{
+      name: name || "Sheet1",
+      startColumn: 0,
+      rows: [],
+      totalRows: 0,
+      totalRowsExact: !sourceTruncated,
+      totalColumns: 0,
+      rowsTruncated: sourceTruncated,
+      columnsTruncated: false,
+      contentTruncated: sourceTruncated,
+    }],
+    totalSheets: 1,
+    sheetsTruncated: false,
+    contentTruncated: sourceTruncated,
+  };
+}
+
+function decodeTextSpreadsheetPayload(bytes: Uint8Array): string {
+  if (bytes.byteLength === 0) return "";
+  try {
+    return decodeTextAttachment(bytes);
+  } catch (error) {
+    try {
+      const plain = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      if (!plain.includes("\0") && !plain.trim()) return plain;
+    } catch {
+      // Fall through to original error.
+    }
+    throw error;
+  }
+}
+
+async function loadWorkspacePdf(source: string, signal?: AbortSignal) {
   const [{ getDocument, GlobalWorkerOptions }, response] = await Promise.all([
     import("pdfjs-dist"),
-    fetch(source, { cache: "no-store", credentials: "omit" }),
+    fetch(source, { cache: "no-store", credentials: "omit", signal }),
   ]);
   if (!response.ok) throw new Error("The PDF preview is unavailable.");
   const contentLength = response.headers.get("content-length");
   const declaredBytes = contentLength === null ? null : Number(contentLength);
-  if (
-    declaredBytes !== null
-    && (
-      !Number.isSafeInteger(declaredBytes)
-      || declaredBytes < 1
-      || declaredBytes > MAX_WORKSPACE_MEDIA_PDF_BYTES
-    )
-  ) {
-    throw new Error("The PDF exceeds the 50 MiB preview limit.");
+  if (declaredBytes !== null) {
+    if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 1) {
+      throw new Error("The PDF file is empty.");
+    }
+    if (declaredBytes > MAX_WORKSPACE_MEDIA_PDF_BYTES) {
+      throw new Error("The PDF exceeds the 50 MiB preview limit.");
+    }
   }
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength < 1 || bytes.byteLength > MAX_WORKSPACE_MEDIA_PDF_BYTES) {
+  if (bytes.byteLength < 1) throw new Error("The PDF file is empty.");
+  if (bytes.byteLength > MAX_WORKSPACE_MEDIA_PDF_BYTES) {
     throw new Error("The PDF exceeds the 50 MiB preview limit.");
   }
   GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -130,27 +213,53 @@ function MediaErrorFallback({
   title,
   detail,
   target,
+  onRetry,
   onOpenExternally,
 }: {
   title: string;
   detail: string;
   target: WorkspaceMediaPreviewTarget;
-  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void;
+  onRetry?: () => void;
+  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void | Promise<void>;
 }): React.JSX.Element {
   return (
     <div className="workspace-media-error" role="alert">
-      <strong>{title}</strong>
-      <span>{detail}</span>
-      {onOpenExternally && (
+      <span className="workspace-media-error-icon" aria-hidden="true">
+        <CircleAlert size={16} />
+      </span>
+      <div className="workspace-media-error-copy">
+        <strong>{title}</strong>
+        <span>{detail}</span>
+      </div>
+      {(onRetry || onOpenExternally) && (
         <div className="workspace-media-error-actions">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => onOpenExternally(target)}
-          >
-            <ExternalLink size={14} aria-hidden="true" />
-            <span>Open externally</span>
-          </button>
+          {onRetry && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={(event) => {
+                event.currentTarget.closest<HTMLElement>(".workspace-media-viewer")?.focus({
+                  preventScroll: true,
+                });
+                onRetry();
+              }}
+            >
+              <RotateCw size={14} aria-hidden="true" />
+              <span>Retry</span>
+            </button>
+          )}
+          {onOpenExternally && (
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => {
+                void Promise.resolve(onOpenExternally(target)).catch(() => undefined);
+              }}
+            >
+              <ExternalLink size={14} aria-hidden="true" />
+              <span>Open externally</span>
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -163,15 +272,13 @@ function WorkspaceVideoViewer({
   onMetadata,
 }: {
   target: WorkspaceMediaPreviewTarget;
-  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void;
+  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void | Promise<void>;
   onMetadata?: (meta: string) => void;
 }): React.JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [target.url]);
+  const [failure, setFailure] = useState<{ url: string; detail: string } | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const failed = failure?.url === target.url;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -190,14 +297,28 @@ function WorkspaceVideoViewer({
         // Non-media DOM environments may not implement load().
       }
     };
-  }, [target.url, failed]);
+  }, [target.url, failed, retryNonce]);
+
+  const reportMetadata = useCallback((element: HTMLVideoElement) => {
+    const parts: string[] = [];
+    if (element.videoWidth > 0 && element.videoHeight > 0) {
+      parts.push(`${element.videoWidth} × ${element.videoHeight}`);
+    }
+    const duration = formatMediaDuration(element.duration);
+    if (duration) parts.push(duration);
+    if (parts.length > 0) onMetadata?.(parts.join(" · "));
+  }, [onMetadata]);
 
   if (failed) {
     return (
       <MediaErrorFallback
         title="Video playback unavailable"
-        detail="This video codec or format cannot be played in the embedded viewer."
+        detail={failure.detail}
         target={target}
+        onRetry={() => {
+          setFailure(null);
+          setRetryNonce((value) => value + 1);
+        }}
         onOpenExternally={onOpenExternally}
       />
     );
@@ -212,17 +333,12 @@ function WorkspaceVideoViewer({
         preload="metadata"
         playsInline
         aria-label={target.name}
-        onLoadedMetadata={(event) => {
-          const element = event.currentTarget;
-          const parts: string[] = [];
-          if (element.videoWidth > 0 && element.videoHeight > 0) {
-            parts.push(`${element.videoWidth} × ${element.videoHeight}`);
-          }
-          const duration = formatMediaDuration(element.duration);
-          if (duration) parts.push(duration);
-          if (parts.length > 0) onMetadata?.(parts.join(" · "));
-        }}
-        onError={() => setFailed(true)}
+        onLoadedMetadata={(event) => reportMetadata(event.currentTarget)}
+        onDurationChange={(event) => reportMetadata(event.currentTarget)}
+        onError={(event) => setFailure({
+          url: target.url,
+          detail: mediaErrorDetail(event.currentTarget.error, "video"),
+        })}
       />
     </div>
   );
@@ -236,15 +352,14 @@ function WorkspaceAudioViewer({
 }: {
   target: WorkspaceMediaPreviewTarget;
   descriptorLabel: string;
-  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void;
+  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void | Promise<void>;
   onMetadata?: (meta: string) => void;
 }): React.JSX.Element {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [target.url]);
+  const [duration, setDuration] = useState("");
+  const [failure, setFailure] = useState<{ url: string; detail: string } | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const failed = failure?.url === target.url;
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -263,14 +378,24 @@ function WorkspaceAudioViewer({
         // Non-media DOM environments may not implement load().
       }
     };
-  }, [target.url, failed]);
+  }, [target.url, failed, retryNonce]);
+
+  const reportMetadata = useCallback((element: HTMLAudioElement) => {
+    const formatted = formatMediaDuration(element.duration);
+    setDuration(formatted);
+    if (formatted) onMetadata?.(formatted);
+  }, [onMetadata]);
 
   if (failed) {
     return (
       <MediaErrorFallback
         title="Audio playback unavailable"
-        detail="This audio format cannot be played in the embedded viewer."
+        detail={failure.detail}
         target={target}
+        onRetry={() => {
+          setFailure(null);
+          setRetryNonce((value) => value + 1);
+        }}
         onOpenExternally={onOpenExternally}
       />
     );
@@ -278,12 +403,17 @@ function WorkspaceAudioViewer({
 
   return (
     <div className="workspace-media-audio-wrap">
-      <div className="workspace-media-audio-icon" aria-hidden="true">
-        <Music size={16} />
-      </div>
-      <div className="workspace-media-audio-meta">
-        <strong title={target.name}>{target.name}</strong>
-        <span>{descriptorLabel}</span>
+      <div className="workspace-media-audio-head">
+        <div className="workspace-media-audio-icon" aria-hidden="true">
+          <Music size={16} />
+        </div>
+        <div className="workspace-media-audio-meta">
+          <strong title={target.name}>{target.name}</strong>
+          <span className="workspace-media-audio-detail">
+            <span>{descriptorLabel}</span>
+            {duration && <span className="workspace-media-audio-duration">{duration}</span>}
+          </span>
+        </div>
       </div>
       <audio
         ref={audioRef}
@@ -291,11 +421,12 @@ function WorkspaceAudioViewer({
         controls
         preload="metadata"
         aria-label={target.name}
-        onLoadedMetadata={(event) => {
-          const duration = formatMediaDuration(event.currentTarget.duration);
-          if (duration) onMetadata?.(duration);
-        }}
-        onError={() => setFailed(true)}
+        onLoadedMetadata={(event) => reportMetadata(event.currentTarget)}
+        onDurationChange={(event) => reportMetadata(event.currentTarget)}
+        onError={(event) => setFailure({
+          url: target.url,
+          detail: mediaErrorDetail(event.currentTarget.error, "audio"),
+        })}
       />
     </div>
   );
@@ -307,13 +438,15 @@ function WorkspaceSpreadsheetViewer({
   onMetadata,
 }: {
   target: WorkspaceMediaPreviewTarget;
-  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void;
+  onOpenExternally?: (target: WorkspaceMediaPreviewTarget) => void | Promise<void>;
   onMetadata?: (meta: string) => void;
 }): React.JSX.Element {
   const [workbook, setWorkbook] = useState<SpreadsheetPreviewWorkbook | null>(null);
   const [sourceTruncated, setSourceTruncated] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const csvClipboard = useCopiedState();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -335,29 +468,48 @@ function WorkspaceSpreadsheetViewer({
       if (!response.ok) throw new Error("Spreadsheet preview is unavailable.");
       const contentLength = response.headers.get("content-length");
       const declaredBytes = contentLength === null ? null : Number(contentLength);
-      if (
-        declaredBytes !== null
-        && (
-          !Number.isSafeInteger(declaredBytes)
-          || declaredBytes < 1
-          || declaredBytes > maxBytes
-        )
-      ) {
-        throw new Error("Spreadsheet exceeds the preview size limit.");
+      if (declaredBytes !== null) {
+        if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
+          throw new Error("Spreadsheet preview is unavailable.");
+        }
+        if (!isTextSpreadsheet && declaredBytes < 1) {
+          throw new Error("The spreadsheet file is empty.");
+        }
+        if (declaredBytes > maxBytes) {
+          throw new Error("Spreadsheet exceeds the preview size limit.");
+        }
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength < 1 || bytes.byteLength > maxBytes) {
+      if (bytes.byteLength > maxBytes) {
         throw new Error("Spreadsheet exceeds the preview size limit.");
       }
+      if (!isTextSpreadsheet && bytes.byteLength < 1) {
+        throw new Error("The spreadsheet file is empty.");
+      }
       const truncated = response.headers.get("x-workspace-media-truncated") === "true";
-      const previewBytes = truncated && isTextSpreadsheet ? trimIncompleteText(bytes) : bytes;
-      const workbookBytes = isTextSpreadsheet
-        ? new TextEncoder().encode(`\uFEFF${decodeTextAttachment(previewBytes)}`)
-        : bytes;
-      const parsed = await readSpreadsheetWorkbook(
-        workbookBytes,
-        SPREADSHEET_PREVIEW_LIMITS,
-      );
+      let parsed: SpreadsheetPreviewWorkbook;
+      if (isTextSpreadsheet) {
+        const previewBytes = truncated ? trimIncompleteText(bytes) : bytes;
+        const decodedText = decodeTextSpreadsheetPayload(previewBytes);
+        const isBlank = target.extension === "tsv"
+          ? !decodedText.includes("\t") && !decodedText.trim()
+          : !decodedText.trim();
+        if (isBlank) {
+          parsed = emptyTextSpreadsheetWorkbook(target.name, truncated);
+        } else {
+          parsed = readDelimitedSpreadsheetWorkbook(
+            decodedText,
+            target.extension === "tsv" ? "\t" : "auto",
+            SPREADSHEET_PREVIEW_LIMITS,
+            { sheetName: target.name, sourceTruncated: truncated },
+          );
+        }
+      } else {
+        parsed = await readSpreadsheetWorkbook(
+          bytes,
+          SPREADSHEET_PREVIEW_LIMITS,
+        );
+      }
       if (controller.signal.aborted) return;
       startTransition(() => {
         setSourceTruncated(truncated);
@@ -368,7 +520,7 @@ function WorkspaceSpreadsheetViewer({
         onMetadata?.(`${parsed.totalSheets.toLocaleString(INTERFACE_LOCALE)} sheets`);
       } else if (first) {
         onMetadata?.(
-          `${first.totalRows.toLocaleString(INTERFACE_LOCALE)} ${first.totalRows === 1 ? "row" : "rows"} · ${first.totalColumns.toLocaleString(INTERFACE_LOCALE)} ${first.totalColumns === 1 ? "column" : "columns"}`,
+          `${formatSheetRowCount(first)} · ${first.totalColumns.toLocaleString(INTERFACE_LOCALE)} ${first.totalColumns === 1 ? "column" : "columns"}`,
         );
       }
     }).catch((error: unknown) => {
@@ -384,7 +536,7 @@ function WorkspaceSpreadsheetViewer({
     });
 
     return () => controller.abort();
-  }, [onMetadata, target.extension, target.url]);
+  }, [onMetadata, retryNonce, target.extension, target.name, target.url]);
 
   const activeSheet = workbook?.sheets[activeIndex] ?? workbook?.sheets[0] ?? null;
   const visibleColumns = useMemo(
@@ -400,6 +552,7 @@ function WorkspaceSpreadsheetViewer({
         title="Spreadsheet preview unavailable"
         detail={errorMessage}
         target={target}
+        onRetry={() => setRetryNonce((value) => value + 1)}
         onOpenExternally={onOpenExternally}
       />
     );
@@ -426,6 +579,7 @@ function WorkspaceSpreadsheetViewer({
   const truncated = activeSheet.rowsTruncated
     || activeSheet.columnsTruncated
     || activeSheet.contentTruncated;
+  const hasVisibleCells = activeSheet.rows.length > 0 && visibleColumns > 0;
 
   return (
     <div className="spreadsheet-attachment-preview">
@@ -446,24 +600,42 @@ function WorkspaceSpreadsheetViewer({
             </button>
           ))}
         </div>
-        <span className="spreadsheet-attachment-summary">
-          {activeSheet.totalRows.toLocaleString(INTERFACE_LOCALE)}{" "}
-          {activeSheet.totalRows === 1 ? "row" : "rows"}
-          {" · "}
-          {activeSheet.totalColumns.toLocaleString(INTERFACE_LOCALE)}{" "}
-          {activeSheet.totalColumns === 1 ? "column" : "columns"}
-          {workbook.totalSheets > 1
-            ? ` · ${workbook.totalSheets.toLocaleString(INTERFACE_LOCALE)} sheets`
-            : ""}
-        </span>
+        <div className="workspace-media-spreadsheet-tools">
+          <span className="spreadsheet-attachment-summary">
+            {formatSheetRowCount(activeSheet)}
+            {" · "}
+            {activeSheet.totalColumns.toLocaleString(INTERFACE_LOCALE)}{" "}
+            {activeSheet.totalColumns === 1 ? "column" : "columns"}
+            {workbook.totalSheets > 1
+              ? ` · ${workbook.totalSheets.toLocaleString(INTERFACE_LOCALE)} sheets`
+              : ""}
+          </span>
+          {hasVisibleCells && (
+            <button
+              type="button"
+              className="workspace-media-inline-button"
+              onClick={() => {
+                void csvClipboard.copy(sheetAsCsv(activeSheet));
+              }}
+            >
+              {csvClipboard.copied ? (
+                <Check size={14} aria-hidden="true" />
+              ) : (
+                <Copy size={14} aria-hidden="true" />
+              )}
+              <span>{csvClipboard.copied ? "Copied CSV" : "Copy CSV"}</span>
+            </button>
+          )}
+        </div>
       </div>
       <div
+        key={activeIndex}
         className="spreadsheet-attachment-table-wrap"
         data-preview-truncated={truncated || workbook.sheetsTruncated || sourceTruncated}
         tabIndex={0}
         aria-label={`Scrollable worksheet preview for ${activeSheet.name}`}
       >
-        {activeSheet.rows.length === 0 || visibleColumns === 0
+        {!hasVisibleCells
           ? (
               <div className="spreadsheet-attachment-empty">
                 <strong>Empty worksheet</strong>
@@ -519,18 +691,21 @@ export function WorkspaceMediaViewer({
   onOpenExternally,
   onMetadata,
 }: WorkspaceMediaViewerProps): React.JSX.Element {
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const descriptor = useMemo(
     () => classifyWorkspaceMediaPath(target.relativePath),
     [target.relativePath],
   );
   const descriptorLabel = descriptor?.label ?? target.kind;
+  const loadKey = `${target.kind}:${target.url}:${retryNonce}`;
+  const loadFailed = failedKey === loadKey;
 
-  useEffect(() => {
-    setLoadFailed(false);
-  }, [target.kind, target.url]);
-
-  const markLoadFailed = useCallback(() => setLoadFailed(true), []);
+  const markLoadFailed = useCallback(() => setFailedKey(loadKey), [loadKey]);
+  const retryLoad = useCallback(() => {
+    setFailedKey(null);
+    setRetryNonce((value) => value + 1);
+  }, []);
 
   const handleImageLoadCapture = useCallback((event: SyntheticEvent<HTMLDivElement>) => {
     if (!(event.target instanceof HTMLImageElement)) return;
@@ -550,6 +725,7 @@ export function WorkspaceMediaViewer({
     <div
       className={clsx("workspace-media-viewer", compact && "is-compact")}
       data-media-kind={target.kind}
+      tabIndex={-1}
     >
       {target.kind === "image" ? (
         loadFailed ? (
@@ -557,6 +733,7 @@ export function WorkspaceMediaViewer({
             title="Image preview unavailable"
             detail="This image could not be loaded in the workspace preview."
             target={target}
+            onRetry={retryLoad}
             onOpenExternally={onOpenExternally}
           />
         ) : (
@@ -565,6 +742,7 @@ export function WorkspaceMediaViewer({
             onLoadCapture={handleImageLoadCapture}
           >
             <ZoomableAttachmentImage
+              key={loadKey}
               source={target.url}
               alt={target.name}
               onFailure={markLoadFailed}
@@ -590,6 +768,7 @@ export function WorkspaceMediaViewer({
             title="PDF preview unavailable"
             detail="This PDF could not be rendered in the embedded viewer."
             target={target}
+            onRetry={retryLoad}
             onOpenExternally={onOpenExternally}
           />
         ) : (
@@ -602,7 +781,7 @@ export function WorkspaceMediaViewer({
             )}
           >
             <PdfAttachmentPreview
-              key={target.url}
+              key={loadKey}
               source={target.url}
               title={target.name}
               onFailure={markLoadFailed}

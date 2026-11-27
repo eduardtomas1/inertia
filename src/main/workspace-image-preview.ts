@@ -157,7 +157,8 @@ export async function openContainedWorkspaceFile(
 ): Promise<OpenedWorkspaceFile> {
   assertWorkspaceImageRequestActive(options.signal);
   const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
-  const handle = await open(path, constants.O_RDONLY | noFollow);
+  const nonBlock = constants.O_NONBLOCK ?? 0;
+  const handle = await open(path, constants.O_RDONLY | noFollow | nonBlock);
   try {
     const info = await handle.stat();
     const minSizeValid = options.allowEmpty ? info.size >= 0 : info.size > 0;
@@ -230,22 +231,35 @@ function workspaceImageStream(
 ): ReadableStream<Uint8Array> {
   let offset = 0;
   let disposed = false;
+  let closeStarted = false;
+  let inFlightRead: Promise<unknown> | null = null;
   let removeAbortListener = (): void => undefined;
   const dispose = async (): Promise<void> => {
-    if (disposed) return;
     disposed = true;
     removeAbortListener();
+    if (closeStarted) return;
+    closeStarted = true;
     try {
-      await image.handle.close();
+      await inFlightRead?.catch(() => undefined);
     } finally {
-      image.releaseBudget();
+      try {
+        await image.handle.close();
+      } finally {
+        image.releaseBudget();
+      }
     }
   };
   return new ReadableStream<Uint8Array>({
     start: (controller) => {
       const abort = (): void => {
-        controller.error(new Error("The workspace image request was cancelled."));
-        void dispose();
+        if (disposed) return;
+        disposed = true;
+        try {
+          controller.error(new Error("The workspace image request was cancelled."));
+        } catch {
+          // Controller may already be closed or errored.
+        }
+        void dispose().catch(() => undefined);
       };
       removeAbortListener = (): void => {
         signal?.removeEventListener("abort", abort);
@@ -254,12 +268,20 @@ function workspaceImageStream(
       if (signal?.aborted) abort();
     },
     pull: async (controller) => {
+      if (disposed) return;
       try {
         // Close on the pull after the final chunk. This keeps the weighted
         // lease until the consumer drains the response body rather than only
         // until the source has queued its last bytes.
         if (offset === image.info.size) {
-          await verifyOpenFileIdentity(image.handle, image.info);
+          const verifyPromise = verifyOpenFileIdentity(image.handle, image.info);
+          inFlightRead = verifyPromise;
+          try {
+            await verifyPromise;
+          } finally {
+            inFlightRead = null;
+          }
+          if (disposed) return;
           controller.close();
           await dispose();
           return;
@@ -268,26 +290,37 @@ function workspaceImageStream(
           WORKSPACE_IMAGE_STREAM_CHUNK_BYTES,
           image.info.size - offset,
         ));
-        const { bytesRead } = await image.handle.read(
+        const readPromise = image.handle.read(
           buffer,
           0,
           buffer.length,
           offset,
         );
+        inFlightRead = readPromise;
+        let bytesRead: number;
+        try {
+          ({ bytesRead } = await readPromise);
+        } finally {
+          inFlightRead = null;
+        }
+        if (disposed) return;
         if (bytesRead <= 0) throw new Error("The workspace image changed while streaming.");
         offset += bytesRead;
         controller.enqueue(bytesRead === buffer.length
           ? buffer
           : buffer.subarray(0, bytesRead));
       } catch (error) {
+        if (disposed) return;
         try {
           controller.error(error);
+        } catch {
+          // Controller may already be closed or errored.
         } finally {
-          await dispose();
+          await dispose().catch(() => undefined);
         }
       }
     },
-    cancel: dispose,
+    cancel: () => dispose().catch(() => undefined),
   }, { highWaterMark: 1 });
 }
 

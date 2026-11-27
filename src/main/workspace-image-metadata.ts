@@ -695,7 +695,7 @@ async function inspectIco(
     }
     if (imageBytes >= 24) {
       cursor.seek(imageOffset);
-      const head = await cursor.bytes(24);
+      const head = await cursor.bytes(Math.min(imageBytes, 40));
       if (
         head.subarray(0, 8).equals(PNG_SIGNATURE)
         && ascii(head.subarray(12, 16)) === "IHDR"
@@ -707,7 +707,29 @@ async function inspectIco(
         }
         width = Math.max(width, pngWidth);
         height = Math.max(height, pngHeight);
+      } else {
+        if (head.length < 40) {
+          throw new Error("The workspace ICO entry is invalid or truncated.");
+        }
+        const dibSize = head.readUInt32LE(0);
+        if (dibSize < 40 || dibSize > imageBytes) {
+          throw new Error("The workspace ICO entry is invalid or truncated.");
+        }
+        const dibWidth = head.readInt32LE(4);
+        const dibRawHeight = head.readInt32LE(8);
+        const dibPlanes = head.readUInt16LE(12);
+        const dibBpp = head.readUInt16LE(14);
+        const dibHeight = dibRawHeight === -2_147_483_648
+          ? 0
+          : Math.ceil(Math.abs(dibRawHeight) / 2);
+        if (dibWidth <= 0 || dibHeight <= 0 || dibPlanes !== 1 || dibBpp === 0) {
+          throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+        }
+        width = Math.max(width, dibWidth);
+        height = Math.max(height, dibHeight);
       }
+    } else {
+      throw new Error("The workspace ICO entry is invalid or truncated.");
     }
     maxWidth = Math.max(maxWidth, width);
     maxHeight = Math.max(maxHeight, height);
@@ -759,6 +781,18 @@ async function readIsoBoxHeader(
   return { type, payloadStart: cursor.position, boxEnd };
 }
 
+interface AvifSampleTableState {
+  hasStsc: boolean;
+  stscEntries: { firstChunk: number; samplesPerChunk: number }[];
+  hasChunkTable: boolean;
+  chunkCount: number;
+  hasStsz: boolean;
+  stszSampleSize: number;
+  stszSampleCount: number;
+  hasStts: boolean;
+  sttsFrames: number;
+}
+
 interface AvifDimensionState {
   foundIspe: boolean;
   ispeWidth: number;
@@ -766,6 +800,48 @@ interface AvifDimensionState {
   foundTkhd: boolean;
   tkhdWidth: number;
   tkhdHeight: number;
+  codedWidth: number;
+  codedHeight: number;
+  foundMoov: boolean;
+  trackFrames: number;
+}
+
+function validateAvifSampleTable(table: AvifSampleTableState): number {
+  if (!table.hasStsc || !table.hasChunkTable || table.chunkCount === 0 || table.stscEntries.length === 0) {
+    throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+  }
+  let stscFrames = 0;
+  let previousFirstChunk = 0;
+  for (let index = 0; index < table.stscEntries.length; index += 1) {
+    const entry = table.stscEntries[index]!;
+    if (
+      entry.firstChunk < 1
+      || entry.firstChunk > table.chunkCount
+      || (index === 0 ? entry.firstChunk !== 1 : entry.firstChunk <= previousFirstChunk)
+      || entry.samplesPerChunk < 1
+    ) {
+      throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+    }
+    const nextFirstChunk = index + 1 < table.stscEntries.length
+      ? table.stscEntries[index + 1]!.firstChunk
+      : table.chunkCount + 1;
+    const chunks = nextFirstChunk - entry.firstChunk;
+    if (chunks <= 0) {
+      throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+    }
+    stscFrames += chunks * entry.samplesPerChunk;
+    if (stscFrames > MAX_WORKSPACE_IMAGE_FRAMES) {
+      throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+    }
+    previousFirstChunk = entry.firstChunk;
+  }
+  if (table.hasStsz && table.stszSampleCount !== stscFrames) {
+    throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+  }
+  if (table.hasStts && table.sttsFrames !== stscFrames) {
+    throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+  }
+  return stscFrames;
 }
 
 async function walkAvifBoxes(
@@ -774,6 +850,7 @@ async function walkAvifBoxes(
   depth: number,
   budget: InspectionBudget,
   state: AvifDimensionState,
+  sampleTable?: AvifSampleTableState,
 ): Promise<void> {
   if (depth > MAX_AVIF_BOX_DEPTH) {
     throw new Error("The workspace AVIF container nesting exceeds safe depth.");
@@ -787,14 +864,32 @@ async function walkAvifBoxes(
         throw new Error("The workspace AVIF meta box is truncated.");
       }
       cursor.skip(4);
-      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state);
+      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state, sampleTable);
+    } else if (type === "stbl") {
+      const table: AvifSampleTableState = {
+        hasStsc: false,
+        stscEntries: [],
+        hasChunkTable: false,
+        chunkCount: 0,
+        hasStsz: false,
+        stszSampleSize: 0,
+        stszSampleCount: 0,
+        hasStts: false,
+        sttsFrames: 0,
+      };
+      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state, table);
+      const frames = validateAvifSampleTable(table);
+      state.trackFrames = Math.max(state.trackFrames, frames);
     } else if (
       type === "iprp"
       || type === "ipco"
       || type === "moov"
       || type === "trak"
+      || type === "mdia"
+      || type === "minf"
     ) {
-      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state);
+      if (type === "moov") state.foundMoov = true;
+      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state, sampleTable);
     } else if (type === "ispe") {
       if (payloadSize < 12) {
         throw new Error("The workspace AVIF ispe box is truncated.");
@@ -823,6 +918,93 @@ async function walkAvifBoxes(
           state.tkhdHeight = Math.max(state.tkhdHeight, height);
         }
       }
+    } else if (sampleTable && type === "stsd") {
+      if (payloadSize < 8) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      const header = await cursor.bytes(8);
+      const entryCount = header.readUInt32BE(4);
+      if (entryCount === 0) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      for (let index = 0; index < entryCount; index += 1) {
+        budget.consume();
+        const entryBox = await readIsoBoxHeader(cursor, boxEnd);
+        const entryPayloadSize = entryBox.boxEnd - entryBox.payloadStart;
+        if (entryBox.type === "av01") {
+          if (entryPayloadSize < 28) {
+            throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+          }
+          cursor.skip(24);
+          const dims = await cursor.bytes(4);
+          const codedWidth = dims.readUInt16BE(0);
+          const codedHeight = dims.readUInt16BE(2);
+          if (codedWidth === 0 || codedHeight === 0) {
+            throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+          }
+          state.codedWidth = Math.max(state.codedWidth, codedWidth);
+          state.codedHeight = Math.max(state.codedHeight, codedHeight);
+        }
+        cursor.seek(entryBox.boxEnd);
+      }
+    } else if (sampleTable && type === "stsc") {
+      if (sampleTable.hasStsc || payloadSize < 8) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      const header = await cursor.bytes(8);
+      const entryCount = header.readUInt32BE(4);
+      if (entryCount > MAX_WORKSPACE_IMAGE_FRAMES || payloadSize - 8 < entryCount * 12) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      sampleTable.hasStsc = true;
+      for (let index = 0; index < entryCount; index += 1) {
+        budget.consume();
+        const entry = await cursor.bytes(12);
+        sampleTable.stscEntries.push({
+          firstChunk: entry.readUInt32BE(0),
+          samplesPerChunk: entry.readUInt32BE(4),
+        });
+      }
+    } else if (sampleTable && (type === "stco" || type === "co64")) {
+      if (sampleTable.hasChunkTable || payloadSize < 8) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      const header = await cursor.bytes(8);
+      const entryCount = header.readUInt32BE(4);
+      const stride = type === "co64" ? 8 : 4;
+      if (entryCount > MAX_WORKSPACE_IMAGE_FRAMES || payloadSize - 8 < entryCount * stride) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      sampleTable.hasChunkTable = true;
+      sampleTable.chunkCount = entryCount;
+    } else if (sampleTable && type === "stsz") {
+      if (sampleTable.hasStsz || payloadSize < 12) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      const header = await cursor.bytes(12);
+      sampleTable.hasStsz = true;
+      sampleTable.stszSampleSize = header.readUInt32BE(4);
+      sampleTable.stszSampleCount = header.readUInt32BE(8);
+    } else if (sampleTable && type === "stts") {
+      if (sampleTable.hasStts || payloadSize < 8) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      const header = await cursor.bytes(8);
+      const entryCount = header.readUInt32BE(4);
+      if (payloadSize - 8 < entryCount * 8) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      let frames = 0;
+      for (let index = 0; index < entryCount; index += 1) {
+        budget.consume();
+        const entry = await cursor.bytes(8);
+        frames += entry.readUInt32BE(0);
+        if (frames > MAX_WORKSPACE_IMAGE_FRAMES) {
+          throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+        }
+      }
+      sampleTable.hasStts = true;
+      sampleTable.sttsFrames = frames;
     }
     cursor.seek(boxEnd);
   }
@@ -846,11 +1028,14 @@ async function inspectAvif(
   const ftypData = await cursor.bytes(ftypPayloadBytes);
   const majorBrand = ascii(ftypData.subarray(0, 4));
   let isAvifBrand = majorBrand === "avif" || majorBrand === "avis";
+  let isSequenceBrand = majorBrand === "avis";
   for (let offset = 8; offset + 4 <= ftypData.length; offset += 4) {
     const brand = ascii(ftypData.subarray(offset, offset + 4));
     if (brand === "avif" || brand === "avis") {
       isAvifBrand = true;
-      break;
+    }
+    if (brand === "avis") {
+      isSequenceBrand = true;
     }
   }
   if (!isAvifBrand) {
@@ -864,18 +1049,28 @@ async function inspectAvif(
     foundTkhd: false,
     tkhdWidth: 0,
     tkhdHeight: 0,
+    codedWidth: 0,
+    codedHeight: 0,
+    foundMoov: false,
+    trackFrames: 0,
   };
   await walkAvifBoxes(cursor, cursor.size, 0, budget, state);
-  const width = state.foundIspe ? state.ispeWidth : state.foundTkhd ? state.tkhdWidth : 0;
-  const height = state.foundIspe ? state.ispeHeight : state.foundTkhd ? state.tkhdHeight : 0;
+  const width = Math.max(state.ispeWidth, state.tkhdWidth, state.codedWidth);
+  const height = Math.max(state.ispeHeight, state.tkhdHeight, state.codedHeight);
   if (width === 0 || height === 0) {
     throw new Error("The workspace AVIF is missing spatial extent dimensions.");
   }
+  if (state.foundMoov && state.trackFrames === 0) {
+    throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+  }
+  const frames = state.foundMoov || isSequenceBrand
+    ? Math.max(1, state.trackFrames)
+    : 1;
   return validateMetadata({
     mimeType: "image/avif",
     width,
     height,
-    frames: 1,
+    frames,
   });
 }
 

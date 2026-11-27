@@ -1,9 +1,13 @@
 /** File links are opened on demand by the desktop, never loaded as web content. */
-export function parseLocalFileUrl(value: unknown): URL | null {
+export function parseLocalFileUrl(
+  value: unknown,
+  options?: { readonly allowSearch?: boolean },
+): URL | null {
   if (typeof value !== "string" || value.length > 16_384 || /[\0\r\n]/u.test(value)) return null;
   try {
     const url = new URL(value);
-    if (url.protocol !== "file:" || url.hostname || url.username || url.password || url.port || url.search
+    if (url.protocol !== "file:" || url.hostname || url.username || url.password || url.port
+      || (!options?.allowSearch && url.search)
       || /%(?:2f|5c)/iu.test(url.pathname)
       || /[\0\r\n]/u.test(decodeURIComponent(url.pathname))) return null;
     return url;
@@ -12,7 +16,7 @@ export function parseLocalFileUrl(value: unknown): URL | null {
 
 /** Preserve URL escaping until the Markdown path parser has interpreted locations. */
 export function encodedLocalFilePath(url: URL): string {
-  return url.pathname.replace(/^\/([a-z]:\/)/iu, "$1");
+  return url.pathname.replace(/^\/([a-z])(?::|%3a)\//iu, "$1:/");
 }
 
 export function localFileLocationSuffix(path: string): string {

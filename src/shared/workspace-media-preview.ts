@@ -56,7 +56,7 @@ const MEDIA_EXTENSIONS: Readonly<Record<string, Omit<WorkspaceMediaDescriptor, "
   m4a: { kind: "audio", mimeType: "audio/mp4", label: "M4A audio", isTextDualView: false },
   flac: { kind: "audio", mimeType: "audio/flac", label: "FLAC audio", isTextDualView: false },
   aac: { kind: "audio", mimeType: "audio/aac", label: "AAC audio", isTextDualView: false },
-  opus: { kind: "audio", mimeType: "audio/opus", label: "Opus audio", isTextDualView: false },
+  opus: { kind: "audio", mimeType: "audio/ogg", label: "Opus audio", isTextDualView: false },
   // PDF
   pdf: { kind: "pdf", mimeType: "application/pdf", label: "PDF document", isTextDualView: false },
   // Spreadsheets

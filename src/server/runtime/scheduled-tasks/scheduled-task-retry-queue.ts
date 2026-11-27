@@ -29,6 +29,7 @@ export class ScheduledTaskRetryQueue<TTurn extends { id: string; conversationId:
   private bootRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private retryBackoffAttempts = 0;
   private bootAttempts = 0;
+  private bootCutoff: Date | null = null;
   private disposed = false;
 
   get pendingBindingCount(): number {
@@ -159,12 +160,22 @@ export class ScheduledTaskRetryQueue<TTurn extends { id: string; conversationId:
     this.bootRetryTimer.unref?.();
   }
 
-  clearBootRetry(): void {
+  getOrSetBootCutoff(now: Date): Date {
+    if (this.bootCutoff === null) this.bootCutoff = now;
+    return this.bootCutoff;
+  }
+
+  cancelBootRetryTimer(): void {
     if (this.bootRetryTimer !== null) {
       clearTimeout(this.bootRetryTimer);
       this.bootRetryTimer = null;
     }
+  }
+
+  resetBootRetry(): void {
+    this.cancelBootRetryTimer();
     this.bootAttempts = 0;
+    this.bootCutoff = null;
   }
 
   dispose(): void {
@@ -173,7 +184,7 @@ export class ScheduledTaskRetryQueue<TTurn extends { id: string; conversationId:
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
     }
-    this.clearBootRetry();
+    this.resetBootRetry();
     this.pendingBindings.clear();
     this.pendingSettlements.clear();
     this.pendingBootBroadcastProjects.clear();

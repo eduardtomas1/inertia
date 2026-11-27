@@ -227,6 +227,7 @@ export function ScheduledTasksView({
   const [submitting, setSubmitting] = useState(false);
   const [busyTaskIds, setBusyTaskIds] = useState<ReadonlySet<string>>(() => new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [pendingOpenConversationId, setPendingOpenConversationId] = useState<string | null>(null);
   const [expandedRunIds, setExpandedRunIds] = useState<ReadonlySet<string>>(() => new Set());
   const [announcement, setAnnouncement] = useState("");
 
@@ -379,6 +380,14 @@ export function ScheduledTasksView({
     });
   }, [request, runTaskAction]);
 
+  useEffect(() => {
+    if (!pendingOpenConversationId) return;
+    const match = conversationsById.get(pendingOpenConversationId);
+    if (!match) return;
+    setPendingOpenConversationId(null);
+    onOpenConversation(match);
+  }, [conversationsById, onOpenConversation, pendingOpenConversationId]);
+
   const handleRunNow = useCallback((task: ScheduledTask): void => {
     void runTaskAction(task.id, "Could not run scheduled task.", async () => {
       const res = await request({ type: "scheduled-task.run-now", payload: { taskId: task.id } });
@@ -386,7 +395,12 @@ export function ScheduledTasksView({
       setSummaries((cur) => upsertSummary(cur, ran.task, undefined, ran.run));
       setAnnouncement(`Triggered ${ran.task.title}.`);
       const target = ran.conversationId ? conversationsById.get(ran.conversationId) : undefined;
-      if (target) onOpenConversation(target);
+      if (target) {
+        setPendingOpenConversationId(null);
+        onOpenConversation(target);
+      } else if (ran.conversationId) {
+        setPendingOpenConversationId(ran.conversationId);
+      }
     });
   }, [conversationsById, onOpenConversation, request, runTaskAction]);
 

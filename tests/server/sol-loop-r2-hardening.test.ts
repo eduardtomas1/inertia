@@ -2350,6 +2350,114 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         "request.started", "scheduled-task.accepted",
         "request.started", "scheduled-task.deleted",
       ]);
+
+      const a4Persisted = store.scheduledTasks.get(a4Task.id);
+      expect(a4Persisted?.lastRunStatus).toBe("failed");
+      expect(a4Persisted?.lastError).toBe("Scheduled run settlement failed repeatedly.");
+
+      const s87Conv = store.createConversation(project.id, "S87 Lookup retry");
+      const s87Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s87Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+      });
+      const s87Task = s87Service.create({
+        projectId: project.id,
+        title: "Lookup retry task",
+        prompt: "Check lookup retry",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s87Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const s87Run = await s87Service.runNow(s87Task.id);
+      const s87TurnId = randomUUID();
+      s87Service.bindRunTurn(s87Run.run.id, s87TurnId);
+      const s87LookupSpy = vi.spyOn(store.scheduledTasks, "findRunByTurnId").mockImplementationOnce(() => {
+        throw new Error("Transient SQLITE_BUSY on findRunByTurnId");
+      });
+      expect(() => s87Service.onTurnSettled({
+        id: s87TurnId,
+        conversationId: s87Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: "2030-10-01T10:10:00.000Z",
+        updatedAt: "2030-10-01T10:10:00.000Z",
+      })).toThrow("Transient SQLITE_BUSY on findRunByTurnId");
+      s87LookupSpy.mockRestore();
+      expect(store.scheduledTasks.getRun(s87Run.run.id)?.state).toBe("running");
+      await vi.advanceTimersByTimeAsync(500);
+      expect(store.scheduledTasks.getRun(s87Run.run.id)?.state).toBe("completed");
+      expect(store.scheduledTasks.get(s87Task.id)?.lastRunStatus).toBe("completed");
+      s87Service.dispose();
+
+      let r2NowMs = Date.parse("2030-12-01T10:00:00.000Z");
+      const r2Conv = store.createConversation(project.id, "R2-A1/S90 Boot backoff and cutoff");
+      const r2DueShortlyIso = new Date(r2NowMs + 100).toISOString();
+      const r2OnceTask = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Due 100ms after first start",
+        prompt: "Run shortly after boot",
+        schedule: { type: "once", runAt: r2DueShortlyIso },
+        boundConversationId: r2Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: r2DueShortlyIso,
+        now: new Date(r2NowMs - 60_000).toISOString(),
+      });
+      const r2BootService = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => r2Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(r2NowMs),
+      });
+      let bootFailCount = 0;
+      const r2ListSpy = vi.spyOn(store.scheduledTasks, "listActiveRuns").mockImplementation(() => {
+        if (bootFailCount < 2) {
+          bootFailCount += 1;
+          throw new Error(`Transient boot error ${bootFailCount}`);
+        }
+        return [];
+      });
+      expect(() => r2BootService.start()).toThrow("Transient boot error 1");
+      r2NowMs += 500;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(bootFailCount).toBe(2);
+      r2NowMs += 500;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(bootFailCount).toBe(2);
+      expect(store.scheduledTasks.get(r2OnceTask.id)?.enabled).toBe(true);
+      r2NowMs += 500;
+      await vi.advanceTimersByTimeAsync(500);
+      r2ListSpy.mockRestore();
+      const r2AfterBoot = store.scheduledTasks.get(r2OnceTask.id)!;
+      expect(r2AfterBoot.enabled).toBe(true);
+      expect(r2AfterBoot.lastRunStatus).toBeNull();
+      r2BootService.dispose();
+
+      let r2a3BroadcastCalls = 0;
+      const r2a3Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => r2Conv,
+        broadcast: () => {
+          r2a3BroadcastCalls += 1;
+          throw new Error("Observer broadcast boom");
+        },
+        enableProviders: true,
+        now: () => new Date("2030-12-01T10:05:00.000Z"),
+      });
+      expect(() => r2a3Service.start()).not.toThrow();
+      expect(r2a3BroadcastCalls).toBeGreaterThanOrEqual(1);
+      r2a3Service.dispose();
     } finally {
       warnSpy.mockRestore();
       vi.useRealTimers();

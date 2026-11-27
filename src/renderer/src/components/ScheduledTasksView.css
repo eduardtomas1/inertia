@@ -342,7 +342,7 @@ select.scheduled-control option:focus-visible {
   transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
-.scheduled-day-btn:hover:not(:disabled) {
+.scheduled-day-btn:hover:not(:disabled):not([aria-pressed="true"]) {
   color: var(--text);
 }
 

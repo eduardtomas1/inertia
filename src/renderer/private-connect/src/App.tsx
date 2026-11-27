@@ -572,7 +572,7 @@ export default function App({
         );
       }
     } finally {
-      if (!options?.silent && authorityGen === scheduledTasksAuthorityGenRef.current && reqSeq === scheduledTasksRequestSeqRef.current) {
+      if (isFresh()) {
         setScheduledTasksLoading(false);
       }
     }

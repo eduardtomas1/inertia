@@ -497,13 +497,11 @@ describe("ScheduledTasksView", () => {
     await waitFor(() => {
       expect(screen.getByText("Stored previous failure")).toBeVisible();
     });
-    // R1-B3: persisted errors must NOT have role="alert"
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Recent runs \(1\)/i }));
     expect(screen.getByText("Stored run error")).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
-    // R1-B2: clicking Delete focuses Cancel; clicking Cancel returns focus to Delete
     const deleteBtn = screen.getByRole("button", { name: "Delete" });
     await user.click(deleteBtn);
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
@@ -511,5 +509,84 @@ describe("ScheduledTasksView", () => {
     await user.click(cancelBtn);
     const restoredDeleteBtn = screen.getByRole("button", { name: "Delete" });
     expect(document.activeElement).toBe(restoredDeleteBtn);
+  });
+
+  it("S91: Run now opens a newly created chat once it arrives in snapshot", async () => {
+    const user = userEvent.setup();
+    const createdConvId = "99999999-9999-4999-8999-999999999999";
+    const onOpenConversation = vi.fn();
+    const request = vi.fn(async (command: { type: string }) => {
+      if (command.type === "scheduled-task.list") {
+        return {
+          type: "request.result" as const,
+          requestId: "req-list",
+          result: {
+            kind: "scheduled-tasks.list" as const,
+            tasks: [{ task: makeTask({ boundConversationId: null, lastConversationId: null }), recentRuns: [] }],
+          },
+        };
+      }
+      if (command.type === "scheduled-task.run-now") {
+        return {
+          type: "request.result" as const,
+          requestId: "req-run",
+          result: {
+            kind: "scheduled-task.ran" as const,
+            task: makeTask({ boundConversationId: null, lastConversationId: createdConvId, lastRunStatus: "queued" }),
+            run: makeRun({ conversationId: createdConvId, state: "queued" }),
+            conversationId: createdConvId,
+          },
+        };
+      }
+      throw new Error(`Unexpected command ${command.type}`);
+    });
+
+    const initialSnapshot = snapshot([], {
+      conversations: [conversation({ id: conversationId, projectId: firstProjectId })],
+    });
+    const view = render(
+      <ScheduledTasksView
+        snapshot={initialSnapshot}
+        status="online"
+        projectScopeId={null}
+        refreshNonce={0}
+        request={request as never}
+        onOpenConversation={onOpenConversation}
+        onError={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run now" })).toBeVisible();
+    });
+    await user.click(screen.getByRole("button", { name: "Run now" }));
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith({ type: "scheduled-task.run-now", payload: { taskId: taskOneId } });
+    });
+    expect(onOpenConversation).not.toHaveBeenCalled();
+
+    const createdConversation = conversation({
+      id: createdConvId,
+      projectId: firstProjectId,
+      title: "Morning repo check",
+    });
+    view.rerender(
+      <ScheduledTasksView
+        snapshot={{
+          ...initialSnapshot,
+          conversations: [...initialSnapshot.conversations, createdConversation],
+        }}
+        status="online"
+        projectScopeId={null}
+        refreshNonce={0}
+        request={request as never}
+        onOpenConversation={onOpenConversation}
+        onError={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onOpenConversation).toHaveBeenCalledWith(expect.objectContaining({ id: createdConvId }));
+    });
   });
 });

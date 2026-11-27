@@ -617,22 +617,18 @@ describe("Private Connect browser lifecycle", () => {
     render(<App initialPairingFragment={null} />);
     await waitFor(() => expect(screen.getByText("Release cutover")).toBeInTheDocument());
 
-    // R1-B4: one-shot schedule label is formatted locally (no raw UTC ISO string)
     expect(screen.queryByText(/2030-11-27T09:00:00\.000Z/u)).not.toBeInTheDocument();
     expect(screen.getByText(/^Once · /u)).toBeInTheDocument();
 
-    // R1-B3: stored lastError is rendered without role="alert"
     expect(screen.getByText("Stored remote error")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
-    // R1-B2: Delete focuses Cancel, Cancel returns focus to Delete
     fireEvent.click(screen.getByRole("button", { name: /Delete Release cutover/i }));
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     expect(document.activeElement).toBe(cancelBtn);
     fireEvent.click(cancelBtn);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: /Delete Release cutover/i }));
 
-    // R1-B1: failed delete keeps confirmation visible, displays per-row role="alert" error, and refreshes list
     const listBeforeDelete = liveSocket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
     fireEvent.click(screen.getByRole("button", { name: /Delete Release cutover/i }));
     fireEvent.click(screen.getByRole("button", { name: /Confirm delete Release cutover/i }));
@@ -643,9 +639,45 @@ describe("Private Connect browser lifecycle", () => {
         .toBeGreaterThan(listBeforeDelete);
     });
 
-    // R1-B5: 5s live poll passively refreshes scheduled tasks so desktop changes appear without manual Refresh
     listResponses = [{ ...onceTask, enabled: false, lastRunStatus: "completed", lastError: null }];
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(screen.getByText("Paused")).toBeInTheDocument();
+  });
+
+  it("R2-B1: silent 5s poll superseding an in-flight manual Refresh still clears loading state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    const pendingLists: Array<(value: unknown) => void> = [];
+    const baseImpl = socket.request.getMockImplementation()!;
+    const pollSocket = {
+      request: vi.fn((req: { type: string; requestId?: string }) => {
+        if (req.type === "scheduled-tasks.list") {
+          return new Promise<unknown>((resolve) => { pendingLists.push(resolve); });
+        }
+        return baseImpl(req);
+      }),
+      onClose: vi.fn(() => () => undefined),
+      close: vi.fn(),
+    };
+    vi.mocked(connectPrivateConnectSocket).mockResolvedValueOnce(pollSocket as never);
+
+    vi.useFakeTimers();
+    render(<App initialPairingFragment={null} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(pendingLists.length).toBeGreaterThanOrEqual(1);
+    const firstResolve = pendingLists[pendingLists.length - 1]!;
+    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(pendingLists.length).toBeGreaterThanOrEqual(2);
+    const silentResolve = pendingLists[pendingLists.length - 1]!;
+
+    await act(async () => {
+      firstResolve({ type: "response", requestId: "r-first", ok: true, result: { kind: "scheduled-tasks", tasks: [] } });
+      silentResolve({ type: "response", requestId: "r-silent", ok: true, result: { kind: "scheduled-tasks", tasks: [] } });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const refreshBtn = screen.getByRole("button", { name: "Refresh" });
+    expect(refreshBtn).toBeEnabled();
   });
 });

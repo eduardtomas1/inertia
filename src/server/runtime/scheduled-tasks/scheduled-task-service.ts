@@ -364,26 +364,28 @@ export class ScheduledTaskService {
 
   bindRunTurn(runIdOrQueueItemId: string, turnId: string): ScheduledTaskRun | null {
     const resolvedRunId = this.trackedByQueueItemId.get(runIdOrQueueItemId) ?? runIdOrQueueItemId;
-    const existing = this.dependencies.repository.getRun(resolvedRunId);
-    if (!existing || existing.state === "completed" || existing.state === "failed" || existing.state === "skipped") {
-      this.retryQueue.clearBinding(resolvedRunId);
-      return null;
-    }
-
+    const trackedHint = this.trackedByRunId.get(resolvedRunId);
     const nowIso = this.now().toISOString();
+    let existing: ScheduledTaskRun | null = null;
     let updatedRun: ScheduledTaskRun | null = null;
     let projectId: string | null = null;
     try {
+      existing = this.dependencies.repository.getRun(resolvedRunId);
+      if (!existing || existing.state === "completed" || existing.state === "failed" || existing.state === "skipped") {
+        this.retryQueue.clearBinding(resolvedRunId);
+        return null;
+      }
+      const runToBind = existing;
       const committed = this.runInTransaction(() => {
-        const nextRun = this.dependencies.repository.updateRun(existing.id, {
+        const nextRun = this.dependencies.repository.updateRun(runToBind.id, {
           state: "running", turnId, updatedAt: nowIso,
         });
-        const task = this.dependencies.repository.get(existing.taskId);
-        if (task && this.isLatestRunForTask(task.id, existing.id)) {
+        const task = this.dependencies.repository.get(runToBind.taskId);
+        if (task && this.isLatestRunForTask(task.id, runToBind.id)) {
           this.dependencies.repository.update(task.id, {
             now: nowIso,
             lastRunStatus: "running",
-            ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
+            ...(runToBind.conversationId ? { lastConversationId: runToBind.conversationId } : {}),
             lastTurnId: turnId,
             lastError: null,
           });
@@ -393,7 +395,13 @@ export class ScheduledTaskService {
       updatedRun = committed.updatedRun;
       projectId = committed.projectId;
     } catch (error) {
-      this.retryQueue.recordBindingFailure(existing.id, existing.taskId, turnId, error, () => this.flushPendingRetries());
+      this.retryQueue.recordBindingFailure(
+        existing?.id ?? resolvedRunId,
+        existing?.taskId ?? trackedHint?.taskId ?? "",
+        turnId,
+        error,
+        () => this.flushPendingRetries(),
+      );
       throw error;
     }
     this.retryQueue.clearBinding(existing.id);
@@ -456,31 +464,32 @@ export class ScheduledTaskService {
     turn: Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">,
   ): void {
     if (!isTerminalTurnStatus(turn.status)) return;
-    const run = this.resolveRunForTurn(turn);
-    if (!run) {
-      this.retryQueue.clearSettlement(turn.id);
-      return;
-    }
-    if (run.state === "completed" || run.state === "failed" || run.state === "skipped") {
-      this.retryQueue.clearSettlement(turn.id);
-      this.untrackRun(run.id);
-      return;
-    }
-
     const now = this.now();
     const settledAt = turn.completedAt ?? turn.updatedAt ?? now.toISOString();
-    const claimedMs = Date.parse(run.claimedAt);
-    const withinWindow = Number.isFinite(claimedMs)
-      && (now.getTime() - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS;
     const succeeded = turn.status === "completed";
     const errorMessage = succeeded
       ? null
       : normalizeScheduledTaskError(turn.terminalReason ?? `Scheduled run ${turn.status}.`);
 
+    let run: ScheduledTaskRun | null = null;
     let projectId: string | null = null;
     try {
+      run = this.resolveRunForTurn(turn);
+      if (!run) {
+        this.retryQueue.clearSettlement(turn.id);
+        return;
+      }
+      if (run.state === "completed" || run.state === "failed" || run.state === "skipped") {
+        this.retryQueue.clearSettlement(turn.id);
+        this.untrackRun(run.id);
+        return;
+      }
+      const targetRun = run;
+      const claimedMs = Date.parse(targetRun.claimedAt);
+      const withinWindow = Number.isFinite(claimedMs)
+        && (now.getTime() - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS;
       projectId = this.runInTransaction(() => {
-        this.dependencies.repository.updateRun(run.id, {
+        this.dependencies.repository.updateRun(targetRun.id, {
           state: succeeded ? "completed" : "failed",
           conversationId: turn.conversationId,
           turnId: turn.id,
@@ -488,9 +497,9 @@ export class ScheduledTaskService {
           finishedAt: settledAt,
           updatedAt: settledAt,
         });
-        const task = this.dependencies.repository.get(run.taskId);
+        const task = this.dependencies.repository.get(targetRun.taskId);
         if (!task) return null;
-        if (this.isLatestRunForTask(task.id, run.id)) {
+        if (this.isLatestRunForTask(task.id, targetRun.id)) {
           this.dependencies.repository.recordTaskOutcome(task.id, {
             lastRunAt: settledAt,
             lastRunStatus: succeeded ? "completed" : "failed",
@@ -504,79 +513,123 @@ export class ScheduledTaskService {
         return task.projectId;
       });
     } catch (error) {
+      const failedRun = run;
       this.retryQueue.recordSettlementFailure(
         turn,
-        run.taskId,
+        failedRun?.taskId ?? null,
         error,
         () => {
-          this.dependencies.repository.updateRun(run.id, {
-            state: "failed",
-            error: "Scheduled run settlement failed repeatedly.",
-            finishedAt: settledAt,
-            updatedAt: settledAt,
-          });
-          this.untrackRun(run.id);
+          const fallbackRun = failedRun ?? this.resolveRunForTurn(turn);
+          if (!fallbackRun) return;
+          const fallbackError = "Scheduled run settlement failed repeatedly.";
+          try {
+            this.dependencies.repository.updateRun(fallbackRun.id, {
+              state: "failed",
+              error: fallbackError,
+              finishedAt: settledAt,
+              updatedAt: settledAt,
+            });
+          } finally {
+            this.untrackRun(fallbackRun.id);
+          }
+          const fallbackTask = this.dependencies.repository.get(fallbackRun.taskId);
+          if (fallbackTask) {
+            if (this.isLatestRunForTask(fallbackTask.id, fallbackRun.id)) {
+              try {
+                this.dependencies.repository.recordTaskOutcome(fallbackTask.id, {
+                  lastRunAt: settledAt,
+                  lastRunStatus: "failed",
+                  lastConversationId: turn.conversationId,
+                  lastTurnId: turn.id,
+                  lastError: fallbackError,
+                  consecutiveFailures: fallbackTask.consecutiveFailures,
+                  updatedAt: settledAt,
+                });
+              } catch (summaryError) {
+                try {
+                  this.dependencies.repository.update(fallbackTask.id, {
+                    now: settledAt,
+                    lastRunAt: settledAt,
+                    lastRunStatus: "failed",
+                    lastConversationId: turn.conversationId,
+                    lastTurnId: turn.id,
+                    lastError: fallbackError,
+                  });
+                } catch {
+                  console.warn(
+                    `[scheduled-tasks] Fallback summary update failed for task ${fallbackTask.id}:`,
+                    summaryError instanceof Error ? summaryError.message : String(summaryError),
+                  );
+                }
+              }
+            }
+            this.broadcastChanged(fallbackTask.projectId);
+          }
         },
         () => this.flushPendingRetries(),
       );
       throw error;
     }
     this.retryQueue.clearSettlement(turn.id);
-    this.untrackRun(run.id);
+    if (run) this.untrackRun(run.id);
     if (projectId) this.broadcastChanged(projectId);
   }
 
   start(): void {
     if (this.started || this.disposed) return;
-    this.retryQueue.clearBootRetry();
-    const now = this.now();
-    const nowMs = now.getTime();
-    const nowIso = now.toISOString();
+    this.retryQueue.cancelBootRetryTimer();
+    const bootCutoff = this.retryQueue.getOrSetBootCutoff(this.now());
+    const cutoffMs = bootCutoff.getTime();
+    const cutoffIso = bootCutoff.toISOString();
     const affectedProjects = new Set<string>(this.retryQueue.drainBootBroadcastProjects());
     try {
       for (const run of this.dependencies.repository.listActiveRuns()) {
-        const projectId = this.reconcileActiveRunOnBoot(run, now);
+        const projectId = this.reconcileActiveRunOnBoot(run, bootCutoff);
         if (projectId) affectedProjects.add(projectId);
       }
-      for (const taskId of this.dependencies.repository.disableTasksForMissingOrArchivedTarget(nowIso)) {
+      for (const taskId of this.dependencies.repository.disableTasksForMissingOrArchivedTarget(cutoffIso)) {
         const task = this.dependencies.repository.get(taskId);
         if (task) affectedProjects.add(task.projectId);
       }
       for (const task of this.dependencies.repository.list()) {
         if (!task.enabled || task.nextRunAt === null) continue;
         const dueMs = Date.parse(task.nextRunAt);
-        if (!Number.isFinite(dueMs) || dueMs > nowMs) continue;
+        if (!Number.isFinite(dueMs) || dueMs > cutoffMs) continue;
         if (task.schedule.type === "once") {
           this.runInTransaction(() => {
             const missedRunId = this.createId();
             const claimed = this.dependencies.repository.claimRun({
               runId: missedRunId, taskId: task.id,
-              claimKey: `missed-boot:${task.id}:${task.nextRunAt ?? nowIso}:${missedRunId}`,
-              trigger: "schedule", scheduledFor: task.nextRunAt, claimedAt: nowIso,
+              claimKey: `missed-boot:${task.id}:${task.nextRunAt ?? cutoffIso}:${missedRunId}`,
+              trigger: "schedule", scheduledFor: task.nextRunAt, claimedAt: cutoffIso,
               nextRunAtAfterClaim: null, disableTaskAfterClaim: true,
             });
             if (claimed) {
               this.dependencies.repository.updateRun(claimed.id, {
-                state: "skipped", error: SCHEDULED_TASK_MISSED_BOOT_ERROR, finishedAt: nowIso, updatedAt: nowIso,
+                state: "skipped", error: SCHEDULED_TASK_MISSED_BOOT_ERROR, finishedAt: cutoffIso, updatedAt: cutoffIso,
               });
             }
             this.dependencies.repository.update(task.id, {
-              enabled: false, nextRunAt: null, now: nowIso, lastRunAt: nowIso,
+              enabled: false, nextRunAt: null, now: cutoffIso, lastRunAt: cutoffIso,
               lastRunStatus: "skipped", lastTurnId: null, lastError: SCHEDULED_TASK_MISSED_BOOT_ERROR,
             });
           });
         } else {
           this.dependencies.repository.update(task.id, {
-            nextRunAt: computeNextScheduledRunAt(task.schedule, now), now: nowIso,
+            nextRunAt: computeNextScheduledRunAt(task.schedule, bootCutoff), now: cutoffIso,
           });
         }
         affectedProjects.add(task.projectId);
       }
       this.started = true;
       this.rescheduleTimer();
-      for (const projectId of affectedProjects) this.broadcastChanged(projectId);
+      this.retryQueue.resetBootRetry();
     } catch (error) {
       this.started = false;
+      if (this.timer !== null) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
       this.retryQueue.addBootBroadcastProjects(affectedProjects);
       this.retryQueue.scheduleBootRetry(error, () => {
         if (!this.disposed && !this.started) {
@@ -584,6 +637,16 @@ export class ScheduledTaskService {
         }
       });
       throw error;
+    }
+    for (const projectId of affectedProjects) {
+      try {
+        this.broadcastChanged(projectId);
+      } catch (broadcastError) {
+        console.warn(
+          `[scheduled-tasks] Boot broadcast failed for project ${projectId}:`,
+          broadcastError instanceof Error ? broadcastError.message : String(broadcastError),
+        );
+      }
     }
   }
 

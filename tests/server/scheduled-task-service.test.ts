@@ -1493,6 +1493,37 @@ describe("ScheduledTaskService", () => {
       await drain();
       expect(runtime.store.orchestration.queue.getItem(staleItemId)?.state).toBe("cancelled");
       expect(runtime.provider.runCount).toBe(5);
+
+      // 6) S41: deleting the generated chat of a queued/active unbound scheduled run settles that run so future runs aren't wedged
+      const unboundDeleteChatTask = service.create({
+        projectId,
+        title: "Unbound chat deleted while queued",
+        prompt: "Check repo",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: null,
+      });
+      const deletedChat = runtime.store.createConversation(projectId, "Ephemeral scheduled chat", { activate: false });
+      const activeRunId = randomUUID();
+      const wedgedRun = runtime.store.scheduledTasks.claimRun({
+        runId: activeRunId,
+        taskId: unboundDeleteChatTask.id,
+        claimKey: `s41:${activeRunId}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: new Date().toISOString(),
+        nextRunAtAfterClaim: unboundDeleteChatTask.nextRunAt,
+      })!;
+      runtime.store.scheduledTasks.updateRun(wedgedRun.id, {
+        state: "queued",
+        conversationId: deletedChat.id,
+        queueItemId: randomUUID(),
+        updatedAt: new Date().toISOString(),
+      });
+      expect(runtime.store.scheduledTasks.hasActiveQueuedOrRunningOccurrence(unboundDeleteChatTask.id)).toBe(true);
+      runtime.store.deleteConversation(deletedChat.id);
+      service.onConversationDeleted(deletedChat.id, projectId);
+      expect(runtime.store.scheduledTasks.getRun(wedgedRun.id)?.state).toBe("skipped");
+      expect(runtime.store.scheduledTasks.hasActiveQueuedOrRunningOccurrence(unboundDeleteChatTask.id)).toBe(false);
     } finally {
       abort.abort();
       service?.dispose();

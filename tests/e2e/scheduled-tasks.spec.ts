@@ -59,8 +59,21 @@ test("creates, pauses, resumes, runs now, and deletes a scheduled task from the 
   });
   try {
     const page = app.page;
-    const schedulesNav = page.getByRole("button", { name: "Schedules" });
+    const tasksNav = page.getByRole("button", { name: "Tasks", exact: true });
+    const schedulesNav = page.getByRole("button", { name: "Schedules", exact: true });
+    const libraryNav = page.getByRole("button", { name: "Library", exact: true });
     await expect(schedulesNav).toBeVisible({ timeout: 20_000 });
+    const [tasksBox, schedulesBox, libraryBox] = await Promise.all([
+      tasksNav.boundingBox(),
+      schedulesNav.boundingBox(),
+      libraryNav.boundingBox(),
+    ]);
+    expect(tasksBox).not.toBeNull();
+    expect(schedulesBox).not.toBeNull();
+    expect(libraryBox).not.toBeNull();
+    expect(schedulesBox!.height).toBeLessThanOrEqual(36);
+    expect(schedulesBox!.y - (tasksBox!.y + tasksBox!.height)).toBeLessThanOrEqual(8);
+    expect(libraryBox!.y - (schedulesBox!.y + schedulesBox!.height)).toBeLessThanOrEqual(8);
     await schedulesNav.click();
 
     await expect(page.getByRole("heading", { name: "Schedules" })).toBeVisible({ timeout: 15_000 });

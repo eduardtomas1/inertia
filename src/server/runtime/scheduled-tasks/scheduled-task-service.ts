@@ -326,6 +326,12 @@ export class ScheduledTaskService {
   }
 
   onConversationDeleted(conversationId: string, projectId: string): void {
+    const now = this.now();
+    for (const run of this.dependencies.repository.listActiveRuns()) {
+      if (run.conversationId === conversationId) {
+        this.settleNonTurnRun(run, "skipped", "The run's chat was deleted.", now, false);
+      }
+    }
     for (const [runId, tracked] of this.trackedByRunId) {
       if (tracked.conversationId === conversationId) this.untrackRun(runId);
     }

@@ -288,8 +288,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Main sync onto cd0949a8 (#784 media preview polish) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks; keep 512-byte headroom.
-  coreJavaScript: 2_851_650 + 2_443 + 512,
+  // Main sync onto cd0949a8 (#784 media preview polish) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 2_854_516 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  coreJavaScript: 2_854_516 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

@@ -144,6 +144,7 @@ test("queued messages sit in-flow above the composer and support in-place editin
     await input.fill("Original queued step");
     await input.press("Tab");
     const queueList = page.getByRole("list", { name: "Queued messages" });
+    await expect(queueList).toBeVisible();
     await expect(queueList).toContainText("Original queued step");
 
     // Verify in-flow geometry: queue slot sits strictly above the composer with zero overlap.

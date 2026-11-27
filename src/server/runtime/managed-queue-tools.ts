@@ -270,7 +270,7 @@ function mapQueueConflictError(action: ManagedQueueAction, error: unknown): neve
 
 export async function executeManagedQueueMutation(
   dependencies: ManagedQueueToolDependencies,
-  source: Pick<Conversation, "id" | "title">,
+  source: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
   target: Conversation,
   args: unknown,
   operationId: string,
@@ -408,7 +408,7 @@ export async function executeManagedQueueMutation(
   try {
     await lease.ready;
     if (signal.aborted) throw new Error("The parent turn ended before the queue action ran.");
-    const { caller: initialFreshSource } = assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id);
+    const { caller: initialFreshSource } = assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source);
     const preClaimItem = queue.getItem(itemId);
     if (preClaimItem?.state === "delivered") {
       return json({
@@ -477,7 +477,7 @@ export async function executeManagedQueueMutation(
       await steerStart.result;
     }
     if (signal.aborted) throw new Error("The parent turn ended before the queue action ran.");
-    const { caller: freshSource } = assertFreshManagedDispatchAuthority(dependencies.store, initialFreshSource.id, target.id);
+    const { caller: freshSource } = assertFreshManagedDispatchAuthority(dependencies.store, initialFreshSource.id, target.id, source);
     const steerClosed = steerStart.kind === "lead" && steerStart.intake.kind === "closed";
     const steered = steerClosed
       ? { kind: "turn-ended" as const }

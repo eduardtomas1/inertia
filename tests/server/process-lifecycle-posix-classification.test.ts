@@ -36,7 +36,7 @@ describe("provider process-tree POSIX classification", () => {
   describe("terminal (PID-owned) tree with a delayed stop", () => {
     const pidTermination = (
       tablesByRead: (read: number) => string | null,
-      options: { groupSurvives?: boolean } = {},
+      options: { groupSurvives?: boolean; useRealPause?: boolean } = {},
     ) => {
       const killed = new Set<number>();
       const killProcess = vi.fn((target: number, signal?: NodeJS.Signals | number) => {
@@ -60,6 +60,7 @@ describe("provider process-tree POSIX classification", () => {
           platform: "linux",
           killProcess: killProcess as never,
           spawnProcessSync: spawnProcessSync as never,
+          ...(options.useRealPause ? {} : { pauseSync: () => undefined }),
           processCanExecute: () => null,
           processGroupCanExecute: () => null,
           waitMs: 1_000,
@@ -88,7 +89,7 @@ describe("provider process-tree POSIX classification", () => {
       const { terminate } = pidTermination((read) => {
         if (read === 1) firstReadAt = performance.now();
         return performance.now() - firstReadAt >= 60 ? "4242 1 Tl\n" : "4242 1 Rl\n";
-      });
+      }, { useRealPause: true });
       await expect(terminate()).resolves.toBe(true);
       expect(terminate.posixCleanupFailure).toBeNull();
     });
@@ -381,6 +382,7 @@ describe("provider process-tree POSIX classification", () => {
           platform: "linux",
           killProcess: killProcess as never,
           spawnProcessSync: spawnProcessSync as never,
+          pauseSync: () => undefined,
           processCanExecute: () => null,
           processGroupCanExecute: () => null,
           waitMs: 1_000,
@@ -427,6 +429,7 @@ describe("provider process-tree POSIX classification", () => {
           platform: "linux",
           killProcess: killProcess as never,
           spawnProcessSync: spawnProcessSync as never,
+          pauseSync: () => undefined,
           processCanExecute: () => null,
           processGroupCanExecute: () => null,
           waitMs: 1_000,
@@ -508,6 +511,7 @@ describe("provider process-tree POSIX classification", () => {
           platform: "linux" as const,
           killProcess: killProcess as never,
           spawnProcessSync: spawnProcessSync as never,
+          pauseSync: () => undefined,
           processCanExecute: () => null,
           processGroupCanExecute: () => null,
           waitMs: 1_000,

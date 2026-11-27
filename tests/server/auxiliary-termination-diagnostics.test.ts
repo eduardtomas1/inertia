@@ -71,7 +71,7 @@ describe("POSIX cleanup rows", () => {
     { name: "every ps read timed out", table: timedOutRead,
       expected: { row: "ps-read-timed-out", rootState: "unknown", snapshotReads: 8, snapshotTimeouts: 8 } },
     { name: "the stop was never observed", table: stoppedNeverObserved,
-      expected: { row: "stop-never-observed", rootState: "running", snapshotReads: 9, snapshotTimeouts: 0 } },
+      expected: { row: "stop-never-observed", rootState: "running", snapshotReads: 15, snapshotTimeouts: 0 } },
     { name: "the root ran and then disappeared", table: runningThenGone,
       expected: { row: "running-then-gone", rootState: "absent", snapshotReads: 2, snapshotTimeouts: 0 } },
     { name: "the root ran and every later ps read timed out", table: runningThenTimedOut,
@@ -151,7 +151,7 @@ describe("Codex control client cleanup classification", () => {
     await expect(withCodexControlClient(controlOptions(child), async () => "completed"))
       .rejects.toMatchObject({
         code: "process-tree-termination-unconfirmed",
-        posixCleanupDiagnostic: { row: "stop-never-observed", snapshotReads: 9 },
+        posixCleanupDiagnostic: { row: "stop-never-observed", snapshotReads: 15 },
       });
   });
 
@@ -161,7 +161,7 @@ describe("Codex control client cleanup classification", () => {
       .rejects.toMatchObject({
         code: "process-tree-termination-unconfirmed",
         message: expect.stringContaining("output closed early"),
-        posixCleanupDiagnostic: { row: "stop-never-observed", snapshotReads: 9 },
+        posixCleanupDiagnostic: { row: "stop-never-observed", snapshotReads: 15 },
       });
   });
 });

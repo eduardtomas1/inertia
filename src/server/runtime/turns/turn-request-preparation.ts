@@ -625,9 +625,14 @@ export function resolveTurnRequest(
       ?? dependencies.store.orchestration.backings.sessionWorkspaceKey(conversation.id, sessionId);
     return known === null || sameCheckoutPath(known, checkout);
   };
-  const resumeSessionId = reusableBacking?.nativeSessionId ?? conversationSessionForRoute;
+  const requestedResumeSessionId = request.resumeSessionId ?? null;
+  const resumeSessionId = reusableBacking?.nativeSessionId ?? conversationSessionForRoute ?? requestedResumeSessionId;
+  const latestTurnOwnsResumeSession = latestTurn !== null
+    && resumeSessionId !== null
+    && latestTurn.providerId === route.providerId
+    && (latestTurn.providerSessionAfter === resumeSessionId || latestTurn.providerSessionBefore === resumeSessionId);
   const previousContinuationIdentity = reusableBacking?.continuationIdentity ?? (candidateBacking ? null : latestTurn
-    ? latestTurnOwnsProviderSession
+    ? (latestTurnOwnsProviderSession || latestTurnOwnsResumeSession)
       ? latestTurn.continuationIdentity
       : null
     : conversationMatchesRouteProvider ? conversation.continuationIdentity ?? null : null);
@@ -1053,6 +1058,7 @@ export function resolveTurnRequest(
     content: assembled.visibleContent,
     attachments,
     activateConversation: request.activateConversation,
+    ...(hasSelectionOverride ? { allowProviderSelectionOverride: true } : {}),
     privateConnectDeviceId: request.privateConnectDeviceId,
     ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
     ...(request.delegatedCompletion ? { delegatedCompletion: request.delegatedCompletion } : {}),

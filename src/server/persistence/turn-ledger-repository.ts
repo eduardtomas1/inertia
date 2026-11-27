@@ -281,10 +281,11 @@ export class TurnLedgerRepository {
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
       assertNativeControlIdle(this.context.database, input.conversationId);
-      const allowQueuedSelectionProvider = input.queuedMessageId
-        ? this.queuedItemHasExplicitSelection(input.conversationId, input.queuedMessageId)
-        : false;
-      if (!allowQueuedSelectionProvider) {
+      const allowOverrideProvider = input.allowProviderSelectionOverride === true
+        || (input.queuedMessageId
+          ? this.queuedItemHasExplicitSelection(input.conversationId, input.queuedMessageId)
+          : false);
+      if (!allowOverrideProvider) {
         assertConversationProvider(this.context, input.conversationId, input.providerId);
       }
       if (input.providerSessionInvalidation) {
@@ -333,7 +334,7 @@ export class TurnLedgerRepository {
         ...input,
         userMessageId: message.id,
         requestedAt: message.createdAt,
-      }, allowQueuedSelectionProvider);
+      }, allowOverrideProvider);
       if (input.limitResetPlanId) {
         const accepted = cachedStatement(this.context.database, `
           UPDATE usage_limit_resume_plans SET state='completed', turn_id=?, error=NULL

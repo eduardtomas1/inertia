@@ -2384,6 +2384,12 @@ describe("Phase 5 sol-loop hardening (S3, S5, S11, S12)", () => {
       await f.drain();
       expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
 
+      // Remove any backing entity for the stopped turn so Resume must carry & validate the saved sessionId explicitly (S5),
+      // and verify the stopped turn is never marked superseded (S17).
+      f.store.orchestration.effects.connection.prepare(
+        "DELETE FROM orchestration_v2_entities WHERE kind = 'provider-backing' AND thread_id = ?",
+      ).run(f.conversationId);
+
       // Switch live composer to Claude BEFORE clicking Resume.
       const claudeSelection = providerNativeModelSelection({ providerId: "claude", modelId: "claude-sonnet-4" });
       f.store.updateConversation(f.conversationId, { providerId: "claude", modelSelection: claudeSelection });
@@ -2400,6 +2406,11 @@ describe("Phase 5 sol-loop hardening (S3, S5, S11, S12)", () => {
         sessionId: "native-codex-sess-1",
         prompt: expect.stringContaining(NATIVE_RESUME_TEXT),
       });
+      // S17: Cross-provider Resume must NOT mark the stopped turn superseded (would strip it from portable forks).
+      const superseded = f.store.orchestration.effects.connection.prepare(
+        "SELECT id FROM orchestration_v2_entities WHERE kind = 'superseded-turn' AND thread_id = ?",
+      ).all(f.conversationId);
+      expect(superseded).toEqual([]);
       // Live composer stays on Claude.
       expect(f.store.conversation(f.conversationId).providerId).toBe("claude");
     } finally { await f.close(); }

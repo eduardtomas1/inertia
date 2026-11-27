@@ -73,7 +73,7 @@ import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
 import { watcherAwareTurnHooks } from "./runtime/watcher/watcher-turn-hooks";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
-import { createCachedAccountUsageLimitHold, wrapWorkflowsForEffectiveSelection } from "./runtime/queued-message-runtime-helpers";
+import { createCachedAccountUsageLimitHold } from "./runtime/queued-message-runtime-helpers";
 import { registerRunControlEffectHandlers } from "./runtime/run-control-effect-handlers";
 import { createDelegationRuntime, type DelegationRuntime } from "./runtime/delegation/delegation-runtime";
 import type { ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
@@ -780,7 +780,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     pendingApprovals, pendingInputs, dataDirectory, enableProviders,
     attachmentResolver, generatedAttachments,
     prepareDocumentAttachments: options.prepareDocumentAttachments,
-    workflows: wrapWorkflowsForEffectiveSelection(agentWorkflows, store, providers), providerTerminalResumes,
+    workflows: agentWorkflows, providerTerminalResumes,
     providerInfo: () => providerInfo,
     verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
     prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes, broadcast }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,

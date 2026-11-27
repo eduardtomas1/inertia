@@ -169,6 +169,12 @@ export interface BeginAgentTurnInput
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
   /**
+   * True when this turn was admitted with an explicit pinned `modelSelectionOverride`
+   * (e.g. a queued item or cross-provider Resume continuation) whose provider may
+   * legitimately differ from the live composer's current provider.
+   */
+  allowProviderSelectionOverride?: boolean;
+  /**
    * Exact stale provider session that must be cleared atomically with this
    * fresh turn. A mismatched persisted session aborts the whole transaction.
    */

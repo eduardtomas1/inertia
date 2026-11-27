@@ -12,12 +12,9 @@ import type { MessageQueueResult, QueuedMessage } from "../../shared/queued-mess
 import type { RuntimeStore } from "../database";
 import { providerInstanceId } from "../orchestration-v2/provider-instance";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
-import type { ProviderManager } from "../providers";
-import { RuntimeRequestError } from "../runtime-errors";
 import { resetQuota } from "../usage/limit-reset-policy";
 import type { NativeUsageAccount } from "../usage/subscription-io";
 import { hasIncompleteWorktreeSetup } from "../workspace-path-authority";
-import { AgentWorkflowController } from "./agent-workflow-controller";
 
 export const RESUME_WORKTREE_SETUP_ERROR = "Retry worktree setup or choose a workspace before resuming the queue.";
 export const RESUME_USAGE_LIMIT_ERROR = "Continue the limited thread before resuming its queue.";
@@ -192,8 +189,8 @@ export function createCachedAccountUsageLimitHold(
 }
 
 export type ResumeContinuationPlan =
-  | { kind: "native"; content: string; modelSelection: ModelSelection; turnId: string; runId: string }
-  | { kind: "prompted"; content: string; modelSelection: ModelSelection; turnId: string; runId: string }
+  | { kind: "native"; content: string; modelSelection: ModelSelection; sessionId: string; turnId: string; runId: string }
+  | { kind: "prompted"; content: string; modelSelection: ModelSelection; sessionId: null; turnId: string; runId: string }
   | { kind: "queue" }
   | { kind: "noop" };
 
@@ -253,10 +250,10 @@ export function resolveResumeContinuation(
       providerInstanceId: providerInstanceId(latest.providerId, latest.continuationIdentity),
     }).length > 0;
   if (nativeSupported && hasResumableSession && !missedImages) {
-    return { kind: "native", content: NATIVE_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
+    return { kind: "native", content: NATIVE_RESUME_TEXT, modelSelection: latest.modelSelection, sessionId, turnId: latest.id, runId: latest.runId };
   }
   if (nativeSupported && missedImages) {
-    return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
+    return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, sessionId: null, turnId: latest.id, runId: latest.runId };
   }
   const hasWaiting = listQueueEntries(store, conversationId).some((entry) => entry.state === "waiting" && !entry.queueHeld);
   if (!nativeSupported) {
@@ -264,12 +261,12 @@ export function resolveResumeContinuation(
       || store.turnLedgerRepository.turnHasProviderActivity(conversationId, latest.id, latest.harnessId)
       || hasAssistantMessageForTurn(store, conversationId, latest.id);
     if (!reachedProvider) {
-      return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
+      return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, sessionId: null, turnId: latest.id, runId: latest.runId };
     }
     return hasWaiting ? { kind: "queue" } : { kind: "noop" };
   }
   if (hasWaiting) return { kind: "queue" };
-  return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
+  return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, sessionId: null, turnId: latest.id, runId: latest.runId };
 }
 
 /** Returns true once a run has already been accepted/started after the stored resume intent. */
@@ -687,50 +684,4 @@ export function rebindPreSetupWorktreeItems(
   return rebound;
 }
 
-/**
- * S15: Wraps `AgentWorkflowController` so pinned queued sends resolving `$skill`
- * inputs with an `effectiveConversation` evaluate skills against the pinned route
- * instead of the live composer route, while keeping live-route sends untouched.
- */
-export function wrapWorkflowsForEffectiveSelection(
-  workflows: AgentWorkflowController,
-  store: RuntimeStore,
-  providers: ProviderManager,
-): AgentWorkflowController {
-  const scopedControllerFor = (effectiveConversation: Conversation): AgentWorkflowController => {
-    const effectiveStore = Object.create(store) as RuntimeStore;
-    effectiveStore.conversation = (id: string) =>
-      id === effectiveConversation.id ? effectiveConversation : store.conversation(id);
-    effectiveStore.assertConversationProvider = (id: string, providerId: ProviderId) => {
-      if (id === effectiveConversation.id) {
-        if (effectiveConversation.providerId !== providerId) {
-          throw new RuntimeRequestError(`This route uses ${effectiveConversation.providerId}, not ${providerId}.`);
-        }
-        return;
-      }
-      store.assertConversationProvider(id, providerId);
-    };
-    return new AgentWorkflowController(effectiveStore, providers);
-  };
-  return new Proxy(workflows, {
-    get(target, prop, receiver) {
-      if (prop === "resolveTurnSkills") {
-        return async (conversationId: string, content: string, effectiveConversation?: Conversation) => {
-          if (!effectiveConversation) return await target.resolveTurnSkills(conversationId, content);
-          return await scopedControllerFor(effectiveConversation).resolveTurnSkills(conversationId, content);
-        };
-      }
-      if (prop === "assertTurnSkillsCurrent") {
-        return (conversationId: string, routeKey: string | null, effectiveConversation?: Conversation) => {
-          if (!effectiveConversation) {
-            target.assertTurnSkillsCurrent(conversationId, routeKey);
-            return;
-          }
-          scopedControllerFor(effectiveConversation).assertTurnSkillsCurrent(conversationId, routeKey);
-        };
-      }
-      const value = Reflect.get(target, prop, receiver);
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
-}
+

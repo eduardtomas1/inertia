@@ -364,7 +364,7 @@ describe("D.7 inertia_queue tool and H2/G5 managed queue semantics", () => {
     }
   });
 
-  it("S2: mode restart preserves the position-1 unheld replacement item if crash/failure occurs after atomic stop+enqueue", async () => {
+  it("S2/S7: mode restart preserves the position-1 held replacement item if crash/failure occurs after atomic stop+enqueue before post-cleanup authority check", async () => {
     const env = await setup({ orchestrated: true });
     try {
       env.turns.failCleanupOnce(new Error("Simulated crash during cleanup wait"));
@@ -374,14 +374,15 @@ describe("D.7 inertia_queue tool and H2/G5 managed queue semantics", () => {
         mode: "restart",
       }));
       expect(res.success).toBe(false);
-      // Turn was stopped, and the replacement prompt is durably queued at position 1 unheld.
+      // Turn was stopped, and the replacement prompt is durably queued at position 1 held
+      // so automatic dispatch cannot bypass the unrun post-cleanup authority check.
       expect(env.turns.isActive(env.childId)).toBe(false);
       const activeItems = env.store.orchestration.queue.listActive(env.childId);
       expect(activeItems).toHaveLength(1);
       expect(activeItems[0]).toMatchObject({
         state: "waiting",
         queuePosition: 1,
-        queueHeld: false,
+        queueHeld: true,
         createdBy: "agent",
         creationSource: "mcp",
       });
@@ -923,6 +924,88 @@ describe("D.7 inertia_queue tool and H2/G5 managed queue semantics", () => {
       ).all(env.childId) as Array<{ content: string }>;
       expect(transcript.filter((message) => message.content === "Acknowledged steer before crash (open effect)")).toHaveLength(1);
       expect(transcript.filter((message) => message.content === "Acknowledged steer before crash (retired effect)")).toHaveLength(1);
+    } finally {
+      env.store.close();
+    }
+  });
+
+  it("S16: promote_to_steer reads queued text after claiming so a desktop edit during lease.ready is never overwritten by stale text", async () => {
+    const env = await setup({ orchestrated: true });
+    try {
+      const itemId = env.store.orchestration.queue.enqueue({
+        conversationId: env.childId,
+        itemId: crypto.randomUUID(),
+        content: "Original pre-edit text",
+        createdBy: "agent",
+        creationSource: "mcp",
+      }).value.id;
+      let releaseLeaseReady!: () => void;
+      const leaseReady = new Promise<void>((resolve) => { releaseLeaseReady = resolve; });
+      const realAcquire = env.turns.acquireFollowUpAdmission;
+      env.turns.acquireFollowUpAdmission = (conversationId: string) => {
+        const lease = realAcquire(conversationId);
+        return lease ? Object.assign(lease, { ready: leaseReady }) : null;
+      };
+      let steeredContent: string | null = null;
+      env.turns.setSteerHandler(async (lease, input, _attachments, acknowledged) => {
+        steeredContent = input.content;
+        acknowledged?.();
+        return { kind: "accepted", message: { id: "follow-up-s16", turnId: lease.turnId } };
+      });
+
+      const promoting = env.bridge.invoke(env.toolCall("inertia_queue", {
+        conversationId: env.childId,
+        action: "promote_to_steer",
+        itemId,
+      }));
+
+      // Allow promote_to_steer to pass approval and suspend on lease.ready.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Desktop edit lands while promote_to_steer awaits lease.ready.
+      env.store.orchestration.queue.edit({
+        conversationId: env.childId,
+        itemId,
+        expectedRevision: 0,
+        content: "Updated text edited during lease wait",
+      });
+      releaseLeaseReady();
+
+      const result = await promoting;
+      expect(result.success).toBe(true);
+      expect(steeredContent).toBe("Updated text edited during lease wait");
+      expect(env.store.orchestration.queue.getItem(itemId)?.state).toBe("delivered");
+    } finally {
+      env.store.close();
+    }
+  });
+
+  it("S7: managed restart keeps replacement held during cleanup so automatic dispatch cannot claim it before post-cleanup authority check", async () => {
+    const env = await setup({ orchestrated: true });
+    try {
+      env.store.updateConversation(env.source.id, { accessMode: "auto-edit", interactionMode: "build" });
+      const beforeRestart = env.turns.queueCallCount();
+      let sawReplacementHeldDuringCleanup = false;
+      env.turns.setWaitForProviderCleanupHook(() => {
+        // During cleanup, the enqueued replacement MUST be held so automatic dispatch cannot claim it.
+        const activeItems = env.store.orchestration.queue.listActive(env.childId);
+        sawReplacementHeldDuringCleanup = activeItems.length === 1 && activeItems[0]!.queueHeld === true;
+        // Raise target's accessMode during cleanup to simulate ceiling drift before post-cleanup check.
+        env.store.updateConversation(env.childId, { accessMode: "full" });
+      });
+
+      const restartRes = await env.bridge.invoke(env.toolCall("inertia_send_message", {
+        conversationId: env.childId,
+        content: "Replacement that must not dispatch if ceiling narrows",
+        mode: "restart",
+      }));
+      env.turns.setWaitForProviderCleanupHook(null);
+
+      expect(restartRes.success).toBe(false);
+      expect(JSON.parse(restartRes.text).error.code).toBe("access_mode_escalation_denied");
+      expect(sawReplacementHeldDuringCleanup).toBe(true);
+      expect(env.store.orchestration.queue.listActive(env.childId)).toEqual([]);
+      expect(env.turns.queueCallCount()).toBe(beforeRestart);
     } finally {
       env.store.close();
     }

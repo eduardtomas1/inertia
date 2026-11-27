@@ -778,8 +778,9 @@ export class AgentWorkflowController {
   async listSkills(
     conversationId: string,
     forceReload: boolean,
+    effectiveConversation?: Conversation,
   ): Promise<AgentSkillSummary[]> {
-    const conversation = this.store.conversation(conversationId);
+    const conversation = effectiveConversation ?? this.store.conversation(conversationId);
     const cwd = this.store.conversationPath(conversationId);
     if (
       !isNativeCodexConversation(conversation)
@@ -798,7 +799,7 @@ export class AgentWorkflowController {
     ) return await existing.promise;
     const predecessor = existing?.promise ?? Promise.resolve([]);
     const promise = predecessor.catch(() => []).then(async () => {
-      const current = this.store.conversation(conversationId);
+      const current = effectiveConversation ?? this.store.conversation(conversationId);
       const currentCwd = this.store.conversationPath(conversationId);
       if (this.skillRouteKey(current, currentCwd) !== routeKey) {
         throw new RuntimeRequestError(
@@ -811,6 +812,7 @@ export class AgentWorkflowController {
         currentCwd,
         forceReload,
         routeKey,
+        effectiveConversation !== undefined,
       );
     });
     const flight: SkillDiscoveryFlight = {
@@ -834,12 +836,15 @@ export class AgentWorkflowController {
     cwd: string,
     forceReload: boolean,
     routeKey: string,
+    pinnedRoute = false,
   ): Promise<AgentSkillSummary[]> {
     if (isNativeClaudeConversation(conversation) || isNativePiConversation(conversation)) {
       const pi = isNativePiConversation(conversation);
       const source = pi ? "pi-native" as const : "claude-native" as const;
-      const rawSkills = pi ? await this.contact.piSkills(conversationId) : await this.contact.claudeSkills(conversationId, forceReload);
-      this.requireCurrentSkillRoute(conversationId, routeKey);
+      const rawSkills = pi
+        ? (pinnedRoute ? await this.contact.piSkillsAt(cwd) : await this.contact.piSkills(conversationId))
+        : (pinnedRoute ? await this.contact.claudeSkillsAt(cwd, forceReload) : await this.contact.claudeSkills(conversationId, forceReload));
+      this.requireCurrentSkillRoute(conversationId, routeKey, pinnedRoute ? conversation : undefined);
       return this.replaceSkills(
         conversationId,
         rawSkills,
@@ -849,7 +854,7 @@ export class AgentWorkflowController {
         routeKey,
       );
     }
-    const context = await this.contact.codexControl(conversationId);
+    const context = pinnedRoute ? await this.contact.codexControlAt(cwd) : await this.contact.codexControl(conversationId);
     const { rawSkills, warningCount } = codexSkillListing(
       await withCodexControlClient(
         context,
@@ -860,7 +865,7 @@ export class AgentWorkflowController {
       ),
       cwd,
     );
-    this.requireCurrentSkillRoute(conversationId, routeKey);
+    this.requireCurrentSkillRoute(conversationId, routeKey, pinnedRoute ? conversation : undefined);
     return this.replaceSkills(
       conversationId,
       rawSkills,
@@ -1037,33 +1042,27 @@ export class AgentWorkflowController {
   private requireCurrentSkillRoute(
     conversationId: string,
     expectedRouteKey: string,
+    effectiveConversation?: Conversation,
   ): void {
-    const conversation = this.store.conversation(conversationId);
+    const conversation = effectiveConversation ?? this.store.conversation(conversationId);
     const cwd = this.store.conversationPath(conversationId);
     if (this.skillRouteKey(conversation, cwd) !== expectedRouteKey) {
-      throw new RuntimeRequestError(
-        "The provider route changed while skills were refreshing.",
-      );
+      throw new RuntimeRequestError("The provider route changed while skills were refreshing.");
     }
   }
 
-  async resolveSkills(
-    conversationId: string,
-    content: string,
-  ): Promise<ProviderSkillInput[]> {
+  async resolveSkills(conversationId: string, content: string): Promise<ProviderSkillInput[]> {
     return (await this.resolveTurnSkills(conversationId, content)).inputs;
   }
 
   async resolveTurnSkills(
     conversationId: string,
     content: string,
-  ): Promise<{
-    inputs: ProviderSkillInput[];
-    routeKey: string | null;
-  }> {
+    effectiveConversation?: Conversation,
+  ): Promise<{ inputs: ProviderSkillInput[]; routeKey: string | null }> {
     this.pruneSkills();
     if (!content.includes("$")) return { inputs: [], routeKey: null };
-    const conversation = this.store.conversation(conversationId);
+    const conversation = effectiveConversation ?? this.store.conversation(conversationId);
     const routeKey = this.skillRouteKey(conversation, this.store.conversationPath(conversationId));
     const cachedSummaries = [...this.skills.values()]
       .filter(({ summary, routeKey: capabilityRoute }) =>
@@ -1074,7 +1073,8 @@ export class AgentWorkflowController {
       cachedSummaries.map(({ name }) => name));
     if (cachedNames.length === 0) {
       const supportsSkills = isNativeCodexConversation(conversation)
-        || isNativeClaudeConversation(conversation);
+        || isNativeClaudeConversation(conversation)
+        || isNativePiConversation(conversation);
       const discovery = this.skillDiscovery.get(conversationId);
       if (
         !supportsSkills
@@ -1088,7 +1088,7 @@ export class AgentWorkflowController {
         )
       ) return { inputs: [], routeKey: null };
     }
-    await this.listSkills(conversationId, false);
+    await this.listSkills(conversationId, false, effectiveConversation);
     const names = mentionedSkillNames(content, [...this.skills.values()]
       .filter(({ summary, routeKey: capabilityRoute }) =>
         summary.conversationId === conversationId
@@ -1125,9 +1125,10 @@ export class AgentWorkflowController {
   assertTurnSkillsCurrent(
     conversationId: string,
     routeKey: string | null,
+    effectiveConversation?: Conversation,
   ): void {
     if (routeKey !== null) {
-      this.requireCurrentSkillRoute(conversationId, routeKey);
+      this.requireCurrentSkillRoute(conversationId, routeKey, effectiveConversation);
     }
   }
 

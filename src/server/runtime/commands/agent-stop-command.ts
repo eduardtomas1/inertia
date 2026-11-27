@@ -51,6 +51,8 @@ export interface AgentStopRequest {
   skipQueueHold?: boolean;
   /** When false, reject with `superseded` before committing if the expected turn is no longer live at stop intake (default true). */
   commitExtraEventsOnNoOp?: boolean;
+  /** Optional synchronous guard invoked inside stop intake immediately before any commit. */
+  beforeCommit?: () => void;
 }
 
 function unheldQueueHoldPlan(
@@ -84,6 +86,7 @@ export async function requestAgentStop(dependencies: StopDependencies, request: 
     source: request.source, threadId: conversation.id, projectId: conversation.projectId,
     commandType: "agent.stop", rejection: request.rejection,
   }, (ticket) => {
+    request.beforeCommit?.();
     const holdPlan = unheldQueueHoldPlan(store, conversationId, request.skipQueueHold === true);
     const combinedEvents: OrchestrationDomainEvent[] = [...holdPlan.events, ...(request.extraEvents ?? [])];
     const runAfterCommit = (): void => {

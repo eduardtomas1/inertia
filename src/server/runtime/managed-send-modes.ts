@@ -546,7 +546,7 @@ export async function restartManagedTurn(
       routeIdentity,
       followsThreadSelection: true,
       placement: "front",
-      queueHeld: false,
+      queueHeld: true,
       skipHoldInheritance: true,
       requestedAt,
       origin: "command",
@@ -561,7 +561,7 @@ export async function restartManagedTurn(
       queue_position, queue_held, kind, created_by, creation_source, device_id, steer_follow_up_of_run_id,
       edit_revision, edited_at, dispatch_ordinal, run_id, delivery_mode, steer_when_ready_run_id,
       selection_json, follows_thread_selection
-    ) VALUES (?, ?, ?, '[]', ?, ?, ?, 'waiting', ?, NULL, NULL, NULL, ?, 0, 'message', 'agent', 'mcp', NULL, NULL, 0, NULL, 0, NULL, 'after-stop', NULL, NULL, 1)`).run(
+    ) VALUES (?, ?, ?, '[]', ?, ?, ?, 'waiting', ?, NULL, NULL, NULL, ?, 1, 'message', 'agent', 'mcp', NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, NULL, 1)`).run(
       projected.id, target.id, trimmed, digest, digest, routeIdentity,
       requestedAt, projected.queuePosition,
     );
@@ -609,6 +609,7 @@ export async function restartManagedTurn(
         extraEvents: [enqueueEvent],
         extraAfterCommit: syncRow,
         commitExtraEventsOnNoOp: false,
+        beforeCommit: () => assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id),
       },
     );
   } catch (error) {
@@ -648,6 +649,10 @@ export async function restartManagedTurn(
     withdrawQueuedRestartItem();
     throw error;
   }
+  if (queue.getItem(itemId)?.queueHeld) {
+    queue.release({ conversationId: target.id, cause: "R3-resume", itemIds: [itemId] });
+  }
+  db.prepare("UPDATE queued_messages SET queue_held = 0, delivery_mode = 'after-stop' WHERE id = ? AND conversation_id = ?").run(itemId, target.id);
   const ordered = queue.listActive(target.id);
   const firstUnheld = ordered.find((item) => item.state === "waiting" && !item.queueHeld);
   const canStartNow = !dependencies.turns.isActive(target.id)

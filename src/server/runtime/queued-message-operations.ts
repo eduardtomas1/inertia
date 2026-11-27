@@ -3,7 +3,7 @@ import type WebSocket from "ws";
 
 import type { AgentTurn, ChatAttachment, ClientCommand, Conversation, ModelSelection } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
-import { modelSelectionSchema, providerIdForHarness } from "../../shared/model-routing";
+import { modelSelectionSchema } from "../../shared/model-routing";
 import {
   MAX_QUEUED_USER_AND_AGENT_ITEMS,
   queueContentCharCount,
@@ -425,47 +425,22 @@ export async function dispatchPinnedResumePlan(
   requestId: string,
   plan: Extract<ReturnType<typeof resolveResumeContinuation>, { kind: "native" | "prompted" }>,
   socket?: WebSocket,
-  options?: { fromDispatch?: boolean },
+  _options?: { fromDispatch?: boolean },
 ): Promise<boolean> {
   if (!ctx.dependencies.enableProviders) return false;
-  const { store } = ctx.dependencies;
-  const conversation = store.conversation(conversationId);
-  const planProviderId = providerIdForHarness(plan.modelSelection.harnessId) ?? conversation.providerId;
-  if (planProviderId === conversation.providerId) {
-    await ctx.directTurnInteraction(
-      socket ?? (null as unknown as WebSocket),
-      {
-        type: "message.send",
-        requestId: `${requestId}:continue`,
-        payload: { conversationId, content: plan.content, attachments: [], activate: false },
-      },
-      { kind: "main" },
-      { modelSelectionOverride: plan.modelSelection },
-    );
-    return true;
-  }
-  const resumeItemId = randomUUID();
-  store.orchestration.queue.enqueue({
-    conversationId,
-    itemId: resumeItemId,
-    content: plan.content,
-    attachments: [],
-    kind: "message",
-    createdBy: "system",
-    creationSource: "server",
-    requeuedFromRunId: plan.runId,
-    requeuedFromTurnId: plan.turnId,
-    routeIdentity: routeIdentityForSelection(conversation, plan.modelSelection),
-    modelSelection: plan.modelSelection,
-    placement: "front",
-    queueHeld: false,
-    skipHoldInheritance: true,
-    origin: "automatic",
-  });
-  if (!options?.fromDispatch) {
-    await ctx.running.get(conversationId)?.catch(() => undefined);
-  }
-  await ctx.dispatch(conversationId, resumeItemId);
+  await ctx.directTurnInteraction(
+    socket ?? (null as unknown as WebSocket),
+    {
+      type: "message.send",
+      requestId: `${requestId}:continue`,
+      payload: { conversationId, content: plan.content, attachments: [], activate: false },
+    },
+    { kind: "main" },
+    {
+      modelSelectionOverride: plan.modelSelection,
+      ...(plan.kind === "native" ? { resumeSessionId: plan.sessionId } : {}),
+    },
+  );
   return true;
 }
 

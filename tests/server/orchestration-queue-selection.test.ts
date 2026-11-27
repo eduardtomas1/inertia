@@ -18,6 +18,7 @@ import {
   modelSelectionSchema,
   nativeModelSelection,
   providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
 import type { UsageAccount } from "../../src/shared/provider-usage-limits";
@@ -46,7 +47,6 @@ import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-mess
 import {
   computeQueueHoldReason,
   usageLimitHoldsQueue,
-  wrapWorkflowsForEffectiveSelection,
 } from "../../src/server/runtime/queued-message-runtime-helpers";
 import { AgentWorkflowController } from "../../src/server/runtime/agent-workflow-controller";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
@@ -91,7 +91,7 @@ function createEnv() {
   return { directory, workspace, store, project, conversation, codexSelection, claudeSelection };
 }
 
-function makeProviderInfo(overrides: Partial<Record<"codex" | "claude", Partial<ProviderInfo>>> = {}): ProviderInfo[] {
+function makeProviderInfo(overrides: Partial<Record<"codex" | "claude" | "pi", Partial<ProviderInfo>>> = {}): ProviderInfo[] {
   const codex: ProviderInfo = {
     id: "codex",
     name: "Codex",
@@ -122,7 +122,21 @@ function makeProviderInfo(overrides: Partial<Record<"codex" | "claude", Partial<
     ],
     ...overrides.claude,
   } as ProviderInfo;
-  return [codex, claude];
+  const pi: ProviderInfo = {
+    id: "pi",
+    name: "Pi",
+    command: "pi",
+    available: true,
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    cleanupConfirmed: true,
+    models: [
+      { id: "provider-default", label: "Pi Default", isDefault: true, inputModalities: ["text", "image"], reasoningEfforts: [], defaultReasoningEffort: null },
+    ],
+    ...overrides.pi,
+  } as ProviderInfo;
+  return [codex, claude, pi];
 }
 
 function makeProviderRuntime(options: {
@@ -140,8 +154,12 @@ function makeProviderRuntime(options: {
     resolveModelRoute(selection: ModelSelection) {
       const err = options.resolveError?.(selection);
       if (err) throw err;
-      const providerId = selection.harnessId === "claude-agent-sdk" ? "claude" : "codex";
-      const harnessId = selection.harnessId as "codex-app-server" | "claude-agent-sdk";
+      const providerId = selection.harnessId === "claude-agent-sdk"
+        ? "claude"
+        : selection.harnessId === "pi-rpc"
+          ? "pi"
+          : "codex";
+      const harnessId = selection.harnessId as "codex-app-server" | "claude-agent-sdk" | "pi-rpc";
       const backendProfile = providerNativeBackendProfile(providerId);
       return {
         providerId,
@@ -1159,6 +1177,7 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
       },
     });
     const claudeSkillPath = join(workspace, ".claude", "skills", "claude-review", "SKILL.md");
+    const piSkillPath = join(workspace, ".pi", "skills", "pi-check", "SKILL.md");
     const claudeSkills = vi.fn(async () => [{
       name: "claude-review",
       description: "Claude-specific review skill",
@@ -1166,17 +1185,19 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
       scope: "repo" as const,
       path: claudeSkillPath,
     }]);
+    const piSkills = vi.fn(async () => [{
+      name: "pi-check",
+      description: "Pi-specific check skill",
+      argumentHint: null,
+      scope: "repo" as const,
+      path: piSkillPath,
+    }]);
     const codexControlContext = vi.fn(async () => {
-      throw new Error("Codex skills must not be queried for a Claude-pinned queued item.");
+      throw new Error("Codex skills must not be queried for a Claude-pinned or Pi-pinned queued item.");
     });
-    const rawWorkflows = new AgentWorkflowController(
+    const workflows = new AgentWorkflowController(
       store,
-      { claudeSkills, codexControlContext } as never,
-    );
-    const wrappedWorkflows = wrapWorkflowsForEffectiveSelection(
-      rawWorkflows,
-      store,
-      { claudeSkills, codexControlContext } as never,
+      { claudeSkills, piSkills, codexControlContext } as never,
     );
     const tasks = new Set<Promise<unknown>>();
     let queue!: ReturnType<typeof createQueuedMessageRuntime>;
@@ -1210,7 +1231,7 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
       enableProviders: true,
       attachmentResolver: null,
       generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
-      workflows: wrappedWorkflows,
+      workflows,
       providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
       providerInfo: () => makeProviderInfo(),
       broadcast: () => undefined,
@@ -1255,6 +1276,27 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
         source: "claude-native",
         name: "claude-review",
         path: claudeSkillPath,
+      }]);
+
+      // S15 (Pi): a Pi-pinned queued send also resolves $pi-check via the shared AgentWorkflowController cache/discovery.
+      const piSelection = providerNativeModelSelection({ providerId: "pi", modelId: "provider-default" });
+      const piSkillItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: piSkillItemId,
+        content: "$pi-check verify this module",
+        modelSelection: piSelection,
+      });
+      await queue.sendNow(conversation.id, piSkillItemId, randomUUID());
+      await vi.waitFor(() => expect(capturedInputs).toHaveLength(2));
+      await drain();
+
+      expect(piSkills).toHaveBeenCalledOnce();
+      expect(capturedInputs[1]!.providerId).toBe("pi");
+      expect(capturedInputs[1]!.skills).toEqual([{
+        source: "pi-native",
+        name: "pi-check",
+        path: piSkillPath,
       }]);
     } finally {
       abort.abort();

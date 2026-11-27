@@ -49,4 +49,9 @@ export class ConversationProviderContact {
   ): ReturnType<ProviderManager["claudeSkills"]> {
     return await this.providers.claudeSkills(cwd, forceReload);
   }
+
+  async piSkillsAt(cwd: string): ReturnType<ProviderManager["piSkills"]> {
+    if (!this.providers.piSkills) throw new Error("Pi skill discovery is unavailable.");
+    return await this.providers.piSkills(cwd);
+  }
 }

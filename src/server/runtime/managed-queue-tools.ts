@@ -396,11 +396,6 @@ export async function executeManagedQueueMutation(
   if (!supportsActiveParentFollowUp(activeHarnessId)) {
     throw new Error("The managed chat's active provider does not support steering.");
   }
-  const contentRow = dependencies.store.orchestration.queue.getContent(target.id, itemId);
-  const content = contentRow?.content.trim() ?? "";
-  if (!content) {
-    throw new Error("This queued message's text is no longer available.");
-  }
   const lease = dependencies.turns.acquireFollowUpAdmission(target.id);
   if (!lease) {
     throw new Error("The managed chat cannot accept a steer right now.");
@@ -452,6 +447,11 @@ export async function executeManagedQueueMutation(
       claimed = true;
     } catch (error) {
       mapQueueConflictError("promote_to_steer", error);
+    }
+    const contentRow = queue.getContent(target.id, itemId);
+    const content = contentRow?.content.trim() ?? "";
+    if (!content) {
+      throw new Error("This queued message's text is no longer available.");
     }
     const steerStart = await dependencies.store.orchestration.authority.begin<
       { kind: "requested"; effectId: string } | { kind: "closed" } | { kind: "untracked" }

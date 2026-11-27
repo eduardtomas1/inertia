@@ -58,6 +58,7 @@ export const QUEUE_CLAIM_SUPERSEDED_CODE = "queue-claim-superseded";
 
 export interface SendMessageCommandOptions {
   modelSelectionOverride?: ModelSelection;
+  resumeSessionId?: string | null;
 }
 
 const inFlightSendContent = new Map<string, string>();
@@ -852,6 +853,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
           orchestrationRequest,
           queuedMessageId: dependencies.queuedMessage?.id,
           ...(selectionOverride ? { modelSelectionOverride: selectionOverride } : {}),
+          ...(options?.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
           // A queue row that names an unread follow-up starts its turn on that persisted message.
           ...(dependencies.queuedMessage?.userMessageId
             ? { adoptedFollowUp: { messageId: dependencies.queuedMessage.userMessageId } } : {}),

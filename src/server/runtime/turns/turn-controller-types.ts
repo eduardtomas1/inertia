@@ -339,6 +339,12 @@ export interface QueueTurnRequest {
    * `conversations`.
    */
   modelSelectionOverride?: ModelSelection | null;
+  /**
+   * Explicit stopped-turn native session ID carried by Resume (Phase 5 N7) so
+   * turn preparation validates and resumes the exact stopped session even after
+   * a mid-chat provider switch without an existing backing row.
+   */
+  resumeSessionId?: string | null;
 }
 
 export interface QueuedTurn {

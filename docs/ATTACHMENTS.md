@@ -18,12 +18,11 @@ Images continue to use the provider's image input.
 
 Each turn passes the agent the directories of the attachments referenced by its
 own chat. Read requests for files inside them are answered without an approval
-prompt: Claude's Read, Grep, Glob, LS and NotebookRead, Cursor and Kimi Code
-`read` requests, and OpenCode `read` permissions. Everything else, including
-writes to those files, reads of another chat's attachments, and OpenCode's
-separate `external_directory` check, follows the selected access mode. Codex
-reads files through its own sandbox, and Antigravity's command-line protocol
-offers no per-request decision.
+prompt: Claude's Read, Grep, Glob, LS and NotebookRead, Cursor, Kimi Code, Grok
+and Antigravity ACP `read` requests, and OpenCode `read` permissions. Everything
+else, including writes to those files, reads of another chat's attachments, and
+OpenCode's separate `external_directory` check, follows the selected access mode.
+Codex reads files through its own sandbox.
 
 Pasted text becomes a `.txt` attachment at **32 KiB of UTF-8**, or when inserting
 it would exceed the message limit. **Shift-paste** keeps text inline. If importing
@@ -55,11 +54,12 @@ background and animations become a still frame). Decoding remains bounded to
 40 megapixels across animation frames, with at most 256 frames. Processed images
 have at most 8,192 pixels per side. Providers may enforce additional limits.
 
-Provider requests have their own image limits. Claude, Cursor, and Kimi Code
-receive image bytes inside one request, so a message to them carries at most
-**20 MiB of images**. Every provider accepts at most **32 images** per message;
-Codex and OpenCode receive image paths, and Antigravity has no image input in
-Inertia. A message over its
+Provider requests have their own image limits. Claude, Cursor, Kimi Code, Grok,
+and Antigravity ACP receive image bytes inside one request (gated on each
+provider's negotiated image capability via Inertia's descriptor-bound reader),
+so a message to them carries at most **20 MiB of images**. Every provider
+accepts at most **32 images** per message; Codex and OpenCode receive image
+paths. A message over its
 provider's limit is refused before anything is sent, and the text and
 attachments stay in the composer or the queue.
 

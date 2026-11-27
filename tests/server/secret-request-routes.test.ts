@@ -149,10 +149,10 @@ describe("inertia_request_secret registration and routes", () => {
       if (SECRET_REQUEST_ROUTES[providerId] !== "prompt-fallback") expect(wait, providerId).toBeGreaterThanOrEqual(4 * 60_000);
     }
     const nodeFetchHeadersTimeoutMs = 300_000;
-    for (const providerId of ["cursor", "kimi"] as const) {
+    for (const providerId of ["cursor", "kimi", "antigravity"] as const) {
       expect(secretRequestWaitMs(providerId), providerId).toBeLessThan(nodeFetchHeadersTimeoutMs);
     }
-    expect(SECRET_REQUEST_ROUTES.antigravity).toBe("prompt-fallback");
+    expect(SECRET_REQUEST_ROUTES.antigravity).toBe("acp-mcp");
     const connection = { url: "http://127.0.0.1:1/mcp", bearerToken: "t".repeat(43) } as never;
     expect(openCodeHostMcpConfig(connection).timeout).toBe(30_000);
     expect(openCodeHostMcpConfig(connection, OPENCODE_SECRET_MCP_TIMEOUT_MS).timeout).toBeGreaterThan(secretRequestWaitMs("opencode"));

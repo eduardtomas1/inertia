@@ -99,6 +99,7 @@ describe("compact on return eligibility", () => {
       { harnessId: "kimi-acp", preset: "native", protocol: "kimi-managed" },
       { harnessId: "opencode-sdk", preset: "native", protocol: "opencode-native" },
       { harnessId: "cursor-acp", preset: "native", protocol: "cursor-managed" },
+      { harnessId: "antigravity-acp", preset: "native", protocol: "antigravity-managed" },
       { harnessId: "antigravity-cli", preset: "native", protocol: "antigravity-managed" },
       { harnessId: "grok-acp", preset: "native", protocol: "grok-managed" },
       { ...anthropicKey, preset: null },

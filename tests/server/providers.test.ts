@@ -1172,7 +1172,7 @@ setInterval(() => {}, 1000);
     });
   });
 
-  it("detects Antigravity from its version alone and never probes sign-in", async () => {
+  it("detects Antigravity from its version and ACP probe without probing sign-in", async () => {
     const executable = join(temporaryRoot(), "agy");
     const probes: string[][] = [];
     await expect(
@@ -1185,7 +1185,9 @@ setInterval(() => {}, 1000);
             probes.push([...args]);
             return {
               exitCode: 0,
-              output: "1.2.2",
+              output: args[0] === "--version"
+                ? "1.5.18"
+                : "Start an Agent Client Protocol (ACP) server",
               started: true,
               timedOut: false,
               cleanupConfirmed: true,
@@ -1196,21 +1198,21 @@ setInterval(() => {}, 1000);
     ).resolves.toMatchObject({
       available: true,
       executable,
-      version: "1.2.2",
+      version: "1.5.18",
       installState: "installed",
       authState: "unknown",
       canRun: true,
       cleanupConfirmed: true,
       statusMessage: "Installed; Antigravity checks your sign-in when a turn starts",
     });
-    expect(probes).toEqual([["--version"]]);
+    expect(probes).toEqual([["--version"], ["acp", "--help"]]);
     expect(providerAuthStatusArgs("antigravity")).toBeNull();
-    expect(providerAuthLoginArgs("antigravity")).toEqual([]);
+    expect(providerAuthLoginArgs("antigravity")).toEqual(["acp", "--login"]);
     expect(providerAuthLaunchEnvironment("antigravity", { TERM: "xterm" }))
-      .toEqual({ TERM: "xterm" });
+      .toEqual({ TERM: "xterm", AGY_CLI_DISABLE_AUTO_UPDATE: "true" });
   });
 
-  it("asks for an Antigravity update below the headless stream-json release", async () => {
+  it("asks for an Antigravity update below the required ACP release floor", async () => {
     const executable = join(temporaryRoot(), "agy");
     await expect(
       detectProvider(
@@ -1234,7 +1236,7 @@ setInterval(() => {}, 1000);
       installState: "installed",
       canRun: false,
       statusMessage:
-        "Antigravity 1.1.0 is installed, but Inertia needs 1.2.2 or newer. Run 'agy update' and refresh.",
+        "Antigravity 1.1.0 is installed, but Inertia needs 1.5.17 or newer. Run 'agy update' and refresh.",
     });
   });
 
@@ -1248,7 +1250,7 @@ setInterval(() => {}, 1000);
           executableCandidates: async () => [executable],
           probeProcess: async () => ({
             exitCode: 0,
-            output: "1.2.2",
+            output: "1.5.18",
             started: true,
             timedOut: false,
             cleanupConfirmed: true,

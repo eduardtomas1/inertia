@@ -26,7 +26,7 @@ Inertia won't start a chat on an agent older than the version it supports. **Set
 |---|---|---|
 | Claude Code | 2.1.309 or newer | Older versions ignore the restrictions Inertia sets and can write outside the project. |
 | OpenCode | 1.18.22 or newer, on 1.x | Older versions let a website install packages through OpenCode's local server. |
-| Antigravity | 1.2.2 or newer | Older versions have no headless mode. Run `agy update`. |
+| Antigravity | 1.5.17 or newer | Older versions lack built-in `agy acp` or its session, subagent, OAuth refresh, and sensitive-file fixes. Run `agy update`. |
 
 If Inertia can't read the version Claude Code or OpenCode prints, it doesn't hold that agent back for it.
 

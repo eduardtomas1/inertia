@@ -11,7 +11,7 @@ export const harnessByProvider = {
   opencode: "opencode-sdk",
   cursor: "cursor-acp",
   kimi: "kimi-acp",
-  antigravity: "antigravity-cli",
+  antigravity: "antigravity-acp",
   grok: "grok-acp",
 } as const;
 

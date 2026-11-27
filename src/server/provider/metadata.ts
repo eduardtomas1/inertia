@@ -119,6 +119,7 @@ interface CachedProviderMetadata {
   revision: number;
   models: CachedField<ProviderModel>;
   rateLimits: CachedField<ProviderRateLimit>;
+  sessionModelIds: Set<string>;
 }
 
 interface InFlightRefresh {
@@ -133,7 +134,7 @@ const DEFAULT_MODEL_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_RATE_LIMIT_TTL_MS = RATE_LIMIT_TTL_MS;
 const MAX_MODELS = 128;
 const MAX_RATE_LIMITS = 16;
-const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi", "grok"];
+const SESSION_REASONING_PROVIDERS: readonly ProviderId[] = ["cursor", "kimi", "antigravity", "grok"];
 const AUTH_STATES: readonly ProviderAuthState[] = ["checking", "authenticated", "unauthenticated", "configured", "unknown", "error"];
 
 // @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
@@ -442,13 +443,25 @@ function blankField<T>(): CachedField<T> {
 }
 
 function blankProvider(scope: ProviderMetadataScope): CachedProviderMetadata {
-  return { scope, revision: 0, models: blankField(), rateLimits: blankField() };
+  return { scope, revision: 0, models: blankField(), rateLimits: blankField(), sessionModelIds: new Set() };
 }
 
 function mergeById<T extends { id: string }>(previous: readonly T[], next: readonly T[]): T[] {
   const merged = new Map(previous.map((item) => [item.id, item]));
   for (const item of next) merged.set(item.id, item);
   return [...merged.values()];
+}
+
+function mergePrioritizedModels(
+  previous: readonly ProviderModel[],
+  next: readonly ProviderModel[],
+  prioritizedIds: ReadonlySet<string>,
+): ProviderModel[] {
+  const merged = mergeById(previous, next);
+  if (prioritizedIds.size === 0) return merged.slice(0, MAX_MODELS);
+  const prioritized = merged.filter(({ id }) => prioritizedIds.has(id));
+  const rest = merged.filter(({ id }) => !prioritizedIds.has(id));
+  return [...prioritized, ...rest].slice(0, MAX_MODELS);
 }
 
 function inheritUnobservedReasoning(previous: readonly ProviderModel[], next: ProviderModel[]): ProviderModel[] {
@@ -464,6 +477,50 @@ function inheritUnobservedReasoning(previous: readonly ProviderModel[], next: Pr
       reasoningObserved: true,
     };
   });
+}
+
+function preserveObservedAntigravityCapabilities(
+  previous: readonly ProviderModel[],
+  sessionModelIds: ReadonlySet<string>,
+  next: ProviderModel[],
+): ProviderModel[] {
+  if (previous.length === 0) return next;
+  const known = new Map(previous.map((model) => [model.id, model]));
+  const nextById = new Map(next.map((model) => [model.id, model]));
+  const nextHasDefault = next.some(({ isDefault }) => isDefault);
+  const mergeCapabilities = (prior: ProviderModel, incoming: ProviderModel): ProviderModel => {
+    const preserveReasoning = !incoming.reasoningObserved && prior.reasoningObserved === true;
+    const preserveImage = prior.inputModalities.includes("image") && !incoming.inputModalities.includes("image");
+    const preserveDefault = !nextHasDefault && prior.isDefault;
+    if (!preserveReasoning && !preserveImage && !preserveDefault) return incoming;
+    return {
+      ...incoming,
+      ...(preserveDefault ? { isDefault: true } : {}),
+      ...(preserveImage ? { inputModalities: ["text", "image"] as ProviderModel["inputModalities"] } : {}),
+      ...(preserveReasoning
+        ? {
+            reasoningOptions: prior.reasoningOptions,
+            defaultReasoningEffort: prior.defaultReasoningEffort,
+            reasoningObserved: true,
+          }
+        : {}),
+    };
+  };
+  const prioritizedIds = new Set<string>();
+  const prioritized: ProviderModel[] = [];
+  for (const prior of previous) {
+    if (!sessionModelIds.has(prior.id) && !prior.reasoningObserved && !prior.isDefault) continue;
+    prioritizedIds.add(prior.id);
+    const incoming = nextById.get(prior.id);
+    prioritized.push(incoming ? mergeCapabilities(prior, incoming) : prior);
+  }
+  const remaining = next
+    .filter((model) => !prioritizedIds.has(model.id))
+    .map((model) => {
+      const prior = known.get(model.id);
+      return prior ? mergeCapabilities(prior, model) : model;
+    });
+  return [...prioritized, ...remaining].slice(0, MAX_MODELS);
 }
 
 function safePersistenceLoad(persistence: ProviderMetadataPersistence | undefined): readonly PersistedProviderMetadata[] {
@@ -689,7 +746,17 @@ export class ProviderMetadataCache {
     const rateLimits = validateProviderRateLimits(metadata.rateLimits);
     let learned = false;
     if (models.length > 0 && AVAILABLE_FIELDS[scope.providerId].includes("models")) {
-      entry.models.values = options.merge ? mergeById(entry.models.values, models).slice(0, MAX_MODELS) : models;
+      if (provenance === "session") {
+        if (!options.merge) entry.sessionModelIds.clear();
+        for (const model of models) entry.sessionModelIds.add(model.id);
+      }
+      entry.models.values = options.merge
+        ? mergePrioritizedModels(
+            entry.models.values,
+            models,
+            provenance === "session" ? entry.sessionModelIds : new Set(),
+          )
+        : models;
       entry.models.updatedAt = attemptedAt;
       entry.models.lastAttemptedAt = attemptedAt;
       entry.models.provenance = provenance;
@@ -871,7 +938,15 @@ export class ProviderMetadataCache {
         if (entry[field].values.length > 0) entry[field].stale = true;
         continue;
       }
-      if (field === "models") entry.models.values = values as ProviderModel[];
+      if (field === "models") {
+        entry.models.values = scope.providerId === "antigravity"
+          ? preserveObservedAntigravityCapabilities(
+              entry.models.values,
+              entry.sessionModelIds,
+              values as ProviderModel[],
+            )
+          : values as ProviderModel[];
+      }
       else entry.rateLimits.values = values as ProviderRateLimit[];
       entry[field].updatedAt = attemptedAt;
       entry[field].provenance = "provider";
@@ -896,6 +971,22 @@ export class ProviderMetadataCache {
       provenance: models.length > 0 ? "persistent-cache" : null,
       stale: cached.modelsStale === true,
     };
+    let hasExplicitSessionMarker = false;
+    if (Array.isArray(cached.models)) {
+      for (const raw of cached.models) {
+        if (
+          raw && typeof raw === "object" && !Array.isArray(raw)
+          && (raw as { sessionObserved?: unknown }).sessionObserved === true
+        ) {
+          hasExplicitSessionMarker = true;
+          const id = cleanString((raw as { id?: unknown }).id, 160);
+          if (id) entry.sessionModelIds.add(id);
+        }
+      }
+    }
+    if (!hasExplicitSessionMarker && cached.modelsProvenance === "session") {
+      for (const model of models) entry.sessionModelIds.add(model.id);
+    }
     entry.rateLimits = {
       values: rateLimits,
       updatedAt: rateLimits.length > 0 ? timestamp(cached.rateLimitsUpdatedAt) : null,
@@ -950,9 +1041,16 @@ export class ProviderMetadataCache {
   private persist(entry: CachedProviderMetadata): void {
     if (!this.persistence) return;
     try {
+      const persistedModels = entry.sessionModelIds.size > 0
+        ? entry.models.values.map((model) => (
+            entry.sessionModelIds.has(model.id)
+              ? ({ ...model, sessionObserved: true } as ProviderModel)
+              : model
+          ))
+        : entry.models.values;
       this.persistence.save({
         scope: entry.scope,
-        models: entry.models.values,
+        models: persistedModels,
         modelsUpdatedAt: isoTimestamp(entry.models.updatedAt),
         modelsLastAttemptedAt: isoTimestamp(entry.models.lastAttemptedAt),
         modelsProvenance: entry.models.provenance,
@@ -1003,6 +1101,7 @@ export class ProviderMetadataCache {
             revision: previous.revision + 1,
             models: staleClone(previous.models),
             rateLimits: staleClone(previous.rateLimits),
+            sessionModelIds: new Set(),
           }
         : blankProvider(scope);
       this.entries.set(key, next);

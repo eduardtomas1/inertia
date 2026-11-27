@@ -16,6 +16,7 @@ export const KNOWN_HARNESS_IDS = [
 
 export const CURRENT_KNOWN_HARNESS_IDS = [
   ...KNOWN_HARNESS_IDS,
+  "antigravity-acp",
   "antigravity-cli",
   "grok-acp",
 ] as const;
@@ -477,7 +478,7 @@ const NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
 
 const CURRENT_NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   ...NATIVE_HARNESS,
-  antigravity: "antigravity-cli",
+  antigravity: "antigravity-acp",
   grok: "grok-acp",
 };
 
@@ -515,6 +516,7 @@ const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendPro
   "kimi-acp": "kimi-managed",
   "opencode-sdk": "opencode-native",
   "opencode-cli": "opencode-native",
+  "antigravity-acp": "antigravity-managed",
   "antigravity-cli": "antigravity-managed",
   "grok-acp": "grok-managed",
 };
@@ -591,7 +593,7 @@ export function providerNativeBackendProfile(
 }
 
 export function providerIdForHarness(harnessId: HarnessId): ProviderId | null {
-  if (harnessId === "antigravity-cli") return "antigravity";
+  if (harnessId === "antigravity-acp" || harnessId === "antigravity-cli") return "antigravity";
   if (harnessId === "grok-acp") return "grok";
   return legacyProviderIdForHarness(harnessId);
 }
@@ -660,7 +662,7 @@ export function resolveHarnessBackendCompatibility(
     const cursorManaged = harnessId === "cursor-acp" || harnessId === "cursor-cli";
     const kimiManaged = harnessId === "kimi-acp";
     const grokManaged = harnessId === "grok-acp";
-    const antigravityManaged = harnessId === "antigravity-cli";
+    const antigravityManaged = harnessId === "antigravity-acp" || harnessId === "antigravity-cli";
     const openCodeNative = harnessId === "opencode-sdk" || harnessId === "opencode-cli";
     return {
       harnessId,
@@ -673,6 +675,7 @@ export function resolveHarnessBackendCompatibility(
         || harnessId === "claude-agent-sdk"
         || harnessId === "kimi-acp"
         || harnessId === "grok-acp"
+        || harnessId === "antigravity-acp"
         || harnessId === "opencode-sdk"
       ),
       reasonCode: cursorManaged
@@ -693,7 +696,9 @@ export function resolveHarnessBackendCompatibility(
         : grokManaged
           ? "Grok manages its backend; model and effort follow the active ACP session."
         : antigravityManaged
-          ? "Antigravity manages its backend; each turn uses the model and effort selected for it."
+          ? harnessId === "antigravity-acp"
+            ? "Antigravity manages its backend; model and effort follow the active ACP session."
+            : "Antigravity manages its backend; each turn uses the model and effort selected for it."
         : openCodeNative
           ? "OpenCode provides its native provider and model catalog."
           : "Built-in native harness and backend pairing.",
@@ -717,6 +722,7 @@ export function resolveHarnessBackendCompatibility(
     || harnessId === "cursor-cli"
     || harnessId === "kimi-acp"
     || harnessId === "grok-acp"
+    || harnessId === "antigravity-acp"
     || harnessId === "antigravity-cli"
     || harnessId === "opencode-sdk"
     || harnessId === "opencode-cli"

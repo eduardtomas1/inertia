@@ -1,17 +1,29 @@
 # Antigravity integration investigation — 2026-09-07
 
-Status: **investigation complete; ACP route not used**.
+Update, 2026-11-26: Inertia now runs Antigravity over the native Go ACP server
+built directly into the `agy` CLI (`agy acp --stdio --process-per-session`,
+harness `antigravity-acp`, requiring `agy >= 1.5.17`), superseding both the
+September 2026 standalone Python `antigravity-acp` 1.1.1 archive investigated
+below and the temporary headless `stream-json` wrapper (`antigravity-cli`).
+Built-in `agy acp` ships across all desktop platforms and architectures
+(including macOS Intel `darwin_amd64`) and shares the user's local `agy`
+installation, sign-in, and updater. See
+[the Antigravity ACP contract](HARNESS_CAPABILITIES.md#antigravity-acp-contract)
+for the active protocol, compliance rules, and remaining authenticated
+verification items. The September 2026 notes below are preserved as historical
+evidence.
+
+Status (historical, 2026-09-07): **investigation complete; standalone Python
+ACP 1.1.1 route not used**.
 No Gemini provider, persisted identity, session, authentication configuration,
 installer, or user application was changed by this investigation. A complete
 ACP adapter is not claimed: the currently published ACP runtime has a
 confirmed terminal-failure ambiguity described below.
 
-Update, 2026-09-13: Inertia now ships Antigravity through the documented
-headless `agy` CLI (`antigravity` / `antigravity-cli` /
-`builtin:antigravity`) instead of this ACP server. Its contract, limits, and
-unverified protocol details are in
-[the harness capabilities](HARNESS_CAPABILITIES.md#antigravity-headless-contract).
-The ACP findings below remain the reason that route was not taken.
+Update, 2026-09-13 (superseded 2026-11-26): Inertia previously shipped
+Antigravity through the headless `agy` CLI (`antigravity-cli`) instead of the
+standalone Python ACP server. The ACP findings below remain historical evidence
+for why the 1.1.1 archive was not taken.
 
 ## Product and transport boundaries
 

@@ -752,10 +752,10 @@ press, resize, hover, select, drag, open tab, close tab) carry the MCP
 OpenCode receive the destructive hint because Inertia already allows its own
 tools in their native permission layers, so the hint cannot add a prompt
 before Inertia's approval. Codex receives dynamic tools, which carry no
-annotations. Cursor and Kimi keep `destructiveHint: false`: in a Supervised
-chat Inertia shows their native permission requests to the user, and neither
-agent documents whether it asks for permission because of this hint, so the
-hint could add a second prompt. Antigravity does not receive Inertia tools.
+annotations. Cursor, Kimi, Grok and Antigravity ACP keep `destructiveHint: false`:
+in a Supervised chat Inertia shows their native permission requests to the user,
+and none of these agents documents whether it asks for permission because of
+this hint, so the hint could add a second prompt.
 
 An aborted or settled call loses browser authority immediately. Every request
 carries a fresh UUID plus the server-owned conversation, run, and turn UUIDs.

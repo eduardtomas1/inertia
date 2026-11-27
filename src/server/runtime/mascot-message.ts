@@ -4,7 +4,7 @@ import { sanitizeProviderActivityDetail } from "../provider/activity-detail";
 
 const COMMAND_LIMIT = 60;
 const SKIPPED = /^(?:Patch updated|Plan updated|Plan completed|Hook · |Claude hook|Claude tool summary)/u;
-const GENERIC = /^(?:Run command|Cursor tool|Kimi Code tool|Dynamic tool|MCP tool|File change|Command|Tool|Activity)$/iu;
+const GENERIC = /^(?:Run command|Cursor tool|Kimi Code tool|Antigravity tool|Dynamic tool|MCP tool|File change|Command|Tool|Activity)$/iu;
 const PHRASES: Array<[RegExp, string, string, string]> = [
   [/todo ?read|read todos/u, "Reading the plan", "Read the plan", "Could not read the plan"],
   [/todo|plan|task ?(?:create|update)/u, "Updating the plan", "Updated the plan", "Could not update the plan"],

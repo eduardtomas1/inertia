@@ -171,7 +171,7 @@ describe("provider slash command projection", () => {
   });
 
   it("advertises nothing for providers that cannot run commands from prompt text", () => {
-    for (const providerId of ["codex", "opencode", "antigravity"] as const) {
+    for (const providerId of ["codex", "opencode"] as const) {
       expect(providerSlashCommands(providerId, [command("review")])).toEqual([]);
     }
   });
@@ -184,6 +184,15 @@ describe("provider slash command projection", () => {
     ])).toEqual([{ name: "review", description: "Review the diff", argumentHint: "<focus>" }]);
     expect(acpSlashCommands("kimi", [{ name: "/init", description: "Write AGENTS.md" }]))
       .toEqual([{ name: "init", description: "Write AGENTS.md", argumentHint: null }]);
+    expect(acpSlashCommands("antigravity", [
+      { name: "review", description: "Review changes", input: { hint: "<scope>" } },
+      { name: "/model", description: "Switch model" },
+      { name: "effort", description: "Set effort" },
+      { name: "settings", description: "Open settings" },
+      { name: "clear", description: "Clear history" },
+      { name: "plan", description: "Plan mode" },
+      { name: "quota", description: "Show quota" },
+    ])).toEqual([{ name: "review", description: "Review changes", argumentHint: "<scope>" }]);
   });
 });
 

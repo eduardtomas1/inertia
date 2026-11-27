@@ -317,25 +317,26 @@ process.exit(1);
 
 function antigravityFake(state: string): string {
   return `${fakePrelude("antigravity", state)}
-if (args[0] === "--version") { console.log("1.2.3"); process.exit(0); }
-if (args.length === 0) {
-  record({ kind: "login", tty: process.stdin.isTTY === true });
+if (args[0] === "--version") { console.log("1.5.18"); process.exit(0); }
+if (args[0] === "acp" && args[1] === "--help") { console.log("Usage: agy acp [options]\\n\\nStart the Agent Client Protocol (ACP) stdio server"); process.exit(0); }
+if (args.join(" ") === "acp --login" || args.length === 0) {
+  record({ kind: "login", tty: process.stdin.isTTY === true, data: args.join(" ") });
   (async () => {
-    await write("Antigravity CLI 1.2.3\\r\\n\\r\\nYou are not signed in. Open this URL, approve access, then paste the authorization code:\\r\\nhttps://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&redirect_uri=https%3A%2F%2Fantigravity.google%2Fauth%2Fcode&response_type=code&scope=openid%20email&state=fixture-state\\r\\n\\r\\n");
-    for (;;) {
-      const code = await readCode("Authorization code: ", true);
-      if (code === EXPECTED) break;
-      await write("Invalid authorization code. Try again.\\r\\n");
-    }
-    signIn();
-    await write("Signed in as synthetic@example.com.\\r\\n\\r\\n");
-    const command = await readCode("> ", true);
-    await finish(command === "/quit" ? "Goodbye.\\r\\n" : "", command === "/quit" ? 0 : 1);
-  })();
-  return;
+    await write("Antigravity CLI 1.5.18\\r\\n\\r\\nYou are not signed in. Open this URL, approve access, then paste the authorization code:\\r\\nhttps://accounts.google.com/o/oauth2/v2/auth?client_id=fixture&redirect_uri=https%3A%2F%2Fantigravity.google%2Fauth%2Fcode&response_type=code&scope=openid%20email&state=fixture-state\\r\\n\\r\\n");
+    for (;;) { const code = await readCode("Authorization code: ", true); if (code === EXPECTED) break; await write("Invalid authorization code. Try again.\\r\\n"); }
+    signIn(); await finish("Signed in as synthetic@example.com.\\r\\n", 0);
+  })(); return;
 }
-record({ kind: "unexpected", data: args.join(" ") });
-process.exit(1);
+if (args[0] !== "acp") { record({ kind: "unexpected", data: args.join(" ") }); process.exit(1); }
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    const authMethods = [{ id: "oauth-personal", name: "Log in with Google" }, { id: "gemini-api-key", name: "Gemini API key" }, ...(message.params?.clientCapabilities?.auth?.terminal === true ? [{ id: "terminal-login", name: "Log in from the terminal", type: "terminal", args: ["--login"] }] : [])];
+    return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentInfo: { name: "Antigravity ACP Server", version: "1.5.18" }, agentCapabilities: { loadSession: true, promptCapabilities: { image: true, audio: false, embeddedContext: true }, mcpCapabilities: { http: true }, sessionCapabilities: { resume: {}, close: {}, load: {} } }, authMethods } });
+  }
+  if (message.id !== undefined) send({ jsonrpc: "2.0", id: message.id, error: { code: -32000, message: "Authentication required" } });
+});
 `;
 }
 
@@ -778,11 +779,9 @@ test("Antigravity sign-in accepts a retry and a menu paste in its own prompt", a
   await expect(dialog).toContainText(`Authorization code: ${CODES.antigravity}`);
   await app.page.keyboard.press("Enter");
   await expect(dialog).toContainText("Signed in as synthetic@example.com.");
-  await app.page.keyboard.type("/quit");
-  await app.page.keyboard.press("Enter");
   await expect(dialog.getByText("Antigravity closed — your next turn will check sign-in", { exact: true })).toBeVisible();
   expect((await eventsFor(pid, "submit")).map((event) => event.value))
-    .toEqual(["typed-wrong-code", CODES.antigravity, "/quit"]);
+    .toEqual(["typed-wrong-code", CODES.antigravity]);
   await expect.poll(() => executableProcessExists(pid)).toBe(false);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).toBeHidden();

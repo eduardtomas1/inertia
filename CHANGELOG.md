@@ -2,6 +2,23 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## Unreleased
+
+### Providers
+
+- Upgraded Antigravity from the headless CLI wrapper (`antigravity-cli`, `agy >= 1.2.2`)
+  to the built-in official Agent Client Protocol server (`agy acp --stdio
+  --process-per-session`, harness `antigravity-acp`, requiring `agy >= 1.5.17`)
+  across macOS (Intel and Apple Silicon), Linux, and Windows.
+- Antigravity chats now support **Supervised** interactive approvals, native
+  image attachments and Window Snapshots, server-advertised models and reasoning
+  effort levels (including **Extra high** / `xhigh` and **Max**, while hiding
+  effort controls on fixed-effort models like Orchestrator), reasoning
+  summaries, tool diffs, plans, provider slash commands, context window usage
+  updates, Inertia HTTP MCP host tools (Browser, CAD, workspace, visual replies,
+  and secret cards), approval-routed Private Connect prompts, and
+  approval-enforced read-only Watchers.
+
 ## 0.0.85 — 2026-11-25
 
 Full-history message search, an editable queue that keeps unsent files across

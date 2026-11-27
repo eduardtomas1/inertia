@@ -475,6 +475,7 @@ describe("Antigravity replaces the Gemini CLI provider", { concurrent: false }, 
 
     expect(schemaVersion(database)).toBe(ANTIGRAVITY_SCHEMA_VERSION);
     const antigravitySelection = providerNativeModelSelection({ providerId: "antigravity" });
+    const legacyAntigravitySelection = { ...antigravitySelection, harnessId: "antigravity-cli" };
     const conversation = database.prepare(`
       SELECT provider_id, provider_session_id, model, reasoning_effort,
              model_selection_json, continuation_identity_json
@@ -487,7 +488,7 @@ describe("Antigravity replaces the Gemini CLI provider", { concurrent: false }, 
       reasoning_effort: "",
       continuation_identity_json: null,
     });
-    expect(JSON.parse(conversation.model_selection_json!)).toEqual(antigravitySelection);
+    expect(JSON.parse(conversation.model_selection_json!)).toEqual(legacyAntigravitySelection);
     const turn = database.prepare(`
       SELECT provider_id, harness_id, backend_profile_id, model, model_alias, reasoning_effort,
              provider_session_before, provider_session_after, model_selection_json,
@@ -505,7 +506,7 @@ describe("Antigravity replaces the Gemini CLI provider", { concurrent: false }, 
       provider_session_after: null,
       continuation_identity_json: null,
     });
-    expect(JSON.parse(turn.model_selection_json!)).toEqual(antigravitySelection);
+    expect(JSON.parse(turn.model_selection_json!)).toEqual(legacyAntigravitySelection);
     expect(database.prepare("SELECT * FROM messages ORDER BY id").all()).toEqual(messages);
     expect(database.prepare("SELECT * FROM conversations WHERE id = ?").get(fixture.codexConversationId))
       .toEqual(codexConversation);
@@ -523,7 +524,7 @@ describe("Antigravity replaces the Gemini CLI provider", { concurrent: false }, 
     expect(database.prepare("SELECT profile_id FROM model_backend_profiles ORDER BY 1").pluck().all())
       .toEqual(["custom:retained-anthropic"]);
     expect(JSON.parse(database.prepare("SELECT selection_json FROM model_backend_defaults").pluck().get() as string))
-      .toEqual(antigravitySelection);
+      .toEqual(legacyAntigravitySelection);
     expect(database.prepare(`
       SELECT default_provider, default_model, default_reasoning_effort, provider_identity_labels_json FROM app_state
     `).get()).toEqual({
@@ -588,7 +589,10 @@ describe("Antigravity replaces the Gemini CLI provider", { concurrent: false }, 
     expect(schemaVersion(database)).toBe(ANTIGRAVITY_SCHEMA_VERSION);
     expect(database.pragma("foreign_key_check")).toEqual([]);
     expect(textReferences(database, "custom:gemini-team")).toEqual([]);
-    const antigravitySelection = providerNativeModelSelection({ providerId: "antigravity" });
+    const antigravitySelection = {
+      ...providerNativeModelSelection({ providerId: "antigravity" }),
+      harnessId: "antigravity-cli",
+    };
     const conversation = database.prepare(`
       SELECT provider_id, provider_session_id, continuation_identity_json, model_selection_json
       FROM conversations WHERE id = ?

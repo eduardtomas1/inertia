@@ -728,6 +728,12 @@ describe("provider environment discovery", { concurrent: false }, () => {
       OPENAI_API_KEY: "openai-secret",
       ANTHROPIC_API_KEY: "anthropic-secret",
       GEMINI_API_KEY: "gemini-secret",
+      GOOGLE_GEMINI_BASE_URL: "https://gemini.example.test",
+      AGY_ADC_AUTH: "1",
+      GOOGLE_CLOUD_PROJECT: "acme-cloud-project",
+      GOOGLE_CLOUD_QUOTA_PROJECT: "acme-quota-project",
+      GOOGLE_CLOUD_LOCATION: "global",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google-adc.json",
     });
 
     expect(environment).toMatchObject({
@@ -745,6 +751,12 @@ describe("provider environment discovery", { concurrent: false }, () => {
     expect(environment).not.toHaveProperty("OPENAI_API_KEY");
     expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
     expect(environment).not.toHaveProperty("GEMINI_API_KEY");
+    expect(environment).not.toHaveProperty("GOOGLE_GEMINI_BASE_URL");
+    expect(environment).not.toHaveProperty("AGY_ADC_AUTH");
+    expect(environment).not.toHaveProperty("GOOGLE_CLOUD_PROJECT");
+    expect(environment).not.toHaveProperty("GOOGLE_CLOUD_QUOTA_PROJECT");
+    expect(environment).not.toHaveProperty("GOOGLE_CLOUD_LOCATION");
+    expect(environment).not.toHaveProperty("GOOGLE_APPLICATION_CREDENTIALS");
   });
 
   it("forbids Windows command shims from resolving bare names in the workspace", () => {
@@ -837,6 +849,47 @@ describe("provider environment discovery", { concurrent: false }, () => {
     });
     expect(providerChildEnvironment("kimi", source)).not.toHaveProperty("GITHUB_TOKEN");
     expect(providerChildEnvironment("kimi", source)).not.toHaveProperty("DATABASE_URL");
+  });
+
+  it("passes Antigravity's documented API-key and ADC environment while redacting only the API key", () => {
+    const source = {
+      PATH: process.env.PATH,
+      GEMINI_API_KEY: "gemini-fixture-secret-key",
+      GOOGLE_GEMINI_BASE_URL: "https://gemini.example.test/v1",
+      AGY_ADC_AUTH: "1",
+      GOOGLE_CLOUD_PROJECT: "acme-cloud-project",
+      GOOGLE_CLOUD_QUOTA_PROJECT: "acme-quota-project",
+      GOOGLE_CLOUD_LOCATION: "global",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google-adc.json",
+      OPENAI_API_KEY: "unrelated-openai-secret",
+      GITHUB_TOKEN: "unrelated-github-token",
+      DATABASE_URL: "postgres://unrelated-secret",
+    };
+
+    const antigravity = providerChildEnvironment("antigravity", source, "linux");
+    expect(antigravity).toMatchObject({
+      PATH: source.PATH,
+      GEMINI_API_KEY: source.GEMINI_API_KEY,
+      GOOGLE_GEMINI_BASE_URL: source.GOOGLE_GEMINI_BASE_URL,
+      AGY_ADC_AUTH: source.AGY_ADC_AUTH,
+      GOOGLE_CLOUD_PROJECT: source.GOOGLE_CLOUD_PROJECT,
+      GOOGLE_CLOUD_QUOTA_PROJECT: source.GOOGLE_CLOUD_QUOTA_PROJECT,
+      GOOGLE_CLOUD_LOCATION: source.GOOGLE_CLOUD_LOCATION,
+      GOOGLE_APPLICATION_CREDENTIALS: source.GOOGLE_APPLICATION_CREDENTIALS,
+    });
+    expect(antigravity).not.toHaveProperty("OPENAI_API_KEY");
+    expect(antigravity).not.toHaveProperty("GITHUB_TOKEN");
+    expect(antigravity).not.toHaveProperty("DATABASE_URL");
+    expect(acpEnvironmentSecretValues(antigravity)).toEqual(["gemini-fixture-secret-key"]);
+
+    const redactor = new AcpSecretRedactor(antigravity);
+    expect(
+      redactor.assistantChunk(
+        "Project acme-cloud-project step 1 with gemini-fixture-secret-key at /run/secrets/google-adc.json",
+      ) + redactor.finishAssistant(),
+    ).toBe(
+      "Project acme-cloud-project step 1 with [redacted] at /run/secrets/google-adc.json",
+    );
   });
 
   it("passes documented OpenCode cloud-provider authentication without unrelated secrets", () => {

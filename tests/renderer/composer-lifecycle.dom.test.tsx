@@ -312,7 +312,7 @@ describe("composer asynchronous ownership", () => {
 
   it.each([
     ["codex", "ultra"], ["claude", "max"], ["cursor", "high"],
-    ["kimi", "high"], ["opencode", "xhigh"], ["antigravity", "high"],
+    ["kimi", "high"], ["opencode", "xhigh"], ["antigravity", "xhigh"],
   ] as const)("animates only the supported maximum on %s", (providerId, maximum) => {
     const active = conversation(`maximum-${providerId}`);
     active.providerId = providerId;

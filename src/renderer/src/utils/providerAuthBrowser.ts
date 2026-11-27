@@ -15,6 +15,12 @@ const CLAUDE_AUTH_ENDPOINTS: Readonly<Record<string, ReadonlySet<string>>> =
   });
 const CLAUDE_MANUAL_REDIRECT_URL =
   "https://platform.claude.com/oauth/code/callback";
+const ANTIGRAVITY_AUTH_ORIGIN = "https://accounts.google.com";
+const ANTIGRAVITY_AUTH_PATHS: ReadonlySet<string> = new Set([
+  "/o/oauth2/v2/auth",
+  "/o/oauth2/auth",
+]);
+
 function isClaudeRedirectUri(value: string): boolean {
   if (value === CLAUDE_MANUAL_REDIRECT_URL) return true;
   try {
@@ -32,6 +38,23 @@ function isClaudeRedirectUri(value: string): boolean {
   }
 }
 
+function isAntigravityRedirectUri(value: string): boolean {
+  try {
+    const redirect = new URL(value);
+    if (redirect.username || redirect.password || redirect.search || redirect.hash) {
+      return false;
+    }
+    if (redirect.protocol === "https:") {
+      return redirect.origin.toLowerCase() === "https://antigravity.google";
+    }
+    return redirect.protocol === "http:"
+      && (redirect.hostname === "localhost" || redirect.hostname === "127.0.0.1")
+      && redirect.port !== "";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Accept only the official authorization endpoint for the provider whose
  * owned login flow produced the terminal output. The URL carries ephemeral
@@ -42,7 +65,7 @@ export function providerAuthBrowserUrl(
   value: unknown,
 ): string | null {
   if (
-    providerId !== "claude"
+    (providerId !== "claude" && providerId !== "antigravity")
     || typeof value !== "string"
     || value.length === 0
     || value.length > MAX_PROVIDER_AUTH_URL_LENGTH
@@ -57,8 +80,18 @@ export function providerAuthBrowserUrl(
       || url.hash
       || !url.search
     ) return null;
-    const allowedPaths = CLAUDE_AUTH_ENDPOINTS[url.origin.toLowerCase()];
+    const origin = url.origin.toLowerCase();
     const redirectUris = url.searchParams.getAll("redirect_uri");
+    if (providerId === "antigravity") {
+      if (
+        origin !== ANTIGRAVITY_AUTH_ORIGIN
+        || !ANTIGRAVITY_AUTH_PATHS.has(url.pathname)
+        || redirectUris.length !== 1
+        || !isAntigravityRedirectUri(redirectUris[0]!)
+      ) return null;
+      return url.toString();
+    }
+    const allowedPaths = CLAUDE_AUTH_ENDPOINTS[origin];
     if (
       !allowedPaths?.has(url.pathname)
       || redirectUris.length > 1
@@ -82,7 +115,7 @@ export function providerAuthBrowserUrlFromTerminal(
   providerId: ProviderId,
   terminal: Pick<Terminal, "buffer" | "cols">,
 ): string | null {
-  if (providerId !== "claude") return null;
+  if (providerId !== "claude" && providerId !== "antigravity") return null;
   const buffer = terminal.buffer.active;
   const cursorRow = Math.min(buffer.length - 1, buffer.baseY + buffer.cursorY);
   let text = "";

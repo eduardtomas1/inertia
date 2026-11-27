@@ -28,9 +28,10 @@ single contract used by both the browser-facing protocol and the worker-facing
 runtime schema, so the two boundaries cannot disagree about identifier shape,
 answer bounds, or the custom-answer capability.
 
-Antigravity's headless mode applies its own approval policy and cannot deliver
-approval requests to Inertia, so Private Connect refuses prompts for Antigravity
-conversations; use the local provider flow.
+Antigravity ACP (`antigravity-acp`) routes permission requests to Inertia, so
+Private Connect admits Antigravity ACP prompts under the same approval-routed
+safety tier as Cursor, Kimi Code, and Grok. Historical headless `antigravity-cli`
+routes without an approval channel remain refused.
 
 A pending input is projected only when every question is non-secret and the
 complete set fits the projected bounds. The runtime requires an answer for

@@ -953,8 +953,8 @@ describe("composer detachment ownership", () => {
   });
 });
 
-describe("image-less composer routes", () => {
-  it("says up front that Antigravity can't read images and keeps images out of the draft", async () => {
+describe("Antigravity ACP image attachments", () => {
+  it("allows images and reviewed screenshots on Antigravity ACP", async () => {
     const current: Conversation = {
       ...conversation("antigravity-images"),
       providerId: "antigravity",
@@ -971,6 +971,8 @@ describe("image-less composer routes", () => {
       async () => attachmentLease([attachment("diagram"), notes]),
     );
     const bridge = window.inertia;
+    const platform = Object.getOwnPropertyDescriptor(window.navigator, "platform");
+    Object.defineProperty(window.navigator, "platform", { configurable: true, value: "Linux x86_64" });
     window.inertia = {
       ...bridge,
       snapshot: vi.fn(async () => ({ enabled: true, shortcut: "both-shift" as const, available: true, permission: "granted" as const, message: null })),
@@ -978,20 +980,18 @@ describe("image-less composer routes", () => {
     };
     try {
       render(<Composer {...composerProps(current, { onChooseAttachments })} />);
-      expect(screen.queryByRole("button", { name: "Snapshots" })).toBeNull();
+      expect(await screen.findByRole("button", { name: "Take reviewed screenshot" })).toBeEnabled();
+      expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
+        .toBe("Ask anything. @ files, / commands");
+      fireEvent.click(screen.getByRole("button", {
+        name: "Attach images, documents, or spreadsheets",
+      }));
+      await waitFor(() => expect(onChooseAttachments).toHaveBeenCalledWith("all"));
+      expect(await screen.findByText("diagram.png")).toBeTruthy();
+      expect(screen.getByText("notes.txt")).toBeTruthy();
     } finally {
       window.inertia = bridge;
+      if (platform) Object.defineProperty(window.navigator, "platform", platform);
     }
-
-    expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder"))
-      .toBe("Ask anything. @ files, / commands");
-    fireEvent.click(screen.getByRole("button", {
-      name: "Attach documents or spreadsheets. Antigravity can't read images in Inertia.",
-    }));
-    await waitFor(() => expect(onChooseAttachments).toHaveBeenCalledWith("all"));
-    expect(await screen.findByText("Antigravity can't read images in Inertia. Images were not attached."))
-      .toBeTruthy();
-    expect(screen.queryByText("diagram.png")).toBeNull();
-    expect(screen.getByText("notes.txt")).toBeTruthy();
   });
 });

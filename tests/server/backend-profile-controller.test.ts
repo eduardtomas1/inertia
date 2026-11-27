@@ -334,18 +334,18 @@ describe("model backend profile controller", () => {
     expect(controller.profiles([antigravity])).toContainEqual(expect.objectContaining({
       id: "builtin:antigravity",
       displayName: "Google Antigravity",
-      harnessId: "antigravity-cli",
+      harnessId: "antigravity-acp",
       protocol: "antigravity-managed",
     }));
     expect(controller.detail("builtin:antigravity")).toMatchObject({
       id: "builtin:antigravity",
-      harnessId: "antigravity-cli",
+      harnessId: "antigravity-acp",
     });
     expect(controller.validateSelection(
       providerNativeModelSelection({ providerId: "antigravity" }),
       { allowUnavailableNativeCatalog: true },
     )).toMatchObject({
-      harnessId: "antigravity-cli",
+      harnessId: "antigravity-acp",
       backendProfileId: "builtin:antigravity",
     });
     runtimeStore.close();

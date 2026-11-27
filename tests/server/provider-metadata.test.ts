@@ -97,6 +97,24 @@ describe("provider metadata cache", () => {
     expect(read).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps Antigravity session-learned reasoning options scoped to observed models", () => {
+    const cache = new ProviderMetadataCache();
+    const reasoning = {
+      reasoningOptions: [{ value: "high", label: "High", description: "High reasoning" }],
+      defaultReasoningEffort: "high",
+    };
+    cache.learn("antigravity", resolve("agy"), {
+      models: [
+        { ...model("model-a"), ...reasoning },
+        { ...model("model-b"), ...reasoning },
+      ],
+    }, "session");
+    expect(cache.current("antigravity").models).toMatchObject([
+      { id: "model-a", ...reasoning },
+      { id: "model-b", reasoningOptions: [], defaultReasoningEffort: "" },
+    ]);
+  });
+
   it.each([
     { label: "null", response: null },
     { label: "absent availability", response: {} },
@@ -646,5 +664,162 @@ process.exit(1);
     writeFileSync(marker, "no");
     await manager.detect("codex", { cwd: root });
     expect(manager.cachedMetadata("codex").metadataState.models.freshness).toBe("stale");
+  });
+
+  it("preserves and prioritizes ACP session models (even unselected ones) across a full 128-entry agy models refresh", async () => {
+    const executable = "/usr/local/bin/agy";
+    const cliCatalog = Array.from({ length: 128 }, (_, index) => ({
+      id: index === 0 ? "gemini-4-neon" : `cli-model-${index}`,
+      label: index === 0 ? "Gemini 4 Neon" : `CLI Model ${index}`,
+      description: "Available through Antigravity CLI",
+      isDefault: false,
+      inputModalities: ["text"] as ["text"],
+      reasoningOptions: [],
+      defaultReasoningEffort: "",
+      fastMode: null,
+    }));
+    const cache = new ProviderMetadataCache({
+      read: async () => ({ models: cliCatalog }),
+    });
+    cache.correlate("antigravity", { executable, version: "1.5.18", authState: "unknown" });
+    cache.learn("antigravity", executable, {
+      models: [
+        {
+          id: "gemini-4-neon",
+          label: "Gemini 4 Neon",
+          description: "Antigravity session model",
+          isDefault: true,
+          inputModalities: ["text", "image"],
+          reasoningOptions: [
+            { value: "low", label: "Low", description: "Low reasoning" },
+            { value: "high", label: "High", description: "High reasoning" },
+          ],
+          defaultReasoningEffort: "high",
+          reasoningObserved: true,
+          fastMode: null,
+        },
+        {
+          id: "orchestrator",
+          label: "Orchestrator",
+          description: "Antigravity session model",
+          isDefault: false,
+          inputModalities: ["text", "image"],
+          reasoningOptions: [],
+          defaultReasoningEffort: "",
+          reasoningObserved: false,
+          fastMode: null,
+        },
+      ],
+    }, "session");
+
+    const refreshed = await cache.metadata("antigravity", executable, {}, "/workspace", { force: true });
+    expect(refreshed.models).toHaveLength(128);
+    expect(refreshed.models[0]).toMatchObject({
+      id: "gemini-4-neon",
+      isDefault: true,
+      inputModalities: ["text", "image"],
+      defaultReasoningEffort: "high",
+      reasoningObserved: true,
+      reasoningOptions: [
+        expect.objectContaining({ value: "low" }),
+        expect.objectContaining({ value: "high" }),
+      ],
+    });
+    expect(refreshed.models[1]).toMatchObject({
+      id: "orchestrator",
+      isDefault: false,
+      inputModalities: ["text", "image"],
+    });
+    expect(refreshed.models.some(({ id }) => id === "cli-model-1")).toBe(true);
+
+    // Cold-restart hydration also preserves persisted session-learned models across refresh
+    const persistedRecords: PersistedProviderMetadata[] = [];
+    const persisted = new ProviderMetadataCache({
+      persistence: {
+        load: () => persistedRecords,
+        save: (record) => {
+          persistedRecords.push(record);
+        },
+      },
+      read: async () => ({ models: cliCatalog }),
+    });
+    persisted.correlate("antigravity", { executable, version: "1.5.18", authState: "unknown" });
+    await persisted.metadata("antigravity", executable, {}, "/workspace", { force: true });
+    // Full 128-entry CLI catalog + session learn with merge: true must prioritize ACP models before capping
+    const merged = persisted.learn("antigravity", executable, {
+      models: [
+        {
+          id: "orchestrator",
+          label: "Orchestrator",
+          description: "Antigravity session model",
+          isDefault: false,
+          inputModalities: ["text", "image"],
+          reasoningOptions: [],
+          defaultReasoningEffort: "",
+          reasoningObserved: false,
+          fastMode: null,
+        },
+      ],
+    }, "session", { merge: true });
+    expect(merged.models).toHaveLength(128);
+    expect(merged.models[0]).toMatchObject({
+      id: "orchestrator",
+      inputModalities: ["text", "image"],
+    });
+
+    // Restart immediately after session merge (provenance="session") admits new CLI models instead of freezing 127 obsolete ones
+    const mergedPersisted = persistedRecords.at(-1)!;
+    expect(mergedPersisted.modelsProvenance).toBe("session");
+    const replacementCliCatalog = Array.from({ length: 128 }, (_, index) => ({
+      id: `next-cli-model-${index}`,
+      label: `Next CLI Model ${index}`,
+      description: "Available through Antigravity CLI",
+      isDefault: false,
+      inputModalities: ["text"] as ["text"],
+      reasoningOptions: [],
+      defaultReasoningEffort: "",
+      fastMode: null,
+    }));
+    const restartedAfterMerge = new ProviderMetadataCache({
+      persistence: {
+        load: () => [mergedPersisted],
+        save: () => undefined,
+      },
+      read: async () => ({ models: replacementCliCatalog }),
+    });
+    restartedAfterMerge.correlate("antigravity", { executable, version: "1.5.18", authState: "unknown" });
+    const refreshedAfterMergeRestart = await restartedAfterMerge.metadata(
+      "antigravity",
+      executable,
+      {},
+      "/workspace",
+      { force: true },
+    );
+    expect(refreshedAfterMergeRestart.models).toHaveLength(128);
+    expect(refreshedAfterMergeRestart.models[0]).toMatchObject({
+      id: "orchestrator",
+      inputModalities: ["text", "image"],
+    });
+    expect(refreshedAfterMergeRestart.models.some(({ id }) => id === "next-cli-model-0")).toBe(true);
+    expect(refreshedAfterMergeRestart.models.some(({ id }) => id === "cli-model-1")).toBe(false);
+
+    // CLI refresh persists provenance="provider" while keeping ACP session markers across cold restart
+    await persisted.metadata("antigravity", executable, {}, "/workspace", { force: true });
+    const latestPersisted = persistedRecords.at(-1)!;
+    expect(latestPersisted.modelsProvenance).toBe("provider");
+
+    const restarted = new ProviderMetadataCache({
+      persistence: {
+        load: () => [latestPersisted],
+        save: () => undefined,
+      },
+      read: async () => ({ models: cliCatalog }),
+    });
+    restarted.correlate("antigravity", { executable, version: "1.5.18", authState: "unknown" });
+    const afterRestart = await restarted.metadata("antigravity", executable, {}, "/workspace", { force: true });
+    expect(afterRestart.models[0]).toMatchObject({
+      id: "orchestrator",
+      inputModalities: ["text", "image"],
+    });
   });
 });

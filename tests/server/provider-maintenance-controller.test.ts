@@ -138,6 +138,47 @@ describe("ProviderMaintenanceController", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("checks Antigravity's official release manifest for current and update-available status", async () => {
+    const os = process.platform === "darwin" ? "mac" : process.platform === "win32" ? "windows" : "linux";
+    const cpu = process.arch === "arm64" ? "arm64" : "x64";
+    const extension = process.platform === "win32" ? "exe" : "tar.gz";
+    const folder = `${process.platform === "win32" ? "windows" : process.platform}-${process.arch === "arm64" ? "arm" : "x64"}`;
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      version: "1.5.19",
+      url: `https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.19-99/${folder}/cli_${os}_${cpu}.${extension}`,
+      sha512: "b".repeat(128),
+    }), { status: 200 }));
+    let installedVersion = "1.5.18";
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId, installedVersion, "/home/ada/.local/bin/agy"),
+      refreshTarget: async (providerId) => target(providerId, installedVersion, "/home/ada/.local/bin/agy"),
+      latestVersions: new ProviderLatestVersionCache({ fetch: fetch as typeof globalThis.fetch }),
+      resolveCapabilities: async () => capabilities("antigravity", "native:antigravity", null),
+    });
+
+    const [outdated] = await controller.refresh(["antigravity"]);
+    expect(outdated).toMatchObject({
+      providerId: "antigravity",
+      installedVersion: "1.5.18",
+      latestVersion: "1.5.19",
+      versionStatus: "update-available",
+      freshness: "fresh",
+      updateAvailability: "available",
+    });
+
+    installedVersion = "1.5.19";
+    const [current] = await controller.refresh(["antigravity"]);
+    expect(current).toMatchObject({
+      providerId: "antigravity",
+      installedVersion: "1.5.19",
+      latestVersion: "1.5.19",
+      versionStatus: "current",
+      freshness: "fresh",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["1.4.2", "available", "opencode upgrade 1.4.2 --method curl"],
     ["2.0.0", "instructions-only", null],

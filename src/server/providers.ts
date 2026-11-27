@@ -135,6 +135,7 @@ export type ProductionProviderManagerOptions =
 
 export class ProviderManager {
   private readonly commands: Partial<Record<ProviderId, string>>;
+  private readonly dataDirectory?: string;
   private readonly resolvedCommands = new Map<ProviderId, string>();
   private readonly commandCatalog: ProviderCommandCatalog;
   private readonly updateRequirements = new Map<ProviderId, string>();
@@ -220,6 +221,7 @@ export class ProviderManager {
       );
     }
     this.commands = { ...options.commands };
+    this.dataDirectory = options.dataDirectory;
     this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_PROVIDER_CANCEL_GRACE_MS, 30_000));
     this.harnessRegistry = harnessRegistry;
     this.metadataCache = options.metadataCache ?? new ProviderMetadataCache();
@@ -644,6 +646,9 @@ export class ProviderManager {
     try {
       detection = await this.detectProviderImplementation(providerId, {
         ...detectionOptions,
+        ...(this.dataDirectory && detectionOptions.dataDirectory === undefined
+          ? { dataDirectory: this.dataDirectory }
+          : {}),
         refreshEnvironment: false,
         command: configured,
         signal: this.lifetimeSignal,

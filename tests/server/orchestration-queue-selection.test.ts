@@ -43,7 +43,12 @@ import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-co
 import type WebSocket from "ws";
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
 import { createQueuedMessageRuntime } from "../../src/server/runtime/queued-message-runtime";
-import { computeQueueHoldReason, usageLimitHoldsQueue } from "../../src/server/runtime/queued-message-runtime-helpers";
+import {
+  computeQueueHoldReason,
+  usageLimitHoldsQueue,
+  wrapWorkflowsForEffectiveSelection,
+} from "../../src/server/runtime/queued-message-runtime-helpers";
+import { AgentWorkflowController } from "../../src/server/runtime/agent-workflow-controller";
 import type { TurnInteractionCommandDependencies } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { LimitResetScheduler } from "../../src/server/usage/limit-reset-scheduler";
 import { isItemCovered } from "../../src/server/orchestration-v2/backing-repository";
@@ -936,6 +941,321 @@ describe("Phase 5 Package 3: config-while-running, session overwrite guard, per-
       expect(usageLimitHoldsQueue(store, conversation.id, codexSelection, Date.now())).toBe(true);
       expect(store.orchestration.queue.getItem(codexItemId)?.state).toBe("waiting");
       expect(runs).toHaveLength(1);
+    } finally {
+      abort.abort();
+      await drain();
+      await controller.dispose();
+      await attachments.close();
+    }
+  });
+
+  it("S10: holds Provider A via cached account future reset even with NO armed plan and NO snooze after Provider B succeeds, then dispatches once quota recovers", async () => {
+    const { directory, store, conversation, codexSelection, claudeSelection } = createEnv();
+    const attachments = await ConversationAttachmentStore.open(directory);
+    const abort = new AbortController();
+    const runs: Array<{ providerId: string; prompt: string }> = [];
+    const { runtime } = makeProviderRuntime({
+      onRun: async (input, callbacks) => {
+        runs.push({ providerId: input.providerId, prompt: input.prompt });
+        callbacks.onStarted?.();
+        return {
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          status: "completed",
+          terminalReason: { outcome: "completed", reason: "provider-completed" },
+          text: "Completed",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      },
+    });
+    const now = Date.now();
+    const futureReset = new Date(now + 15 * 60_000).toISOString();
+    let codexAccount: UsageAccount | null = {
+      id: "native:codex",
+      providerId: "codex",
+      providerLabel: "Codex",
+      label: "Codex",
+      email: "user@example.test",
+      plan: "plus",
+      identityKey: "codex-acct",
+      sources: ["This computer"],
+      status: "ready",
+      detail: null,
+      updatedAt: new Date(now).toISOString(),
+      checkedAt: new Date(now).toISOString(),
+      credits: null,
+      canReset: false,
+      windows: [{ id: "codex:primary", label: "5 hour", remainingPercent: 0, windowMinutes: 300, resetsAt: futureReset }],
+    };
+    const scheduler = new LimitResetScheduler({
+      store,
+      signal: abort.signal,
+      enabled: true,
+      readAccount: vi.fn(async () => codexAccount),
+      cachedAccount: vi.fn((providerId) => (providerId === "codex" ? codexAccount : null)),
+      busy: () => false,
+      dispatch: vi.fn(async () => undefined),
+      track: async (op) => op(),
+      changed: vi.fn(),
+    });
+    const tasks = new Set<Promise<unknown>>();
+    let queue!: ReturnType<typeof createQueuedMessageRuntime>;
+    const controller = new TurnController(
+      store,
+      runtime,
+      new Map<string, AgentApprovalRequest>(),
+      new Map<string, AgentInputRequest>(),
+      new Map<string, AgentPlan>(),
+      {
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        providerInfo: () => makeProviderInfo(),
+        onTurnSettled: (turn) => queue.onTurnSettled(turn),
+      },
+    );
+    const dependencies: TurnInteractionCommandDependencies = {
+      store,
+      turns: controller,
+      conversationAttachments: attachments,
+      backendProfileController: {
+        validateSelection: (selection: ModelSelection) => selection,
+        isExternalSelection: () => false,
+        readiness: async () => null,
+      } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+      isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+      workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      dataDirectory: directory,
+      enableProviders: true,
+      attachmentResolver: null,
+      generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+      workflows: { resolveTurnSkills: async () => ({ inputs: [], routeKey: null }), assertTurnSkillsCurrent: () => undefined } as unknown as TurnInteractionCommandDependencies["workflows"],
+      providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+      providerInfo: () => makeProviderInfo(),
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      send: () => undefined,
+    };
+    const usageLimitHold = (conversationId: string, providerId: "codex" | "claude", model?: string) =>
+      scheduler.usageLimitHoldsQueue(conversationId, providerId, model).held;
+    queue = createQueuedMessageRuntime(dependencies, {
+      signal: abort.signal,
+      usageLimitHold: (conversationId, providerId, model) =>
+        scheduler.usageLimitHoldsQueue(conversationId, providerId, model).held,
+      track: (op) => {
+        const task = op();
+        tasks.add(task);
+        void task.finally(() => tasks.delete(task));
+        return task;
+      },
+    });
+    const drain = async () => {
+      await Promise.resolve();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+      await controller.drainSettlementTasks();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+    };
+
+    try {
+      // Turn 1 on Codex fails with usage limit — NO reset plan armed and NO snooze set!
+      const t1 = store.beginAgentTurn({
+        conversationId: conversation.id,
+        runId: randomUUID(),
+        content: "Codex turn 1",
+        providerId: "codex",
+        modelSelection: codexSelection,
+        model: "gpt-5",
+        reasoningEffort: "high",
+        interactionMode: "build",
+        accessMode: "supervised",
+        configurationRevision: 0,
+        association: "authoritative",
+        requestedAt: new Date(now - 5_000).toISOString(),
+      }).turn;
+      store.updateAgentTurnLifecycle(t1.id, { status: "failed", startedAt: t1.requestedAt, completedAt: new Date(now - 4_000).toISOString() });
+      store.limitResets.markUsageLimited(t1.id);
+      expect(store.limitResets.get(conversation.id)).toBeNull();
+      expect(store.conversation(conversation.id).snoozedUntil).toBeNull();
+
+      const claudeItemId = randomUUID();
+      const codexItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: claudeItemId,
+        content: "Claude runs while Codex account is exhausted",
+        modelSelection: claudeSelection,
+      });
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: codexItemId,
+        content: "Codex waits for account quota",
+        modelSelection: codexSelection,
+      });
+
+      queue.onTurnSettled(store.agentTurn(t1.id));
+      await vi.waitFor(() => expect(runs).toHaveLength(1));
+      await drain();
+      expect(runs[0]!.providerId).toBe("claude");
+      expect(store.orchestration.queue.getItem(claudeItemId)?.state).toBe("delivered");
+
+      // Codex item MUST stay held even after Claude succeeded!
+      expect(usageLimitHold(conversation.id, "codex", "gpt-5")).toBe(true);
+      expect(store.orchestration.queue.getItem(codexItemId)?.state).toBe("waiting");
+      expect(computeQueueHoldReason(
+        store,
+        conversation.id,
+        store.orchestration.queue.listActive(conversation.id),
+        Date.now(),
+        (cid, pid, model) => scheduler.usageLimitHoldsQueue(cid, pid, model).held,
+      )).toBe("usage-limit");
+      expect(runs).toHaveLength(1);
+
+      // Once Codex quota becomes available, next wake dispatches the Codex item.
+      codexAccount = {
+        ...codexAccount,
+        windows: [{ id: "codex:primary", label: "5 hour", remainingPercent: 100, windowMinutes: 300, resetsAt: futureReset }],
+      };
+      queue.onCompactionSettled(conversation.id);
+      await vi.waitFor(() => expect(runs).toHaveLength(2));
+      await drain();
+      expect(runs[1]!.providerId).toBe("codex");
+      expect(store.orchestration.queue.getItem(codexItemId)?.state).toBe("delivered");
+    } finally {
+      abort.abort();
+      await drain();
+      await controller.dispose();
+      await attachments.close();
+    }
+  });
+
+  it("S15: resolves $skill inputs for a pinned queued send against its pinned selection instead of the live composer route", async () => {
+    const { directory, workspace, store, conversation, claudeSelection } = createEnv();
+    const attachments = await ConversationAttachmentStore.open(directory);
+    const abort = new AbortController();
+    const capturedInputs: ProviderRunInput[] = [];
+    const { runtime } = makeProviderRuntime({
+      onRun: async (input, callbacks) => {
+        capturedInputs.push(input);
+        callbacks.onStarted?.();
+        return {
+          providerId: input.providerId,
+          conversationId: input.conversationId,
+          runId: input.runId,
+          turnId: input.turnId,
+          status: "completed",
+          terminalReason: { outcome: "completed", reason: "provider-completed" },
+          text: "Skill applied",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      },
+    });
+    const claudeSkillPath = join(workspace, ".claude", "skills", "claude-review", "SKILL.md");
+    const claudeSkills = vi.fn(async () => [{
+      name: "claude-review",
+      description: "Claude-specific review skill",
+      argumentHint: null,
+      scope: "repo" as const,
+      path: claudeSkillPath,
+    }]);
+    const codexControlContext = vi.fn(async () => {
+      throw new Error("Codex skills must not be queried for a Claude-pinned queued item.");
+    });
+    const rawWorkflows = new AgentWorkflowController(
+      store,
+      { claudeSkills, codexControlContext } as never,
+    );
+    const wrappedWorkflows = wrapWorkflowsForEffectiveSelection(
+      rawWorkflows,
+      store,
+      { claudeSkills, codexControlContext } as never,
+    );
+    const tasks = new Set<Promise<unknown>>();
+    let queue!: ReturnType<typeof createQueuedMessageRuntime>;
+    const controller = new TurnController(
+      store,
+      runtime,
+      new Map<string, AgentApprovalRequest>(),
+      new Map<string, AgentInputRequest>(),
+      new Map<string, AgentPlan>(),
+      {
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        providerInfo: () => makeProviderInfo(),
+        onTurnSettled: (turn) => queue.onTurnSettled(turn),
+      },
+    );
+    const dependencies: TurnInteractionCommandDependencies = {
+      store,
+      turns: controller,
+      conversationAttachments: attachments,
+      backendProfileController: {
+        validateSelection: (selection: ModelSelection) => selection,
+        isExternalSelection: () => false,
+        readiness: async () => null,
+      } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
+      isolatedRuns: { has: () => false } as unknown as TurnInteractionCommandDependencies["isolatedRuns"],
+      workspaceRuns: {} as TurnInteractionCommandDependencies["workspaceRuns"],
+      pendingApprovals: new Map(),
+      pendingInputs: new Map(),
+      dataDirectory: directory,
+      enableProviders: true,
+      attachmentResolver: null,
+      generatedAttachments: { release: async () => undefined } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+      workflows: wrappedWorkflows,
+      providerTerminalResumes: { isActive: () => false, acquireWhenAvailable: async () => true, release: () => undefined } as unknown as TurnInteractionCommandDependencies["providerTerminalResumes"],
+      providerInfo: () => makeProviderInfo(),
+      broadcast: () => undefined,
+      broadcastSnapshot: () => undefined,
+      send: () => undefined,
+    };
+    queue = createQueuedMessageRuntime(dependencies, {
+      signal: abort.signal,
+      track: (op) => {
+        const task = op();
+        tasks.add(task);
+        void task.finally(() => tasks.delete(task));
+        return task;
+      },
+    });
+    const drain = async () => {
+      await Promise.resolve();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+      await controller.drainSettlementTasks();
+      while (tasks.size > 0) await Promise.allSettled(tasks);
+    };
+
+    try {
+      // Live composer stays on Codex, while the queued item is pinned to Claude with a Claude $skill!
+      expect(store.conversation(conversation.id).providerId).toBe("codex");
+      const claudeSkillItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conversation.id,
+        itemId: claudeSkillItemId,
+        content: "$claude-review inspect this module",
+        modelSelection: claudeSelection,
+      });
+
+      await queue.sendNow(conversation.id, claudeSkillItemId, randomUUID());
+      await vi.waitFor(() => expect(capturedInputs).toHaveLength(1));
+      await drain();
+
+      expect(claudeSkills).toHaveBeenCalledOnce();
+      expect(codexControlContext).not.toHaveBeenCalled();
+      expect(capturedInputs[0]!.providerId).toBe("claude");
+      expect(capturedInputs[0]!.skills).toEqual([{
+        source: "claude-native",
+        name: "claude-review",
+        path: claudeSkillPath,
+      }]);
     } finally {
       abort.abort();
       await drain();

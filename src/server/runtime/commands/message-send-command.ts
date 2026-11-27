@@ -56,6 +56,10 @@ type SendRoute =
 
 export const QUEUE_CLAIM_SUPERSEDED_CODE = "queue-claim-superseded";
 
+export interface SendMessageCommandOptions {
+  modelSelectionOverride?: ModelSelection;
+}
+
 const inFlightSendContent = new Map<string, string>();
 
 function queuedSelectionOverrideFor(
@@ -68,21 +72,67 @@ function queuedSelectionOverrideFor(
   return queued.modelSelection ?? null;
 }
 
+function selectionOverrideFor(
+  dependencies: TurnInteractionCommandDependencies,
+  options?: SendMessageCommandOptions,
+): ModelSelection | null {
+  return options?.modelSelectionOverride ?? queuedSelectionOverrideFor(dependencies);
+}
+
 function effectiveSelectionFor(
   dependencies: TurnInteractionCommandDependencies,
   conversation: Conversation,
+  options?: SendMessageCommandOptions,
 ): ModelSelection {
-  return queuedSelectionOverrideFor(dependencies) ?? conversation.modelSelection;
+  return selectionOverrideFor(dependencies, options) ?? conversation.modelSelection;
 }
 
 function effectiveProviderIdFor(
   dependencies: TurnInteractionCommandDependencies,
   conversation: Conversation,
+  options?: SendMessageCommandOptions,
 ): Conversation["providerId"] {
-  const override = queuedSelectionOverrideFor(dependencies);
+  const override = selectionOverrideFor(dependencies, options);
   return override
     ? (providerIdForHarness(override.harnessId) ?? conversation.providerId)
     : conversation.providerId;
+}
+
+function resolveSkillsForSend(
+  workflows: AgentWorkflowController,
+  conversationId: string,
+  content: string,
+  effectiveConversation?: Conversation,
+): ReturnType<AgentWorkflowController["resolveTurnSkills"]> {
+  if (!effectiveConversation) {
+    return workflows.resolveTurnSkills(conversationId, content);
+  }
+  return (
+    workflows.resolveTurnSkills as (
+      id: string,
+      text: string,
+      effective?: Conversation,
+    ) => ReturnType<AgentWorkflowController["resolveTurnSkills"]>
+  )(conversationId, content, effectiveConversation);
+}
+
+function assertTurnSkillsCurrentForSend(
+  workflows: AgentWorkflowController,
+  conversationId: string,
+  routeKey: string | null,
+  effectiveConversation?: Conversation,
+): void {
+  if (!effectiveConversation) {
+    workflows.assertTurnSkillsCurrent(conversationId, routeKey);
+    return;
+  }
+  (
+    workflows.assertTurnSkillsCurrent as (
+      id: string,
+      key: string | null,
+      effective?: Conversation,
+    ) => void
+  )(conversationId, routeKey, effectiveConversation);
 }
 
 function assertQueuedClaimCurrent(
@@ -202,12 +252,14 @@ interface NewTurnInput {
   orchestrationRequest: CommandSource;
   origin: string | null;
   reply: ReplyChannel;
+  options?: SendMessageCommandOptions;
 }
 
 export async function sendMessageCommand(
   dependencies: TurnInteractionCommandDependencies,
   socket: WebSocket,
   command: MessageSendCommand,
+  options?: SendMessageCommandOptions,
 ): Promise<"handled"> {
   if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
   const origin = internalDispatchOrigin(dependencies);
@@ -272,7 +324,7 @@ export async function sendMessageCommand(
     } else if (route.kind === "follow-up") {
       await sendActiveFollowUp({ dependencies, command, conversation, ticket, reply }, route.admission);
     } else {
-      await startNewTurn({ dependencies, command, conversation, route, orchestrationRequest, origin, reply });
+      await startNewTurn({ dependencies, command, conversation, route, orchestrationRequest, origin, reply, options });
     }
   } catch (error) {
     ticket.fail(error);
@@ -412,7 +464,7 @@ function queuedReply(
 }
 
 async function startNewTurn(input: NewTurnInput): Promise<void> {
-  const { dependencies, command, orchestrationRequest, origin, reply } = input;
+  const { dependencies, command, orchestrationRequest, origin, reply, options } = input;
   const { handedOff, contextPacketIds, resolvedTurnContext } = input.route;
   const scheduledDispatch = dependencies.limitResetDispatch ?? dependencies.restartContinuationDispatch;
   let conversation = input.conversation;
@@ -462,8 +514,18 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   }
   messageSendStage = "attachments";
   const queuedSelectionOverride = queuedSelectionOverrideFor(dependencies);
-  const effectiveSelection = effectiveSelectionFor(dependencies, conversation);
-  const effectiveProviderId = effectiveProviderIdFor(dependencies, conversation);
+  const selectionOverride = selectionOverrideFor(dependencies, options);
+  const effectiveSelection = effectiveSelectionFor(dependencies, conversation, options);
+  const effectiveProviderId = effectiveProviderIdFor(dependencies, conversation, options);
+  const effectiveRouteDiffers = selectionOverride !== null && (
+    effectiveProviderId !== conversation.providerId
+    || effectiveSelection.harnessId !== conversation.modelSelection.harnessId
+    || effectiveSelection.backendProfileId !== conversation.modelSelection.backendProfileId
+    || effectiveSelection.backendConfigurationRevision !== conversation.modelSelection.backendConfigurationRevision
+  );
+  const skillConversation: Conversation | undefined = effectiveRouteDiffers
+    ? { ...conversation, providerId: effectiveProviderId, modelSelection: effectiveSelection }
+    : undefined;
   let resolvedAttachments: Awaited<
     ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
   > = [];
@@ -665,9 +727,11 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   >;
   try {
     resolvedSkills = await awaitMessageSendPreparation(
-      dependencies.workflows.resolveTurnSkills(
+      resolveSkillsForSend(
+        dependencies.workflows,
         conversation.id,
         command.payload.content,
+        skillConversation,
       ),
       preparationDeadlineAt,
     );
@@ -679,9 +743,11 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
   let providerTransitionReserved = false;
   try {
     assertMessageSendPreparationPending(preparationDeadlineAt);
-    dependencies.workflows.assertTurnSkillsCurrent(
+    assertTurnSkillsCurrentForSend(
+      dependencies.workflows,
       conversation.id,
       resolvedSkills.routeKey,
+      skillConversation,
     );
     if (dependencies.enableProviders && !handedOff) {
       const acquisition =
@@ -710,9 +776,11 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
           "Wait for this chat's current operation (such as compaction) to finish. If you resumed it in a terminal, close that terminal first.",
         );
       }
-      dependencies.workflows.assertTurnSkillsCurrent(
+      assertTurnSkillsCurrentForSend(
+        dependencies.workflows,
         conversation.id,
         resolvedSkills.routeKey,
+        skillConversation,
       );
     }
   } catch (error) {
@@ -783,7 +851,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
       ? dependencies.turns.queue({
           orchestrationRequest,
           queuedMessageId: dependencies.queuedMessage?.id,
-          ...(queuedSelectionOverride ? { modelSelectionOverride: queuedSelectionOverride } : {}),
+          ...(selectionOverride ? { modelSelectionOverride: selectionOverride } : {}),
           // A queue row that names an unread follow-up starts its turn on that persisted message.
           ...(dependencies.queuedMessage?.userMessageId
             ? { adoptedFollowUp: { messageId: dependencies.queuedMessage.userMessageId } } : {}),

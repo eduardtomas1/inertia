@@ -13,6 +13,7 @@ export const QUEUE_TEXT_LOST_DETAIL = "This queued message's text was lost; remo
 
 export interface QueueBootReconciliationReport {
   adoptedLegacy: number;
+  reconciledDelivered: string[];
   blockedTextLost: string[];
   blockedUnconfirmedSteers: string[];
   releasedDispatching: string[];
@@ -33,16 +34,18 @@ function deterministicUuid(seed: string): string {
  * Per-chat durable boot reconciliation for the V2 queue (Phase 5 §2.9).
  * Runs inside each chat's orchestration lane before any command or auto-dispatch:
  * 1. Adopts legacy `queued_messages` rows into V2 queue events.
- * 2. Blocks items whose `queued_messages` row is missing or mismatched (`text-lost`).
- * 3. Retires orphaned `dispatching` steers / blocks items whose `provider.steer` effect retired `runtime-lost`.
- * 4. Releases any `dispatching -> waiting` claims (`runtime-lost`) and clears stale `steerWhenReadyRunId`.
- * 5. Requeues interrupted runs that never reached a provider turn (`delivery = 'not-delivered'`, zero native boundaries) at the front, held.
- * 6. Requeues accepted unread steers (`listUnreadAcceptedSteers`) at their N2 position, held.
- * 7. Applies the H5 restart hold to all active unheld items (`H5-restart`).
+ * 2. Reconciles active V2 items whose `queued_messages` row was already durably marked `accepted` with a persisted follow-up message (settling open `provider.steer` effects as `accepted` and delivering the V2 item instead of marking it `text-lost` or requeuing).
+ * 3. Blocks items whose `queued_messages` row is missing or mismatched (`text-lost`).
+ * 4. Retires orphaned `dispatching` steers / blocks items whose `provider.steer` effect retired `runtime-lost`.
+ * 5. Releases any `dispatching -> waiting` claims (`runtime-lost`) and clears stale `steerWhenReadyRunId`.
+ * 6. Requeues interrupted runs that never reached a provider turn (`delivery = 'not-delivered'`, zero native boundaries) at the front, held.
+ * 7. Requeues accepted unread steers (`listUnreadAcceptedSteers`) at their N2 position, held.
+ * 8. Applies the H5 restart hold to all active unheld items (`H5-restart`).
  */
 export async function reconcileQueueOnBoot(store: RuntimeStore): Promise<QueueBootReconciliationReport> {
   const report: QueueBootReconciliationReport = {
     adoptedLegacy: 0,
+    reconciledDelivered: [],
     blockedTextLost: [],
     blockedUnconfirmedSteers: [],
     releasedDispatching: [],
@@ -111,6 +114,76 @@ function reconcileConversationQueueOnBoot(
   const db = store.orchestration.effects.connection;
   const queue = store.orchestration.queue;
   const runControl = store.orchestration.runControl;
+
+  // 0. Reconcile active V2 items whose compatibility row was already durably
+  // accepted in `transcript-repository.ts` before a crash (prevents false
+  // `text-lost` classification, orphaned open steer effects, or duplicate sends).
+  for (const item of queue.listActive(conversationId)) {
+    if (item.state !== "dispatching" && item.state !== "waiting") continue;
+    const row = db.prepare(`
+      SELECT state, turn_id, user_message_id, delivery_mode
+      FROM queued_messages
+      WHERE id = ? AND conversation_id = ?
+    `).get(item.id, conversationId) as {
+      state: string;
+      turn_id: string | null;
+      user_message_id: string | null;
+      delivery_mode: string | null;
+    } | undefined;
+    if (!row || row.state !== "accepted" || !row.turn_id || !row.user_message_id) continue;
+    let message;
+    let turn;
+    try {
+      message = store.message(row.user_message_id);
+      turn = store.agentTurn(row.turn_id);
+    } catch {
+      continue;
+    }
+    if (message.conversationId !== conversationId || turn.conversationId !== conversationId) continue;
+
+    const matchingSteerEffects = db.prepare(`
+      SELECT id FROM orchestration_v2_effects
+      WHERE thread_id = ? AND kind = 'provider.steer'
+        AND json_extract(payload_json, '$.queuedMessageId') = ?
+      ORDER BY sequence DESC
+    `).all(conversationId, item.id) as Array<{ id: string }>;
+    let steerEffectId: string | undefined;
+    let steerAttemptId: string | undefined;
+    for (const effect of matchingSteerEffects) {
+      const steer = runControl.steer(effect.id);
+      if (!steer) continue;
+      if (steer.state === "dispatching") {
+        runControl.settleSteer(effect.id, "accepted", {
+          messageId: message.id,
+          queuedMessageId: item.id,
+        });
+        steerEffectId ??= effect.id;
+        steerAttemptId ??= steer.attemptId;
+      } else if (steer.state === "settled" && steer.outcome === "accepted") {
+        steerEffectId ??= effect.id;
+        steerAttemptId ??= steer.attemptId;
+      }
+    }
+
+    const mode = row.delivery_mode === "run" || row.delivery_mode === "steer" || row.delivery_mode === "after-stop"
+      ? row.delivery_mode
+      : "steer";
+    const attemptId = store.orchestration.currentAttemptId(turn.runId) ?? steerAttemptId ?? turn.runId;
+    queue.deliver({
+      conversationId,
+      itemId: item.id,
+      delivery: {
+        mode,
+        runId: turn.runId,
+        attemptId,
+        turnId: turn.id,
+        messageId: message.id,
+        ...(steerEffectId ? { steerEffectId } : {}),
+        deliveredAt: message.createdAt,
+      },
+    });
+    report.reconciledDelivered.push(item.id);
+  }
 
   // 1. Block items whose text row is missing or disagrees with V2 contentRef.
   for (const mismatch of mismatches) {

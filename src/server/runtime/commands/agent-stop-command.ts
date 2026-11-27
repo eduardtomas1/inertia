@@ -2,6 +2,7 @@ import type { ClientCommand } from "../../../shared/contracts";
 import type { QueueEvent } from "../../../shared/orchestration-queue";
 import type { RunInterruptCause } from "../../../shared/orchestration-run-control";
 import type { OrchestrationDomainEvent } from "../../../shared/orchestration-v2";
+import { isAgentTurnTerminalStatus } from "../../../shared/turn-lifecycle";
 import type { CommandRejectionPolicy } from "../../orchestration-v2/command-authority";
 import type { CommandSource, JsonValue } from "../../orchestration-v2/types";
 import { ownedProviderStopBudgetMs } from "../../provider/run-cleanup-settlement";
@@ -48,6 +49,8 @@ export interface AgentStopRequest {
   extraAfterCommit?: () => void;
   /** Set true when the caller handles holding queue items itself (default false: Stop atomically holds all unheld active items). */
   skipQueueHold?: boolean;
+  /** When false, reject with `superseded` before committing if the expected turn is no longer live at stop intake (default true). */
+  commitExtraEventsOnNoOp?: boolean;
 }
 
 function unheldQueueHoldPlan(
@@ -88,12 +91,19 @@ export async function requestAgentStop(dependencies: StopDependencies, request: 
       request.extraAfterCommit?.();
     };
     const queueChanged = holdPlan.heldIds.length > 0 || (request.extraEvents?.length ?? 0) > 0;
+    const rejectNoOp = request.commitExtraEventsOnNoOp === false;
     if (isolatedRuns?.has(conversationId)) {
+      if (rejectNoOp) {
+        throw new RuntimeRequestError(SUPERSEDED_STOP_MESSAGE, SUPERSEDED_STOP_CODE);
+      }
       ticket.commit({ events: combinedEvents, result: { stop: "isolated" } }, runAfterCommit);
       return { kind: "isolated", queueChanged };
     }
     const owner = turns.activeIdentity(conversationId);
     if (!owner) {
+      if (rejectNoOp) {
+        throw new RuntimeRequestError(SUPERSEDED_STOP_MESSAGE, SUPERSEDED_STOP_CODE);
+      }
       const kind = turns.isReleasing(conversationId) ? "releasing" : "idle";
       // Idle Stop with no unheld queued items and no extra events writes 0 domain events.
       ticket.commit({ events: combinedEvents, result: { stop: kind } }, runAfterCommit);
@@ -105,6 +115,20 @@ export async function requestAgentStop(dependencies: StopDependencies, request: 
     }
     const target = runControl.target(owner.runId);
     if (!target || target.terminal || target.turnId !== owner.turnId) {
+      if (rejectNoOp && expectedTurnId !== null) {
+        if (target !== null) {
+          throw new RuntimeRequestError(SUPERSEDED_STOP_MESSAGE, SUPERSEDED_STOP_CODE);
+        }
+        let turnTerminal = false;
+        try {
+          turnTerminal = isAgentTurnTerminalStatus(store.agentTurn(owner.turnId).status);
+        } catch {
+          turnTerminal = true;
+        }
+        if (turnTerminal) {
+          throw new RuntimeRequestError(SUPERSEDED_STOP_MESSAGE, SUPERSEDED_STOP_CODE);
+        }
+      }
       ticket.commit({ events: combinedEvents, result: { stop: "untracked", runId: owner.runId } }, runAfterCommit);
       return { kind: "turn", owner, runId: null, effectId: null, earlierSteers: [], queueChanged };
     }

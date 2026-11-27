@@ -73,6 +73,7 @@ import { createWatcherTurnPolicy } from "./runtime/watcher/watcher-turn-policy";
 import { watcherAwareTurnHooks } from "./runtime/watcher/watcher-turn-hooks";
 import type { TurnInteractionCommandDependencies } from "./runtime/commands/turn-interaction-commands";
 import { createQueuedMessageRuntime } from "./runtime/queued-message-runtime";
+import { createCachedAccountUsageLimitHold, wrapWorkflowsForEffectiveSelection } from "./runtime/queued-message-runtime-helpers";
 import { registerRunControlEffectHandlers } from "./runtime/run-control-effect-handlers";
 import { createDelegationRuntime, type DelegationRuntime } from "./runtime/delegation/delegation-runtime";
 import type { ConversationCompactionCommandDependencies } from "./runtime/commands/conversation-compaction-commands"; import { startIdleCompaction } from "./runtime/idle-compaction-scheduler";
@@ -779,18 +780,20 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     pendingApprovals, pendingInputs, dataDirectory, enableProviders,
     attachmentResolver, generatedAttachments,
     prepareDocumentAttachments: options.prepareDocumentAttachments,
-    workflows: agentWorkflows, providerTerminalResumes,
+    workflows: wrapWorkflowsForEffectiveSelection(agentWorkflows, store, providers), providerTerminalResumes,
     providerInfo: () => providerInfo,
     verifyProviderInstallation: providerInstallationVerifier(providers, refreshProviderInfo),
     prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes, broadcast }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,
     broadcast, broadcastSnapshot, send,
   };
   registerRunControlEffectHandlers({ effects: orchestrationEffects, store, turns });
+  let usageRuntime: ReturnType<typeof usageLimitsRuntime> | undefined;
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork,
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
     cancelStaleWatcherNote: (conversationId, itemId) => watchers?.delivery.cancelIfStale(conversationId, itemId) ?? false,
     compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
+    usageLimitHold: createCachedAccountUsageLimitHold(store, (providerId, model, cwd) => usageRuntime?.service.cachedNativeAccount(providerId, model, cwd) ?? null),
   });
   compactions.onSettled((conversationId) => queuedMessages?.onCompactionSettled(conversationId));
   const recordWorktreeCreation = store.conversationWorktrees.recordCreation.bind(store.conversationWorktrees);
@@ -798,17 +801,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     recordWorktreeCreation(conversationId, plannedPath, plannedBranch, identity);
     queuedMessages?.onWorktreeSetupRetried(conversationId);
   };
-  const rejectWorktreeCreation = store.conversationWorktrees.rejectCreation.bind(store.conversationWorktrees);
-  store.conversationWorktrees.rejectCreation = (conversationId) => {
-    rejectWorktreeCreation(conversationId);
-    queuedMessages?.onWorktreeSetupRetried(conversationId);
-  };
   void queuedMessages.start(() => delegation?.recover());
   const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork });
   watchers = createWatcherRuntime({ store, turns, providers, backendProfileController, providerInfo: () => providerInfo, policy: watcherPolicy, signal: runtimeLifetimeAbort.signal,
     interaction: turnInteractionDependencies, queuedMessages, broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell, send,
     turnDiff: (turnId) => turnGitArtifacts.settledTurnDiff(turnId), databaseWrites });
-  const usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
+  usageRuntime = usageLimitsRuntime(store, providers, backendProfileController, () => providerInfo, options.defaultWorkspacePath, runtimeLifetimeAbort.signal, enableProviders, options.backendCredentials, send, {
     dependencies: turnInteractionDependencies, track: admitBackgroundWork, providerMaintenance, updatePreparation,
   }, (providerId) => { applyProviderMetadata(providerId, providers.cachedMetadata(providerId)); flushSnapshot(); });
   const executeCommand = createRuntimeCommandExecutor({
@@ -995,7 +993,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       },
     }, conversationId, content, deviceId, { deliveryId }),
     queueHandlers: {
-      send: (conversationId, itemId, _deviceId, requestId) => queuedMessages?.sendNow(conversationId, itemId, requestId),
+      send: (conversationId, itemId, _deviceId, requestId) => queuedMessages?.sendNow(conversationId, itemId, requestId, { textOnly: true }),
       resume: async (conversationId, _deviceId, requestId) => { await queuedMessages?.resume(conversationId, requestId); },
     },
     onQueueMutated: (conversationId) => {

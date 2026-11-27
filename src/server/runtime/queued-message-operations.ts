@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type WebSocket from "ws";
 
 import type { AgentTurn, ChatAttachment, ClientCommand, Conversation, ModelSelection } from "../../shared/contracts";
-import { modelSelectionSchema } from "../../shared/model-routing";
+import { chatAttachmentKind } from "../../shared/attachments";
+import { modelSelectionSchema, providerIdForHarness } from "../../shared/model-routing";
 import {
   MAX_QUEUED_USER_AND_AGENT_ITEMS,
   queueContentCharCount,
@@ -10,6 +11,7 @@ import {
   type QueueEvent,
 } from "../../shared/orchestration-queue";
 import { QUEUED_ROUTE_CHANGED_ERROR, type MessageQueueResult, type QueuedMessage } from "../../shared/queued-messages";
+import type { DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import type { WatcherNoteAttribution } from "../../shared/watcher";
 import type { RuntimeStore } from "../database";
 import { QueuedMessageLimitError, queuedIntentDigest, queuedRouteIdentity } from "../persistence/queued-message-repository";
@@ -17,9 +19,10 @@ import { MESSAGE_ADMISSION_UNAVAILABLE, publicRuntimeError, RuntimeRequestError 
 import { hasIncompleteWorktreeSetup } from "../workspace-path-authority";
 import type { CommandTicket } from "../orchestration-v2/command-authority";
 import { OrchestrationConflict, type CommandSource } from "../orchestration-v2/types";
+import { delegatedSteerContent } from "./delegation/delivery-instruction";
 import { commandRejection } from "./commands/command-rejection";
 import { requestAgentStop, SUPERSEDED_STOP_CODE } from "./commands/agent-stop-command";
-import { QUEUE_CLAIM_SUPERSEDED_CODE } from "./commands/message-send-command";
+import { QUEUE_CLAIM_SUPERSEDED_CODE, type SendMessageCommandOptions } from "./commands/message-send-command";
 import {
   awaitMessageSendPreparation,
   MessageSendPreparationTimeoutError,
@@ -34,18 +37,19 @@ import {
   QueuedSelectionProviderUnavailableError,
 } from "./turns/turn-request-preparation";
 import {
+  canReleaseWorktreeSetupRetry,
   isResumeIntentFulfilled,
   isUserQueueFull,
   isWatcherQueueFull,
   listQueueEntries,
   nextQueuedSelectionForConversation,
   queueItemRouteMatches,
+  rebindPreSetupWorktreeItems,
   resolveQueueTailSelection,
   resolveResumeContinuation,
   RESUME_USAGE_LIMIT_ERROR,
   RESUME_WORKTREE_SETUP_ERROR,
   routeIdentityForSelection,
-  usageLimitHoldsQueue,
 } from "./queued-message-runtime-helpers";
 
 export interface InPlaceEditPayload {
@@ -143,6 +147,7 @@ export interface QueueOperationsContext {
   running: Map<string, Promise<void>>;
   inFlightEditText: Map<string, string>;
   isCompacting(conversationId: string): boolean;
+  isUsageLimitHeld(conversationId: string, targetSelection?: ModelSelection | null): boolean;
   requireConversation(conversationId: string): Conversation;
   hasPendingInteraction(conversationId: string): boolean;
   result(conversationId: string, id?: string): MessageQueueResult;
@@ -154,6 +159,7 @@ export interface QueueOperationsContext {
     socket: WebSocket,
     command: Extract<ClientCommand, { type: "message.send" }>,
     authority: { kind: "main" },
+    sendOptions?: SendMessageCommandOptions,
   ): Promise<unknown>;
 }
 
@@ -412,7 +418,58 @@ export async function reconfirmOperation(
   await ctx.dispatch(conversationId, id);
 }
 
-/** Executes the N7 continuation plan (native-first, prompted fallback, or next waiting queued item). */
+/** Dispatches a resolved native or prompted resume continuation pinned to `plan.modelSelection`. */
+export async function dispatchPinnedResumePlan(
+  ctx: QueueOperationsContext,
+  conversationId: string,
+  requestId: string,
+  plan: Extract<ReturnType<typeof resolveResumeContinuation>, { kind: "native" | "prompted" }>,
+  socket?: WebSocket,
+  options?: { fromDispatch?: boolean },
+): Promise<boolean> {
+  if (!ctx.dependencies.enableProviders) return false;
+  const { store } = ctx.dependencies;
+  const conversation = store.conversation(conversationId);
+  const planProviderId = providerIdForHarness(plan.modelSelection.harnessId) ?? conversation.providerId;
+  if (planProviderId === conversation.providerId) {
+    await ctx.directTurnInteraction(
+      socket ?? (null as unknown as WebSocket),
+      {
+        type: "message.send",
+        requestId: `${requestId}:continue`,
+        payload: { conversationId, content: plan.content, attachments: [], activate: false },
+      },
+      { kind: "main" },
+      { modelSelectionOverride: plan.modelSelection },
+    );
+    return true;
+  }
+  const resumeItemId = randomUUID();
+  store.orchestration.queue.enqueue({
+    conversationId,
+    itemId: resumeItemId,
+    content: plan.content,
+    attachments: [],
+    kind: "message",
+    createdBy: "system",
+    creationSource: "server",
+    requeuedFromRunId: plan.runId,
+    requeuedFromTurnId: plan.turnId,
+    routeIdentity: routeIdentityForSelection(conversation, plan.modelSelection),
+    modelSelection: plan.modelSelection,
+    placement: "front",
+    queueHeld: false,
+    skipHoldInheritance: true,
+    origin: "automatic",
+  });
+  if (!options?.fromDispatch) {
+    await ctx.running.get(conversationId)?.catch(() => undefined);
+  }
+  await ctx.dispatch(conversationId, resumeItemId);
+  return true;
+}
+
+/** Executes the N7 continuation plan (native-first, prompted fallback, next waiting item, or noop). */
 export async function executeResumeContinuationOperation(
   ctx: QueueOperationsContext,
   conversationId: string,
@@ -421,14 +478,9 @@ export async function executeResumeContinuationOperation(
 ): Promise<boolean> {
   const { store } = ctx.dependencies;
   const plan = resolveResumeContinuation(store, conversationId);
+  if (plan.kind === "noop") return false;
   if (plan.kind === "native" || plan.kind === "prompted") {
-    if (!ctx.dependencies.enableProviders) return false;
-    await ctx.directTurnInteraction(socket ?? (null as unknown as WebSocket), {
-      type: "message.send",
-      requestId: `${requestId}:continue`,
-      payload: { conversationId, content: plan.content, attachments: [], activate: false },
-    }, { kind: "main" });
-    return true;
+    return await dispatchPinnedResumePlan(ctx, conversationId, requestId, plan, socket);
   }
   await ctx.running.get(conversationId)?.catch(() => undefined);
   const nextWaiting = listQueueEntries(store, conversationId).find((entry) => entry.state === "waiting" && !entry.queueHeld);
@@ -455,8 +507,11 @@ export async function resumeQueueOperation(
   if (hasIncompleteWorktreeSetup(db, conversationId)) {
     throw new RuntimeRequestError(RESUME_WORKTREE_SETUP_ERROR);
   }
-  const targetSelection = nextQueuedSelectionForConversation(store, conversationId);
-  if (usageLimitHoldsQueue(store, conversationId, targetSelection)) {
+  const resumePlan = resolveResumeContinuation(store, conversationId);
+  const targetSelection = resumePlan.kind === "native" || resumePlan.kind === "prompted"
+    ? resumePlan.modelSelection
+    : nextQueuedSelectionForConversation(store, conversationId);
+  if (ctx.isUsageLimitHeld(conversationId, targetSelection)) {
     throw new RuntimeRequestError(RESUME_USAGE_LIMIT_ERROR);
   }
   if (ctx.hasPendingInteraction(conversationId)) {
@@ -804,14 +859,14 @@ export function onTurnSettledOperation(
   const nextSelection = nextQueuedSelectionForConversation(store, conversationId);
   if (turn.status === "completed" && !wasStopped
     && !hasIncompleteWorktreeSetup(db, conversationId)
-    && !usageLimitHoldsQueue(store, conversationId, nextSelection)) {
+    && !ctx.isUsageLimitHeld(conversationId, nextSelection)) {
     const released = queue.release({ conversationId, cause: "R2-run-completed" });
     if (released.events.length > 0) queueMutated = true;
   }
 
   if (adoptSettledUnreadFollowUps(store, turn)) queueMutated = true;
 
-  if (turn.status === "failed" && !usageLimitHoldsQueue(store, conversationId, turn.modelSelection)) {
+  if (turn.status === "failed" && !ctx.isUsageLimitHeld(conversationId, turn.modelSelection)) {
     const held = queue.hold({ conversationId, cause: "H4-start-failure" });
     if (held.events.length > 0) queueMutated = true;
   }
@@ -840,5 +895,132 @@ export function onTurnSettledOperation(
   if (hasDispatchableItem(conversationId)) {
     if (turn.status === "cancelled") ctx.retryAfterCleanup(conversationId);
     else void ctx.schedule(conversationId).catch(() => undefined);
+  }
+}
+
+/** S12: Rebinds pre-setup held items to the newly verified worktree checkout and releases via R4. */
+export function onWorktreeSetupRetriedOperation(
+  ctx: QueueOperationsContext,
+  conversationId: string,
+): void {
+  const { store, turns } = ctx.dependencies;
+  if (turns.isActive(conversationId) || !canReleaseWorktreeSetupRetry(store, conversationId)) return;
+  const rebound = rebindPreSetupWorktreeItems(store, conversationId);
+  const released = store.orchestration.queue.release({ conversationId, cause: "R4-preparation-retry" });
+  if (rebound || released.events.length > 0) {
+    ctx.changed(conversationId);
+    void ctx.schedule(conversationId).catch(() => undefined);
+  }
+}
+
+/** Validates `message.queue.send` BEFORE committing any receipt (Audit 3 Bug #5). */
+export function validateManualSendOperation(
+  ctx: QueueOperationsContext,
+  conversationId: string,
+  id: string,
+  documentsWaitError: string,
+): void {
+  const { store, turns } = ctx.dependencies;
+  const db = store.orchestration.effects.connection;
+  ctx.requireConversation(conversationId);
+  if (hasIncompleteWorktreeSetup(db, conversationId)) {
+    throw new RuntimeRequestError(RESUME_WORKTREE_SETUP_ERROR);
+  }
+  const entries = listQueueEntries(store, conversationId);
+  const target = entries.find((entry) => entry.id === id);
+  if (!target) throw new RuntimeRequestError("This queued message is no longer in the queue.");
+  if (turns.isActive(conversationId)) {
+    if (target.delegatedCompletion) {
+      throw new RuntimeRequestError("Delegated results continue this chat after the current turn ends.");
+    }
+    if (target.userMessageId) {
+      throw new RuntimeRequestError("This follow-up sends as its own turn when the current turn ends.");
+    }
+    const first = entries.find((entry) => !entry.delegatedCompletion);
+    if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
+    if (target.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) {
+      throw new RuntimeRequestError(documentsWaitError);
+    }
+  }
+}
+
+export async function steerDelegatedOperation(
+  ctx: QueueOperationsContext,
+  input: {
+    conversationId: string;
+    entry: QueuedMessage & { delegatedCompletion: DelegatedCompletionAttribution };
+    hooks: {
+      steerable(conversationId: string, attribution: DelegatedCompletionAttribution): boolean;
+      content(attribution: DelegatedCompletionAttribution): string | null;
+      steered(attribution: DelegatedCompletionAttribution, turnId: string): void;
+    };
+    claimItem(
+      conversationId: string,
+      id: string,
+      mode: "run" | "steer" | "after-stop",
+    ): { dispatchOrdinal: number; editRevision: number } | null;
+    releaseClaimItem(
+      conversationId: string,
+      id: string,
+      reason: "transient" | "runtime-lost" | "steer-declined" | "turn-ended",
+    ): boolean;
+  },
+): Promise<boolean> {
+  const { store, turns } = ctx.dependencies;
+  const queue = store.orchestration.queue;
+  const runControl = store.orchestration.runControl;
+  const { conversationId, entry, hooks } = input;
+  const attribution = entry.delegatedCompletion;
+  if (entry.userMessageId !== null || entry.state !== "waiting" || !hooks.steerable(conversationId, attribution)) return false;
+  const content = hooks.content(attribution);
+  if (content === null) return false;
+  const admission = turns.acquireFollowUpAdmission(conversationId);
+  if (!admission) return false;
+  let claimed = false;
+  try {
+    const claim = input.claimItem(conversationId, entry.id, "steer");
+    if (!claim) return false;
+    claimed = true;
+    ctx.changed(conversationId);
+    const steered = await turns.steer(
+      admission,
+      { content, imagePaths: [] },
+      [],
+      undefined,
+      AbortSignal.timeout(Math.max(0, messageSendPreparationDeadline() - Date.now())),
+      { queuedMessageId: entry.id, providerContent: delegatedSteerContent(content), delegatedCompletion: attribution },
+    );
+    claimed = false;
+    if (steered.kind === "accepted") {
+      if (queue.getItem(entry.id)) {
+        const targetRun = runControl.target(admission.runId);
+        queue.deliver({
+          conversationId,
+          itemId: entry.id,
+          delivery: {
+            mode: "steer",
+            runId: admission.runId,
+            attemptId: targetRun?.attemptId ?? admission.runId,
+            turnId: admission.turnId,
+            messageId: steered.message.id,
+            deliveredAt: steered.message.createdAt,
+          },
+        });
+      }
+      hooks.steered(attribution, admission.turnId);
+      ctx.dependencies.broadcast({ type: "conversation.message.persisted", message: steered.message });
+      ctx.dependencies.broadcastSnapshot();
+      return true;
+    }
+    input.releaseClaimItem(conversationId, entry.id, steered.kind === "turn-ended" ? "turn-ended" : "steer-declined");
+    void ctx.schedule(conversationId).catch(() => undefined);
+    return false;
+  } catch {
+    if (claimed) input.releaseClaimItem(conversationId, entry.id, "steer-declined");
+    void ctx.schedule(conversationId).catch(() => undefined);
+    return false;
+  } finally {
+    admission.release();
+    ctx.changed(conversationId);
   }
 }

@@ -10,6 +10,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import { ConversationContextRequestCoordinator } from "../../src/server/runtime/conversation-context-request-coordinator";
+import { reconcileQueueOnBoot } from "../../src/server/runtime/queue-boot-reconciliation";
 
 const roots: string[] = [];
 
@@ -55,11 +56,9 @@ async function setup(options: { orchestrated?: boolean } = {}) {
     if (!options.orchestrated) return;
     const target = store.orchestration.runControl.target(identity.runId);
     if (!target || target.terminal) return;
-    const now = new Date().toISOString();
     store.updateAgentTurnLifecycle(identity.turnId, {
       status: "cancelled",
       terminalReason: "agent-cancelled",
-      completedAt: now,
     });
     store.orchestration.synchronize(store.agentTurn(identity.turnId));
     store.orchestration.cleanup(identity, "confirmed");
@@ -76,13 +75,23 @@ async function setup(options: { orchestrated?: boolean } = {}) {
     return { kind: "accepted", message: { id: `follow-up-${followUps}`, turnId: lease.turnId } };
   };
   let failNextCleanup: Error | null = null;
+  let onAcquireTurnAdmission: ((conversationId: string) => void) | null = null;
+  let onWaitForProviderCleanup: (() => void) | null = null;
+  let lastAdmissionRelease: ReturnType<typeof vi.fn> | null = null;
+  let queueCallCount = 0;
   const turns = {
-    acquireTurnAdmission: async (conversationId: string) => active.has(conversationId) ? null
-      : { conversationId, token: Symbol("admission"), release: () => undefined },
+    acquireTurnAdmission: async (conversationId: string) => {
+      if (active.has(conversationId)) return null;
+      onAcquireTurnAdmission?.(conversationId);
+      const release = vi.fn();
+      lastAdmissionRelease = release;
+      return { conversationId, token: Symbol("admission"), release };
+    },
     isActive: (conversationId: string) => active.has(conversationId),
     activeConversationIds: () => [...active.keys()],
     activeIdentity: (conversationId: string) => active.get(conversationId) ?? null,
     queue: (request: { conversationId: string; content: string; activateConversation: boolean; queuedMessageId?: string }) => {
+      queueCallCount += 1;
       turnCounter += 1;
       const conversation = store.conversation(request.conversationId);
       const input = {
@@ -132,6 +141,7 @@ async function setup(options: { orchestrated?: boolean } = {}) {
     }),
     isReleasing: (conversationId: string) => active.has(conversationId),
     waitForProviderCleanup: async () => {
+      onWaitForProviderCleanup?.();
       if (failNextCleanup) {
         const error = failNextCleanup;
         failNextCleanup = null;
@@ -149,6 +159,10 @@ async function setup(options: { orchestrated?: boolean } = {}) {
     ) => await steerHandler(lease, input, attachments, acknowledged),
     setSteerHandler: (next: typeof steerHandler) => { steerHandler = next; },
     failCleanupOnce: (error: Error) => { failNextCleanup = error; },
+    setAcquireTurnAdmissionHook: (hook: ((conversationId: string) => void) | null) => { onAcquireTurnAdmission = hook; },
+    setWaitForProviderCleanupHook: (hook: (() => void) | null) => { onWaitForProviderCleanup = hook; },
+    lastAdmissionRelease: () => lastAdmissionRelease,
+    queueCallCount: () => queueCallCount,
     respondToInput: vi.fn(() => false),
   };
 
@@ -624,6 +638,291 @@ describe("D.7 inertia_queue tool and H2/G5 managed queue semantics", () => {
       for (const marker of [secretMarkerA, secretMarkerB, editedMarker]) {
         expect(persistedDump).not.toContain(marker);
       }
+    } finally {
+      env.store.close();
+    }
+  });
+
+  it("S2 round-2: mode restart commits zero replacement queue items if the expected turn ends before stop intake", async () => {
+    const env = await setup({ orchestrated: true });
+    try {
+      const initialQueueCalls = env.turns.queueCallCount();
+      let releaseLane!: () => void;
+      let laneHeld!: () => void;
+      const laneReady = new Promise<void>((resolve) => { laneHeld = resolve; });
+      const laneGate = new Promise<void>((resolve) => { releaseLane = resolve; });
+
+      // Hold the child's orchestration lane right when approval returns so
+      // restartManagedTurn passes its pre-stop check, enters requestAgentStop,
+      // and waits on the lane while the expected turn completes.
+      const laneHolder = env.store.orchestration.lanes.run(env.childId, async () => {
+        laneHeld();
+        await laneGate;
+      });
+      await laneReady;
+
+      const restartCall = env.toolCall("inertia_send_message", {
+        conversationId: env.childId,
+        content: "Must never be enqueued when expected turn ended before stop intake",
+        mode: "restart",
+      });
+      const restartPromise = env.bridge.invoke(restartCall);
+      // Wait for restartManagedTurn to reach authority.begin (queued behind laneHolder).
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      // Expected turn finishes before requestAgentStop enters intake.
+      env.turns.cancel(env.childId);
+      env.store.updateAgentTurnLifecycle(env.firstTurnId, {
+        status: "completed",
+      });
+      env.store.orchestration.synchronize(env.store.agentTurn(env.firstTurnId));
+      releaseLane();
+      await laneHolder;
+
+      const res = await restartPromise;
+      expect(res.success).toBe(false);
+      expect(res.text).toContain("approved turn is no longer active");
+      expect(env.store.orchestration.queue.listActive(env.childId)).toEqual([]);
+      expect(env.store.queuedMessages.list(env.childId)).toEqual([]);
+      expect(env.turns.queueCallCount()).toBe(initialQueueCalls);
+      expect(env.turns.activeIdentity(env.childId)).toBeNull();
+
+      const enqueueEvents = env.db.prepare(
+        "SELECT type FROM orchestration_v2_events WHERE thread_id = ? AND type = 'queue.item-enqueued'",
+      ).all(env.childId);
+      expect(enqueueEvents).toEqual([]);
+    } finally {
+      env.store.close();
+    }
+  });
+
+  it("S7 round-2: re-enforces caller/target accessMode and interactionMode ceilings after acquireTurnAdmission, prepareForkSession, and restart cleanup", async () => {
+    const env = await setup({ orchestrated: true });
+    try {
+      // Make child idle (and settle the initial orchestrated turn cleanly) and align caller + child at auto-edit / build.
+      const firstTurn = env.store.agentTurn(env.firstTurnId);
+      env.turns.cancel(env.childId);
+      env.store.updateAgentTurnLifecycle(firstTurn.id, {
+        status: "completed",
+      });
+      env.store.orchestration.synchronize(env.store.agentTurn(firstTurn.id));
+      env.store.orchestration.cleanup({ turnId: firstTurn.id, runId: firstTurn.runId }, "confirmed");
+      env.store.updateConversation(env.source.id, { accessMode: "auto-edit", interactionMode: "build" });
+      env.store.updateConversation(env.childId, { accessMode: "auto-edit", interactionMode: "build" });
+
+      // (a) Caller accessMode lowered DURING acquireTurnAdmission -> rejects before turns.queue and releases admission.
+      const beforeAdmissionDrift = env.turns.queueCallCount();
+      env.turns.setAcquireTurnAdmissionHook(() => {
+        env.store.updateConversation(env.source.id, { accessMode: "supervised" });
+      });
+      const admissionDriftRes = await env.bridge.invoke(env.toolCall("inertia_send_message", {
+        conversationId: env.childId,
+        content: "Blocked after acquireTurnAdmission",
+        mode: "auto",
+      }));
+      env.turns.setAcquireTurnAdmissionHook(null);
+      expect(admissionDriftRes.success).toBe(false);
+      expect(JSON.parse(admissionDriftRes.text).error.code).toBe("access_mode_escalation_denied");
+      expect(env.turns.queueCallCount()).toBe(beforeAdmissionDrift);
+      expect(env.turns.lastAdmissionRelease()).toHaveBeenCalledOnce();
+
+      // (b) Caller interactionMode lowered DURING prepareForkSession -> rejects before turns.queue and releases admission.
+      env.store.updateConversation(env.source.id, { accessMode: "auto-edit", interactionMode: "build" });
+      const beforeForkDrift = env.turns.queueCallCount();
+      const forkSpy = vi.spyOn(env.store.orchestration.forks, "get").mockImplementationOnce(() => {
+        env.store.updateConversation(env.source.id, { interactionMode: "plan" });
+        return null;
+      });
+      const forkDriftRes = await env.bridge.invoke(env.toolCall("inertia_send_message", {
+        conversationId: env.childId,
+        content: "Blocked after prepareForkSession",
+        mode: "auto",
+      }));
+      forkSpy.mockRestore();
+      expect(forkDriftRes.success).toBe(false);
+      expect(JSON.parse(forkDriftRes.text).error.code).toBe("interaction_mode_escalation_denied");
+      expect(env.turns.queueCallCount()).toBe(beforeForkDrift);
+      expect(env.turns.lastAdmissionRelease()).toHaveBeenCalledOnce();
+
+      // (c) Target accessMode raised DURING waitForProviderCleanup in mode restart -> withdraws replacement item and rejects before turns.queue.
+      env.store.updateConversation(env.source.id, { accessMode: "auto-edit", interactionMode: "build" });
+      const startRes = await env.bridge.invoke(env.toolCall("inertia_send_message", {
+        conversationId: env.childId,
+        content: "Start active turn before restart drift test",
+        mode: "auto",
+      }));
+      expect(startRes.success).toBe(true);
+      const beforeRestartDrift = env.turns.queueCallCount();
+      env.turns.setWaitForProviderCleanupHook(() => {
+        env.store.updateConversation(env.childId, { accessMode: "full" });
+      });
+      const restartDriftRes = await env.bridge.invoke(env.toolCall("inertia_send_message", {
+        conversationId: env.childId,
+        content: "Blocked after restart cleanup",
+        mode: "restart",
+      }));
+      env.turns.setWaitForProviderCleanupHook(null);
+      expect(restartDriftRes.success).toBe(false);
+      expect(JSON.parse(restartDriftRes.text).error.code).toBe("access_mode_escalation_denied");
+      expect(env.turns.queueCallCount()).toBe(beforeRestartDrift);
+      expect(env.store.orchestration.queue.listActive(env.childId)).toEqual([]);
+    } finally {
+      env.store.close();
+    }
+  });
+
+  it("S8 round-2: boot reconciliation delivers already-acknowledged follow-ups and settles open/retired provider.steer effects instead of classifying text-lost", async () => {
+    const env = await setup({ orchestrated: true });
+    try {
+      const firstTurn = env.store.agentTurn(env.firstTurnId);
+
+      // Case 1: Crash with open provider.steer effect (still running/pending) right after transcript persistence.
+      const itemOpen = env.store.orchestration.queue.enqueue({
+        conversationId: env.childId,
+        itemId: crypto.randomUUID(),
+        content: "Acknowledged steer before crash (open effect)",
+        createdBy: "agent",
+        creationSource: "mcp",
+      }).value.id;
+      env.store.orchestration.queue.claim({
+        conversationId: env.childId,
+        itemId: itemOpen,
+        mode: "steer",
+      });
+      const steerOpen = await env.store.orchestration.authority.begin<
+        { kind: "requested"; effectId: string } | { kind: "closed" } | { kind: "untracked" }
+      >({
+        source: {
+          actorId: "runtime",
+          commandId: `queue-steer:${itemOpen}:1:crash-open`,
+          command: { type: "queue.steer", conversationId: env.childId, itemId: itemOpen },
+        },
+        threadId: env.childId,
+        projectId: env.project.id,
+        commandType: "queue.steer",
+        rejection: null,
+      }, (ticket) => env.store.orchestration.runControl.requestSteer(ticket, firstTurn.runId, firstTurn.id, { queuedMessageId: itemOpen }));
+      expect(steerOpen.kind).toBe("lead");
+      if (steerOpen.kind === "lead") steerOpen.ticket.finish(null);
+      const openEffectId = steerOpen.kind === "lead" && steerOpen.intake.kind === "requested"
+        ? steerOpen.intake.effectId
+        : "";
+      expect(openEffectId).toMatch(/^steer:/u);
+
+      // Simulate transcript-repository persisting the follow-up and clearing queued_messages before V2 settlement/delivery.
+      const persistedOpen = env.store.createAcknowledgedFollowUpMessage(
+        env.childId,
+        firstTurn.id,
+        "Acknowledged steer before crash (open effect)",
+        "2026-11-26T20:00:01.000Z",
+        "2026-11-26T20:00:02.000Z",
+        [],
+        itemOpen,
+      );
+
+      // Case 2: Same crash gap, plus effect outbox already retired the process-bound provider.steer as runtime-lost on boot.
+      const itemRetired = env.store.orchestration.queue.enqueue({
+        conversationId: env.childId,
+        itemId: crypto.randomUUID(),
+        content: "Acknowledged steer before crash (retired effect)",
+        createdBy: "agent",
+        creationSource: "mcp",
+      }).value.id;
+      env.store.orchestration.queue.claim({
+        conversationId: env.childId,
+        itemId: itemRetired,
+        mode: "steer",
+      });
+      const steerRetired = await env.store.orchestration.authority.begin<
+        { kind: "requested"; effectId: string } | { kind: "closed" } | { kind: "untracked" }
+      >({
+        source: {
+          actorId: "runtime",
+          commandId: `queue-steer:${itemRetired}:1:crash-retired`,
+          command: { type: "queue.steer", conversationId: env.childId, itemId: itemRetired },
+        },
+        threadId: env.childId,
+        projectId: env.project.id,
+        commandType: "queue.steer",
+        rejection: null,
+      }, (ticket) => env.store.orchestration.runControl.requestSteer(ticket, firstTurn.runId, firstTurn.id, { queuedMessageId: itemRetired }));
+      expect(steerRetired.kind).toBe("lead");
+      if (steerRetired.kind === "lead") steerRetired.ticket.finish(null);
+      const retiredEffectId = steerRetired.kind === "lead" && steerRetired.intake.kind === "requested"
+        ? steerRetired.intake.effectId
+        : "";
+      expect(retiredEffectId).toMatch(/^steer:/u);
+
+      const persistedRetired = env.store.createAcknowledgedFollowUpMessage(
+        env.childId,
+        firstTurn.id,
+        "Acknowledged steer before crash (retired effect)",
+        "2026-11-26T20:00:03.000Z",
+        "2026-11-26T20:00:04.000Z",
+        [],
+        itemRetired,
+      );
+      env.db.prepare(
+        "UPDATE orchestration_v2_effects SET state = 'retired', failure_code = 'runtime-lost', claim_id = NULL, claimed_at = NULL, settled_at = ? WHERE id = ?",
+      ).run(new Date().toISOString(), retiredEffectId);
+
+      // Pre-boot crash state: both items look mismatched in verify() because queued_messages is accepted with empty content.
+      const preVerify = env.store.orchestration.events.verify({ readable: true });
+      expect(preVerify.queueContentMismatches.map((m) => m.itemId).sort()).toEqual([itemOpen, itemRetired].sort());
+
+      const report = await reconcileQueueOnBoot(env.store);
+      expect(report.reconciledDelivered.sort()).toEqual([itemOpen, itemRetired].sort());
+      expect(report.blockedTextLost).toEqual([]);
+      expect(report.blockedUnconfirmedSteers).toEqual([]);
+      expect(report.releasedDispatching).toEqual([]);
+
+      expect(env.store.orchestration.queue.listActive(env.childId)).toEqual([]);
+      expect(env.store.orchestration.queue.getItem(itemOpen)).toMatchObject({
+        state: "delivered",
+        delivery: {
+          mode: "steer",
+          runId: firstTurn.runId,
+          turnId: firstTurn.id,
+          messageId: persistedOpen.id,
+          steerEffectId: openEffectId,
+          deliveredAt: persistedOpen.createdAt,
+        },
+      });
+      expect(env.store.orchestration.queue.getItem(itemRetired)).toMatchObject({
+        state: "delivered",
+        delivery: {
+          mode: "steer",
+          runId: firstTurn.runId,
+          turnId: firstTurn.id,
+          messageId: persistedRetired.id,
+          steerEffectId: retiredEffectId,
+          deliveredAt: persistedRetired.createdAt,
+        },
+      });
+      expect(env.store.orchestration.runControl.steer(openEffectId)).toMatchObject({
+        state: "settled",
+        outcome: "accepted",
+        messageId: persistedOpen.id,
+        queuedMessageId: itemOpen,
+      });
+      expect(env.store.orchestration.runControl.steer(retiredEffectId)).toMatchObject({
+        state: "settled",
+        outcome: "accepted",
+        messageId: persistedRetired.id,
+        queuedMessageId: itemRetired,
+      });
+
+      // Boot reconciliation is idempotent and leaves zero duplicate messages or active queue items.
+      const secondReport = await reconcileQueueOnBoot(env.store);
+      expect(secondReport.reconciledDelivered).toEqual([]);
+      expect(secondReport.blockedTextLost).toEqual([]);
+      expect(secondReport.blockedUnconfirmedSteers).toEqual([]);
+      expect(env.store.orchestration.queue.listActive(env.childId)).toEqual([]);
+      const transcript = env.db.prepare(
+        "SELECT content FROM messages WHERE conversation_id = ? AND role = 'user'",
+      ).all(env.childId) as Array<{ content: string }>;
+      expect(transcript.filter((message) => message.content === "Acknowledged steer before crash (open effect)")).toHaveLength(1);
+      expect(transcript.filter((message) => message.content === "Acknowledged steer before crash (retired effect)")).toHaveLength(1);
     } finally {
       env.store.close();
     }

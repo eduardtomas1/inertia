@@ -12,12 +12,24 @@ import type { MessageQueueResult, QueuedMessage } from "../../shared/queued-mess
 import type { RuntimeStore } from "../database";
 import { providerInstanceId } from "../orchestration-v2/provider-instance";
 import { queuedRouteIdentity } from "../persistence/queued-message-repository";
+import type { ProviderManager } from "../providers";
+import { RuntimeRequestError } from "../runtime-errors";
+import { resetQuota } from "../usage/limit-reset-policy";
+import type { NativeUsageAccount } from "../usage/subscription-io";
 import { hasIncompleteWorktreeSetup } from "../workspace-path-authority";
+import { AgentWorkflowController } from "./agent-workflow-controller";
 
 export const RESUME_WORKTREE_SETUP_ERROR = "Retry worktree setup or choose a workspace before resuming the queue.";
 export const RESUME_USAGE_LIMIT_ERROR = "Continue the limited thread before resuming its queue.";
 export const PROMPTED_RESUME_TEXT = "Continue where you left off.";
 export const NATIVE_RESUME_TEXT = "Continue from where you stopped.";
+export const PRIVATE_CONNECT_ATTACHMENT_SEND_ERROR = "Queued messages with attachments cannot be sent from a paired device.";
+
+export type UsageLimitHoldCheck = (
+  conversationId: string,
+  providerId: ProviderId,
+  model?: string,
+) => boolean | undefined;
 
 /** Resolves the effective ModelSelection for a queued item (per-item override vs thread selection). */
 export function resolveEffectiveQueuedSelection(
@@ -108,15 +120,99 @@ export function usageLimitHoldsQueue(
   return false;
 }
 
+/**
+ * Checks provider-scoped usage-limit hold, preferring the live `LimitResetScheduler`
+ * callback (which inspects cached provider account reset windows even without an
+ * armed plan or snooze) before falling back to the store-only check.
+ */
+export function isUsageLimitHeldForSelection(
+  store: RuntimeStore,
+  conversationId: string,
+  targetSelection?: ModelSelection | null,
+  usageLimitHold?: UsageLimitHoldCheck,
+  nowMs: number = Date.now(),
+): boolean {
+  if (usageLimitHold) {
+    try {
+      const conversation = store.conversation(conversationId);
+      const effectiveSelection = targetSelection ?? conversation.modelSelection;
+      const targetProviderId = providerIdForHarness(effectiveSelection.harnessId) ?? conversation.providerId;
+      const held = usageLimitHold(conversationId, targetProviderId, effectiveSelection.modelId);
+      if (held !== undefined) return held;
+    } catch {
+      return false;
+    }
+  }
+  return usageLimitHoldsQueue(store, conversationId, targetSelection, nowMs);
+}
+
+/**
+ * S10: Builds a `UsageLimitHoldCheck` backed by `UsageLimitsService.cachedNativeAccount`
+ * so a known future provider account reset holds that provider's queued items even when
+ * no reset plan is armed and no snooze is set (matching `LimitResetScheduler.usageLimitHoldsQueue`).
+ */
+export function createCachedAccountUsageLimitHold(
+  store: RuntimeStore,
+  cachedAccount: (providerId: ProviderId, model?: string, cwd?: string) => NativeUsageAccount | null,
+): UsageLimitHoldCheck {
+  return (conversationId, providerId, model) => {
+    let conversation: Conversation;
+    try {
+      conversation = store.conversation(conversationId);
+    } catch {
+      return false;
+    }
+    const latest = latestTurnForProvider(store, conversationId, providerId);
+    if (!latest || latest.status !== "failed") return false;
+    if (!store.limitResets.usageLimited(latest.id)) return false;
+    const now = Date.now();
+    const effectiveModel = model ?? latest.model;
+    const cwd = store.conversationPath(conversationId);
+    const plan = store.limitResets.get(conversationId);
+    const activePlanResetsAt = plan
+      && plan.failedTurnId === latest.id
+      && (plan.state === "waiting" || plan.state === "dispatching")
+      ? plan.resetsAt
+      : null;
+    const account = cachedAccount(providerId, effectiveModel, cwd);
+    if (account && account.providerId === providerId) {
+      const quota = resetQuota(account, effectiveModel, now, latest.modelSelection.alias);
+      if (quota.kind === "available") return false;
+      if (quota.kind === "exhausted") {
+        const resetsAtMs = Date.parse(quota.resetsAt);
+        return Number.isFinite(resetsAtMs) && resetsAtMs > now;
+      }
+      return activePlanResetsAt !== null && Date.parse(activePlanResetsAt) > now;
+    }
+    if (activePlanResetsAt !== null && Date.parse(activePlanResetsAt) > now) return true;
+    return conversation.providerId === providerId
+      && typeof conversation.snoozedUntil === "string"
+      && Date.parse(conversation.snoozedUntil) > now;
+  };
+}
+
 export type ResumeContinuationPlan =
-  | { kind: "native"; content: string }
-  | { kind: "prompted"; content: string }
-  | { kind: "queue" };
+  | { kind: "native"; content: string; modelSelection: ModelSelection; turnId: string; runId: string }
+  | { kind: "prompted"; content: string; modelSelection: ModelSelection; turnId: string; runId: string }
+  | { kind: "queue" }
+  | { kind: "noop" };
+
+function hasAssistantMessageForTurn(
+  store: RuntimeStore,
+  conversationId: string,
+  turnId: string,
+): boolean {
+  const row = store.orchestration.effects.connection.prepare(
+    "SELECT 1 FROM messages WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant' LIMIT 1",
+  ).get(conversationId, turnId);
+  return row !== undefined;
+}
 
 /**
  * N7: decides whether `message.queue.resume` continues the latest stopped/interrupted/failed
- * run natively first, falls back to prompted continuation (e.g. missed-run images or empty queue),
- * or dispatches the next waiting queued item directly.
+ * run natively first (pinned to `latest.modelSelection`), falls back to prompted continuation
+ * when appropriate, dispatches the next waiting queued item, or no-ops for a non-native-resume
+ * harness whose stopped turn already ran when the queue is empty.
  */
 export function resolveResumeContinuation(
   store: RuntimeStore,
@@ -144,8 +240,7 @@ export function resolveResumeContinuation(
   const sessionId = latest.providerSessionAfter
     ?? latest.providerSessionBefore
     ?? (conversation.providerId === latest.providerId ? conversation.providerSessionId : null);
-  const hasResumableSession = conversation.providerId === latest.providerId
-    && sessionId !== null
+  const hasResumableSession = sessionId !== null
     && !store.orchestration.backings.sessionRetired({
       threadId: conversationId,
       providerId: latest.providerId,
@@ -158,14 +253,23 @@ export function resolveResumeContinuation(
       providerInstanceId: providerInstanceId(latest.providerId, latest.continuationIdentity),
     }).length > 0;
   if (nativeSupported && hasResumableSession && !missedImages) {
-    return { kind: "native", content: NATIVE_RESUME_TEXT };
+    return { kind: "native", content: NATIVE_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
   }
   if (nativeSupported && missedImages) {
-    return { kind: "prompted", content: PROMPTED_RESUME_TEXT };
+    return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
   }
   const hasWaiting = listQueueEntries(store, conversationId).some((entry) => entry.state === "waiting" && !entry.queueHeld);
+  if (!nativeSupported) {
+    const reachedProvider = latest.terminalAssistantMessageId !== null
+      || store.turnLedgerRepository.turnHasProviderActivity(conversationId, latest.id, latest.harnessId)
+      || hasAssistantMessageForTurn(store, conversationId, latest.id);
+    if (!reachedProvider) {
+      return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
+    }
+    return hasWaiting ? { kind: "queue" } : { kind: "noop" };
+  }
   if (hasWaiting) return { kind: "queue" };
-  return { kind: "prompted", content: PROMPTED_RESUME_TEXT };
+  return { kind: "prompted", content: PROMPTED_RESUME_TEXT, modelSelection: latest.modelSelection, turnId: latest.id, runId: latest.runId };
 }
 
 /** Returns true once a run has already been accepted/started after the stored resume intent. */
@@ -280,11 +384,12 @@ export function computeQueueHoldReason(
   conversationId: string,
   activeItems: readonly QueueItemProjection[],
   nowMs: number = Date.now(),
+  usageLimitHold?: UsageLimitHoldCheck,
 ): QueueHoldReason | null {
   const db = store.orchestration.effects.connection;
   if (hasIncompleteWorktreeSetup(db, conversationId)) return "workspace-setup";
   const nextSelection = nextQueuedSelectionForConversation(store, conversationId);
-  if (usageLimitHoldsQueue(store, conversationId, nextSelection, nowMs)) return "usage-limit";
+  if (isUsageLimitHeldForSelection(store, conversationId, nextSelection, usageLimitHold, nowMs)) return "usage-limit";
   const hasHeldItem = activeItems.some((item) => item.queueHeld);
   if (!hasHeldItem) return null;
   const lastHold = db.prepare(`
@@ -372,12 +477,13 @@ export function buildQueueResult(
     isActive: boolean;
     hasPendingInteraction: boolean;
     nowMs?: number;
+    usageLimitHold?: UsageLimitHoldCheck;
   },
 ): MessageQueueResult {
   const entries = listQueueEntries(store, conversationId);
   const v2Active = store.orchestration.queue.listActive(conversationId);
   const revision = store.orchestration.queue.revision(conversationId);
-  const holdReason = computeQueueHoldReason(store, conversationId, v2Active, options.nowMs);
+  const holdReason = computeQueueHoldReason(store, conversationId, v2Active, options.nowMs, options.usageLimitHold);
   const held = v2Active.some((item) => item.queueHeld) || holdReason !== null;
 
   let canResume = false;
@@ -386,7 +492,7 @@ export function buildQueueResult(
     const conversation = store.conversation(conversationId);
     if (conversation.archivedAt === null && !options.isActive && !options.hasPendingInteraction) {
       const latest = store.latestAgentTurnForConversation(conversationId);
-      const nativeResume = supportsNativeResume(conversation.modelSelection.harnessId);
+      const nativeResume = supportsNativeResume((latest?.modelSelection ?? conversation.modelSelection).harnessId);
       const hasUndeliveredRequeue = v2Active.some((item) => item.requeuedFromTurnId !== undefined);
       const hasHeldItems = v2Active.some((item) => item.queueHeld);
       const latestInterruptedOrStopped = latest !== null
@@ -519,5 +625,112 @@ export function routeIdentityForSelection(conversation: Conversation, selection:
     modelSelection: selection,
     model: selection.modelId,
     reasoningEffort: selection.reasoningEffort ?? "",
+  });
+}
+
+/**
+ * S12: Rebinds setup-held waiting items whose routeIdentity was captured pre-setup
+ * (`worktreePath === null`) to the newly created worktree checkout before R4 release.
+ */
+export function rebindPreSetupWorktreeItems(
+  store: RuntimeStore,
+  conversationId: string,
+): boolean {
+  let conversation: Conversation;
+  try {
+    conversation = store.conversation(conversationId);
+  } catch {
+    return false;
+  }
+  if (conversation.worktreePath === null) return false;
+  const queue = store.orchestration.queue;
+  const db = store.orchestration.effects.connection;
+  let rebound = false;
+  for (const item of queue.listActive(conversationId)) {
+    if (!item.queueHeld || item.state !== "waiting" || item.kind !== "message") continue;
+    const rawRoute = item.routeIdentity ?? (db.prepare(
+      "SELECT route_identity FROM queued_messages WHERE id = ? AND conversation_id = ?",
+    ).get(item.id, conversationId) as { route_identity: string } | undefined)?.route_identity;
+    if (!rawRoute) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawRoute);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parsed) || parsed.length < 8) continue;
+    if (parsed[0] !== conversation.projectId || parsed[1] !== null) continue;
+    const contentRow = queue.getContent(conversationId, item.id);
+    const nextRouteIdentity = (!item.followsThreadSelection && item.modelSelection)
+      ? routeIdentityForSelection(conversation, item.modelSelection)
+      : queuedRouteIdentity(conversation);
+    queue.edit({
+      conversationId,
+      itemId: item.id,
+      expectedRevision: item.contentRef.editRevision,
+      content: contentRow?.content ?? "",
+      routeIdentity: nextRouteIdentity,
+      source: {
+        actorId: "runtime",
+        commandId: `queue-rebind-worktree:${item.id}:${conversation.worktreePath}`,
+        command: {
+          type: "queue.rebind-worktree",
+          conversationId,
+          itemId: item.id,
+          worktreePath: conversation.worktreePath,
+        },
+      },
+      commandType: "queue.rebind-worktree",
+    });
+    rebound = true;
+  }
+  return rebound;
+}
+
+/**
+ * S15: Wraps `AgentWorkflowController` so pinned queued sends resolving `$skill`
+ * inputs with an `effectiveConversation` evaluate skills against the pinned route
+ * instead of the live composer route, while keeping live-route sends untouched.
+ */
+export function wrapWorkflowsForEffectiveSelection(
+  workflows: AgentWorkflowController,
+  store: RuntimeStore,
+  providers: ProviderManager,
+): AgentWorkflowController {
+  const scopedControllerFor = (effectiveConversation: Conversation): AgentWorkflowController => {
+    const effectiveStore = Object.create(store) as RuntimeStore;
+    effectiveStore.conversation = (id: string) =>
+      id === effectiveConversation.id ? effectiveConversation : store.conversation(id);
+    effectiveStore.assertConversationProvider = (id: string, providerId: ProviderId) => {
+      if (id === effectiveConversation.id) {
+        if (effectiveConversation.providerId !== providerId) {
+          throw new RuntimeRequestError(`This route uses ${effectiveConversation.providerId}, not ${providerId}.`);
+        }
+        return;
+      }
+      store.assertConversationProvider(id, providerId);
+    };
+    return new AgentWorkflowController(effectiveStore, providers);
+  };
+  return new Proxy(workflows, {
+    get(target, prop, receiver) {
+      if (prop === "resolveTurnSkills") {
+        return async (conversationId: string, content: string, effectiveConversation?: Conversation) => {
+          if (!effectiveConversation) return await target.resolveTurnSkills(conversationId, content);
+          return await scopedControllerFor(effectiveConversation).resolveTurnSkills(conversationId, content);
+        };
+      }
+      if (prop === "assertTurnSkillsCurrent") {
+        return (conversationId: string, routeKey: string | null, effectiveConversation?: Conversation) => {
+          if (!effectiveConversation) {
+            target.assertTurnSkillsCurrent(conversationId, routeKey);
+            return;
+          }
+          scopedControllerFor(effectiveConversation).assertTurnSkillsCurrent(conversationId, routeKey);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
   });
 }

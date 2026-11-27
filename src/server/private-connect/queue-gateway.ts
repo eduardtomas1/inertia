@@ -15,6 +15,7 @@ import {
 } from "../../shared/private-connect/sanitizer";
 import type { RuntimeStore } from "../database";
 import { OrchestrationConflict } from "../orchestration-v2/types";
+import { RuntimeRequestError } from "../runtime-errors";
 import {
   normalizePrivateConnectText,
   privateConnectDeviceActorId,
@@ -364,7 +365,17 @@ export async function handlePrivateConnectQueueCommand(
       return fail("forbidden", "This provider does not support sending queued messages while a turn is active.");
     }
     if (handlers?.send) {
-      await handlers.send(conversation.id, request.id, subject.deviceId, request.requestId);
+      try {
+        await handlers.send(conversation.id, request.id, subject.deviceId, request.requestId);
+      } catch (error) {
+        if (
+          error instanceof RuntimeRequestError
+          && error.message === "Queued messages with attachments cannot be sent from a paired device."
+        ) {
+          return fail("forbidden", error.message);
+        }
+        throw error;
+      }
     } else {
       if (queue.listActive(conversation.id).some((entry) => entry.queueHeld)) {
         queue.release({

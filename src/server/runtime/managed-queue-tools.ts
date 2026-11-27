@@ -17,7 +17,11 @@ import {
 } from "../provider/contracts";
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { MULTILINE_PATTERN, idSchema, safeMultilineSchema } from "./managed-chat-schemas";
-import { withAgentSenderNote, type ManagedMessageQueue } from "./managed-send-modes";
+import {
+  assertFreshManagedDispatchAuthority,
+  withAgentSenderNote,
+  type ManagedMessageQueue,
+} from "./managed-send-modes";
 import { executeSteerViaEffectRuntime } from "./run-control-effect-handlers";
 import type { TurnController } from "./turns/turn-controller";
 import { bindSteerEffectId } from "./turns/turn-follow-up-coordinator";
@@ -407,6 +411,20 @@ export async function executeManagedQueueMutation(
   let acknowledged = false;
   let steerEffectId: string | null = null;
   try {
+    await lease.ready;
+    if (signal.aborted) throw new Error("The parent turn ended before the queue action ran.");
+    const { caller: initialFreshSource } = assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id);
+    const preClaimItem = queue.getItem(itemId);
+    if (preClaimItem?.state === "delivered") {
+      return json({
+        conversationId: target.id,
+        action: "promote_to_steer",
+        itemId,
+        turnId: preClaimItem.delivery?.turnId ?? lease.turnId,
+        disposition: "follow-up",
+        accepted: true,
+      });
+    }
     let dispatchOrdinal: number;
     try {
       const claimResult = queue.claim({
@@ -420,6 +438,16 @@ export async function executeManagedQueueMutation(
           command: { type: "message.queue.promote-to-steer", conversationId: target.id, id: itemId, turnId: lease.turnId },
         },
       });
+      if (claimResult.value.state === "delivered") {
+        return json({
+          conversationId: target.id,
+          action: "promote_to_steer",
+          itemId,
+          turnId: claimResult.value.delivery?.turnId ?? lease.turnId,
+          disposition: "follow-up",
+          accepted: true,
+        });
+      }
       dispatchOrdinal = claimResult.value.dispatchOrdinal;
       claimed = true;
     } catch (error) {
@@ -448,6 +476,8 @@ export async function executeManagedQueueMutation(
     } else if (steerStart.kind === "joined") {
       await steerStart.result;
     }
+    if (signal.aborted) throw new Error("The parent turn ended before the queue action ran.");
+    const { caller: freshSource } = assertFreshManagedDispatchAuthority(dependencies.store, initialFreshSource.id, target.id);
     const steerClosed = steerStart.kind === "lead" && steerStart.intake.kind === "closed";
     const steered = steerClosed
       ? { kind: "turn-ended" as const }
@@ -460,29 +490,32 @@ export async function executeManagedQueueMutation(
           [],
           () => { acknowledged = true; },
           signal,
-          { providerContent: withAgentSenderNote(content, source), queuedMessageId: itemId },
+          { providerContent: withAgentSenderNote(content, freshSource), queuedMessageId: itemId },
         ),
       );
     if (steered.kind === "accepted" && steered.message.turnId) {
       const settledEffectId = steerEffectId;
+      const attemptId = dependencies.store.orchestration.currentAttemptId(lease.runId) ?? lease.runId;
+      const deliveredAt = steered.message.createdAt ?? dependencies.now();
       if (settledEffectId) {
         steerEffectId = null;
         runControl.settleSteer(settledEffectId, "accepted", { messageId: steered.message.id, queuedMessageId: itemId });
       }
-      const attemptId = dependencies.store.orchestration.currentAttemptId(lease.runId) ?? lease.runId;
-      queue.deliver({
-        conversationId: target.id,
-        itemId,
-        delivery: {
-          mode: "steer",
-          runId: lease.runId,
-          attemptId,
-          turnId: lease.turnId,
-          messageId: steered.message.id,
-          ...(settledEffectId ? { steerEffectId: settledEffectId } : {}),
-          deliveredAt: dependencies.now(),
-        },
-      });
+      if (queue.getItem(itemId)?.state !== "delivered") {
+        queue.deliver({
+          conversationId: target.id,
+          itemId,
+          delivery: {
+            mode: "steer",
+            runId: lease.runId,
+            attemptId,
+            turnId: lease.turnId,
+            messageId: steered.message.id,
+            ...(settledEffectId ? { steerEffectId: settledEffectId } : {}),
+            deliveredAt,
+          },
+        });
+      }
       claimed = false;
       publish();
       return json({
@@ -534,6 +567,53 @@ export async function executeManagedQueueMutation(
     publish();
     throw new Error(detail);
   } catch (error) {
+    // If the transcript already durably committed the acknowledged follow-up
+    // and marked `queued_messages` accepted before a later failure, finalize
+    // V2 steer settlement and queue delivery instead of blocking as unconfirmed.
+    const acceptedRow = dependencies.store.orchestration.effects.connection.prepare(
+      "SELECT state, turn_id, user_message_id FROM queued_messages WHERE id = ? AND conversation_id = ?",
+    ).get(itemId, target.id) as { state: string; turn_id: string | null; user_message_id: string | null } | undefined;
+    if (acceptedRow?.state === "accepted" && acceptedRow.turn_id && acceptedRow.user_message_id) {
+      const settledEffectId = steerEffectId;
+      if (settledEffectId) {
+        steerEffectId = null;
+        try {
+          runControl.settleSteer(settledEffectId, "accepted", {
+            messageId: acceptedRow.user_message_id,
+            queuedMessageId: itemId,
+          });
+        } catch {
+          // Best-effort reconcile; never mask the original error.
+        }
+      }
+      if (claimed) {
+        try {
+          if (queue.getItem(itemId)?.state === "dispatching") {
+            const turn = dependencies.store.agentTurn(acceptedRow.turn_id);
+            const message = dependencies.store.message(acceptedRow.user_message_id);
+            const attemptId = dependencies.store.orchestration.currentAttemptId(turn.runId) ?? turn.runId;
+            queue.deliver({
+              conversationId: target.id,
+              itemId,
+              delivery: {
+                mode: "steer",
+                runId: turn.runId,
+                attemptId,
+                turnId: turn.id,
+                messageId: message.id,
+                ...(settledEffectId ? { steerEffectId: settledEffectId } : {}),
+                deliveredAt: message.createdAt,
+              },
+            });
+            claimed = false;
+            publish();
+          }
+        } catch {
+          // Best-effort delivery reconcile; never mask the original error.
+        }
+      }
+      throw error;
+    }
     const ambiguous = acknowledged
       || (error instanceof RuntimeRequestError && error.delivery === "ambiguous")
       || error instanceof ProviderSteerDeliveryUnknownError;

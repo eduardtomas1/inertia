@@ -139,6 +139,31 @@ export function assertManagedDispatchCeiling(
   assertInteractionWithinParent(target.interactionMode, caller.interactionMode);
 }
 
+/**
+ * Re-reads both caller and target from the durable store immediately before
+ * mutation/dispatch and enforces managed ownership, non-archived status, and
+ * N15 accessMode/interactionMode ceilings across any intervening async wait.
+ */
+export function assertFreshManagedDispatchAuthority(
+  store: RuntimeStore,
+  sourceConversationId: string,
+  targetConversationId: string,
+): { caller: Conversation; target: Conversation } {
+  const caller = store.conversation(sourceConversationId);
+  const target = store.conversation(targetConversationId);
+  if (target.projectId !== caller.projectId) {
+    throw new Error("That chat is outside this turn's current-project authority.");
+  }
+  if (!store.agentThreadManagement.managedBy(caller.id, target.id)) {
+    throw new Error("conversationId: not a chat this chat created; only chats created with inertia_create_conversation can be managed here.");
+  }
+  if (target.archivedAt !== null) {
+    throw new Error("The managed chat is archived and cannot accept new messages.");
+  }
+  assertManagedDispatchCeiling(caller, target);
+  return { caller, target };
+}
+
 function json(value: unknown): ProviderHostToolResult {
   return { success: true, text: JSON.stringify(value) };
 }
@@ -257,8 +282,13 @@ export async function steerManagedTurn(
   const lease = dependencies.turns.acquireFollowUpAdmission(target.id);
   if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
   try {
+    await lease.ready;
+    if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+    const freshSource = source
+      ? assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id).caller
+      : undefined;
     dispatching(dependencies, operationId, target);
-    const providerContent = source ? withAgentSenderNote(content, source) : content;
+    const providerContent = freshSource ? withAgentSenderNote(content, freshSource) : content;
     const steered = await dependencies.turns.steer(lease, {
       content,
       imagePaths: [],
@@ -311,8 +341,14 @@ export async function startManagedTurn(
     if (!admission) throw new Error("The target chat cannot accept a message right now.");
     await prepareForkSession(dependencies, target.id, signal);
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
+    let freshSource = options.source;
+    if (options.source) {
+      freshSource = assertFreshManagedDispatchAuthority(dependencies.store, options.source.id, target.id).caller;
+    } else if (dependencies.store.conversation(target.id).archivedAt !== null) {
+      throw new Error("The managed chat is archived and cannot accept new messages.");
+    }
     if (!options.alreadyDispatching) dispatching(dependencies, operationId, target);
-    const internalInstructions = options.source ? agentSenderHiddenInstruction(content, options.source) : [];
+    const internalInstructions = freshSource ? agentSenderHiddenInstruction(content, freshSource) : [];
     const queued = dependencies.turns.queue({
       conversationId: target.id,
       content,
@@ -386,12 +422,16 @@ export function queueManagedMessage(
   content: string,
   operationId: string,
   options: {
+    source?: Pick<Conversation, "id" | "title">;
     placement?: QueueEnqueuePlacement;
     queueHeld?: boolean;
     skipHoldInheritance?: true;
     skipDispatchTransition?: boolean;
   } = {},
 ): { result: ProviderHostToolResult; itemId: string; queueHeld: boolean; position: number } {
+  if (options.source) {
+    assertFreshManagedDispatchAuthority(dependencies.store, options.source.id, target.id);
+  }
   const queue = messageQueue(dependencies);
   const itemId = deterministicAgentQueueItemId(operationId);
   const existingItem = dependencies.store.orchestration.queue.getItem(itemId);
@@ -481,6 +521,7 @@ export async function restartManagedTurn(
   link?: ManagedFollowUpLink,
 ): Promise<ProviderHostToolResult> {
   if (!restart) throw new Error(RESTART_IDLE);
+  assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id);
   assertManagedTurnCanStart(dependencies, target);
   if (!sameTurnOwner(dependencies.turns.activeIdentity(target.id), restart)) {
     throw new Error(MANAGED_TURN_GONE_MESSAGE);
@@ -567,6 +608,7 @@ export async function restartManagedTurn(
         source: { actorId: "agent", commandId, command },
         extraEvents: [enqueueEvent],
         extraAfterCommit: syncRow,
+        commitExtraEventsOnNoOp: false,
       },
     );
   } catch (error) {
@@ -599,6 +641,12 @@ export async function restartManagedTurn(
   if (signal.aborted) {
     withdrawQueuedRestartItem();
     throw new Error("The parent turn ended after the managed chat stopped; the new message was not sent.");
+  }
+  try {
+    assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id);
+  } catch (error) {
+    withdrawQueuedRestartItem();
+    throw error;
   }
   const ordered = queue.listActive(target.id);
   const firstUnheld = ordered.find((item) => item.state === "waiting" && !item.queueHeld);
@@ -658,6 +706,9 @@ export async function restartManagedTurn(
           itemId,
           reason: "transient",
         });
+        if (error instanceof ModeEscalationError) {
+          withdrawQueuedRestartItem();
+        }
       }
     } catch {
       // Best-effort release if start failed after claim.
@@ -734,11 +785,11 @@ export async function dispatchManagedSend(
     if (!active && !compacting && !hasUnheldWaitingQueueItem(dependencies.store, target.id)) {
       return (await startManagedTurn(dependencies, target, content, operationId, signal, { source, link })).result;
     }
-    return queueManagedMessage(dependencies, target, content, operationId).result;
+    return queueManagedMessage(dependencies, target, content, operationId, { source }).result;
   }
   if (mode === "auto" && (active || compacting)) {
     if (shouldAutoQueueInsteadOfSteer(dependencies, target)) {
-      return queueManagedMessage(dependencies, target, content, operationId).result;
+      return queueManagedMessage(dependencies, target, content, operationId, { source }).result;
     }
     return await steerManagedTurn(dependencies, target, content, operationId, signal, link, source);
   }

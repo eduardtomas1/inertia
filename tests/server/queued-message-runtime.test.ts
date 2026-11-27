@@ -1,5 +1,6 @@
 // @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import Database from "better-sqlite3";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,7 +22,14 @@ import {
 import { ProviderSteerDeliveryUnknownError } from "../../src/server/provider/contracts";
 import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller";
 import { join } from "node:path";
-import { providerNativeModelSelection } from "../../src/shared/model-routing";
+import {
+  continuationIdentityForSelection,
+  providerIdForHarness,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
+  providerNativeModelSelection,
+  resolveHarnessBackendCompatibility,
+} from "../../src/shared/model-routing";
 import { hold, release } from "../../src/server/runtime/update-hold";
 import { createTurnInteractionCommandHandler } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { requestAgentStop } from "../../src/server/runtime/commands/agent-stop-command";
@@ -2165,18 +2173,18 @@ describe("Phase 5 sol-loop hardening (S3, S5, S11, S12)", () => {
     } finally { await f.close(); }
   });
 
-  it("S12: R4 onWorktreeSetupRetried releases held items after setup completes, but releases nothing when a newer executed run already exists", async () => {
+  it("S12: R4 onWorktreeSetupRetried rebinds & releases pre-setup held items on successful recordCreation, ignores rejectCreation, and skips when a newer run exists", async () => {
     const f = await fixture();
     try {
       const firstId = randomUUID();
       await f.command("message.queue.enqueue", firstId);
       await f.drain();
 
-      // Simulate incomplete worktree setup -> dispatch holds the item with H3-created-held.
+      const rejectedPath = join(f.directory, "worktrees", `rejected-${f.conversationId}`);
       f.store.conversationWorktrees.beginCreation(
         f.conversationId,
-        join(f.directory, "worktrees", f.conversationId),
-        `inertia/${f.conversationId.slice(0, 8)}`,
+        rejectedPath,
+        `inertia/rejected-${f.conversationId.slice(0, 8)}`,
         randomUUID(),
       );
       f.queue.onCompactionSettled(f.conversationId);
@@ -2188,8 +2196,34 @@ describe("Phase 5 sol-loop hardening (S3, S5, S11, S12)", () => {
       f.queue.onWorktreeSetupRetried(f.conversationId);
       expect(f.store.orchestration.queue.getItem(firstId)?.queueHeld).toBe(true);
 
-      // Complete/resolve worktree setup -> onWorktreeSetupRetried releases with R4 and dispatches!
+      // Rejecting failed worktree creation does NOT trigger R4 release!
       f.store.conversationWorktrees.rejectCreation(f.conversationId);
+      await f.drain();
+      expect(f.store.orchestration.queue.getItem(firstId)?.queueHeld).toBe(true);
+      expect(f.provider.runCount).toBe(0);
+
+      // Successful worktree preparation: recordCreation transitions worktreePath from null -> createdPath.
+      const createdPath = join(f.directory, "worktrees", f.conversationId);
+      mkdirSync(createdPath, { recursive: true });
+      const createdBranch = `inertia/${f.conversationId.slice(0, 8)}`;
+      const ownershipToken = randomUUID();
+      f.store.conversationWorktrees.beginCreation(f.conversationId, createdPath, createdBranch, ownershipToken);
+      f.store.conversationWorktrees.recordCreation(f.conversationId, createdPath, createdBranch, {
+        path: createdPath,
+        branch: createdBranch,
+        head: "a".repeat(40),
+        worktreeId: "wt-1",
+        repositoryIdentity: "b".repeat(64),
+        ownershipToken,
+        filesystemReceipt: {
+          version: 1,
+          worktreesDirectory: { device: "1", inode: "2", birthtimeNs: "3" },
+          adminDirectory: { device: "1", inode: "4", birthtimeNs: "5" },
+        },
+      });
+      expect(f.store.conversation(f.conversationId).worktreePath).toBe(createdPath);
+
+      // onWorktreeSetupRetried rebinds pre-setup held item to createdPath, releases with R4, and dispatches (NOT route-changed)!
       f.queue.onWorktreeSetupRetried(f.conversationId);
       await vi.waitFor(() => expect(f.provider.runCount).toBe(1));
       await f.drain();
@@ -2215,6 +2249,207 @@ describe("Phase 5 sol-loop hardening (S3, S5, S11, S12)", () => {
       await f.drain();
       expect(f.store.orchestration.queue.getItem(secondId)).toMatchObject({ state: "waiting", queueHeld: true });
       expect(f.provider.runCount).toBe(2);
+    } finally { await f.close(); }
+  });
+
+  it("S3: claims sendDuringTurn BEFORE image resolution so concurrent edits are rejected and steer sends the exact claimed revision", async () => {
+    const f = await fixture();
+    let releaseResolve!: () => void;
+    try {
+      startRunning(f);
+      const id = randomUUID();
+      const image = { id: randomUUID(), name: "snap.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
+      await f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.enqueue",
+        requestId: randomUUID(),
+        payload: { conversationId: f.conversationId, id, content: "Original image prompt.", attachments: [image] },
+      });
+      await f.drain();
+
+      const realResolve = f.attachments.resolve.bind(f.attachments);
+      const gate = new Promise<void>((resolve) => { releaseResolve = resolve; });
+      const resolveSpy = vi.spyOn(f.attachments, "resolve").mockImplementationOnce(async (attachmentId) => {
+        await gate;
+        return await realResolve(attachmentId);
+      });
+
+      const sending = f.command("message.queue.send", id);
+      await vi.waitFor(() => expect(resolveSpy).toHaveBeenCalledOnce());
+      // Claim is already held during image resolution so a concurrent edit MUST be rejected!
+      expect(f.store.orchestration.queue.getItem(id)?.state).toBe("dispatching");
+      await expect(f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.edit",
+        requestId: randomUUID(),
+        payload: { conversationId: f.conversationId, id, expectedRevision: 0, content: "Stale concurrent edit." },
+      })).rejects.toThrow("already being sent");
+
+      releaseResolve();
+      await sending;
+      expect(f.provider.steerCalls).toEqual(["Original image prompt."]);
+      expect(f.store.orchestration.queue.getItem(id)?.state).toBe("delivered");
+
+      // Clean release if image resolution fails before steer.
+      const brokenId = randomUUID();
+      const brokenImage = { id: randomUUID(), name: "missing.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
+      await f.command("message.queue.enqueue", brokenId, [brokenImage]);
+      await f.drain();
+      vi.spyOn(f.attachments, "resolve").mockResolvedValueOnce(null);
+      await expect(f.command("message.queue.send", brokenId)).rejects.toThrow("no longer available");
+      expect(f.store.orchestration.queue.getItem(brokenId)?.state).toBe("waiting");
+    } finally { releaseResolve?.(); await f.close(); }
+  });
+
+  it("S14: explicit message.queue.send on a held head during an active turn releases and steers it, while automatic dispatch keeps held items skipped", async () => {
+    const f = await fixture();
+    try {
+      startRunning(f);
+      const heldId = randomUUID();
+      const secondHeldId = randomUUID();
+      await f.command("message.queue.enqueue", heldId);
+      await f.command("message.queue.enqueue", secondHeldId);
+      await f.drain();
+      f.store.orchestration.queue.hold({ conversationId: f.conversationId, cause: "H1-stop", itemIds: [heldId, secondHeldId] });
+      expect(f.store.orchestration.queue.getItem(heldId)?.queueHeld).toBe(true);
+
+      // Explicit Send now on held head during active turn MUST release & steer it (not no-op!).
+      await f.command("message.queue.send", heldId);
+      expect(f.provider.steerCalls).toEqual(["Do the next task."]);
+      expect(f.store.orchestration.queue.getItem(heldId)?.state).toBe("delivered");
+      expect(f.store.orchestration.queue.getItem(secondHeldId)).toMatchObject({ state: "waiting", queueHeld: true });
+
+      // Completing the turn does NOT auto-dispatch the remaining held user item!
+      f.provider.resolve({ status: "completed" });
+      await f.drain();
+      expect(f.provider.runCount).toBe(1);
+      expect(f.store.orchestration.queue.getItem(secondHeldId)).toMatchObject({ state: "waiting", queueHeld: true });
+    } finally { await f.close(); }
+  });
+
+  it("S6: sendNow with textOnly rejects without claiming when a desktop edit attaches a file during cleanup wait", async () => {
+    const f = await fixture();
+    let releaseCleanup!: () => void;
+    try {
+      const id = randomUUID();
+      await f.command("message.queue.enqueue", id);
+      await f.drain();
+
+      const realCleanup = f.controller.waitForProviderCleanup.bind(f.controller);
+      const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+      const cleanupSpy = vi.spyOn(f.controller, "waitForProviderCleanup").mockImplementationOnce(async (ids, deadline) => {
+        await cleanupGate;
+        return await realCleanup(ids, deadline);
+      });
+
+      const sending = f.queue.sendNow(f.conversationId, id, randomUUID(), { textOnly: true });
+      await vi.waitFor(() => expect(cleanupSpy).toHaveBeenCalledOnce());
+
+      // Desktop edit adds an attachment while Private Connect sendNow awaits cleanup.
+      const image = { id: randomUUID(), name: "attached-mid-wait.png", path: "opaque", mimeType: "image/png" as const, size: 8 };
+      await f.queue.handler(null as unknown as WebSocket, {
+        type: "message.queue.edit",
+        requestId: randomUUID(),
+        payload: { conversationId: f.conversationId, id, expectedRevision: 0, content: "Now with attachment.", attachments: [image] },
+      });
+
+      releaseCleanup();
+      await expect(sending).rejects.toThrow("Queued messages with attachments cannot be sent from a paired device.");
+      await f.drain();
+      expect(f.provider.runCount).toBe(0);
+      expect(f.store.orchestration.queue.getItem(id)).toMatchObject({ state: "waiting", dispatchOrdinal: 0 });
+    } finally { releaseCleanup?.(); await f.close(); }
+  });
+
+  it("S5: Resume continues a stopped native-resume turn on its original modelSelection & sessionId even after live composer switches provider", async () => {
+    const f = await fixture();
+    try {
+      const codexInfo = turnControllerTestProviderInfo();
+      const claudeInfo = { ...codexInfo, id: "claude" as const, label: "Claude Code", command: "fake-claude", models: [{ ...codexInfo.models[0]!, id: "claude-sonnet-4", label: "Claude Sonnet 4" }] };
+      f.dependencies.providerInfo = () => [codexInfo, claudeInfo];
+      f.provider.resolveModelRoute = (selection) => {
+        const providerId = providerIdForHarness(selection.harnessId) ?? "codex";
+        const harnessId = providerNativeHarnessId(providerId);
+        const backendProfile = providerNativeBackendProfile(providerId);
+        return {
+          providerId,
+          harnessId,
+          backendProfile,
+          compatibility: resolveHarnessBackendCompatibility(harnessId, backendProfile),
+          continuationIdentity: continuationIdentityForSelection(selection, null, false),
+        };
+      };
+
+      const initial = startRunning(f);
+      f.provider.emit({ ...turnControllerTestIdentity(f), type: "session", sessionId: "native-codex-sess-1" });
+      f.provider.resolve({ status: "cancelled", sessionId: "native-codex-sess-1" });
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).status).toBe("cancelled");
+
+      // Switch live composer to Claude BEFORE clicking Resume.
+      const claudeSelection = providerNativeModelSelection({ providerId: "claude", modelId: "claude-sonnet-4" });
+      f.store.updateConversation(f.conversationId, { providerId: "claude", modelSelection: claudeSelection });
+      expect(f.store.conversation(f.conversationId).providerId).toBe("claude");
+
+      await f.queue.resume(f.conversationId, randomUUID());
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
+      await f.drain();
+
+      // Resumed turn MUST run on Codex with the stopped turn's modelSelection and native sessionId!
+      expect(f.provider.input).toMatchObject({
+        providerId: "codex",
+        model: initial.turn.model,
+        sessionId: "native-codex-sess-1",
+        prompt: expect.stringContaining(NATIVE_RESUME_TEXT),
+      });
+      // Live composer stays on Claude.
+      expect(f.store.conversation(f.conversationId).providerId).toBe("claude");
+    } finally { await f.close(); }
+  });
+
+  it("S5: Resume on a non-native-resume harness (Pi) whose stopped turn already ran does not send a spurious prompt on empty queue, and dispatches waiting items when present", async () => {
+    const piSelection = providerNativeModelSelection({ providerId: "pi", modelId: "provider-default" });
+    const f = await fixture({}, {
+      modelSelection: piSelection,
+      resolveModelRoute: (selection) => {
+        const providerId = providerIdForHarness(selection.harnessId) ?? "pi";
+        const harnessId = providerNativeHarnessId(providerId);
+        const backendProfile = providerNativeBackendProfile(providerId);
+        return {
+          providerId,
+          harnessId,
+          backendProfile,
+          compatibility: resolveHarnessBackendCompatibility(harnessId, backendProfile),
+          continuationIdentity: continuationIdentityForSelection(selection, null, false),
+        };
+      },
+    });
+    try {
+      const piInfo = { ...turnControllerTestProviderInfo(), id: "pi" as const, label: "Pi", command: "fake-pi" };
+      f.dependencies.providerInfo = () => [piInfo];
+      const initial = startRunning(f);
+      f.provider.emit({ ...turnControllerTestIdentity(f), type: "activity", kind: "tool", phase: "started", label: "Read file", activityId: "act-1" });
+      f.provider.resolve({ status: "cancelled", text: "Partial work" });
+      await f.drain();
+      expect(f.store.agentTurn(initial.turn.id).harnessId).toBe("pi-rpc");
+
+      // Empty queue -> Resume MUST NOT send a spurious literal prompt!
+      await f.queue.resume(f.conversationId, randomUUID());
+      await f.drain();
+      expect(f.provider.runCount).toBe(1);
+
+      // With a held waiting item -> Resume releases and dispatches that item directly!
+      const waitingId = randomUUID();
+      f.store.orchestration.queue.enqueue({
+        conversationId: f.conversationId,
+        itemId: waitingId,
+        content: "Next queued task for Pi",
+        queueHeld: true,
+      });
+      await f.queue.resume(f.conversationId, randomUUID());
+      await vi.waitFor(() => expect(f.provider.runCount).toBe(2));
+      await f.drain();
+      expect(f.provider.input?.prompt).toContain("Next queued task for Pi");
+      expect(f.provider.input?.prompt).not.toContain(PROMPTED_RESUME_TEXT);
+      expect(f.store.orchestration.queue.getItem(waitingId)?.state).toBe("delivered");
     } finally { await f.close(); }
   });
 });

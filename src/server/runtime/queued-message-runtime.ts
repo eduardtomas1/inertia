@@ -11,6 +11,7 @@ import { QueuedMessageLimitError, queuedRouteIdentity, releasesQueue } from "../
 import { publicRuntimeError, RuntimeRequestError } from "../runtime-errors";
 import { hasIncompleteWorktreeSetup } from "../workspace-path-authority";
 import { defineRuntimeCommandHandler } from "./commands/command-router";
+import { sendMessageCommand } from "./commands/message-send-command";
 import { createTurnInteractionCommandHandler, type TurnInteractionCommandDependencies } from "./commands/turn-interaction-commands";
 import type { QueuedMessagePersistence } from "./commands/turn-interaction-types";
 import { commandRejection } from "./commands/command-rejection";
@@ -23,28 +24,28 @@ import {
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note-instruction";
-import { delegatedDelivery, delegatedSteerContent } from "./delegation/delivery-instruction";
+import { delegatedDelivery } from "./delegation/delivery-instruction";
 import { takeFollowUpQueueHint } from "./queue-follow-up-hints";
 import { reconcileQueueOnBoot } from "./queue-boot-reconciliation";
 import { executeSteerViaEffectRuntime } from "./run-control-effect-handlers";
 import { bindSteerEffectId } from "./turns/turn-follow-up-coordinator";
 import {
   buildQueueResult,
-  canReleaseWorktreeSetupRetry,
   hasWorktreeRetryReleaseAuthority,
   isResumeIntentFulfilled,
+  isUsageLimitHeldForSelection,
   isUserQueueFull,
   listQueueEntries,
-  nextQueuedSelectionForConversation,
+  PRIVATE_CONNECT_ATTACHMENT_SEND_ERROR,
   queueItemRouteMatches,
   resolveEffectiveQueuedSelection,
   resolveQueueTailSelection,
   resolveResumeContinuation,
-  RESUME_WORKTREE_SETUP_ERROR,
   routeIdentityForSelection,
-  usageLimitHoldsQueue,
+  type UsageLimitHoldCheck,
 } from "./queued-message-runtime-helpers";
 import {
+  dispatchPinnedResumePlan,
   editInPlaceOperation,
   enqueueManagedMessageOperation,
   enqueueWatcherNoteOperation,
@@ -52,11 +53,14 @@ import {
   isInPlaceEditPayload,
   isTransientDispatchFailure,
   onTurnSettledOperation,
+  onWorktreeSetupRetriedOperation,
   prepareAttachmentsForQueue,
   reconfirmOperation,
   reorderQueueOperation,
   resumeQueueOperation,
+  steerDelegatedOperation,
   stopAndSendOperation,
+  validateManualSendOperation,
   withdrawWatcherNoteOperation,
   type QueueOperationsContext,
 } from "./queued-message-operations";
@@ -86,6 +90,7 @@ interface QueuedMessageRuntimeOptions {
   cancelStaleWatcherNote?(conversationId: string, itemId: string): boolean;
   compacting?(conversationId: string): boolean;
   delegated?(): DelegatedQueueHooks | undefined;
+  usageLimitHold?: UsageLimitHoldCheck;
 }
 
 export const WATCHER_NOTE_REMOVED_REASON = "it was removed from the main chat's queue";
@@ -120,10 +125,17 @@ export function createQueuedMessageRuntime(
     return false;
   };
 
+  const isUsageLimitHeld = (conversationId: string, targetSelection?: ModelSelection | null): boolean =>
+    isUsageLimitHeldForSelection(store, conversationId, targetSelection, options.usageLimitHold);
+
+  const hasQueuedAttachments = (entry: QueuedMessage): boolean =>
+    entry.attachments.length > 0 || (queue.getItem(entry.id)?.attachmentIds.length ?? 0) > 0;
+
   const result = (conversationId: string, id?: string): MessageQueueResult => buildQueueResult(store, conversationId, {
     id,
     isActive: turns.isActive(conversationId),
     hasPendingInteraction: hasPendingInteraction(conversationId),
+    usageLimitHold: options.usageLimitHold,
   });
 
   const changed = (conversationId: string): void => {
@@ -164,10 +176,15 @@ export function createQueuedMessageRuntime(
     conversationId: string,
     id: string,
     mode: "run" | "steer" | "after-stop",
+    claimOptions?: { releaseHeld?: boolean },
   ): { dispatchOrdinal: number; editRevision: number } | null => {
     const v2 = queue.getItem(id);
     if (v2) {
-      if (v2.state !== "waiting" || v2.queueHeld) return null;
+      if (v2.state !== "waiting") return null;
+      if (v2.queueHeld) {
+        if (!claimOptions?.releaseHeld) return null;
+        queue.release({ conversationId, cause: "R3-resume", itemIds: [id] });
+      }
       const claimed = queue.claim({ conversationId, itemId: id, mode });
       return { dispatchOrdinal: claimed.value.dispatchOrdinal, editRevision: claimed.value.contentRef.editRevision };
     }
@@ -247,7 +264,11 @@ export function createQueuedMessageRuntime(
   const hasPendingWork = (conversationId: string): boolean =>
     hasDispatchableItem(conversationId) || pendingResumeIntent(conversationId) !== null;
 
-  async function dispatch(conversationId: string, requestedId?: string): Promise<boolean> {
+  async function dispatch(
+    conversationId: string,
+    requestedId?: string,
+    dispatchOptions?: { textOnly?: boolean },
+  ): Promise<boolean> {
     if (options.signal.aborted || !dependencies.enableProviders || turns.isClosing() || turns.isActive(conversationId)) return false;
     if (options.compacting?.(conversationId)) return false;
     if (requestedId === undefined && !hasPendingWork(conversationId)) return false;
@@ -277,16 +298,13 @@ export function createQueuedMessageRuntime(
 
     const pendingResume = requestedId === undefined ? pendingResumeIntent(conversationId) : null;
     if (pendingResume && !hasPendingInteraction(conversationId)) {
-      const nextSelection = nextQueuedSelectionForConversation(store, conversationId);
-      if (!usageLimitHoldsQueue(store, conversationId, nextSelection)) {
-        const plan = resolveResumeContinuation(store, conversationId);
-        if (plan.kind === "native" || plan.kind === "prompted") {
+      const plan = resolveResumeContinuation(store, conversationId);
+      if (plan.kind === "noop") {
+        retriedManualSend.add(pendingResume.retryKey);
+      } else if (plan.kind === "native" || plan.kind === "prompted") {
+        if (!isUsageLimitHeld(conversationId, plan.modelSelection)) {
           try {
-            await directTurnInteraction(null as unknown as WebSocket, {
-              type: "message.send",
-              requestId: `${pendingResume.intent.requestId}:continue`,
-              payload: { conversationId, content: plan.content, attachments: [], activate: false },
-            }, { kind: "main" });
+            await dispatchPinnedResumePlan(operationsContext, conversationId, pendingResume.intent.requestId, plan, undefined, { fromDispatch: true });
             retriedManualSend.add(pendingResume.retryKey);
             changed(conversationId);
             return true;
@@ -313,10 +331,13 @@ export function createQueuedMessageRuntime(
     const isManual = manualId !== undefined;
     if (!isManual && (first.state !== "waiting" || first.queueHeld)) return false;
     if (isManual && first.state === "dispatching") return false;
+    if (dispatchOptions?.textOnly && hasQueuedAttachments(first)) {
+      throw new RuntimeRequestError(PRIVATE_CONNECT_ATTACHMENT_SEND_ERROR);
+    }
 
     const effectiveSelection = resolveEffectiveQueuedSelection(first, conversation);
     const effectiveProviderId = providerIdForHarness(effectiveSelection.harnessId) ?? conversation.providerId;
-    if (!isManual && usageLimitHoldsQueue(store, conversationId, effectiveSelection)) return false;
+    if (!isManual && isUsageLimitHeld(conversationId, effectiveSelection)) return false;
     let manualSendRetryKey: string | null = null;
     if (!isManual) {
       const latestTurn = store.latestAgentTurnForConversation(conversationId);
@@ -353,9 +374,6 @@ export function createQueuedMessageRuntime(
       return false;
     }
 
-    if (isManual && first.queueHeld && queue.getItem(first.id)) {
-      queue.release({ conversationId, cause: "R3-resume", itemIds: [first.id] });
-    }
     if (isManual && first.state === "blocked" && queue.getItem(first.id)) {
       const v2 = queue.getItem(first.id)!;
       const fallbackContent = first.content || (first.delegatedCompletion ? hooks?.content(first.delegatedCompletion) ?? "" : "");
@@ -369,7 +387,7 @@ export function createQueuedMessageRuntime(
     }
 
     const deliveryMode: "run" | "after-stop" = first.deliveryMode === "after-stop" ? "after-stop" : "run";
-    const claim = claimItem(conversationId, first.id, deliveryMode);
+    const claim = claimItem(conversationId, first.id, deliveryMode, { releaseHeld: isManual });
     if (!claim) return false;
     // Re-read fresh item content/attachments/selection now that state='dispatching' locks out edits.
     const fresh = listQueueEntries(store, conversationId).find(({ id }) => id === first.id) ?? first;
@@ -464,7 +482,7 @@ export function createQueuedMessageRuntime(
       } else if (progressed && !options.signal.aborted && !turns.isActive(conversationId) && hasPendingWork(conversationId)) {
         const head = listQueueEntries(store, conversationId).find((entry) => entry.state === "waiting" && !entry.queueHeld);
         const headSelection = head ? resolveEffectiveQueuedSelection(head, store.conversation(conversationId)) : null;
-        if (head && !isHeld() && !hasIncompleteWorktreeSetup(db, conversationId) && !usageLimitHoldsQueue(store, conversationId, headSelection)) {
+        if (head && !isHeld() && !hasIncompleteWorktreeSetup(db, conversationId) && !isUsageLimitHeld(conversationId, headSelection)) {
           const latest = store.latestAgentTurnForConversation(conversationId);
           const pendingSend = queue.getState(conversationId)?.pendingSendIntent;
           const explicit = head.deliveryMode === "after-stop"
@@ -615,20 +633,24 @@ export function createQueuedMessageRuntime(
   const withdrawWatcherNote = (conversationId: string, id: string): boolean =>
     withdrawWatcherNoteOperation(operationsContext, conversationId, id);
 
-  async function sendDuringTurn(conversationId: string, id: string, requestId: string): Promise<void> {
+  async function sendDuringTurn(
+    conversationId: string,
+    id: string,
+    requestId: string,
+    sendOptions?: { releaseHeld?: boolean; textOnly?: boolean },
+  ): Promise<void> {
     const conversation = requireConversation(conversationId);
     const entries = listQueueEntries(store, conversationId);
     const target = entries.find((entry) => entry.id === id);
     if (!target) throw new RuntimeRequestError("This queued message is no longer in the queue.");
-    if (target.delegatedCompletion) {
-      throw new RuntimeRequestError("Delegated results continue this chat after the current turn ends.");
-    }
-    if (target.userMessageId) {
-      throw new RuntimeRequestError("This follow-up sends as its own turn when the current turn ends.");
-    }
+    if (target.delegatedCompletion) throw new RuntimeRequestError("Delegated results continue this chat after the current turn ends.");
+    if (target.userMessageId) throw new RuntimeRequestError("This follow-up sends as its own turn when the current turn ends.");
     const first = entries.find((entry) => !entry.delegatedCompletion);
     if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
     if (first.state === "dispatching") return;
+    if (sendOptions?.textOnly && hasQueuedAttachments(first)) {
+      throw new RuntimeRequestError(PRIVATE_CONNECT_ATTACHMENT_SEND_ERROR);
+    }
     if (!queueItemRouteMatches(store, first, conversation)) {
       blockItem(conversationId, first, "route-changed", QUEUED_ROUTE_CHANGED_ERROR);
       changed(conversationId);
@@ -642,13 +664,33 @@ export function createQueuedMessageRuntime(
     let claimed = false;
     let acknowledged = false;
     let steerEffectId: string | null = null;
+    let locked: QueuedMessage = first;
     try {
       if (first.attachments.length > 0 && !admission.supportsImages) {
         throw new RuntimeRequestError("The active model cannot inspect follow-up images. It will send when the turn ends.");
       }
+      // Claim FIRST so state='dispatching' immediately rejects concurrent edits during image resolution (S3).
+      const claim = claimItem(conversationId, first.id, "steer", { releaseHeld: sendOptions?.releaseHeld });
+      if (!claim) return;
+      claimed = true;
+      locked = listQueueEntries(store, conversationId).find((entry) => entry.id === first.id) ?? first;
+      if ((locked.editRevision ?? 0) !== claim.editRevision) {
+        throw new RuntimeRequestError("This queued message changed before it could be sent.");
+      }
+      if (sendOptions?.textOnly && hasQueuedAttachments(locked)) {
+        throw new RuntimeRequestError(PRIVATE_CONNECT_ATTACHMENT_SEND_ERROR);
+      }
+      if (locked.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) {
+        throw new RuntimeRequestError(QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
+      }
+      if (locked.attachments.length > 0 && !admission.supportsImages) {
+        throw new RuntimeRequestError("The active model cannot inspect follow-up images. It will send when the turn ends.");
+      }
+      changed(conversationId);
+
       const deadline = messageSendPreparationDeadline();
       const attachments: ChatAttachment[] = [];
-      for (const attachment of first.attachments) {
+      for (const attachment of locked.attachments) {
         const preview = await awaitMessageSendPreparation(conversationAttachments.resolve(attachment.id), deadline);
         if (!preview) throw new RuntimeRequestError("A queued image is no longer available. Remove this message and attach it again.");
         attachments.push({
@@ -657,22 +699,27 @@ export function createQueuedMessageRuntime(
           ...(attachment.previewAnnotation ? { previewAnnotation: attachment.previewAnnotation } : {}),
         });
       }
-      const claim = claimItem(conversationId, first.id, "steer");
-      if (!claim) return;
-      claimed = true;
-      changed(conversationId);
+      const v2AfterPrep = queue.getItem(locked.id);
+      if (v2AfterPrep && (v2AfterPrep.state !== "dispatching" || v2AfterPrep.queueHeld
+        || v2AfterPrep.dispatchOrdinal !== claim.dispatchOrdinal || v2AfterPrep.contentRef.editRevision !== claim.editRevision)) {
+        if (v2AfterPrep.state === "dispatching" && v2AfterPrep.dispatchOrdinal === claim.dispatchOrdinal) {
+          releaseClaimItem(conversationId, locked.id, "transient");
+        }
+        claimed = false;
+        return;
+      }
 
       const steerStart = await store.orchestration.authority.begin<{ kind: "requested"; effectId: string } | { kind: "closed" } | { kind: "untracked" }>({
         source: {
           actorId: "runtime",
-          commandId: `queue-steer:${first.id}:${claim.dispatchOrdinal}:${requestId}`,
-          command: { type: "queue.steer", conversationId, itemId: first.id, dispatchOrdinal: claim.dispatchOrdinal },
+          commandId: `queue-steer:${locked.id}:${claim.dispatchOrdinal}:${requestId}`,
+          command: { type: "queue.steer", conversationId, itemId: locked.id, dispatchOrdinal: claim.dispatchOrdinal },
         },
         threadId: conversation.id,
         projectId: conversation.projectId,
         commandType: "queue.steer",
         rejection: null,
-      }, (steerTicket) => runControl.requestSteer(steerTicket, admission.runId, admission.turnId, { queuedMessageId: first.id }));
+      }, (steerTicket) => runControl.requestSteer(steerTicket, admission.runId, admission.turnId, { queuedMessageId: locked.id }));
 
       if (steerStart.kind === "lead") {
         if (steerStart.intake.kind === "requested") {
@@ -689,14 +736,14 @@ export function createQueuedMessageRuntime(
           steerEffectId,
           () => turns.steer(
             admission,
-            { content: first.content, imagePaths: attachments.map(({ path }) => path) },
+            { content: locked.content, imagePaths: attachments.map(({ path }) => path) },
             attachments,
             () => { acknowledged = true; },
             AbortSignal.timeout(Math.max(0, deadline - Date.now())),
             {
-              queuedMessageId: first.id,
-              ...(first.watcherNote
-                ? { providerContent: watcherSteerContent(first.content, first.watcherNote), watcherNote: first.watcherNote }
+              queuedMessageId: locked.id,
+              ...(locked.watcherNote
+                ? { providerContent: watcherSteerContent(locked.content, locked.watcherNote), watcherNote: locked.watcherNote }
                 : {}),
             },
           ),
@@ -704,12 +751,12 @@ export function createQueuedMessageRuntime(
 
       if (steered.kind === "accepted") {
         claimed = false;
-        if (steerEffectId) runControl.settleSteer(steerEffectId, "accepted", { messageId: steered.message.id, queuedMessageId: first.id });
-        if (queue.getItem(first.id)) {
+        if (steerEffectId) runControl.settleSteer(steerEffectId, "accepted", { messageId: steered.message.id, queuedMessageId: locked.id });
+        if (queue.getItem(locked.id)) {
           const targetRun = runControl.target(admission.runId);
           queue.deliver({
             conversationId,
-            itemId: first.id,
+            itemId: locked.id,
             delivery: {
               mode: "steer",
               runId: admission.runId,
@@ -727,29 +774,29 @@ export function createQueuedMessageRuntime(
       }
       if (steered.kind === "unconfirmed") {
         claimed = false;
-        if (steerEffectId) runControl.settleSteer(steerEffectId, "unconfirmed", { queuedMessageId: first.id });
-        blockItem(conversationId, first, "steer-unconfirmed", steered.message);
+        if (steerEffectId) runControl.settleSteer(steerEffectId, "unconfirmed", { queuedMessageId: locked.id });
+        blockItem(conversationId, locked, "steer-unconfirmed", steered.message);
         return;
       }
-      if (steerEffectId) runControl.settleSteer(steerEffectId, steered.kind === "turn-ended" ? "turn-ended" : "refused", { queuedMessageId: first.id });
-      releaseClaimItem(conversationId, first.id, steered.kind === "turn-ended" ? "turn-ended" : "steer-declined");
+      if (steerEffectId) runControl.settleSteer(steerEffectId, steered.kind === "turn-ended" ? "turn-ended" : "refused", { queuedMessageId: locked.id });
+      releaseClaimItem(conversationId, locked.id, steered.kind === "turn-ended" ? "turn-ended" : "steer-declined");
       claimed = false;
       if (steered.kind === "turn-ended") {
-        if (queue.getItem(first.id)?.queueHeld) {
-          queue.release({ conversationId, cause: "R3-resume", itemIds: [first.id] });
+        if (queue.getItem(locked.id)?.queueHeld) {
+          queue.release({ conversationId, cause: "R3-resume", itemIds: [locked.id] });
         }
         retryAfterCleanup(conversationId);
       }
       else throw new RuntimeRequestError("The agent did not take this message now. It will send when the turn ends.");
     } catch (error) {
-      if (steerEffectId) runControl.settleSteer(steerEffectId, acknowledged ? "unconfirmed" : "unavailable", { queuedMessageId: first.id });
+      if (steerEffectId) runControl.settleSteer(steerEffectId, acknowledged ? "unconfirmed" : "unavailable", { queuedMessageId: locked.id });
       if (claimed) {
         if (acknowledged) {
-          blockItem(conversationId, first, "steer-unconfirmed", "The agent received this message, but Inertia could not record it. Check the chat before sending it again.");
+          blockItem(conversationId, locked, "steer-unconfirmed", "The agent received this message, but Inertia could not record it. Check the chat before sending it again.");
         } else if (error instanceof RuntimeRequestError && error.delivery === "ambiguous") {
-          blockItem(conversationId, first, "steer-unconfirmed", publicRuntimeError(error));
+          blockItem(conversationId, locked, "steer-unconfirmed", publicRuntimeError(error));
         } else {
-          releaseClaimItem(conversationId, first.id, "steer-declined");
+          releaseClaimItem(conversationId, locked.id, "steer-declined");
         }
       }
       throw error;
@@ -759,36 +806,13 @@ export function createQueuedMessageRuntime(
     }
   }
 
-  /** Validates `message.queue.send` BEFORE committing any receipt (Audit 3 Bug #5). */
-  function validateManualSend(conversationId: string, id: string): void {
-    requireConversation(conversationId);
-    if (hasIncompleteWorktreeSetup(db, conversationId)) {
-      throw new RuntimeRequestError(RESUME_WORKTREE_SETUP_ERROR);
-    }
-    const entries = listQueueEntries(store, conversationId);
-    const target = entries.find((entry) => entry.id === id);
-    if (!target) throw new RuntimeRequestError("This queued message is no longer in the queue.");
-    if (turns.isActive(conversationId)) {
-      if (target.delegatedCompletion) {
-        throw new RuntimeRequestError("Delegated results continue this chat after the current turn ends.");
-      }
-      if (target.userMessageId) {
-        throw new RuntimeRequestError("This follow-up sends as its own turn when the current turn ends.");
-      }
-      const first = entries.find((entry) => !entry.delegatedCompletion);
-      if (!first || first.id !== id) throw new RuntimeRequestError("Send the first queued message first.");
-      if (target.attachments.some(({ mimeType }) => chatAttachmentKind(mimeType) !== "image")) {
-        throw new RuntimeRequestError(QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
-      }
-    }
-  }
-
   const directTurnInteraction = createTurnInteractionCommandHandler({ ...dependencies, undeliveredFollowUps });
   const operationsContext: QueueOperationsContext = {
     dependencies,
     running,
     inFlightEditText,
     isCompacting: (conversationId) => options.compacting?.(conversationId) === true,
+    isUsageLimitHeld,
     requireConversation,
     hasPendingInteraction,
     result,
@@ -796,7 +820,10 @@ export function createQueuedMessageRuntime(
     schedule,
     retryAfterCleanup,
     dispatch: async (conversationId, requestedId) => { await dispatch(conversationId, requestedId); },
-    directTurnInteraction,
+    directTurnInteraction: (socket, command, authority, sendOptions) =>
+      sendOptions?.modelSelectionOverride
+        ? sendMessageCommand({ ...dependencies, undeliveredFollowUps }, socket, command, sendOptions)
+        : directTurnInteraction(socket, command, authority),
   };
 
   const handler = defineRuntimeCommandHandler([
@@ -940,7 +967,7 @@ export function createQueuedMessageRuntime(
         void schedule(conversationId).catch(() => undefined);
       } else if (command.type === "message.queue.send") {
         await running.get(conversationId)?.catch(() => undefined);
-        if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id, command.requestId);
+        if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, command.payload.id, command.requestId, { releaseHeld: true });
         else await dispatch(conversationId, command.payload.id);
       } else if (command.type === "message.queue.stop-and-send") {
         await stopAndSendOperation(operationsContext, command.payload, command.requestId, ticket);
@@ -990,7 +1017,7 @@ export function createQueuedMessageRuntime(
       return { kind: "removed", removed: removed! };
     }
     if (command.type === "message.queue.send") {
-      validateManualSend(conversationId, command.payload.id);
+      validateManualSendOperation(operationsContext, conversationId, command.payload.id, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
       const v2 = queue.getItem(command.payload.id);
       const activeInV2 = v2 !== null && (v2.state === "waiting" || v2.state === "blocked");
       ticket.commit({
@@ -1014,60 +1041,8 @@ export function createQueuedMessageRuntime(
   async function steerDelegated(conversationId: string): Promise<boolean> {
     const hooks = options.delegated?.();
     const entry = waitingDelivery(conversationId);
-    const attribution = entry?.delegatedCompletion;
-    if (!hooks || !entry || !attribution || entry.userMessageId !== null || entry.state !== "waiting"
-      || !hooks.steerable(conversationId, attribution)) return false;
-    const content = hooks.content(attribution);
-    if (content === null) return false;
-    const admission = turns.acquireFollowUpAdmission(conversationId);
-    if (!admission) return false;
-    let claimed = false;
-    try {
-      const claim = claimItem(conversationId, entry.id, "steer");
-      if (!claim) return false;
-      claimed = true;
-      changed(conversationId);
-      const steered = await turns.steer(
-        admission,
-        { content, imagePaths: [] },
-        [],
-        undefined,
-        AbortSignal.timeout(Math.max(0, messageSendPreparationDeadline() - Date.now())),
-        { queuedMessageId: entry.id, providerContent: delegatedSteerContent(content), delegatedCompletion: attribution },
-      );
-      claimed = false;
-      if (steered.kind === "accepted") {
-        if (queue.getItem(entry.id)) {
-          const targetRun = runControl.target(admission.runId);
-          queue.deliver({
-            conversationId,
-            itemId: entry.id,
-            delivery: {
-              mode: "steer",
-              runId: admission.runId,
-              attemptId: targetRun?.attemptId ?? admission.runId,
-              turnId: admission.turnId,
-              messageId: steered.message.id,
-              deliveredAt: steered.message.createdAt,
-            },
-          });
-        }
-        hooks.steered(attribution, admission.turnId);
-        dependencies.broadcast({ type: "conversation.message.persisted", message: steered.message });
-        dependencies.broadcastSnapshot();
-        return true;
-      }
-      releaseClaimItem(conversationId, entry.id, steered.kind === "turn-ended" ? "turn-ended" : "steer-declined");
-      void schedule(conversationId).catch(() => undefined);
-      return false;
-    } catch {
-      if (claimed) releaseClaimItem(conversationId, entry.id, "steer-declined");
-      void schedule(conversationId).catch(() => undefined);
-      return false;
-    } finally {
-      admission.release();
-      changed(conversationId);
-    }
+    if (!hooks || !entry) return false;
+    return await steerDelegatedOperation(operationsContext, { conversationId, entry, hooks, claimItem, releaseClaimItem });
   }
 
   async function promoteDeferredSteers(conversationId: string, runId: string, attemptId: string): Promise<void> {
@@ -1078,7 +1053,7 @@ export function createQueuedMessageRuntime(
         .run(item.id, conversationId);
       if (!turns.isActive(conversationId)) break;
       try {
-        await sendDuringTurn(conversationId, item.id, queueDeferredSteerCommandId(item.id, runId, attemptId));
+        await sendDuringTurn(conversationId, item.id, queueDeferredSteerCommandId(item.id, runId, attemptId), { releaseHeld: false });
       } catch {
         // Leave item waiting in queue for turn end.
       }
@@ -1148,10 +1123,18 @@ export function createQueuedMessageRuntime(
     resume: (conversationId: string, requestId: string) => resumeQueueOperation(operationsContext, conversationId, requestId),
     reorder: (conversationId: string, id: string, beforeId: string | null, requestId: string) =>
       reorderQueueOperation(operationsContext, conversationId, id, beforeId, requestId),
-    sendNow: async (conversationId: string, id: string, requestId: string): Promise<void> => {
+    sendNow: async (
+      conversationId: string,
+      id: string,
+      requestId: string,
+      sendOptions?: { textOnly?: boolean },
+    ): Promise<void> => {
       await running.get(conversationId)?.catch(() => undefined);
-      if (turns.isActive(conversationId)) await sendDuringTurn(conversationId, id, requestId);
-      else await dispatch(conversationId, id);
+      if (turns.isActive(conversationId)) {
+        await sendDuringTurn(conversationId, id, requestId, { releaseHeld: true, textOnly: sendOptions?.textOnly });
+      } else {
+        await dispatch(conversationId, id, sendOptions);
+      }
     },
     promoteDeferredSteers,
     async offerDelegated(conversationId: string): Promise<void> {
@@ -1197,12 +1180,7 @@ export function createQueuedMessageRuntime(
       if (hasPendingWork(conversationId)) void schedule(conversationId).catch(() => undefined);
     },
     onWorktreeSetupRetried(conversationId: string): void {
-      if (turns.isActive(conversationId) || !canReleaseWorktreeSetupRetry(store, conversationId)) return;
-      const released = queue.release({ conversationId, cause: "R4-preparation-retry" });
-      if (released.events.length > 0) {
-        changed(conversationId);
-        void schedule(conversationId).catch(() => undefined);
-      }
+      onWorktreeSetupRetriedOperation(operationsContext, conversationId);
     },
     async start(beforeSchedule?: () => void | Promise<void>): Promise<void> {
       await reconcileQueueOnBoot(store);

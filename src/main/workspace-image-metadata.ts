@@ -11,12 +11,25 @@ const MAX_GIF_SUB_BLOCKS = Math.ceil(
 
 export const MAX_WORKSPACE_IMAGE_WIDTH = 8_192;
 export const MAX_WORKSPACE_IMAGE_HEIGHT = 8_192;
-export const MAX_WORKSPACE_IMAGE_PIXELS = 6_000_000;
+export const MAX_WORKSPACE_IMAGE_PIXELS = 40_000_000;
 export const MAX_WORKSPACE_IMAGE_FRAMES = 256;
-export const MAX_WORKSPACE_IMAGE_DECODED_PIXELS = 12_000_000;
+export const MAX_WORKSPACE_IMAGE_DECODED_PIXELS = 40_000_000;
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const BMP_VALID_DIB_HEADER_SIZES = new Set([12, 40, 52, 56, 64, 108, 124]);
+const BMP_VALID_BITS_PER_PIXEL = new Set([1, 2, 4, 8, 16, 24, 32]);
+const MAX_AVIF_FTYP_BYTES = 4_096;
+const MAX_AVIF_BOX_DEPTH = 8;
 
 export interface WorkspaceImageMetadata {
-  mimeType: "image/gif" | "image/jpeg" | "image/png" | "image/webp";
+  mimeType:
+    | "image/avif"
+    | "image/bmp"
+    | "image/gif"
+    | "image/jpeg"
+    | "image/png"
+    | "image/webp"
+    | "image/x-icon";
   width: number;
   height: number;
   frames: number;
@@ -590,6 +603,397 @@ async function inspectWebp(
   });
 }
 
+async function inspectBmp(
+  cursor: FileCursor,
+  budget: InspectionBudget,
+): Promise<WorkspaceImageMetadata> {
+  cursor.seek(0);
+  budget.consume();
+  const fileHeader = await cursor.bytes(14);
+  if (fileHeader[0] !== 0x42 || fileHeader[1] !== 0x4d) {
+    throw new Error("The workspace resource is not a supported image.");
+  }
+  const pixelDataOffset = fileHeader.readUInt32LE(10);
+  const dibHeaderSize = (await cursor.bytes(4)).readUInt32LE(0);
+  if (
+    !BMP_VALID_DIB_HEADER_SIZES.has(dibHeaderSize)
+    || 14 + dibHeaderSize > cursor.size
+    || pixelDataOffset < 14 + dibHeaderSize
+    || pixelDataOffset > cursor.size
+  ) {
+    throw new Error("The workspace BMP header is invalid or truncated.");
+  }
+  let width: number;
+  let height: number;
+  let planes: number;
+  let bitsPerPixel: number;
+  if (dibHeaderSize === 12) {
+    const core = await cursor.bytes(8);
+    width = core.readUInt16LE(0);
+    height = core.readUInt16LE(2);
+    planes = core.readUInt16LE(4);
+    bitsPerPixel = core.readUInt16LE(6);
+  } else {
+    const info = await cursor.bytes(12);
+    const rawWidth = info.readInt32LE(0);
+    const rawHeight = info.readInt32LE(4);
+    planes = info.readUInt16LE(8);
+    bitsPerPixel = info.readUInt16LE(10);
+    if (rawWidth <= 0 || rawHeight === 0 || rawHeight === -0x8000_0000) {
+      throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+    }
+    width = rawWidth;
+    height = Math.abs(rawHeight);
+  }
+  if (planes !== 1 || !BMP_VALID_BITS_PER_PIXEL.has(bitsPerPixel)) {
+    throw new Error("The workspace BMP pixel format is invalid.");
+  }
+  return validateMetadata({
+    mimeType: "image/bmp",
+    width,
+    height,
+    frames: 1,
+  });
+}
+
+async function inspectIco(
+  cursor: FileCursor,
+  budget: InspectionBudget,
+): Promise<WorkspaceImageMetadata> {
+  cursor.seek(0);
+  budget.consume();
+  const header = await cursor.bytes(6);
+  const reserved = header.readUInt16LE(0);
+  const type = header.readUInt16LE(2);
+  const count = header.readUInt16LE(4);
+  if (reserved !== 0 || type !== 1) {
+    throw new Error("The workspace resource is not a supported image.");
+  }
+  if (count === 0 || count > MAX_WORKSPACE_IMAGE_FRAMES) {
+    throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+  }
+  const directoryEnd = 6 + count * 16;
+  if (directoryEnd > cursor.size) {
+    throw new Error("The workspace image structure is truncated.");
+  }
+  const entriesTable = await cursor.bytes(count * 16);
+  let maxWidth = 0;
+  let maxHeight = 0;
+  for (let index = 0; index < count; index += 1) {
+    budget.consume();
+    const base = index * 16;
+    let width = entriesTable[base]! === 0 ? 256 : entriesTable[base]!;
+    let height = entriesTable[base + 1]! === 0 ? 256 : entriesTable[base + 1]!;
+    const imageBytes = entriesTable.readUInt32LE(base + 8);
+    const imageOffset = entriesTable.readUInt32LE(base + 12);
+    if (
+      imageBytes === 0
+      || imageOffset < directoryEnd
+      || imageOffset + imageBytes > cursor.size
+    ) {
+      throw new Error("The workspace ICO entry is invalid or truncated.");
+    }
+    if (imageBytes >= 24) {
+      cursor.seek(imageOffset);
+      const head = await cursor.bytes(24);
+      if (
+        head.subarray(0, 8).equals(PNG_SIGNATURE)
+        && ascii(head.subarray(12, 16)) === "IHDR"
+      ) {
+        const pngWidth = head.readUInt32BE(16);
+        const pngHeight = head.readUInt32BE(20);
+        if (pngWidth === 0 || pngHeight === 0) {
+          throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+        }
+        width = Math.max(width, pngWidth);
+        height = Math.max(height, pngHeight);
+      }
+    }
+    maxWidth = Math.max(maxWidth, width);
+    maxHeight = Math.max(maxHeight, height);
+  }
+  return validateMetadata({
+    mimeType: "image/x-icon",
+    width: maxWidth,
+    height: maxHeight,
+    frames: count,
+  });
+}
+
+interface IsoBoxHeader {
+  readonly type: string;
+  readonly payloadStart: number;
+  readonly boxEnd: number;
+}
+
+async function readIsoBoxHeader(
+  cursor: FileCursor,
+  containerEnd: number,
+): Promise<IsoBoxHeader> {
+  if (containerEnd - cursor.position < 8) {
+    throw new Error("The workspace AVIF box header is truncated.");
+  }
+  const boxStart = cursor.position;
+  const header = await cursor.bytes(8);
+  const size32 = header.readUInt32BE(0);
+  const type = ascii(header.subarray(4, 8));
+  let boxSize = size32;
+  if (size32 === 1) {
+    if (containerEnd - cursor.position < 8) {
+      throw new Error("The workspace AVIF extended box header is truncated.");
+    }
+    const size64 = (await cursor.bytes(8)).readBigUInt64BE(0);
+    if (size64 < 16n || size64 > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("The workspace AVIF extended box size is invalid.");
+    }
+    boxSize = Number(size64);
+  } else if (size32 === 0) {
+    boxSize = containerEnd - boxStart;
+  } else if (size32 < 8) {
+    throw new Error("The workspace AVIF box size is invalid.");
+  }
+  const boxEnd = boxStart + boxSize;
+  if (boxEnd > containerEnd || boxEnd < cursor.position) {
+    throw new Error("The workspace AVIF box exceeds its container.");
+  }
+  return { type, payloadStart: cursor.position, boxEnd };
+}
+
+interface AvifDimensionState {
+  foundIspe: boolean;
+  ispeWidth: number;
+  ispeHeight: number;
+  foundTkhd: boolean;
+  tkhdWidth: number;
+  tkhdHeight: number;
+}
+
+async function walkAvifBoxes(
+  cursor: FileCursor,
+  containerEnd: number,
+  depth: number,
+  budget: InspectionBudget,
+  state: AvifDimensionState,
+): Promise<void> {
+  if (depth > MAX_AVIF_BOX_DEPTH) {
+    throw new Error("The workspace AVIF container nesting exceeds safe depth.");
+  }
+  while (cursor.position < containerEnd) {
+    budget.consume();
+    const { type, payloadStart, boxEnd } = await readIsoBoxHeader(cursor, containerEnd);
+    const payloadSize = boxEnd - payloadStart;
+    if (type === "meta") {
+      if (payloadSize < 4) {
+        throw new Error("The workspace AVIF meta box is truncated.");
+      }
+      cursor.skip(4);
+      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state);
+    } else if (
+      type === "iprp"
+      || type === "ipco"
+      || type === "moov"
+      || type === "trak"
+    ) {
+      await walkAvifBoxes(cursor, boxEnd, depth + 1, budget, state);
+    } else if (type === "ispe") {
+      if (payloadSize < 12) {
+        throw new Error("The workspace AVIF ispe box is truncated.");
+      }
+      const data = await cursor.bytes(12);
+      const width = data.readUInt32BE(4);
+      const height = data.readUInt32BE(8);
+      if (width === 0 || height === 0) {
+        throw new Error("The workspace image has unsafe decoded dimensions or frames.");
+      }
+      state.foundIspe = true;
+      state.ispeWidth = Math.max(state.ispeWidth, width);
+      state.ispeHeight = Math.max(state.ispeHeight, height);
+    } else if (type === "tkhd" && payloadSize >= 4) {
+      const versionHeader = await cursor.bytes(4);
+      const version = versionHeader[0]!;
+      const needed = version === 1 ? 92 : 80;
+      if (payloadSize - 4 >= needed) {
+        cursor.skip(needed - 8);
+        const dims = await cursor.bytes(8);
+        const width = Math.ceil(dims.readUInt32BE(0) / 65_536);
+        const height = Math.ceil(dims.readUInt32BE(4) / 65_536);
+        if (width > 0 && height > 0) {
+          state.foundTkhd = true;
+          state.tkhdWidth = Math.max(state.tkhdWidth, width);
+          state.tkhdHeight = Math.max(state.tkhdHeight, height);
+        }
+      }
+    }
+    cursor.seek(boxEnd);
+  }
+}
+
+async function inspectAvif(
+  cursor: FileCursor,
+  budget: InspectionBudget,
+): Promise<WorkspaceImageMetadata> {
+  cursor.seek(0);
+  budget.consume();
+  const ftyp = await readIsoBoxHeader(cursor, cursor.size);
+  const ftypPayloadBytes = ftyp.boxEnd - ftyp.payloadStart;
+  if (
+    ftyp.type !== "ftyp"
+    || ftypPayloadBytes < 8
+    || ftypPayloadBytes > MAX_AVIF_FTYP_BYTES
+  ) {
+    throw new Error("The workspace resource is not a supported image.");
+  }
+  const ftypData = await cursor.bytes(ftypPayloadBytes);
+  const majorBrand = ascii(ftypData.subarray(0, 4));
+  let isAvifBrand = majorBrand === "avif" || majorBrand === "avis";
+  for (let offset = 8; offset + 4 <= ftypData.length; offset += 4) {
+    const brand = ascii(ftypData.subarray(offset, offset + 4));
+    if (brand === "avif" || brand === "avis") {
+      isAvifBrand = true;
+      break;
+    }
+  }
+  if (!isAvifBrand) {
+    throw new Error("The workspace resource is not a supported image.");
+  }
+  cursor.seek(ftyp.boxEnd);
+  const state: AvifDimensionState = {
+    foundIspe: false,
+    ispeWidth: 0,
+    ispeHeight: 0,
+    foundTkhd: false,
+    tkhdWidth: 0,
+    tkhdHeight: 0,
+  };
+  await walkAvifBoxes(cursor, cursor.size, 0, budget, state);
+  const width = state.foundIspe ? state.ispeWidth : state.foundTkhd ? state.tkhdWidth : 0;
+  const height = state.foundIspe ? state.ispeHeight : state.foundTkhd ? state.tkhdHeight : 0;
+  if (width === 0 || height === 0) {
+    throw new Error("The workspace AVIF is missing spatial extent dimensions.");
+  }
+  return validateMetadata({
+    mimeType: "image/avif",
+    width,
+    height,
+    frames: 1,
+  });
+}
+
+const SVG_PROLOG_PREFIX_CHARS = 65_536;
+
+function skipXmlProlog(input: string): string | null {
+  let index = input.startsWith("\uFEFF") ? 1 : 0;
+  const length = input.length;
+  while (index < length) {
+    while (index < length && /\s/u.test(input[index]!)) index += 1;
+    if (input.startsWith("<!--", index)) {
+      const end = input.indexOf("-->", index + 4);
+      if (end < 0) return null;
+      index = end + 3;
+      continue;
+    }
+    if (input.startsWith("<?", index)) {
+      const end = input.indexOf("?>", index + 2);
+      if (end < 0) return null;
+      index = end + 2;
+      continue;
+    }
+    if (/^<!DOCTYPE(?=[\s[])/iu.test(input.slice(index, index + 11))) {
+      index += 9;
+      let bracketDepth = 0;
+      let quote: string | null = null;
+      let closed = false;
+      while (index < length) {
+        if (!quote) {
+          if (input.startsWith("<!--", index)) {
+            const commentEnd = input.indexOf("-->", index + 4);
+            if (commentEnd < 0) return null;
+            index = commentEnd + 3;
+            continue;
+          }
+          if (input.startsWith("<?", index)) {
+            const piEnd = input.indexOf("?>", index + 2);
+            if (piEnd < 0) return null;
+            index = piEnd + 2;
+            continue;
+          }
+        }
+        const ch = input[index]!;
+        index += 1;
+        if (quote) {
+          if (ch === quote) quote = null;
+          continue;
+        }
+        if (ch === "\"" || ch === "'") {
+          quote = ch;
+        } else if (ch === "[") {
+          bracketDepth += 1;
+        } else if (ch === "]" && bracketDepth > 0) {
+          bracketDepth -= 1;
+        } else if (ch === ">" && bracketDepth === 0) {
+          closed = true;
+          break;
+        }
+      }
+      if (!closed) return null;
+      continue;
+    }
+    break;
+  }
+  return input.slice(index);
+}
+
+export async function inspectWorkspaceSvg(
+  handle: FileHandle,
+  size: number,
+): Promise<void> {
+  if (size <= 0) {
+    throw new Error("The workspace resource is not a supported image.");
+  }
+  const buffer = Buffer.allocUnsafe(Math.min(INSPECTION_BUFFER_BYTES, size));
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let offset = 0;
+  let prefix = "";
+  while (offset < size) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      0,
+      Math.min(buffer.length, size - offset),
+      offset,
+    );
+    if (bytesRead <= 0) {
+      throw new Error("The workspace image structure is truncated.");
+    }
+    const chunk = buffer.subarray(0, bytesRead);
+    if (chunk.includes(0)) {
+      throw new Error("The workspace SVG contains NUL bytes.");
+    }
+    let decoded: string;
+    try {
+      decoded = decoder.decode(chunk, { stream: true });
+    } catch {
+      throw new Error("The workspace SVG is not valid UTF-8.");
+    }
+    if (prefix.length < SVG_PROLOG_PREFIX_CHARS) {
+      prefix += decoded.slice(0, SVG_PROLOG_PREFIX_CHARS - prefix.length);
+    }
+    offset += bytesRead;
+  }
+  let finalText: string;
+  try {
+    finalText = decoder.decode();
+  } catch {
+    throw new Error("The workspace SVG is not valid UTF-8.");
+  }
+  if (finalText.length > 0 && prefix.length < SVG_PROLOG_PREFIX_CHARS) {
+    prefix += finalText.slice(0, SVG_PROLOG_PREFIX_CHARS - prefix.length);
+  }
+  const rootRemainder = skipXmlProlog(prefix);
+  if (!rootRemainder || !/^<svg(?=[\s/>])/iu.test(rootRemainder)) {
+    throw new Error("The workspace resource is not a supported image.");
+  }
+}
+
 export async function inspectWorkspaceImageMetadata(
   handle: FileHandle,
   size: number,
@@ -601,9 +1005,9 @@ export async function inspectWorkspaceImageMetadata(
   }
   const cursor = new FileCursor(handle, size);
   const budget = new InspectionBudget();
-  if (signature.length >= 8 && signature.subarray(0, 8).equals(
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  )) return await inspectPng(cursor, budget);
+  if (signature.length >= 8 && signature.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    return await inspectPng(cursor, budget);
+  }
   if (signature[0] === 0xff && signature[1] === 0xd8) return await inspectJpeg(cursor, budget);
   if (signature.length >= 6 && ["GIF87a", "GIF89a"].includes(ascii(signature.subarray(0, 6)))) {
     return await inspectGif(cursor, budget);
@@ -613,5 +1017,18 @@ export async function inspectWorkspaceImageMetadata(
     && ascii(signature.subarray(0, 4)) === "RIFF"
     && ascii(signature.subarray(8, 12)) === "WEBP"
   ) return await inspectWebp(cursor, budget);
+  if (signature.length >= 2 && signature[0] === 0x42 && signature[1] === 0x4d) {
+    return await inspectBmp(cursor, budget);
+  }
+  if (
+    signature.length >= 4
+    && signature[0] === 0x00
+    && signature[1] === 0x00
+    && signature[2] === 0x01
+    && signature[3] === 0x00
+  ) return await inspectIco(cursor, budget);
+  if (signature.length >= 12 && ascii(signature.subarray(4, 8)) === "ftyp") {
+    return await inspectAvif(cursor, budget);
+  }
   throw new Error("The workspace resource is not a supported image.");
 }

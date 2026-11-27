@@ -411,10 +411,14 @@ describe("workspace image previews", () => {
 
   it("rejects oversized decoded dimensions and animation frame counts", async () => {
     const directory = await temporaryDirectory();
+    await writeFile(join(directory, "4k.png"), pngFixture({
+      width: 3_840,
+      height: 2_160,
+    }));
     await writeFile(join(directory, "wide.png"), pngFixture({ width: 20_000 }));
     await writeFile(join(directory, "dense.png"), pngFixture({
-      width: 3_000,
-      height: 3_000,
+      width: 7_000,
+      height: 7_000,
     }));
     await writeFile(join(directory, "wide.jpg"), jpegFixture(20_000));
     await writeFile(join(directory, "many.png"), apngFixture(257));
@@ -424,6 +428,13 @@ describe("workspace image previews", () => {
       resolveProjectPath: async ({ relativePath }: { relativePath: string }) =>
         join(directory, relativePath),
     };
+    const ok4k = await resolveWorkspaceImagePreviewResponse(
+      resolver,
+      request("4k.png"),
+    );
+    expect(ok4k.headers.get("Content-Type")).toBe("image/png");
+    await ok4k.body!.cancel();
+
     await expect(resolveWorkspaceImagePreviewResponse(
       resolver,
       request("wide.png"),
@@ -442,6 +453,63 @@ describe("workspace image previews", () => {
     }
   });
 
+  it("supports BMP, ICO, AVIF, and sandboxed SVG workspace images", async () => {
+    const directory = await temporaryDirectory();
+    const bmp = Buffer.alloc(58);
+    bmp.write("BM", 0, "ascii");
+    bmp.writeUInt32LE(58, 2);
+    bmp.writeUInt32LE(54, 10);
+    bmp.writeUInt32LE(40, 14);
+    bmp.writeInt32LE(1, 18);
+    bmp.writeInt32LE(1, 22);
+    bmp.writeUInt16LE(1, 26);
+    bmp.writeUInt16LE(24, 28);
+
+    const ico = Buffer.concat([
+      Buffer.from([0, 0, 1, 0, 1, 0]),
+      Buffer.from([16, 16, 0, 0, 1, 0, 32, 0, VALID_PNG.length & 0xff, (VALID_PNG.length >> 8) & 0xff, 0, 0, 22, 0, 0, 0]),
+      VALID_PNG,
+    ]);
+
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"></svg>', "utf8");
+    const nonSvgExtension = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>', "utf8");
+    const nulSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg">\0</svg>', "utf8");
+
+    await Promise.all([
+      writeFile(join(directory, "sample.bmp"), bmp),
+      writeFile(join(directory, "sample.ico"), ico),
+      writeFile(join(directory, "sample.svg"), svg),
+      writeFile(join(directory, "disguised.png"), nonSvgExtension),
+      writeFile(join(directory, "nul.svg"), nulSvg),
+    ]);
+    const resolver = {
+      resolveProjectPath: async ({ relativePath }: { relativePath: string }) =>
+        join(directory, relativePath),
+    };
+
+    const bmpResponse = await resolveWorkspaceImagePreviewResponse(resolver, request("sample.bmp"));
+    expect(bmpResponse.headers.get("Content-Type")).toBe("image/bmp");
+    expect(Buffer.from(await bmpResponse.arrayBuffer())).toEqual(bmp);
+
+    const icoResponse = await resolveWorkspaceImagePreviewResponse(resolver, request("sample.ico"));
+    expect(icoResponse.headers.get("Content-Type")).toBe("image/x-icon");
+    expect(Buffer.from(await icoResponse.arrayBuffer())).toEqual(ico);
+
+    const svgResponse = await resolveWorkspaceImagePreviewResponse(resolver, request("sample.svg"));
+    expect(svgResponse.headers.get("Content-Type")).toBe("image/svg+xml");
+    expect(svgResponse.headers.get("Content-Security-Policy")).toBe("default-src 'none'; sandbox");
+    expect(svgResponse.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(svgResponse.headers.get("Cache-Control")).toBe("no-store");
+    expect(Buffer.from(await svgResponse.arrayBuffer())).toEqual(svg);
+
+    await expect(
+      resolveWorkspaceImagePreviewResponse(resolver, request("disguised.png")),
+    ).rejects.toThrow("not a supported image");
+    await expect(
+      resolveWorkspaceImagePreviewResponse(resolver, request("nul.svg")),
+    ).rejects.toThrow("NUL bytes");
+  });
+
   it("bounds GIF container records independently from payload sub-blocks", async () => {
     const directory = await temporaryDirectory();
     const path = join(directory, "nested.gif");
@@ -455,7 +523,7 @@ describe("workspace image previews", () => {
   it("accepts near-limit GIF payload blocks without weakening termination bounds", async () => {
     const directory = await temporaryDirectory();
     const nearLimit = gifDataSubBlocks({
-      payloadBytes: MAX_WORKSPACE_IMAGE_PREVIEW_BYTES - 50_000,
+      payloadBytes: MAX_WORKSPACE_IMAGE_PREVIEW_BYTES - 150_000,
     });
     expect(nearLimit.length).toBeGreaterThan(9 * 1024 * 1024);
     expect(nearLimit.length).toBeLessThan(MAX_WORKSPACE_IMAGE_PREVIEW_BYTES);
@@ -468,7 +536,12 @@ describe("workspace image previews", () => {
     await response.body!.cancel();
 
     const excessivePath = join(directory, "excessive-blocks.gif");
-    await writeFile(excessivePath, gifDataSubBlocks({ blocks: 50_000 }));
+    await writeFile(
+      excessivePath,
+      gifDataSubBlocks({
+        blocks: Math.ceil(MAX_WORKSPACE_IMAGE_PREVIEW_BYTES / 255) + 5_000,
+      }),
+    );
     await expect(resolveWorkspaceImagePreviewResponse(
       { resolveProjectPath: async () => excessivePath },
       request("excessive-blocks.gif"),
@@ -644,7 +717,7 @@ describe("workspace image previews", () => {
 
   it("holds weighted bytes until cancellation and restores the cap", async () => {
     const directory = await temporaryDirectory();
-    const large = pngFixture({ totalBytes: 8 * 1024 * 1024 });
+    const large = pngFixture({ totalBytes: 20 * 1024 * 1024 });
     await Promise.all(["one.png", "two.png", "three.png"].map((name) =>
       writeFile(join(directory, name), large)));
     const resolver = {
@@ -678,7 +751,7 @@ describe("workspace image previews", () => {
 
   it("removes an aborted queued request and closes its waiting file", async () => {
     const directory = await temporaryDirectory();
-    const large = pngFixture({ totalBytes: 8 * 1024 * 1024 });
+    const large = pngFixture({ totalBytes: 20 * 1024 * 1024 });
     const paths = ["held-one.png", "held-two.png", "aborted.png"];
     await Promise.all(paths.map((name) => writeFile(join(directory, name), large)));
     const resolver = {
@@ -726,7 +799,7 @@ describe("workspace image previews", () => {
 
   it("disposes an active stream and releases its byte lease on abort", async () => {
     const directory = await temporaryDirectory();
-    const large = pngFixture({ totalBytes: 8 * 1024 * 1024 });
+    const large = pngFixture({ totalBytes: 20 * 1024 * 1024 });
     const paths = ["active.png", "held.png", "next.png"];
     await Promise.all(paths.map((name) => writeFile(join(directory, name), large)));
     const resolver = {
@@ -764,7 +837,7 @@ describe("workspace image previews", () => {
 
   it("releases weighted bytes after stream completion without full-size chunks", async () => {
     const directory = await temporaryDirectory();
-    const bytes = pngFixture({ totalBytes: 8 * 1024 * 1024 });
+    const bytes = pngFixture({ totalBytes: 20 * 1024 * 1024 });
     const imagePath = join(directory, "stream.png");
     await writeFile(imagePath, bytes);
     const allocations: number[] = [];

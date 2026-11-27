@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseMarkdown } from "../../src/renderer/src/components/ResponseMarkdown";
 import { FILE_CHIP_NOTICE_DURATION_MS } from "../../src/renderer/src/components/response-timeline/FileChip";
+import { EditorPreferenceContext } from "../../src/renderer/src/hooks/useAvailableEditors";
 import { renderedAnswerText } from "../../src/renderer/src/utils/answerPlainText";
 import { MAX_FILE_CHIPS_PER_DOCUMENT } from "../../src/renderer/src/utils/fileChipReference";
 
@@ -415,5 +416,62 @@ describe("file chips in response Markdown", () => {
     for (const derived of ["--fill", "--fill-strong", "--line-soft"]) {
       expect(root).toMatch(new RegExp(`${derived}: color-mix\\(in srgb, var\\(--text\\) \\d+%, transparent\\);`, "u"));
     }
+  });
+
+  it("renders media and document inline-code paths as clickable FileChips routed to onPreviewMedia", () => {
+    const onOpenProjectFile = vi.fn();
+    const onPreviewMedia = vi.fn();
+    const openProjectPath = vi.fn(async () => undefined);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { openProjectPath },
+    });
+    const { container } = render(
+      <EditorPreferenceContext.Provider value={{ preferredEditor: "vscode", detectedEditors: [] }}>
+        <ResponseMarkdown
+          content="`docs/report.pdf` `recordings/demo.mp4` `clips/voice.mp3` `data/budget.xlsx` `data/metrics.csv`"
+          projectRoot="/workspace/project"
+          projectId={PROJECT_ID}
+          conversationId={CONVERSATION_ID}
+          defaultCodeWrap={false}
+          onOpenProjectFile={onOpenProjectFile}
+          onPreviewMedia={onPreviewMedia}
+        />
+      </EditorPreferenceContext.Provider>,
+    );
+
+    const chips = [...container.querySelectorAll<HTMLButtonElement>(".response-file-chip")];
+    expect(chips.map((element) => element.getAttribute("data-file-chip-kind"))).toEqual([
+      "pdf",
+      "video",
+      "audio",
+      "spreadsheet",
+      "spreadsheet",
+    ]);
+
+    fireEvent.click(chip("docs/report.pdf"));
+    fireEvent.click(chip("recordings/demo.mp4"));
+    fireEvent.click(chip("data/budget.xlsx"));
+    fireEvent.click(chip("data/metrics.csv"));
+
+    expect(onPreviewMedia).toHaveBeenCalledTimes(4);
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      relativePath: "docs/report.pdf",
+      kind: "pdf",
+    }));
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      relativePath: "recordings/demo.mp4",
+      kind: "video",
+    }));
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      relativePath: "data/budget.xlsx",
+      kind: "spreadsheet",
+    }));
+    expect(onPreviewMedia).toHaveBeenNthCalledWith(4, expect.objectContaining({
+      relativePath: "data/metrics.csv",
+      kind: "spreadsheet",
+    }));
+    expect(openProjectPath).not.toHaveBeenCalled();
+    expect(onOpenProjectFile).not.toHaveBeenCalled();
   });
 });

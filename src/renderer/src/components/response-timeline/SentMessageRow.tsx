@@ -1,5 +1,7 @@
 import { memo } from "react";
 import type { SentToUserMessage } from "@shared/send-to-user";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import { useTaskCreator } from "../tasks/taskCreation";
 import { messageContextMenu } from "./messageContextMenu";
@@ -13,18 +15,27 @@ import { TurnBlockTime } from "./TurnFold";
 export const SentMessageRow = memo(function SentMessageRow({
   message,
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  onPreviewMedia,
   showTime = false,
 }: {
   message: SentToUserMessage;
   projectRoot: string;
+  projectBaseRoot?: string;
   projectId: string;
   conversationId: string;
   defaultCodeWrap: boolean;
-  onOpenProjectFile: (path: string) => void;
+  onOpenProjectFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+    headingId?: string,
+  ) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
   showTime?: boolean;
 }): React.JSX.Element {
   const taskCreator = useTaskCreator();
@@ -41,10 +52,12 @@ export const SentMessageRow = memo(function SentMessageRow({
       <ResponseMarkdown
         content={message.content}
         projectRoot={projectRoot}
+        projectBaseRoot={projectBaseRoot}
         projectId={projectId}
         conversationId={conversationId}
         defaultCodeWrap={defaultCodeWrap}
         onOpenProjectFile={onOpenProjectFile}
+        onPreviewMedia={onPreviewMedia}
       />
       {showTime && <TurnBlockTime createdAt={message.createdAt} />}
     </article>

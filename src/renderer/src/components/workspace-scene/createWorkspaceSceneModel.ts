@@ -360,6 +360,7 @@ export interface WorkspaceSceneModelInput {
   draftConversation: Conversation | null;
   draftSkills?: DraftSkillsProjection;
   globalChatActive: boolean;
+  detached?: boolean;
   workspaceToolsUnavailable: boolean;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
@@ -423,6 +424,7 @@ export function createWorkspaceSceneModel({
   draftConversation,
   draftSkills,
   globalChatActive,
+  detached = false,
   workspaceToolsUnavailable,
   connection,
   providerMaintenance,
@@ -486,6 +488,8 @@ export function createWorkspaceSceneModel({
   const runtimeConversation = runtimeConversationReference(
     persistedConversation,
   );
+  const effectiveProjectRoot = conversation?.worktreePath ?? project?.normalizedPath ?? "";
+  const projectBaseRoot = !detached && project && effectiveProjectRoot && project.normalizedPath !== effectiveProjectRoot ? project.normalizedPath : undefined;
   const snapshotProjects = connection.snapshot?.projects ?? [];
   const snapshotConversations = connection.snapshot?.conversations ?? [];
   const {
@@ -853,6 +857,7 @@ export function createWorkspaceSceneModel({
       onOpenTurnDiff: actions.openTurnDiff,
       onCompareTurnArtifacts: actions.compareTurnArtifacts,
       onOpenTurnFile: workspaceTools.openTurnFile,
+      projectBaseRoot,
       onRevertCheckpoint: actions.revertCheckpoint,
       onOpenSurface: project && !globalChatActive ? layout.openSurface : undefined,
       onStop: actions.stopAgent,
@@ -1145,7 +1150,8 @@ export function createWorkspaceSceneModel({
         steps: panelPlanSteps,
         document: planDocumentText,
         markdown: {
-          projectRoot: conversation?.worktreePath ?? project.normalizedPath,
+          projectRoot: effectiveProjectRoot,
+          projectBaseRoot,
           projectId: project.id,
           conversationId: persistedConversation?.id,
           defaultCodeWrap: settings.defaultCodeWrap,

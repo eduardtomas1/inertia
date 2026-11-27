@@ -32,6 +32,13 @@ import type {
   WorkspaceFilePreview,
 } from "@shared/contracts";
 import { sourceLanguageForFile } from "@shared/source-language";
+import { applicationRendererScheme } from "@shared/workspace-image-preview";
+import {
+  buildWorkspaceMediaPreviewTarget,
+  classifyWorkspaceMediaPath,
+  isBinaryWorkspaceMediaPath,
+  type WorkspaceMediaPreviewTarget,
+} from "@shared/workspace-media-preview";
 import {
   flattenWorkspaceTree,
   isSafeWorkspaceEntryPath,
@@ -76,6 +83,7 @@ type ResponseMarkdownLoader = (attempt: number) => Promise<{
 
 const loadResponseMarkdown: ResponseMarkdownLoader = (_attempt) =>
   import("./ResponseMarkdown");
+const FilesPanelMediaPreview = lazy(() => import("./media/FilesPanelMediaPreview"));
 const FILE_PREVIEW_CLASS = "file-preview";
 const FILE_ENTRY_CLASS = "file-entry";
 const FILE_PANEL_ERROR_CLASS = "file-panel-error";
@@ -166,12 +174,14 @@ export type FilesPanelProps = {
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
     headingId?: string,
+    loadDualViewSource?: boolean,
   ) => void;
   onOpenWorkspaceEntry?: (
     path: string,
     location?: WorkspaceFileLocation,
     literalPath?: boolean,
     headingId?: string,
+    loadDualViewSource?: boolean,
   ) => void;
   onLoadEntries: (request: {
     directory?: string;
@@ -183,16 +193,9 @@ export type FilesPanelProps = {
   onComposerPrefill?: (mode: FileSelectionPromptMode) => void;
   onRefresh?: () => void;
   onOpenFile?: (path: string) => void;
-  onSaveFile?: (
-    path: string,
-    content: string,
-    expectedDigest: string,
-  ) => Promise<WorkspaceFilePreview>;
-  canSaveFile?: (
-    path: string,
-    content: string,
-    expectedDigest: string,
-  ) => boolean;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
+  onSaveFile?: (path: string, content: string, expectedDigest: string) => Promise<WorkspaceFilePreview>;
+  canSaveFile?: (path: string, content: string, expectedDigest: string) => boolean;
   /** Read-only Git blame for the source preview; omit to hide the Blame toggle. */
   onLoadBlame?: FilePreviewBlameLoader;
 };
@@ -247,6 +250,7 @@ export function FilesPanel({
   onComposerPrefill,
   onRefresh,
   onOpenFile,
+  onPreviewMedia,
   onSaveFile,
   canSaveFile,
   onLoadBlame,
@@ -328,25 +332,25 @@ export function FilesPanel({
           ? `Limit: ${MAX_RENDERED_PREVIEW_LINES.toLocaleString("en-US")} lines.`
           : null
     : null;
-  const previewViewIdentity = preview
-    ? [
-        preview.path,
-        preview.contentDigest,
-        selectedLocation?.startLine ?? "",
-        selectedLocation?.endLine ?? "",
-      ].join("\0")
-    : "";
-  const defaultPreviewView: FilePreviewView = selectedLocation
-    ? "source"
-    : "preview";
-  const requestedPreviewView = previewViewState.identity === previewViewIdentity
-    ? previewViewState.view
-    : defaultPreviewView;
-  const renderedMarkdownPreview = markdownPreview
-    && markdownPreviewBlockedReason === null
-    && requestedPreviewView === "preview";
-  const virtualizedSourcePreview = !renderedMarkdownPreview
-    && previewLines.length > MAX_RENDERED_PREVIEW_LINES;
+  const selectedMediaDescriptor = useMemo(() => (selectedPath ? classifyWorkspaceMediaPath(selectedPath) : null), [selectedPath]);
+  const selectedMediaTarget = useMemo(() => (selectedPath && projectId ? buildWorkspaceMediaPreviewTarget({ projectId, conversationId, relativePath: selectedPath, scheme: applicationRendererScheme(globalThis.location?.protocol) }) : null), [conversationId, projectId, selectedPath]);
+  const binaryMediaPreview = Boolean(selectedMediaTarget && selectedPath && isBinaryWorkspaceMediaPath(selectedPath));
+  const dualViewMedia = Boolean(selectedMediaTarget && selectedMediaDescriptor?.isTextDualView);
+  const dualSourceState = preview !== null || previewLoading || previewError !== null;
+  const [seenDualSource, setSeenDualSource] = useState({ path: selectedPath, hasSource: dualSourceState });
+  if (seenDualSource.path !== selectedPath || seenDualSource.hasSource !== dualSourceState) {
+    setSeenDualSource({ path: selectedPath, hasSource: dualSourceState });
+    if (seenDualSource.path !== selectedPath || (dualViewMedia && seenDualSource.hasSource && !dualSourceState)) setPreviewViewState({ identity: "", view: "preview" });
+  }
+  const previewViewIdentity = dualViewMedia
+    ? [selectedPath ?? "", selectedLocation?.startLine ?? "", selectedLocation?.endLine ?? ""].join("\0")
+    : preview ? [preview.path, preview.contentDigest, selectedLocation?.startLine ?? "", selectedLocation?.endLine ?? ""].join("\0") : selectedPath ?? "";
+  const defaultPreviewView: FilePreviewView = selectedLocation ? "source" : "preview";
+  const requestedPreviewView = previewViewState.identity === previewViewIdentity ? previewViewState.view : defaultPreviewView;
+  const renderedMarkdownPreview = markdownPreview && markdownPreviewBlockedReason === null && requestedPreviewView === "preview";
+  const renderedDualMediaPreview = dualViewMedia && requestedPreviewView === "preview";
+  const showMediaPreview = binaryMediaPreview || renderedDualMediaPreview;
+  const virtualizedSourcePreview = !renderedMarkdownPreview && !showMediaPreview && previewLines.length > MAX_RENDERED_PREVIEW_LINES;
   const sourceVirtualizer = useVirtualizer({
     enabled: virtualizedSourcePreview,
     count: virtualizedSourcePreview ? previewLines.length : 0,
@@ -384,12 +388,12 @@ export function FilesPanel({
     [preview, previewLanguage, renderedMarkdownPreview],
   );
   const previewPath = preview?.path ?? null;
-  const blame = useFilePreviewBlame({ preview, load: onLoadBlame, markdownPreview: renderedMarkdownPreview, untracked: preview ? gitIndex.files.get(preview.path)?.label === "Untracked" : false, renderedLines: renderedPreviewLines });
+  const blame = useFilePreviewBlame({ preview, load: onLoadBlame, markdownPreview: renderedMarkdownPreview || showMediaPreview, untracked: preview ? gitIndex.files.get(preview.path)?.label === "Untracked" : false, renderedLines: renderedPreviewLines });
   const lineSelection = useFilePreviewLineSelection({
     preview,
     previewLines,
     conversationId,
-    enabled: !renderedMarkdownPreview && editingFile === null,
+    enabled: !renderedMarkdownPreview && !showMediaPreview && editingFile === null,
     renderedLineNumbers: renderedPreviewLines.map(({ lineNumber }) => lineNumber),
     preferredLine: selectedLocation?.startLine ?? null,
     codeRef: previewCodeRef,
@@ -849,7 +853,7 @@ export function FilesPanel({
       projectId,
       conversationId,
       selectedPath,
-      preview?.path ?? (previewError ? selectedPath : null),
+      preview?.path ?? (previewError || binaryMediaPreview ? selectedPath : null),
     );
     if (openEdit !== undefined) setFileExplorerOpen(false);
     if (
@@ -868,6 +872,7 @@ export function FilesPanel({
     }
     previousSelectedPathRef.current = selectedPath;
   }, [
+    binaryMediaPreview,
     contentMode,
     conversationId,
     projectId,
@@ -922,6 +927,9 @@ export function FilesPanel({
     setPendingMarkdownHeading(null);
     onSelectFile(match.projectPath, { startLine: match.line, endLine: match.line, startColumn: match.column }, true);
   };
+  const openablePath = preview?.path ?? selectedPath;
+  const showDualToggle = ((markdownPreview && preview !== null) || dualViewMedia) && !showContentResults;
+  const dualTogglePreviewActive = markdownPreview ? renderedMarkdownPreview : renderedDualMediaPreview;
 
   return (
     <section className="files-panel" aria-label="Project files" aria-busy={treeBusy}>
@@ -1029,78 +1037,67 @@ export function FilesPanel({
             </div>
             <div className={`${FILE_PREVIEW_CLASS}-metadata`} hidden={showContentResults}>
               {selectedPath && <FileGitBadge index={gitIndex} path={selectedPath} />}
-              {previewLanguage && !markdownPreview && (
-                <span
-                  className={FILE_LANGUAGE_CLASS}
-                  data-language-family={previewLanguage.family}
-                >
+              {previewLanguage && !markdownPreview ? (
+                <span className={FILE_LANGUAGE_CLASS} data-language-family={previewLanguage.family}>
                   {previewLanguage.label}
                 </span>
-              )}
+              ) : selectedMediaDescriptor && !previewLanguage ? (
+                <span className={FILE_LANGUAGE_CLASS}>{selectedMediaDescriptor.label}</span>
+              ) : null}
               {selectedLocation && (
-                <span className="file-location">
-                  {workspaceFileLocationLabel(selectedLocation)}
-                </span>
+                <span className="file-location">{workspaceFileLocationLabel(selectedLocation)}</span>
               )}
             </div>
             <div className={`${FILE_PREVIEW_CLASS}-actions`}>
               {contentSearchActive && !showContentResults && <BackToResultsButton onBack={() => setContentResultsDismissed(false)} />}
-              {markdownPreview && preview && !showContentResults && (
+              {showDualToggle && (
                 <div
                   className={`${FILE_PREVIEW_CLASS}-view-toggle`}
                   role="group"
-                  aria-label="Markdown"
+                  aria-label={markdownPreview ? "Markdown" : selectedMediaDescriptor?.label ?? "Media"}
                 >
                   <TooltipButton
-                    aria-pressed={renderedMarkdownPreview}
-                    disabled={markdownPreviewBlockedReason !== null}
-                    tooltip={markdownPreviewBlockedReason ?? "Preview"}
+                    aria-pressed={dualTogglePreviewActive}
+                    disabled={markdownPreview && markdownPreviewBlockedReason !== null}
+                    tooltip={(markdownPreview ? markdownPreviewBlockedReason : null) ?? "Preview"}
                     describeTooltip={false}
-                    onClick={() => setPreviewViewState({
-                      identity: previewViewIdentity,
-                      view: "preview",
-                    })}
+                    onClick={() => setPreviewViewState({ identity: previewViewIdentity, view: "preview" })}
                   >
                     <Eye size={14} aria-hidden="true" />
                     <span>Preview</span>
                   </TooltipButton>
                   <button
                     type="button"
-                    aria-pressed={!renderedMarkdownPreview}
-                    onClick={() => setPreviewViewState({
-                      identity: previewViewIdentity,
-                      view: "source",
-                    })}
+                    aria-pressed={!dualTogglePreviewActive}
+                    onClick={() => {
+                      setPreviewViewState({ identity: previewViewIdentity, view: "source" });
+                      if (dualViewMedia && selectedPath && !preview && !previewLoading && !previewError) {
+                        onSelectFile(selectedPath, undefined, true, undefined, true);
+                      }
+                    }}
                   >
                     <Code2 size={14} aria-hidden="true" />
                     <span>Source</span>
                   </button>
                 </div>
               )}
-              {preview && onLoadBlame && !showContentResults && <FilePreviewBlameToggle blame={blame} />}
+              {preview && onLoadBlame && !showContentResults && !showMediaPreview && <FilePreviewBlameToggle blame={blame} />}
               {preview && onSaveFile && !showContentResults && (
                 <IconButton
-                  label={previewEditable
-                    ? `Edit ${preview.path}`
-                    : `${preview.path} is too large to edit`}
+                  label={previewEditable ? `Edit ${preview.path}` : `${preview.path} is too large to edit`}
                   disabled={!previewEditable}
                   onClick={() => setEditingFile(preview)}
                 >
                   <Pencil size={14} />
                 </IconButton>
               )}
-              {preview && onOpenFile && !showContentResults && (
-                <IconButton
-                  label="Open file"
-                  onClick={() => onOpenFile(preview.path)}
-                >
+              {openablePath && onOpenFile && !showContentResults && (
+                <IconButton label="Open file" onClick={() => onOpenFile(openablePath)}>
                   <ExternalLink size={14} />
                 </IconButton>
               )}
               <IconButton
-                label={fileExplorerOpen
-                  ? "Hide file explorer"
-                  : "Show file explorer"}
+                label={fileExplorerOpen ? "Hide file explorer" : "Show file explorer"}
                 aria-pressed={fileExplorerOpen}
                 className="file-explorer-toggle"
                 onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
@@ -1112,6 +1109,10 @@ export function FilesPanel({
           {showContentResults ? (
             <FilesContentResultsView query={query} state={contentSearch} selectedPath={selectedPath}
               selectedLine={selectedLocation?.startLine ?? null} onOpen={openContentMatch} />
+          ) : showMediaPreview && selectedMediaTarget ? (
+            <Suspense fallback={<div className={PANEL_LOADING_CLASS} role="status"><LoadingMark label="Loading" /><span>Loading {workspacePathName(selectedMediaTarget.relativePath)}…</span></div>}>
+              <FilesPanelMediaPreview target={selectedMediaTarget} onPreviewMedia={onPreviewMedia} onOpenFile={onOpenFile} />
+            </Suspense>
           ) : previewLoading && selectedPath ? (
             <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
               <LoadingMark label="Loading" />
@@ -1239,7 +1240,7 @@ export function FilesPanel({
           canSave={canSaveFile ?? (() => false)}
           onClose={() => setEditingFile(null)}
           onSave={onSaveFile}
-          onReload={() => onSelectFile(editingFile.path, undefined, true)}
+          onReload={() => (classifyWorkspaceMediaPath(editingFile.path)?.isTextDualView ? onSelectFile(editingFile.path, undefined, true, undefined, true) : onSelectFile(editingFile.path, undefined, true))}
         />
       )}
     </section>

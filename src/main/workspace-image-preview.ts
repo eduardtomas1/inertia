@@ -7,11 +7,21 @@ import { FILE_OPEN_NO_FOLLOW } from
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
 import {
   MAX_WORKSPACE_IMAGE_PREVIEW_BYTES,
+  maxWorkspaceImagePreviewBytesForPath,
 } from "../shared/workspace-image-preview.js";
-import { inspectWorkspaceImageMetadata } from "./workspace-image-metadata.js";
+import {
+  inspectWorkspaceImageMetadata,
+  inspectWorkspaceSvg,
+} from "./workspace-image-metadata.js";
 
-interface ProjectPathResolver {
+export interface ProjectPathResolver {
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string>;
+}
+
+export interface OpenedWorkspaceFile {
+  handle: FileHandle;
+  info: Stats;
+  canonicalPath: string;
 }
 
 interface WeightedWaiter {
@@ -26,7 +36,8 @@ interface PreparedWorkspaceImage {
   releaseBudget: () => void;
 }
 
-export const MAX_ACTIVE_WORKSPACE_IMAGE_BYTES = 20 * 1024 * 1024;
+export const WORKSPACE_SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; sandbox";
+export const MAX_ACTIVE_WORKSPACE_IMAGE_BYTES = 50 * 1024 * 1024;
 const MAX_ACTIVE_WORKSPACE_IMAGE_STREAMS = 32;
 const MAX_PENDING_WORKSPACE_IMAGE_READS = 32;
 const WORKSPACE_IMAGE_STREAM_CHUNK_BYTES = 64 * 1024;
@@ -110,7 +121,7 @@ async function acquireWorkspaceImageBytes(
   });
 }
 
-function samePath(left: string, right: string): boolean {
+export function sameWorkspacePath(left: string, right: string): boolean {
   const normalizedLeft = resolve(left);
   const normalizedRight = resolve(right);
   return process.platform === "win32"
@@ -119,7 +130,7 @@ function samePath(left: string, right: string): boolean {
     : normalizedLeft === normalizedRight;
 }
 
-function hasSameIdentity(left: Stats, right: Stats): boolean {
+export function hasSameFileIdentity(left: Stats, right: Stats): boolean {
   return left.dev === right.dev
     && left.ino === right.ino
     && left.size === right.size
@@ -127,44 +138,81 @@ function hasSameIdentity(left: Stats, right: Stats): boolean {
     && left.ctimeMs === right.ctimeMs;
 }
 
-async function verifyOpenImageIdentity(
+export async function verifyOpenFileIdentity(
   handle: FileHandle,
   expected: Stats,
 ): Promise<void> {
-  if (!hasSameIdentity(expected, await handle.stat())) {
-    throw new Error("The workspace image identity changed.");
+  if (!hasSameFileIdentity(expected, await handle.stat())) {
+    throw new Error("The workspace file identity changed.");
+  }
+}
+
+export async function openContainedWorkspaceFile(
+  path: string,
+  options: {
+    readonly maxBytes: number;
+    readonly allowEmpty?: boolean;
+    readonly signal?: AbortSignal;
+  },
+): Promise<OpenedWorkspaceFile> {
+  assertWorkspaceImageRequestActive(options.signal);
+  const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
+  const handle = await open(path, constants.O_RDONLY | noFollow);
+  try {
+    const info = await handle.stat();
+    const minSizeValid = options.allowEmpty ? info.size >= 0 : info.size > 0;
+    if (
+      !info.isFile()
+      || !minSizeValid
+      || info.size > options.maxBytes
+    ) {
+      throw new Error("The workspace resource is not a bounded regular file.");
+    }
+
+    const canonicalPath = await realpath(path);
+    if (!sameWorkspacePath(canonicalPath, path)) {
+      throw new Error("The workspace file changed after path validation.");
+    }
+    if (!hasSameFileIdentity(info, await stat(canonicalPath))) {
+      throw new Error("The workspace file identity changed.");
+    }
+
+    return { handle, info, canonicalPath };
+  } catch (error) {
+    await handle.close();
+    throw error;
   }
 }
 
 async function prepareWorkspaceImage(
   path: string,
+  requestedRelativePath: string,
   signal?: AbortSignal,
 ): Promise<PreparedWorkspaceImage> {
-  assertWorkspaceImageRequestActive(signal);
-  const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
-  const handle = await open(path, constants.O_RDONLY | noFollow);
+  const { handle, info } = await openContainedWorkspaceFile(path, {
+    maxBytes: Math.max(
+      maxWorkspaceImagePreviewBytesForPath(requestedRelativePath),
+      maxWorkspaceImagePreviewBytesForPath(path),
+    ),
+    allowEmpty: false,
+    signal,
+  });
   let releaseBudget: (() => void) | null = null;
   try {
-    const info = await handle.stat();
-    if (
-      !info.isFile()
-      || info.size <= 0
-      || info.size > MAX_WORKSPACE_IMAGE_PREVIEW_BYTES
-    ) throw new Error("The workspace image is not a bounded regular file.");
-
-    const canonical = await realpath(path);
-    if (!samePath(canonical, path)) {
-      throw new Error("The workspace image changed after path validation.");
-    }
-    if (!hasSameIdentity(info, await stat(canonical))) {
-      throw new Error("The workspace image identity changed.");
-    }
-
     releaseBudget = await acquireWorkspaceImageBytes(info.size, signal);
     assertWorkspaceImageRequestActive(signal);
-    const { mimeType } = await inspectWorkspaceImageMetadata(handle, info.size);
+    let mimeType: string;
+    if (/\.svg$/iu.test(requestedRelativePath) || /\.svg$/iu.test(path)) {
+      await inspectWorkspaceSvg(handle, info.size);
+      mimeType = "image/svg+xml";
+    } else {
+      ({ mimeType } = await inspectWorkspaceImageMetadata(handle, info.size));
+    }
+    if (info.size > MAX_WORKSPACE_IMAGE_PREVIEW_BYTES && mimeType !== "image/bmp") {
+      throw new Error("The workspace image exceeds the preview size limit.");
+    }
     assertWorkspaceImageRequestActive(signal);
-    await verifyOpenImageIdentity(handle, info);
+    await verifyOpenFileIdentity(handle, info);
     return { handle, info, mimeType, releaseBudget };
   } catch (error) {
     try {
@@ -211,7 +259,7 @@ function workspaceImageStream(
         // lease until the consumer drains the response body rather than only
         // until the source has queued its last bytes.
         if (offset === image.info.size) {
-          await verifyOpenImageIdentity(image.handle, image.info);
+          await verifyOpenFileIdentity(image.handle, image.info);
           controller.close();
           await dispose();
           return;
@@ -251,7 +299,7 @@ export async function resolveWorkspaceImagePreviewResponse(
   assertWorkspaceImageRequestActive(signal);
   const path = await resolver.resolveProjectPath(request);
   assertWorkspaceImageRequestActive(signal);
-  const image = await prepareWorkspaceImage(path, signal);
+  const image = await prepareWorkspaceImage(path, request.relativePath, signal);
   try {
     return new Response(workspaceImageStream(image, signal), {
       headers: {
@@ -259,6 +307,9 @@ export async function resolveWorkspaceImagePreviewResponse(
         "Content-Length": String(image.info.size),
         "Content-Type": image.mimeType,
         "X-Content-Type-Options": "nosniff",
+        ...(image.mimeType === "image/svg+xml"
+          ? { "Content-Security-Policy": WORKSPACE_SVG_CONTENT_SECURITY_POLICY }
+          : {}),
       },
     });
   } catch (error) {

@@ -1,8 +1,13 @@
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import type { Protocol } from "electron";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
+  app: { isPackaged: true },
   net: { fetch: vi.fn() },
   protocol: { handle: vi.fn() },
 }));
@@ -15,6 +20,7 @@ import type { ConversationAttachmentAccess } from "../../src/main/conversation-a
 import { HTML_RENDER_CONTENT_SECURITY_POLICY } from "../../src/main/html-render-document";
 import type { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
 import { HTML_RENDER_THEME_STYLE_ID } from "../../src/shared/html-render";
+import { workspaceMediaPreviewUrl } from "../../src/shared/workspace-media-preview";
 
 function subject(): ReturnType<typeof createAppProtocolRegistrar> {
   return createAppProtocolRegistrar({
@@ -322,5 +328,86 @@ describe("detached-chat attachment preview isolation", () => {
     } as Request);
     expect(allowedOwn.status).toBe(200);
     expect(await allowedOwn.text()).toBe("staged-draft-bytes");
+  });
+});
+
+describe("workspace media protocol route", () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const conversationId = "22222222-2222-4222-8222-222222222222";
+  const otherConversationId = "33333333-3333-4333-8333-333333333333";
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  it("serves workspace media with range support, conversation scoping, and dev-only CORS", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "inertia-app-protocol-media-")));
+    tempDirs.push(dir);
+    const pdfPath = join(dir, "doc.pdf");
+    const pdfBytes = Buffer.from("%PDF-1.7\nhello world\n%%EOF\n", "ascii");
+    await writeFile(pdfPath, pdfBytes);
+
+    const resolveProjectPath = vi.fn(async () => pdfPath);
+    const registerPackaged = createAppProtocolRegistrar({
+      scheme: "inertia",
+      attachmentRegistry: () => null,
+      conversationAttachments: () => null,
+      runtimeSupervisor: () => ({ resolveProjectPath }) as unknown as RuntimeSupervisor,
+    });
+    const packagedTarget = protocolTarget();
+    registerPackaged(packagedTarget.target, conversationId);
+    const servePackaged = packagedTarget.handle.mock.calls[0]![1] as (
+      request: Request,
+    ) => Promise<Response>;
+
+    const ownUrl = workspaceMediaPreviewUrl({
+      projectId,
+      conversationId,
+      relativePath: "doc.pdf",
+    });
+    const rangeRes = await servePackaged(
+      new Request(ownUrl, {
+        headers: {
+          Range: "bytes=0-7",
+          Origin: "http://localhost:5173",
+        },
+      }),
+    );
+    expect(rangeRes.status).toBe(206);
+    expect(rangeRes.headers.get("Content-Type")).toBe("application/pdf");
+    expect(rangeRes.headers.get("Content-Range")).toBe(`bytes 0-7/${pdfBytes.length}`);
+    expect(rangeRes.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(await rangeRes.text()).toBe("%PDF-1.7");
+
+    // Foreign conversation blocked in detached conversationScope
+    const foreignUrl = workspaceMediaPreviewUrl({
+      projectId,
+      conversationId: otherConversationId,
+      relativePath: "doc.pdf",
+    });
+    expect((await servePackaged(new Request(foreignUrl))).status).toBe(404);
+
+    // Dev loopback CORS enabled explicitly
+    const registerDev = createAppProtocolRegistrar({
+      scheme: "inertia",
+      attachmentRegistry: () => null,
+      conversationAttachments: () => null,
+      runtimeSupervisor: () => ({ resolveProjectPath }) as unknown as RuntimeSupervisor,
+      allowDevLoopbackCors: true,
+    });
+    const devTarget = protocolTarget();
+    registerDev(devTarget.target);
+    const serveDev = devTarget.handle.mock.calls[0]![1] as (
+      request: Request,
+    ) => Promise<Response>;
+
+    const devRes = await serveDev(
+      new Request(ownUrl, { headers: { Origin: "http://localhost:5173" } }),
+    );
+    expect(devRes.status).toBe(200);
+    expect(devRes.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
+    expect(devRes.headers.get("Vary")).toBe("Origin");
+    await devRes.body!.cancel();
   });
 });

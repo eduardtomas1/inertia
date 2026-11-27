@@ -45,13 +45,15 @@ import { isEditorId } from "@shared/editor-ids";
 import { useEditorPreference } from "../hooks/useAvailableEditors";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
 import { createBoundedCache } from "../utils/boundedCache";
-import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
 import { encodedLocalFilePath, localFileLocationSuffix, localFileUrl, parseLocalFileUrl } from "@shared/local-file-url";
+import { MarkdownImageSchedulerProvider } from "./markdown/MarkdownImageScheduler";
 import {
-  MarkdownImageSchedulerProvider,
-  useMarkdownImageSchedule,
-} from "./markdown/MarkdownImageScheduler";
+  MarkdownMediaEmbed,
+  workspaceMediaIcon,
+  workspaceMediaPreviewTargetForPath,
+} from "./markdown/MarkdownMedia";
 import { TooltipButton } from "./TooltipButton";
 import { TooltipText } from "./TooltipText";
 import { FileChip } from "./response-timeline/FileChip";
@@ -73,7 +75,7 @@ const sanitizeSchema = {
   tagNames: [...RESPONSE_MARKDOWN_TAG_NAMES],
   protocols: {
     href: ["http", "https", "mailto", "file"],
-    src: ["http", "https"],
+    src: ["http", "https", "file"],
     cite: ["http", "https"],
   },
   attributes: {
@@ -111,6 +113,7 @@ const REHYPE_PLUGINS: NonNullable<
 type ResponseMarkdownProps = {
   content: string;
   projectRoot: string;
+  projectBaseRoot?: string;
   projectId: string;
   conversationId?: string;
   markdownBasePath?: string;
@@ -124,6 +127,7 @@ type ResponseMarkdownProps = {
     literalPath?: boolean,
     headingId?: string,
   ) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
 };
 
 type ProjectLink =
@@ -133,6 +137,7 @@ type ProjectLink =
       kind: "project";
       relativePath: string;
       action: "reveal";
+      owner?: "project";
       location?: WorkspaceFileLocation;
       literalPath?: boolean;
       headingId?: string;
@@ -239,7 +244,7 @@ function markFileChips() {
 function preserveCodeMeta() {
   return (tree: MarkdownAstNode) => {
     const visit = (node: MarkdownAstNode): void => {
-      if (node.type === "link" && typeof node.url === "string") {
+      if ((node.type === "link" || node.type === "image") && typeof node.url === "string") {
         const fallback = workspaceFileReferenceFallback(node.url);
         if (
           /^[a-z]:[\\/]/iu.test(node.url)
@@ -303,11 +308,34 @@ function aliasedLocalPath(candidate: string, root: string, literalPath: boolean)
     || /[. ]$/u.test(segment));
 }
 
+function relativeWithinRoot(candidate: string, root: string): string | null {
+  const insensitive = windowsStyleRoot(root);
+  const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
+  const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
+  if (comparableCandidate === comparableRoot) return ".";
+  return comparableCandidate.startsWith(`${comparableRoot}/`) ? candidate.slice(root.length + 1) : null;
+}
+
+function safeDecodeUriPath(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value.replace(/(?:%[0-9a-f]{2})+/giu, (sequence) => {
+      try {
+        return decodeURIComponent(sequence);
+      } catch {
+        return sequence;
+      }
+    });
+  }
+}
+
 export function resolveResponseLink(
   projectRoot: string,
   rawHref: string,
   syntax: "markdown" | "file" = "markdown",
   markdownBasePath = "",
+  projectBaseRoot = "",
 ): ProjectLink {
   let href = rawHref.trim();
   if (!href || href.includes("\0")) return { kind: "unsafe" };
@@ -374,12 +402,7 @@ export function resolveResponseLink(
   const encodedPathDelimiter = /%(?:23|3a|3f)/iu.test(
     encodedWindowsAbsolute ? rawPath.slice(4) : rawPath,
   );
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(rawPath);
-  } catch {
-    return { kind: "unsafe" };
-  }
+  const decoded = safeDecodeUriPath(rawPath);
   if (
     !decoded
     || /[\0\r\n]/u.test(decoded)
@@ -399,25 +422,32 @@ export function resolveResponseLink(
   const candidate = normalizedPath(
     isAbsolute ? resolvedDecoded : `${base}/${resolvedDecoded}`,
   );
-  const insensitive = windowsStyleRoot(root);
-  const comparableRoot = insensitive ? root.toLocaleLowerCase("en-US") : root;
-  const comparableCandidate = insensitive ? candidate.toLocaleLowerCase("en-US") : candidate;
-  if (comparableCandidate !== comparableRoot && !comparableCandidate.startsWith(`${comparableRoot}/`)) {
-    if (aliasedLocalPath(candidate, root, encodedPathDelimiter)) return { kind: "unsafe" };
-    const url = localFileUrl(candidate, encodedPathDelimiter);
-    return url ? { kind: "local", path: candidate, url } : { kind: "unsafe" };
+  const projectTarget = (relativePath: string, owner?: "project"): ProjectLink => (
+    relativePath
+      ? {
+          kind: "project",
+          relativePath,
+          action: "reveal",
+          ...(owner ? { owner } : {}),
+          ...(location ? { location } : {}),
+          ...(encodedPathDelimiter ? { literalPath: true } : {}),
+          ...(headingId ? { headingId } : {}),
+        }
+      : { kind: "unsafe" }
+  );
+  const insideRoot = relativeWithinRoot(candidate, root);
+  if (insideRoot !== null) return projectTarget(insideRoot);
+  if (isAbsolute && projectBaseRoot) {
+    const baseRoot = normalizedPath(projectBaseRoot).replace(/\/+$/u, "");
+    const sameRoot = baseRoot && (windowsStyleRoot(baseRoot)
+      ? baseRoot.toLocaleLowerCase("en-US") === root.toLocaleLowerCase("en-US")
+      : baseRoot === root);
+    const insideBase = baseRoot && !sameRoot ? relativeWithinRoot(candidate, baseRoot) : null;
+    if (insideBase !== null) return projectTarget(insideBase, "project");
   }
-  const relativePath = comparableCandidate === comparableRoot ? "." : candidate.slice(root.length + 1);
-  return relativePath
-    ? {
-        kind: "project",
-        relativePath,
-        action: "reveal",
-        ...(location ? { location } : {}),
-        ...(encodedPathDelimiter ? { literalPath: true } : {}),
-        ...(headingId ? { headingId } : {}),
-      }
-    : { kind: "unsafe" };
+  if (aliasedLocalPath(candidate, root, encodedPathDelimiter)) return { kind: "unsafe" };
+  const url = localFileUrl(candidate, encodedPathDelimiter);
+  return url ? { kind: "local", path: candidate, url } : { kind: "unsafe" };
 }
 
 export function responseHeadingIdFromFragment(fragment: string): string | null {
@@ -567,7 +597,7 @@ function CodeBlock({
     headingId?: string,
   ) => void;
 }): React.JSX.Element {
-  const { announceCopyFeedback, conversationId } = useMarkdownRenderContext();
+  const { announceCopyFeedback, conversationId, projectBaseRoot } = useMarkdownRenderContext();
   const child = Children.toArray(children)[0];
   const element = isValidElement<{
     className?: string;
@@ -587,7 +617,7 @@ function CodeBlock({
     language,
   );
   const fileTarget = meta.file
-    ? resolveResponseLink(projectRoot, meta.file, "file")
+    ? resolveResponseLink(projectRoot, meta.file, "file", "", projectBaseRoot)
     : null;
   const fileLanguagePath = fileTarget?.kind === "project"
     ? workspaceFileReferenceFallback(fileTarget.relativePath)
@@ -635,7 +665,7 @@ function CodeBlock({
       <header>
         {fileTarget?.kind === "local"
           ? <LocalFileLink path={fileTarget.path} url={fileTarget.url} className="response-code-file-link">{meta.file}</LocalFileLink>
-          : fileTarget?.kind === "project" && onOpenProjectFile
+          : fileTarget?.kind === "project" && fileTarget.owner !== "project" && onOpenProjectFile
           ? (
               <TooltipButton
                 className="response-code-file-link"
@@ -698,6 +728,7 @@ function CodeBlock({
 
 interface MarkdownRenderContextValue {
   projectRoot: string;
+  projectBaseRoot?: string;
   projectId: string;
   conversationId?: string;
   markdownBasePath: string;
@@ -711,11 +742,13 @@ interface MarkdownRenderContextValue {
     literalPath?: boolean,
     headingId?: string,
   ) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
 }
 
 const MarkdownRenderContext = createContext<MarkdownRenderContextValue | null>(
   null,
 );
+const InsideMarkdownLinkContext = createContext(false);
 
 function useMarkdownRenderContext(): MarkdownRenderContextValue {
   const context = useContext(MarkdownRenderContext);
@@ -741,7 +774,11 @@ function LocalFileLink({ path, url, children, ...props }: ComponentProps<"a"> & 
         void window.inertia.openExternal(url).catch(() => setError(true));
       }}>
       <FileCode2 className="response-project-file-icon" size={14} aria-hidden="true" />
-      <span>{children}</span>
+      <span>
+        <InsideMarkdownLinkContext.Provider value={true}>
+          {children}
+        </InsideMarkdownLinkContext.Provider>
+      </span>
     </a>
     {error && <span className="response-copy-error" role="alert">The local file could not be opened.</span>}
   </>;
@@ -764,7 +801,9 @@ function WebLink({ url, children, ...props }: ComponentProps<"a"> & {
         void window.inertia.openExternal(url).catch(() => setError(true));
       }}
     >
-      {children}
+      <InsideMarkdownLinkContext.Provider value={true}>
+        {children}
+      </InsideMarkdownLinkContext.Provider>
     </a>
     {error && <span className="response-copy-error" role="alert">The link could not be opened.</span>}
   </>;
@@ -780,10 +819,12 @@ function MarkdownLink({
 }: ComponentProps<"a"> & ExtraProps): React.JSX.Element {
   const {
     projectRoot,
+    projectBaseRoot,
     projectId,
     conversationId,
     markdownBasePath,
     onOpenProjectFile,
+    onPreviewMedia,
   } = useMarkdownRenderContext();
   const { preferredEditor, detectedEditors } = useEditorPreference();
   const target = resolveResponseLink(
@@ -791,6 +832,7 @@ function MarkdownLink({
     href,
     "markdown",
     markdownBasePath,
+    projectBaseRoot,
   );
   if (target.kind === "local") {
     return <LocalFileLink {...props} path={target.path} url={target.url}>{children}</LocalFileLink>;
@@ -799,6 +841,20 @@ function MarkdownLink({
     return <WebLink {...props} url={target.url}>{children}</WebLink>;
   }
   if (target.kind === "project") {
+    const effectiveConversationId = target.owner === "project" ? undefined : conversationId;
+    const effectiveProjectRoot = target.owner === "project" && projectBaseRoot
+      ? projectBaseRoot
+      : projectRoot;
+    const parsedReference = !target.literalPath && !target.location
+      ? workspaceFileReference(target.relativePath)
+      : null;
+    const editorRelativePath = parsedReference ? parsedReference.path : target.relativePath;
+    const editorLocation = target.location ?? parsedReference?.location;
+    const mediaTarget = workspaceMediaPreviewTargetForPath(
+      projectId,
+      effectiveConversationId,
+      editorRelativePath,
+    );
     const language = sourceLanguageForFile(
       workspaceFileReferenceFallback(target.relativePath)
         ?? target.relativePath,
@@ -806,46 +862,48 @@ function MarkdownLink({
     const projectLinkClass = [props.className, "response-project-file-link"]
       .filter(Boolean)
       .join(" ");
-    const FileIcon = language.id === "sql" ? Database : FileCode2;
+    const FileIcon = mediaTarget
+      ? workspaceMediaIcon(mediaTarget.kind)
+      : language.id === "sql" ? Database : FileCode2;
+    const openInConversationFiles = target.owner === "project" ? undefined : onOpenProjectFile;
     const openDefault = (): void => {
-      if (onOpenProjectFile) {
+      if (openInConversationFiles) {
         if (target.headingId) {
-          onOpenProjectFile(
+          openInConversationFiles(
             target.relativePath,
             target.location,
             target.literalPath,
             target.headingId,
           );
         } else if (target.literalPath) {
-          onOpenProjectFile(
+          openInConversationFiles(
             target.relativePath,
             target.location ?? undefined,
             true,
           );
         } else if (target.location) {
-          onOpenProjectFile(target.relativePath, target.location);
+          openInConversationFiles(target.relativePath, target.location);
         } else {
-          onOpenProjectFile(target.relativePath);
+          openInConversationFiles(target.relativePath);
         }
         return;
       }
       void window.inertia.openProjectPath({
         projectId,
-        ...(conversationId ? { conversationId } : {}),
+        ...(effectiveConversationId ? { conversationId: effectiveConversationId } : {}),
         relativePath: target.relativePath,
         action: target.action,
       }).catch(() => undefined);
     };
-    const parsedReference = !target.literalPath && !target.location
-      ? workspaceFileReference(target.relativePath)
-      : null;
-    const editorRelativePath = parsedReference ? parsedReference.path : target.relativePath;
-    const editorLocation = target.location ?? parsedReference?.location;
     const openLink = (event?: React.MouseEvent<HTMLAnchorElement>): void => {
+      if (mediaTarget && onPreviewMedia) {
+        onPreviewMedia(mediaTarget);
+        return;
+      }
       if (isEditorId(preferredEditor)) {
         void window.inertia.openProjectPath({
           projectId,
-          ...(conversationId ? { conversationId } : {}),
+          ...(effectiveConversationId ? { conversationId: effectiveConversationId } : {}),
           relativePath: editorRelativePath,
           action: "open-in-editor",
           editor: preferredEditor,
@@ -860,7 +918,7 @@ function MarkdownLink({
         showEditorPickMenu(
           {
             projectId,
-            conversationId,
+            conversationId: effectiveConversationId,
             relativePath: editorRelativePath,
             location: editorLocation,
             open: openDefault,
@@ -874,11 +932,11 @@ function MarkdownLink({
     };
     const linkMenu = projectPathContextMenu<HTMLAnchorElement>("project-link", {
       projectId,
-      conversationId,
-      projectRoot,
+      conversationId: effectiveConversationId,
+      projectRoot: effectiveProjectRoot,
       relativePath: editorRelativePath,
       location: editorLocation,
-      open: openDefault,
+      open: mediaTarget && onPreviewMedia ? () => onPreviewMedia(mediaTarget) : openDefault,
     });
     return (
       <a
@@ -899,7 +957,11 @@ function MarkdownLink({
           size={14}
           aria-hidden="true"
         />
-        <span>{children}</span>
+        <span>
+          <InsideMarkdownLinkContext.Provider value={true}>
+            {children}
+          </InsideMarkdownLinkContext.Provider>
+        </span>
       </a>
     );
   }
@@ -915,7 +977,7 @@ function MarkdownLink({
       heading?.scrollIntoView({ block: "start", inline: "nearest" });
       if (heading) heading.tabIndex = -1;
       heading?.focus({ preventScroll: true });
-    }}>{children}</a>;
+    }}><InsideMarkdownLinkContext.Provider value={true}>{children}</InsideMarkdownLinkContext.Provider></a>;
   }
   return <>
     <TooltipText className="response-unsafe-link" tooltip={BLOCKED_LINK_REASON}>{children}</TooltipText>
@@ -931,87 +993,36 @@ function MarkdownImage({
 }: ComponentProps<"img">): React.JSX.Element {
   const {
     projectRoot,
+    projectBaseRoot,
     projectId,
     conversationId,
     markdownBasePath,
+    onOpenProjectFile,
+    onPreviewMedia,
   } = useMarkdownRenderContext();
-  const unavailableAlt = alt.trim();
+  const insideLink = useContext(InsideMarkdownLinkContext);
   const target = resolveResponseLink(
     projectRoot,
     src,
     "markdown",
     markdownBasePath,
+    projectBaseRoot,
   );
-  const trustedSource = target.kind === "project"
-      ? workspaceImagePreviewUrl({
-        projectId,
-        ...(conversationId ? { conversationId } : {}),
-        relativePath: target.relativePath,
-      }, applicationRendererScheme(globalThis.location?.protocol))
-    : null;
-  const schedule = useMarkdownImageSchedule(trustedSource);
-  const copyAttributes = {
-    "data-markdown-image-alt": unavailableAlt,
-    "data-markdown-image-source": target.kind === "external"
-      ? target.url
-      : target.kind === "project"
-        ? target.relativePath
-        : target.kind === "local" ? target.path : "",
-  };
-  const placeholder = (reason: string, overflow = false): React.JSX.Element => {
-    const message = unavailableAlt
-      ? `${unavailableAlt} (${reason})`
-      : reason.charAt(0).toUpperCase() + reason.slice(1);
-    return unavailableAlt ? (
-      <span
-        className="response-markdown-image-unavailable"
-        role="img"
-        aria-label={unavailableAlt}
-        data-markdown-image-overflow={overflow ? "true" : undefined}
-        title={title}
-        {...copyAttributes}
-      >
-        {message}
-      </span>
-    ) : (
-      <span
-        className="response-markdown-image-unavailable"
-        aria-hidden="true"
-        data-markdown-image-overflow={overflow ? "true" : undefined}
-        title={title}
-        {...copyAttributes}
-      >
-        {message}
-      </span>
-    );
-  };
-  if (!trustedSource) {
-    return placeholder("image unavailable");
-  }
+  const openInConversationFiles = target.kind === "project" && target.owner === "project"
+    ? undefined
+    : onOpenProjectFile;
   return (
-    <span
-      ref={schedule.shellRef}
-      className="response-markdown-image-shell"
-      data-markdown-image-state={schedule.state}
-      {...copyAttributes}
-    >
-      {schedule.state === "loading" || schedule.state === "loaded" ? (
-        <img
-          src={trustedSource}
-          alt={alt}
-          title={title}
-          className={className}
-          loading="lazy"
-          decoding="async"
-          onLoad={() => schedule.complete(false)}
-          onError={() => schedule.complete(true)}
-        />
-      ) : schedule.state === "overflow"
-        ? placeholder("image not loaded: document image limit reached", true)
-        : schedule.state === "error"
-          ? placeholder("image unavailable")
-          : placeholder("image waiting to load")}
-    </span>
+    <MarkdownMediaEmbed
+      target={target}
+      alt={alt}
+      title={title}
+      className={className}
+      projectId={projectId}
+      conversationId={conversationId}
+      interactive={!insideLink}
+      onOpenProjectFile={openInConversationFiles}
+      onPreviewMedia={onPreviewMedia}
+    />
   );
 }
 
@@ -1041,11 +1052,13 @@ function MarkdownCode({
 }: ComponentProps<"code"> & ExtraProps): React.JSX.Element {
   const {
     projectRoot,
+    projectBaseRoot,
     projectId,
     conversationId,
     announceCopyFeedback,
     fileChips,
     onOpenProjectFile,
+    onPreviewMedia,
   } = useMarkdownRenderContext();
   const { "data-response-file-chip": _marker, ...codeProps } = props as typeof props & {
     "data-response-file-chip"?: unknown;
@@ -1055,24 +1068,37 @@ function MarkdownCode({
     && typeof children === "string"
     ? fileChipReference(children)
     : null;
-  const target = reference && projectRoot && onOpenProjectFile
-    ? resolveResponseLink(projectRoot, reference.path, "file")
+  const target = reference && projectRoot && (onOpenProjectFile || onPreviewMedia)
+    ? resolveResponseLink(projectRoot, reference.path, "file", "", projectBaseRoot)
     : null;
   const relativePath = target?.kind === "project" && target.relativePath !== "."
     ? target.relativePath
     : null;
-  if (!reference || relativePath === null || !onOpenProjectFile) {
+  const effectiveConversationId = target?.kind === "project" && target.owner === "project"
+    ? undefined
+    : conversationId;
+  const effectiveProjectRoot = target?.kind === "project" && target.owner === "project" && projectBaseRoot
+    ? projectBaseRoot
+    : projectRoot;
+  const openInConversationFiles = target?.kind === "project" && target.owner === "project"
+    ? undefined
+    : onOpenProjectFile;
+  const mediaTarget = relativePath && onPreviewMedia
+    ? workspaceMediaPreviewTargetForPath(projectId, effectiveConversationId, relativePath)
+    : null;
+  if (!reference || relativePath === null || (!openInConversationFiles && !mediaTarget)) {
     return <code {...codeProps}>{children}</code>;
   }
   return (
     <FileChip
       reference={reference}
       relativePath={relativePath}
-      projectRoot={projectRoot}
+      projectRoot={effectiveProjectRoot}
       projectId={projectId}
-      conversationId={conversationId}
+      conversationId={effectiveConversationId}
       announceCopyFeedback={announceCopyFeedback}
-      onOpenProjectFile={onOpenProjectFile}
+      onOpenProjectFile={openInConversationFiles}
+      onPreviewMedia={mediaTarget && onPreviewMedia ? () => onPreviewMedia(mediaTarget) : undefined}
     />
   );
 }
@@ -1103,7 +1129,7 @@ const settledMarkdownTrees = createBoundedCache<ReactNode>(
 );
 
 function responseUrlTransform(url: string, key: string): string {
-  return key === "href" && parseLocalFileUrl(url) ? url : defaultUrlTransform(url);
+  return (key === "href" || key === "src") && parseLocalFileUrl(url) ? url : defaultUrlTransform(url);
 }
 
 function renderMarkdownTree(content: string): ReactNode {
@@ -1134,6 +1160,7 @@ export function stabilizeStreamingMarkdown(content: string): string {
 function ResponseMarkdownComponent({
   content,
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   markdownBasePath = "",
@@ -1142,6 +1169,7 @@ function ResponseMarkdownComponent({
   announceCopyFeedback = true,
   fileChips = true,
   onOpenProjectFile,
+  onPreviewMedia,
 }: ResponseMarkdownProps): React.JSX.Element {
   const renderedContent = streaming ? stabilizeStreamingMarkdown(content) : content;
   const markdownTree = useMemo(
@@ -1150,12 +1178,14 @@ function ResponseMarkdownComponent({
   );
   const imageSchedulerIdentity = [
     projectRoot,
+    projectBaseRoot ?? "",
     projectId,
     conversationId ?? "",
     markdownBasePath,
   ].join("\0");
   const renderContext = useMemo<MarkdownRenderContextValue>(() => ({
     projectRoot,
+    projectBaseRoot,
     projectId,
     conversationId,
     markdownBasePath,
@@ -1164,6 +1194,7 @@ function ResponseMarkdownComponent({
     announceCopyFeedback,
     fileChips,
     onOpenProjectFile,
+    onPreviewMedia,
   }), [
     announceCopyFeedback,
     conversationId,
@@ -1171,6 +1202,8 @@ function ResponseMarkdownComponent({
     fileChips,
     markdownBasePath,
     onOpenProjectFile,
+    onPreviewMedia,
+    projectBaseRoot,
     projectId,
     projectRoot,
     streaming,

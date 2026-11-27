@@ -71,11 +71,11 @@ export function CursorSdkModels({ onSelect, query }: {
       <button type="button" className="text-button" disabled={!online || loading} onClick={() => void load()}>
         {loading ? "Loading Cursor SDK models…" : "Load Cursor SDK models"}
       </button>
-      {message && <p role="status">{message}</p>}
+      {message && <p role="status" className="cursor-sdk-message">{message}</p>}
       {matching.length > 0 && <ul aria-label="Discovered Cursor SDK models">
         {matching.map((route) => (
           <li key={route.key}>
-            <button type="button" className="secondary-button" disabled={!online || !route.selectable} onClick={() => onSelect(route)}>
+            <button type="button" className="cursor-sdk-model" disabled={!online || !route.selectable} onClick={() => onSelect(route)}>
               {route.displayName} · Cursor SDK
             </button>
           </li>

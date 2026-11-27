@@ -19,7 +19,7 @@ export function CursorSdkAccount({ transport }: { transport: CursorSdkTransport 
   return (
     <div className="cursor-sdk-account">
       <p>Use the official Cursor SDK for a model you explicitly choose in the model chooser.</p>
-      <div role="status" aria-live="polite">
+      <div role="status" aria-live="polite" className="cursor-sdk-status">
         {account.checking ? "Checking Cursor SDK…" : account.evidence
           ? account.evidence.available ? "Cursor SDK is available." : "Cursor SDK is unavailable in this installation."
           : account.login ? messages[account.login.status] : "Check availability before signing in."}

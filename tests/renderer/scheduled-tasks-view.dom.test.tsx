@@ -228,7 +228,7 @@ describe("ScheduledTasksView", () => {
     await user.selectOptions(screen.getByLabelText("Project"), secondProjectId);
     await user.type(screen.getByLabelText("Title"), "Weekday standup prep");
     await user.type(screen.getByLabelText("Prompt"), "Summarize yesterday commits.");
-    await user.click(screen.getByRole("radio", { name: "Daily / Weekdays" }));
+    await user.click(screen.getByRole("radio", { name: "Daily" }));
     fireEvent.change(screen.getByLabelText("Time of day"), { target: { value: "08:30" } });
     await user.click(screen.getByRole("button", { name: "Weekdays" }));
     await user.click(screen.getByRole("button", { name: "Friday" }));
@@ -248,7 +248,7 @@ describe("ScheduledTasksView", () => {
     await user.click(screen.getByRole("button", { name: "New schedule" }));
     await user.type(screen.getByLabelText("Title"), "Release cutover");
     await user.type(screen.getByLabelText("Prompt"), "Run release verification checklist.");
-    await user.click(screen.getByRole("radio", { name: "One-shot" }));
+    await user.click(screen.getByRole("radio", { name: "Once" }));
     fireEvent.change(screen.getByLabelText("Run at (local time)"), {
       target: { value: "2026-12-01T14:15" },
     });

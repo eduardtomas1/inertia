@@ -1,33 +1,128 @@
+.cursor-sdk-entry {
+  display: grid;
+  min-width: 0;
+  justify-items: start;
+  gap: 4px;
+  padding: 4px 14px 8px;
+}
+
+.cursor-sdk-toggle {
+  display: inline-flex;
+  min-height: var(--control-height-small);
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font-size: var(--text-sm);
+}
+
+.cursor-sdk-toggle:hover,
+.cursor-sdk-toggle[aria-expanded="true"] {
+  color: var(--text);
+}
+
+.cursor-sdk-toggle:hover {
+  background: var(--fill);
+}
+
+.cursor-sdk-toggle > svg {
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.cursor-sdk-toggle[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
 .cursor-sdk-account {
   display: grid;
-  gap: 12px;
-  padding-block: 12px;
-  max-width: 56ch;
+  max-width: 60ch;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0 4px 20px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
 }
 
 .cursor-sdk-account p {
   margin: 0;
-  color: var(--text-muted);
+}
+
+.cursor-sdk-status {
+  color: var(--text);
+}
+
+.cursor-sdk-account [role="alert"] {
+  color: var(--danger);
 }
 
 .cursor-sdk-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  padding-top: 4px;
+}
+
+.cursor-sdk-close {
+  min-height: var(--control-height-small);
+  margin-left: 12px;
+  padding: 0 8px;
 }
 
 .cursor-sdk-models {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line-soft);
+  display: grid;
   max-height: 180px;
+  justify-items: start;
+  gap: 2px;
+  padding: 4px 6px;
   overflow: auto;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.cursor-sdk-models > .text-button {
+  min-height: var(--control-height-small);
+  padding: 0 8px;
+  font-size: var(--text-xs);
+}
+
+.cursor-sdk-message {
+  margin: 0;
+  padding: 2px 8px 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-chrome);
 }
 
 .cursor-sdk-models ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  list-style: none;
-  margin: 8px 0;
+  display: grid;
+  width: 100%;
+  margin: 0;
   padding: 0;
+  list-style: none;
+}
+
+.cursor-sdk-model {
+  display: flex;
+  width: 100%;
+  min-height: var(--model-row-height);
+  align-items: center;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: transparent;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.cursor-sdk-model:hover:not(:disabled) {
+  background: var(--fill);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor-sdk-toggle > svg {
+    transition: none;
+  }
 }

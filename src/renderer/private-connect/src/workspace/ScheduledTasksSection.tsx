@@ -138,6 +138,7 @@ export function ScheduledTasksSection({
                 aria-label={itemLabel}
                 data-enabled={task.enabled ? "true" : "false"}
               >
+                <p className="queue-item-content">{task.title}</p>
                 <div className="queue-item-header">
                   <div className="queue-chips">
                     <span className="queue-chip queue-state">{statusText}</span>
@@ -222,18 +223,15 @@ export function ScheduledTasksSection({
                     </div>
                   )}
                 </div>
-                <p className="queue-item-content">{task.title}</p>
-                <small className="muted">
-                  {task.enabled && task.nextRunAt ? (
-                    <>
-                      Next run: <time dateTime={task.nextRunAt}>{formatTimestamp(task.nextRunAt)}</time>
-                    </>
-                  ) : !task.enabled ? (
-                    "Paused"
-                  ) : (
-                    "No upcoming run"
-                  )}
-                </small>
+                {task.enabled && (
+                  <small className="muted">
+                    {task.nextRunAt ? (
+                      <>
+                        Next run: <time dateTime={task.nextRunAt}>{formatTimestamp(task.nextRunAt)}</time>
+                      </>
+                    ) : "No upcoming run"}
+                  </small>
+                )}
                 {task.lastError && (
                   <p className="queue-item-error" role="alert">{task.lastError}</p>
                 )}

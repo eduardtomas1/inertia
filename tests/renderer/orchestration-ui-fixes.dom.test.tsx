@@ -686,7 +686,7 @@ describe("orchestration UI fixes (Bugs #1-#10)", () => {
       "utf8",
     );
     expect(delegationCss).toMatch(/\.delegation-task:focus-visible\s*\{[^}]*var\(--focus-ring\)/u);
-    expect(delegationCss).toMatch(/\.delegation-chip\s*\{[^}]*border:\s*1px solid transparent/u);
+    expect(delegationCss).toMatch(/@media\s*\(forced-colors:\s*active\)\s*\{\s*\.delegation-chip::before\s*\{[^}]*CanvasText/u);
     expect(delegationCss).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[^}]*\.delegated-completion-toggle svg[^}]*transition:\s*none/su);
   });
 });

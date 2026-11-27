@@ -488,6 +488,7 @@ export function RuntimeComposerQueuedActions({
         const sendWaitsForTurn = running && documents && sendMode === "send-now";
         const editReason = editBlocked && editable ? editBlocked : null;
         const modelLabel = formatQueueModelLabel(entry.modelSelection, providers);
+        const repeatsModel = index > 0 && modelLabel === formatQueueModelLabel(visibleEntries[index - 1]!.modelSelection, providers);
         const chipLabel = attributionChipLabel(entry);
         const steerWaiting = Boolean(entry.steerWhenReadyRunId) && entry.state !== "blocked";
         const isEditingRow = edit?.editingId === entry.id;
@@ -510,7 +511,7 @@ export function RuntimeComposerQueuedActions({
             <CornerDownRight size={14} aria-hidden="true" />
             {chipLabel && <small className="composer-queue-chip">{chipLabel}</small>}
             <span className="composer-queue-copy" title={entry.content}>{entry.content}</span>
-            {modelLabel && (
+            {modelLabel && !repeatsModel && (
               <small className="composer-queue-chip composer-queue-model" title={modelLabel}>
                 {modelLabel}
               </small>

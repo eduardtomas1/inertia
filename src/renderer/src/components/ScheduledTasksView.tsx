@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, CalendarClock, ChevronDown, ChevronRight, Clock,
-  MessageSquare, Pause, Pencil, Play, Plus, RefreshCw, Trash2, X,
+  AlertCircle, CalendarClock, ChevronRight, MessageSquare, Pause, Pencil, Play, Plus, RefreshCw, Trash2, X,
 } from "lucide-react";
 import type { AppSnapshot, Conversation, Project, ServerEvent } from "@shared/contracts";
 import {
@@ -14,7 +13,7 @@ import {
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { projectNameFromPath } from "../lib/format";
 import { resultEvent, type CommandWithoutId, type ResultEvent } from "../lib/runtimeCommands";
-import { LoadingMark } from "./ui";
+import { IconButton, LoadingMark } from "./ui";
 import "./ScheduledTasksView.css";
 
 export interface ScheduledTasksViewProps {
@@ -61,7 +60,7 @@ const ACCESS_LABELS: Record<ScheduledTask["accessMode"], string> = {
 };
 const INTERACTION_LABELS: Record<ScheduledTask["interactionMode"], string> = { build: "Build", plan: "Plan" };
 const KIND_OPTIONS = [
-  ["interval", "Interval"], ["fixed_time", "Daily / Weekdays"], ["once", "One-shot"],
+  ["interval", "Interval"], ["fixed_time", "Daily"], ["once", "Once"],
 ] as const;
 
 function extractResult<Kind extends ResultEvent["result"]["kind"]>(
@@ -396,80 +395,71 @@ export function ScheduledTasksView({
           <div className="scheduled-tasks-heading">
             <h1 id={headingId}>Scheduled tasks</h1>
             <p className="scheduled-tasks-subtitle">
-              {scopedProjectName ? `${scopedProjectName} · ` : ""}
-              {summaries.length === 0 ? "No schedules configured" : `${activeCount} active of ${summaries.length}`}
+              {scopedProjectName && <span>{scopedProjectName}</span>}
+              <span>{summaries.length === 0 ? "No schedules" : `${activeCount} active of ${summaries.length}`}</span>
             </p>
           </div>
-          <div className="scheduled-tasks-header-actions">
-            <button type="button" className="scheduled-btn scheduled-btn-secondary" disabled={offline || loading} onClick={() => { void loadTasks(); }}>
-              <RefreshCw size={14} aria-hidden="true" /><span>Refresh</span>
-            </button>
-            <button type="button" className="scheduled-btn scheduled-btn-primary" disabled={offline || projects.length === 0} onClick={openCreateForm}>
-              <Plus size={14} aria-hidden="true" /><span>New schedule</span>
-            </button>
-          </div>
+          <IconButton label="Refresh" disabled={offline || loading} onClick={() => { void loadTasks(); }}>
+            <RefreshCw size={15} aria-hidden="true" />
+          </IconButton>
+          <button type="button" className="secondary-button" disabled={offline || projects.length === 0} onClick={openCreateForm}>
+            <Plus size={15} aria-hidden="true" />New schedule
+          </button>
         </header>
 
-        <p className="scheduled-tasks-local-note">
-          Schedules run locally while Inertia is open. Missed recurring runs are skipped on startup.
-        </p>
-
-        <div className="scheduled-sr-only" role="status" aria-live="polite">{announcement}</div>
+        <div className="visually-hidden" role="status" aria-live="polite">{announcement}</div>
 
         {offline && (
-          <div className="scheduled-banner scheduled-banner-muted" role="status">
-            <AlertCircle size={15} aria-hidden="true" />
-            <span>Offline — reconnect to create, edit, run, or remove scheduled tasks.</span>
-          </div>
+          <p className="scheduled-banner" role="status">
+            <AlertCircle size={14} aria-hidden="true" />
+            Offline — reconnect to create, edit, run, or remove scheduled tasks.
+          </p>
         )}
 
         {loadError && (
-          <div className="scheduled-banner scheduled-banner-error" role="alert">
-            <AlertCircle size={15} aria-hidden="true" />
+          <p className="scheduled-banner is-error" role="alert">
+            <AlertCircle size={14} aria-hidden="true" />
             <span>{loadError}</span>
-            <button type="button" className="scheduled-btn scheduled-btn-secondary scheduled-btn-sm" disabled={offline} onClick={() => { void loadTasks(); }}>
-              Retry
-            </button>
-          </div>
+            <button type="button" className="text-button" disabled={offline} onClick={() => { void loadTasks(); }}>Retry</button>
+          </p>
         )}
 
         {formOpen && (
           <section className="scheduled-form-panel" aria-labelledby={formHeadingId}>
             <div className="scheduled-form-header">
               <h2 id={formHeadingId}>{isEditing ? "Edit schedule" : "New schedule"}</h2>
-              <button type="button" className="scheduled-icon-close" aria-label="Close schedule form" onClick={closeForm}>
-                <X size={16} aria-hidden="true" />
-              </button>
+              <IconButton label="Close schedule form" onClick={closeForm}>
+                <X size={15} aria-hidden="true" />
+              </IconButton>
             </div>
 
             <form className="scheduled-form" noValidate onSubmit={(e) => { void handleSubmit(e); }}>
               {formError && (
-                <div className="scheduled-banner scheduled-banner-error" role="alert">
-                  <AlertCircle size={15} aria-hidden="true" /><span>{formError}</span>
-                </div>
+                <p className="scheduled-banner is-error" role="alert">
+                  <AlertCircle size={14} aria-hidden="true" /><span>{formError}</span>
+                </p>
               )}
 
               <div className="scheduled-field-grid">
+                <div className="scheduled-field">
+                  <label htmlFor="scheduled-task-title">Title</label>
+                  <input ref={titleInputRef} id="scheduled-task-title" type="text" className="scheduled-control" maxLength={MAX_SCHEDULED_TASK_TITLE_CHARS} required disabled={formDisabled} placeholder="Daily dependency check" value={draft.title} onChange={(e) => { patchDraft({ title: e.target.value }); }} />
+                </div>
                 <div className="scheduled-field">
                   <label htmlFor="scheduled-task-project">Project</label>
                   <select id="scheduled-task-project" className="scheduled-control" value={draft.projectId} disabled={isEditing || projects.length <= 1 || formDisabled} onChange={(e) => { patchDraft({ projectId: e.target.value, boundConversationId: "" }); }}>
                     {projects.map((p) => <option key={p.id} value={p.id}>{p.name.trim() || projectNameFromPath(p.path)}</option>)}
                   </select>
                 </div>
-                <div className="scheduled-field">
-                  <label htmlFor="scheduled-task-title">Title</label>
-                  <input ref={titleInputRef} id="scheduled-task-title" type="text" className="scheduled-control" maxLength={MAX_SCHEDULED_TASK_TITLE_CHARS} required disabled={formDisabled} placeholder="Daily dependency check" value={draft.title} onChange={(e) => { patchDraft({ title: e.target.value }); }} />
-                </div>
               </div>
 
               <div className="scheduled-field">
                 <label htmlFor="scheduled-task-prompt">Prompt</label>
-                <textarea id="scheduled-task-prompt" className="scheduled-control scheduled-textarea" rows={3} required disabled={formDisabled} aria-describedby="scheduled-task-prompt-help" placeholder="Review open pull requests and summarize any failing checks." value={draft.prompt} onChange={(e) => { patchDraft({ prompt: e.target.value }); }} />
-                <p id="scheduled-task-prompt-help" className="scheduled-field-help">Instructions sent to the agent each time this schedule fires.</p>
+                <textarea id="scheduled-task-prompt" className="scheduled-control" rows={3} required disabled={formDisabled} placeholder="Review open pull requests and summarize any failing checks." value={draft.prompt} onChange={(e) => { patchDraft({ prompt: e.target.value }); }} />
               </div>
 
               <div className="scheduled-field">
-                <span id={kindGroupId} className="scheduled-label">Schedule type</span>
+                <span id={kindGroupId} className="scheduled-label">Repeat</span>
                 <div className="scheduled-segmented" role="radiogroup" aria-labelledby={kindGroupId}>
                   {KIND_OPTIONS.map(([value, label]) => (
                     <label key={value} className={`scheduled-segment${draft.scheduleKind === value ? " is-active" : ""}`}>
@@ -481,7 +471,7 @@ export function ScheduledTasksView({
               </div>
 
               {draft.scheduleKind === "interval" && (
-                <div className="scheduled-inline-fields">
+                <div className="scheduled-field-grid">
                   <div className="scheduled-field">
                     <label htmlFor="scheduled-task-interval-value">Every</label>
                     <input id="scheduled-task-interval-value" type="number" min={1} step={1} className="scheduled-control" disabled={formDisabled} value={draft.intervalValue} onChange={(e) => { patchDraft({ intervalValue: e.target.value }); }} />
@@ -498,39 +488,34 @@ export function ScheduledTasksView({
               )}
 
               {draft.scheduleKind === "fixed_time" && (
-                <div className="scheduled-fixed-group">
-                  <div className="scheduled-field scheduled-time-field">
+                <div className="scheduled-field-grid">
+                  <div className="scheduled-field">
                     <label htmlFor="scheduled-task-time">Time of day</label>
                     <input id="scheduled-task-time" type="time" className="scheduled-control" required disabled={formDisabled} value={draft.timeOfDay} onChange={(e) => { patchDraft({ timeOfDay: e.target.value }); }} />
                   </div>
                   <div className="scheduled-field">
                     <div className="scheduled-weekdays-header">
                       <span className="scheduled-label">Days</span>
-                      <div className="scheduled-presets">
-                        <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...ALL_WEEKDAYS] }); }}>Every day</button>
-                        <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...WORK_WEEKDAYS] }); }}>Weekdays</button>
-                      </div>
+                      <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...ALL_WEEKDAYS] }); }}>Every day</button>
+                      <button type="button" className="scheduled-preset-btn" disabled={formDisabled} onClick={() => { patchDraft({ weekdays: [...WORK_WEEKDAYS] }); }}>Weekdays</button>
                     </div>
                     <div className="scheduled-weekday-row" role="group" aria-label="Weekdays">
-                      {WEEKDAYS.map(([value, short, label]) => {
-                        const pressed = draft.weekdays.includes(value);
-                        return (
-                          <button key={value} type="button" aria-pressed={pressed} aria-label={label} className={`scheduled-day-btn${pressed ? " is-selected" : ""}`} disabled={formDisabled} onClick={() => { toggleWeekday(value); }}>{short}</button>
-                        );
-                      })}
+                      {WEEKDAYS.map(([value, short, label]) => (
+                        <button key={value} type="button" aria-pressed={draft.weekdays.includes(value)} aria-label={label} className="scheduled-day-btn" disabled={formDisabled} onClick={() => { toggleWeekday(value); }}>{short}</button>
+                      ))}
                     </div>
                   </div>
                 </div>
               )}
 
               {draft.scheduleKind === "once" && (
-                <div className="scheduled-field">
+                <div className="scheduled-field scheduled-once-field">
                   <label htmlFor="scheduled-task-once">Run at (local time)</label>
                   <input id="scheduled-task-once" type="datetime-local" className="scheduled-control" required disabled={formDisabled} value={draft.onceLocal} onChange={(e) => { patchDraft({ onceLocal: e.target.value }); }} />
                 </div>
               )}
 
-              <div className="scheduled-field-grid">
+              <div className="scheduled-field-grid scheduled-run-grid">
                 <div className="scheduled-field">
                   <label htmlFor="scheduled-task-thread-target">Thread target</label>
                   <select id="scheduled-task-thread-target" className="scheduled-control" disabled={formDisabled} value={draft.threadTarget} onChange={(e) => {
@@ -542,26 +527,6 @@ export function ScheduledTasksView({
                     <option value="specific">Specific chat in project</option>
                   </select>
                 </div>
-                {draft.threadTarget === "specific" && (
-                  <div className="scheduled-field">
-                    <label htmlFor="scheduled-task-conversation">Chat</label>
-                    <select id="scheduled-task-conversation" className="scheduled-control" disabled={formDisabled || projectConversations.length === 0} value={draft.boundConversationId} onChange={(e) => { patchDraft({ boundConversationId: e.target.value }); }}>
-                      {projectConversations.length === 0
-                        ? <option value="">No active chats in this project</option>
-                        : projectConversations.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
-
-              {draft.threadTarget === "specific" && (
-                <label className="scheduled-checkbox-row" htmlFor="scheduled-task-fresh-session">
-                  <input id="scheduled-task-fresh-session" type="checkbox" disabled={formDisabled} checked={draft.specificFreshSession} onChange={(e) => { patchDraft({ specificFreshSession: e.target.checked }); }} />
-                  <span>Fresh session each run</span>
-                </label>
-              )}
-
-              <div className="scheduled-field-grid">
                 <div className="scheduled-field">
                   <label htmlFor="scheduled-task-access-mode">Access mode</label>
                   <select id="scheduled-task-access-mode" className="scheduled-control" disabled={formDisabled} value={draft.accessMode} onChange={(e) => { patchDraft({ accessMode: e.target.value as ScheduledTask["accessMode"] }); }}>
@@ -579,9 +544,26 @@ export function ScheduledTasksView({
                 </div>
               </div>
 
+              {draft.threadTarget === "specific" && (
+                <div className="scheduled-field-grid">
+                  <div className="scheduled-field">
+                    <label htmlFor="scheduled-task-conversation">Chat</label>
+                    <select id="scheduled-task-conversation" className="scheduled-control" disabled={formDisabled || projectConversations.length === 0} value={draft.boundConversationId} onChange={(e) => { patchDraft({ boundConversationId: e.target.value }); }}>
+                      {projectConversations.length === 0
+                        ? <option value="">No active chats in this project</option>
+                        : projectConversations.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+                    </select>
+                  </div>
+                  <label className="scheduled-checkbox-row" htmlFor="scheduled-task-fresh-session">
+                    <input id="scheduled-task-fresh-session" type="checkbox" disabled={formDisabled} checked={draft.specificFreshSession} onChange={(e) => { patchDraft({ specificFreshSession: e.target.checked }); }} />
+                    Fresh session each run
+                  </label>
+                </div>
+              )}
+
               <div className="scheduled-form-footer">
-                <button type="button" className="scheduled-btn scheduled-btn-secondary" disabled={submitting} onClick={closeForm}>Cancel</button>
-                <button type="submit" className="scheduled-btn scheduled-btn-primary" disabled={formDisabled}>
+                <button type="button" className="text-button" disabled={submitting} onClick={closeForm}>Cancel</button>
+                <button type="submit" className="primary-button" disabled={formDisabled}>
                   {submitting ? "Saving…" : isEditing ? "Save changes" : "Create schedule"}
                 </button>
               </div>
@@ -590,18 +572,15 @@ export function ScheduledTasksView({
         )}
 
         {loading && summaries.length === 0 ? (
-          <div className="scheduled-state-card" role="status">
-            <LoadingMark aria-hidden="true" size={16} /><span>Loading scheduled tasks…</span>
-          </div>
+          <p className="scheduled-state" role="status">
+            <LoadingMark aria-hidden="true" size={14} />Loading scheduled tasks…
+          </p>
         ) : summaries.length === 0 && !loadError ? (
           formOpen ? null : (
-            <div className="scheduled-state-card scheduled-empty-card">
-              <CalendarClock size={22} aria-hidden="true" className="scheduled-empty-icon" />
+            <div className="scheduled-state scheduled-empty">
+              <CalendarClock size={20} strokeWidth={1.5} aria-hidden="true" />
               <h2>No scheduled tasks yet</h2>
-              <p>Create a recurring interval, daily weekday schedule, or one-shot prompt to automate work in your projects.</p>
-              <button type="button" className="scheduled-btn scheduled-btn-primary" disabled={offline || projects.length === 0} onClick={openCreateForm}>
-                <Plus size={14} aria-hidden="true" /><span>Create schedule</span>
-              </button>
+              <p>Run a prompt on an interval, at a set time each day, or once.</p>
             </div>
           )
         ) : (
@@ -609,124 +588,107 @@ export function ScheduledTasksView({
             {summaries.map(({ task, recentRuns }) => {
               const badge = statusBadge(task);
               const busy = busyTaskIds.has(task.id);
+              const locked = offline || busy;
               const runsOpen = expandedRunIds.has(task.id);
               const runsPanelId = `scheduled-runs-${task.id}`;
               const targetConvId = task.lastConversationId ?? task.boundConversationId;
               const targetConv = targetConvId ? conversationsById.get(targetConvId) ?? null : null;
 
               return (
-                <li key={task.id} className="scheduled-task-item">
-                  <article className="scheduled-task-card" aria-label={task.title}>
+                <li key={task.id}>
+                  <article className="scheduled-task-card" data-tone={badge.tone} aria-label={task.title}>
                     <div className="scheduled-task-top">
-                      <div className="scheduled-task-title-row">
-                        <h3 className="scheduled-task-title">{task.title}</h3>
-                        <span className="scheduled-badge scheduled-badge-project">{projectLabel(task.projectId)}</span>
-                        <span className={`scheduled-badge scheduled-badge-${badge.tone}`}>{badge.label}</span>
-                        {task.consecutiveFailures > 0 && (
-                          <span className="scheduled-badge scheduled-badge-failed">
-                            {task.consecutiveFailures} {task.consecutiveFailures === 1 ? "failure" : "failures"}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="scheduled-task-actions">
-                        <button type="button" className="scheduled-btn scheduled-btn-secondary scheduled-btn-sm" disabled={offline || busy} onClick={() => { handleToggleEnabled(task); }}>
-                          {task.enabled ? <><Pause size={13} aria-hidden="true" /><span>Pause</span></> : <><Play size={13} aria-hidden="true" /><span>Resume</span></>}
-                        </button>
-                        <button type="button" className="scheduled-btn scheduled-btn-secondary scheduled-btn-sm" disabled={offline || busy} onClick={() => { handleRunNow(task); }}>
-                          <Play size={13} aria-hidden="true" /><span>Run now</span>
-                        </button>
-                        <button type="button" className="scheduled-btn scheduled-btn-secondary scheduled-btn-sm" disabled={offline || busy} onClick={() => { openEditForm(task); }}>
-                          <Pencil size={13} aria-hidden="true" /><span>Edit</span>
-                        </button>
-                        {targetConv && (
-                          <button type="button" className="scheduled-btn scheduled-btn-secondary scheduled-btn-sm" onClick={() => { onOpenConversation(targetConv); }}>
-                            <MessageSquare size={13} aria-hidden="true" /><span>Open latest chat</span>
-                          </button>
-                        )}
-                        {confirmDeleteId === task.id ? (
-                          <span className="scheduled-delete-confirm">
-                            <button type="button" className="scheduled-btn scheduled-btn-danger scheduled-btn-sm" disabled={offline || busy} onClick={() => { handleDelete(task); }}>Confirm delete</button>
-                            <button type="button" className="scheduled-btn scheduled-btn-secondary scheduled-btn-sm" disabled={busy} onClick={() => { setConfirmDeleteId(null); }}>Cancel</button>
-                          </span>
-                        ) : (
-                          <button type="button" className="scheduled-btn scheduled-btn-ghost-danger scheduled-btn-sm" disabled={offline || busy} onClick={() => { setConfirmDeleteId(task.id); }}>
-                            <Trash2 size={13} aria-hidden="true" /><span>Delete</span>
-                          </button>
-                        )}
-                      </div>
+                      <h3 className="scheduled-task-title">{task.title}</h3>
+                      {confirmDeleteId === task.id ? (
+                        <span className="scheduled-task-actions" role="group" aria-label={`Delete ${task.title}`}>
+                          <button type="button" className="text-button" disabled={busy} onClick={() => { setConfirmDeleteId(null); }}>Cancel</button>
+                          <button type="button" className="text-button is-danger" disabled={locked} onClick={() => { handleDelete(task); }}>Confirm delete</button>
+                        </span>
+                      ) : (
+                        <span className="scheduled-task-actions">
+                          <button type="button" className="text-button" disabled={locked} onClick={() => { handleRunNow(task); }}>Run now</button>
+                          <IconButton label={task.enabled ? "Pause" : "Resume"} disabled={locked} onClick={() => { handleToggleEnabled(task); }}>
+                            {task.enabled ? <Pause size={15} aria-hidden="true" /> : <Play size={15} aria-hidden="true" />}
+                          </IconButton>
+                          <IconButton label="Edit" disabled={locked} onClick={() => { openEditForm(task); }}>
+                            <Pencil size={15} aria-hidden="true" />
+                          </IconButton>
+                          {targetConv && (
+                            <IconButton label="Open latest chat" onClick={() => { onOpenConversation(targetConv); }}>
+                              <MessageSquare size={15} aria-hidden="true" />
+                            </IconButton>
+                          )}
+                          <IconButton label="Delete" className="scheduled-delete" disabled={locked} onClick={() => { setConfirmDeleteId(task.id); }}>
+                            <Trash2 size={15} aria-hidden="true" />
+                          </IconButton>
+                        </span>
+                      )}
                     </div>
 
                     <p className="scheduled-task-prompt">{task.prompt}</p>
 
-                    <dl className="scheduled-task-meta">
-                      <div>
-                        <dt>Schedule</dt>
-                        <dd><Clock size={13} aria-hidden="true" /><span>{formatScheduledTaskSchedule(task.schedule)}</span></dd>
-                      </div>
-                      <div>
-                        <dt>Next run</dt>
-                        <dd>{task.enabled ? formatLocalTimestamp(task.nextRunAt) : "Paused"}</dd>
-                      </div>
-                      <div>
-                        <dt>Last run</dt>
-                        <dd>{task.lastRunStatus ? `${runStateLabel(task.lastRunStatus)}${task.lastRunAt ? ` · ${formatLocalTimestamp(task.lastRunAt)}` : ""}` : "Never run"}</dd>
-                      </div>
-                      <div>
-                        <dt>Execution</dt>
-                        <dd>{threadLabel(task, conversationsById)} · {INTERACTION_LABELS[task.interactionMode]} · {ACCESS_LABELS[task.accessMode]}</dd>
-                      </div>
-                    </dl>
+                    <p className="scheduled-task-meta">
+                      <span className="scheduled-status">{badge.label}</span>
+                      {task.consecutiveFailures > 0 && (
+                        <span className="scheduled-failures">
+                          {task.consecutiveFailures} {task.consecutiveFailures === 1 ? "failure" : "failures"}
+                        </span>
+                      )}
+                      <span>{task.schedule.type === "once" ? `Once ${formatLocalTimestamp(task.schedule.runAt)}` : formatScheduledTaskSchedule(task.schedule)}</span>
+                      {task.enabled && <span>Next {formatLocalTimestamp(task.nextRunAt)}</span>}
+                      <span>{task.lastRunAt ? `Last run ${formatLocalTimestamp(task.lastRunAt)}` : "Never run"}</span>
+                    </p>
+                    <p className="scheduled-task-meta">
+                      {!projectScopeId && <span>{projectLabel(task.projectId)}</span>}
+                      <span>{threadLabel(task, conversationsById)}</span>
+                      <span>{INTERACTION_LABELS[task.interactionMode]}</span>
+                      <span>{ACCESS_LABELS[task.accessMode]}</span>
+                    </p>
 
                     {task.lastError && (
-                      <div className="scheduled-task-error" role="alert">
-                        <AlertCircle size={14} aria-hidden="true" /><span>{task.lastError}</span>
-                      </div>
+                      <p className="scheduled-task-error" role="alert">
+                        <AlertCircle size={13} aria-hidden="true" /><span>{task.lastError}</span>
+                      </p>
                     )}
 
-                    <div className="scheduled-runs-section">
+                    {recentRuns.length > 0 && (
                       <button
                         type="button" className="scheduled-runs-toggle"
                         aria-expanded={runsOpen} aria-controls={runsPanelId}
                         onClick={() => { toggleRuns(task.id); }}
                       >
-                        {runsOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-                        <span>Recent runs ({recentRuns.length})</span>
+                        <ChevronRight size={13} aria-hidden="true" />Recent runs ({recentRuns.length})
                       </button>
+                    )}
 
-                      {runsOpen && (
-                        <div id={runsPanelId} className="scheduled-runs-panel">
-                          {recentRuns.length === 0 ? (
-                            <p className="scheduled-runs-empty">No runs recorded yet.</p>
-                          ) : (
-                            <ul className="scheduled-runs-list">
-                              {recentRuns.map((run) => {
-                                const runConv = run.conversationId ? conversationsById.get(run.conversationId) ?? null : null;
-                                return (
-                                  <li key={run.id} className="scheduled-run-row">
-                                    <span className={`scheduled-run-state is-${run.state}`}>{runStateLabel(run.state)}</span>
-                                    <span className="scheduled-run-trigger">{run.trigger === "manual" ? "Manual" : "Scheduled"}</span>
-                                    <span className="scheduled-run-time">{formatLocalTimestamp(run.finishedAt ?? run.claimedAt)}</span>
-                                    {runConv && (
-                                      <button type="button" className="scheduled-run-open" onClick={() => { onOpenConversation(runConv); }}>
-                                        <MessageSquare size={12} aria-hidden="true" /><span>Open chat</span>
-                                      </button>
-                                    )}
-                                    {run.error && <span className="scheduled-run-error" role="alert">{run.error}</span>}
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    {runsOpen && recentRuns.length > 0 && (
+                      <ul id={runsPanelId} className="scheduled-runs-panel">
+                        {recentRuns.map((run) => {
+                          const runConv = run.conversationId ? conversationsById.get(run.conversationId) ?? null : null;
+                          return (
+                            <li key={run.id} className="scheduled-run-row">
+                              <span className={`scheduled-run-state is-${run.state}`}>{runStateLabel(run.state)}</span>
+                              <span>{run.trigger === "manual" ? "Manual" : "Scheduled"}</span>
+                              <span>{formatLocalTimestamp(run.finishedAt ?? run.claimedAt)}</span>
+                              {runConv && (
+                                <button type="button" className="text-button" onClick={() => { onOpenConversation(runConv); }}>Open chat</button>
+                              )}
+                              {run.error && <span className="scheduled-run-error" role="alert">{run.error}</span>}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                   </article>
                 </li>
               );
             })}
           </ul>
         )}
+
+        <p className="scheduled-tasks-note">
+          Schedules run locally while Inertia is open. Missed recurring runs are skipped on startup.
+        </p>
       </div>
     </section>
   );

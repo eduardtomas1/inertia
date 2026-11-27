@@ -1,7 +1,3 @@
-.composer-queue {
-  background: var(--surface-raised);
-}
-
 .composer-shell .composer-input-actions .send-button.has-label {
   display: inline-flex;
   width: auto;

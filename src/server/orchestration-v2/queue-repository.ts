@@ -269,6 +269,20 @@ function parseSelectionJson(raw: string | null) {
   }
 }
 
+export function settleScheduledRunOnQueueCancel(
+  database: Database.Database,
+  item: Pick<QueueItemProjection, "attribution"> | null | undefined,
+  reason: QueueCancelReason,
+  detail: string | undefined,
+  nowIso: string = new Date().toISOString(),
+): void {
+  if (!item?.attribution || !("scheduledTask" in item.attribution)) return;
+  const note = detail ?? `The queued scheduled prompt was cancelled (${reason}).`;
+  database.prepare(`UPDATE scheduled_task_runs
+    SET state = 'skipped', error = COALESCE(error, ?), finished_at = COALESCE(finished_at, ?)
+    WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, item.attribution.scheduledTask.runId);
+}
+
 export class OrchestrationQueueRepository {
   private readonly cancelListeners = new Set<(item: QueueItemProjection, reason: QueueCancelReason) => void>();
 
@@ -327,6 +341,16 @@ export class OrchestrationQueueRepository {
       if (item && (item.state === "waiting" || item.state === "dispatching" || item.state === "blocked")) items.push(item);
     }
     return queuedItemsInDeliveryOrder(items);
+  }
+
+  listActiveByScheduledTask(taskId: string): Array<{ conversationId: string; itemId: string }> {
+    const rows = this.database.prepare(`
+      SELECT thread_id, id FROM orchestration_v2_entities
+      WHERE kind = ?
+        AND json_extract(payload_json, '$.state') IN ('waiting', 'blocked')
+        AND json_extract(payload_json, '$.attribution.scheduledTask.taskId') = ?
+    `).all(QUEUE_ITEM_PROJECTION, taskId) as Array<{ thread_id: string; id: string }>;
+    return rows.map((row) => ({ conversationId: row.thread_id, itemId: row.id }));
   }
 
   pruneTerminal(conversationId: string): void {
@@ -555,13 +579,7 @@ export class OrchestrationQueueRepository {
         this.cancelRowInTable(conversation.id, input.itemId);
         this.syncActiveRowsToTable(conversation.id);
         this.pruneTerminal(conversation.id);
-        if (previous?.attribution && "scheduledTask" in previous.attribution) {
-          const nowIso = this.clock();
-          const note = input.detail ?? `The queued scheduled prompt was cancelled (${input.reason}).`;
-          this.database.prepare(`UPDATE scheduled_task_runs
-            SET state = 'skipped', error = COALESCE(error, ?), finished_at = COALESCE(finished_at, ?)
-            WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, previous.attribution.scheduledTask.runId);
-        }
+        settleScheduledRunOnQueueCancel(this.database, previous, input.reason, input.detail, this.clock());
       });
       if (!committed.replayed) cancelledPrevious = previous;
       return { replayed: committed.replayed, value: this.requireItem(input.itemId), events: committed.events };
@@ -651,7 +669,11 @@ export class OrchestrationQueueRepository {
   claim(input: QueueClaimInput): QueueMutationResult<QueueItemProjection> {
     return this.database.transaction((): QueueMutationResult<QueueItemProjection> => {
       const conversation = this.access.conversation(input.conversationId);
-      const nextOrdinal = this.requireItem(input.itemId).dispatchOrdinal + 1;
+      const item = this.requireItem(input.itemId);
+      if (input.mode === "steer" && item.attribution !== undefined && "scheduledTask" in item.attribution) {
+        throw new OrchestrationConflict("revision-conflict");
+      }
+      const nextOrdinal = item.dispatchOrdinal + 1;
       const commandType = input.commandType ?? "queue.claim";
       const { identity, command } = this.commandContext(conversation, input.source, `queue-claim:${input.itemId}:${nextOrdinal}`,
         { type: commandType, conversationId: conversation.id, itemId: input.itemId, mode: input.mode, dispatchOrdinal: nextOrdinal });

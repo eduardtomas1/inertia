@@ -453,6 +453,7 @@ export async function executeManagedQueueMutation(
       });
     }
     let dispatchOrdinal: number;
+    let claimedItemAttachmentCount = currentItem.attachmentIds.length;
     try {
       const claimResult = queue.claim({
         conversationId: target.id,
@@ -476,6 +477,7 @@ export async function executeManagedQueueMutation(
         });
       }
       dispatchOrdinal = claimResult.value.dispatchOrdinal;
+      claimedItemAttachmentCount = claimResult.value.attachmentIds.length;
       claimed = true;
     } catch (error) {
       mapQueueConflictError("promote_to_steer", error);
@@ -484,6 +486,35 @@ export async function executeManagedQueueMutation(
     const content = contentRow?.content.trim() ?? "";
     if (!content) {
       throw new Error("This queued message's text is no longer available.");
+    }
+    if (isCommandOnlyPrompt(content, claimedItemAttachmentCount)) {
+      queue.releaseClaim({ conversationId: target.id, itemId, reason: "steer-declined" });
+      claimed = false;
+      const activeItems = queue.listActive(target.id);
+      const firstMoveTarget = activeItems.find((item) => item.kind !== "delegated-results" && item.state !== "dispatching");
+      if (firstMoveTarget && firstMoveTarget.id !== itemId) {
+        queue.reorder({
+          conversationId: target.id,
+          itemId,
+          beforeItemId: firstMoveTarget.id,
+          commandType: "message.queue.reorder",
+          source: {
+            actorId: "runtime",
+            commandId: `${commandId}:reorder`,
+            command: { type: "message.queue.reorder", conversationId: target.id, id: itemId, beforeId: firstMoveTarget.id },
+          },
+        });
+      }
+      publish();
+      return json({
+        conversationId: target.id,
+        action: "promote_to_steer",
+        itemId,
+        disposition: "queued",
+        movedFirst: true,
+        accepted: true,
+        message: COMMAND_ONLY_STEER_REFUSED,
+      });
     }
     const steerStart = await dependencies.store.orchestration.authority.begin<
       { kind: "requested"; effectId: string } | { kind: "closed" } | { kind: "untracked" }

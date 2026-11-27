@@ -396,9 +396,6 @@ export function projectQueueEvent(
         || payload.dispatchOrdinal !== item.dispatchOrdinal + 1) {
         throw new OrchestrationConflict("revision-conflict");
       }
-      if (payload.mode === "steer" && item.attribution !== undefined && "scheduledTask" in item.attribution) {
-        throw new OrchestrationConflict("revision-conflict");
-      }
       const cleared = withoutBlockedFields(item);
       const claimed = queueItemProjectionSchema.parse({
         ...cleared,

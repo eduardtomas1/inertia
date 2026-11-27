@@ -274,7 +274,7 @@ export async function handlePrivateConnectQueueCommand(
     if (!item || item.threadId !== conversation.id) {
       return fail("not-found", "That queued message was not found.");
     }
-    if (item.kind !== "message") {
+    if (item.kind !== "message" || item.attribution !== undefined) {
       return fail("forbidden", "Automatic queue items cannot be edited.");
     }
     if (item.attachmentIds.length > 0) {

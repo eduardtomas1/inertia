@@ -374,6 +374,7 @@ describe("ScheduledTasksView", () => {
     });
     expect(screen.getByText("3 failures")).toBeVisible();
     expect(screen.getByText("Failed")).toBeVisible();
+    expect(screen.getByText(/Last run Failed/i)).toBeVisible();
 
     const toggle = screen.getByRole("button", { name: "Recent runs (2)" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -428,5 +429,25 @@ describe("ScheduledTasksView", () => {
     expect(screen.getByRole("button", { name: "Run now" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  });
+
+  it("S56: shows Skipped outcome without a Failed badge for a cancelled scheduled run", async () => {
+    mountView([{
+      task: makeTask({
+        enabled: true,
+        lastRunStatus: "skipped",
+        lastRunAt: "2026-11-26T09:05:00.000Z",
+        lastError: "Removed from the chat queue.",
+        consecutiveFailures: 0,
+      }),
+      recentRuns: [],
+    }]);
+
+    await waitFor(() => {
+      expect(screen.getByText("Morning repo check")).toBeVisible();
+    });
+    expect(screen.getByText("Active")).toBeVisible();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.getByText(/Last run Skipped/i)).toBeVisible();
   });
 });

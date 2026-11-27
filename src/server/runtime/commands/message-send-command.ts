@@ -7,7 +7,7 @@ import { MAX_CHAT_ATTACHMENT_BYTES, isExtractedDocumentAttachmentMimeType } from
 import { COMMAND_ONLY_STEER_REFUSED, isCommandOnlyPrompt, supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { providerIdForHarness } from "../../../shared/model-routing";
 import { privateConnectPromptSafetyForHarness, privateConnectPromptSafetyIsUsable } from "../../../shared/private-connect/prompt-safety";
-import { agentAnswerable } from "../managed-child-questions";
+import { isChildQuestionWakeLive } from "../delegation/child-question-wake";
 import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 import { hasIncompleteWorktreeSetup } from "../../workspace-path-authority";
 import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
@@ -182,24 +182,15 @@ function assertQueuedClaimCurrent(
         }
       }
     } else if (v2Item.attribution && "childQuestionWake" in v2Item.attribution) {
-      const wake = v2Item.attribution.childQuestionWake;
-      const pending = dependencies.pendingInputs.get(wake.requestId);
-      const managed = dependencies.store.agentThreadManagement.managed(wake.childConversationId);
-      const childConv = managed?.sourceConversationId === conversation.id
-        ? (() => { try { return dependencies.store.conversation(wake.childConversationId); } catch { return null; } })()
-        : null;
-      const childLatest = childConv ? dependencies.store.latestAgentTurnForConversation(childConv.id) : null;
-      const childTurnTerminal = childLatest && pending && childLatest.id === pending.turnId
-        && (childLatest.status === "completed" || childLatest.status === "failed" || childLatest.status === "cancelled" || childLatest.status === "interrupted");
-      const wakeLive = dependencies.store.appSettings().delegationAutomaticWakes
-        && childConv !== null
-        && childConv.archivedAt === null
-        && (dependencies.turns.isActive(childConv.id) || childConv.status === "needs-input")
-        && pending !== undefined
-        && pending.conversationId === wake.childConversationId
-        && pending.runId === wake.childRunId
-        && !childTurnTerminal
-        && agentAnswerable(pending);
+      const wakeLive = isChildQuestionWakeLive(
+        {
+          store: dependencies.store,
+          turns: dependencies.turns,
+          pendingInputs: dependencies.pendingInputs,
+        },
+        conversation.id,
+        v2Item.attribution.childQuestionWake,
+      );
       if (!wakeLive) {
         throw new RuntimeRequestError("The child question wake is no longer live.", QUEUE_ATTRIBUTION_STALE_CODE);
       }

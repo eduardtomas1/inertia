@@ -9,8 +9,11 @@ import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { privateConnectPromptSafetyForHarness } from "../../src/shared/private-connect/prompt-safety";
 import { RuntimeStore } from "../../src/server/database";
 import { OrchestrationConflict } from "../../src/server/orchestration-v2/types";
+import { handlePrivateConnectQueueCommand } from "../../src/server/private-connect/queue-gateway";
 import { PrivateConnectRuntimeGateway } from "../../src/server/private-connect/runtime-gateway";
 import { sendMessageCommand, QUEUE_ATTRIBUTION_STALE_CODE } from "../../src/server/runtime/commands/message-send-command";
+import { executeManagedQueueMutation } from "../../src/server/runtime/managed-queue-tools";
+import { registerPendingInteraction } from "../../src/server/runtime/pending-interaction-registry";
 import { reconcileQueueOnBoot } from "../../src/server/runtime/queue-boot-reconciliation";
 import { createScheduledTaskRuntime, resolveScheduledTaskEffectiveModelSelection } from "../../src/server/runtime/scheduled-tasks/scheduled-task-runtime";
 import { ScheduledTaskService } from "../../src/server/runtime/scheduled-tasks/scheduled-task-service";
@@ -449,6 +452,11 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
         turnId: turn2Id,
         updatedAt: "2026-11-27T12:00:02.000Z",
       });
+      store.scheduledTasks.update(task2.id, {
+        now: "2026-11-27T12:00:02.000Z",
+        lastRunStatus: "running",
+        lastTurnId: turn2Id,
+      });
       store.updateAgentTurnLifecycle(turn2Id, { status: "interrupted", terminalReason: "runtime-lost" });
       store.orchestration.synchronize(store.agentTurn(turn2Id));
 
@@ -509,6 +517,10 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       });
       service.start();
       expect(store.scheduledTasks.getRun(run2Id)?.state).toBe("queued");
+      // S55: task summary row is reconciled alongside the occurrence row!
+      const reconciledTask2 = store.scheduledTasks.get(task2.id)!;
+      expect(reconciledTask2.lastRunStatus).toBe("queued");
+      expect(reconciledTask2.lastTurnId).toBeNull();
 
       // Crash point 3: recorded Stop keeps item3 held and NOT in resendsScheduled.
       const after3 = store.orchestration.queue.getItem(item3Id)!;
@@ -660,19 +672,83 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(store.orchestration.queue.getItem(schedItemId)?.state).toBe("cancelled");
       expect(store.orchestration.queue.getItem(schedItemId)?.cancelReason).toBe("withdrawn");
 
-      // S43: childQuestionWake claimed while live, then child request resolves DURING async prep -> final admission withdraws claim!
+      // S43 + S47: register pending child input via production composite-key registry;
+      // verify BOTH a live wake starts a turn AND a mid-prep resolved wake withdraws cleanly!
+      const liveReqId = randomUUID();
+      const liveChildRunId = `run-${randomUUID()}`;
+      const liveChildTurnId = randomUUID();
+      registerPendingInteraction(pendingInputs, {
+        id: liveReqId,
+        providerId: child.providerId,
+        conversationId: child.id,
+        turnId: liveChildTurnId,
+        runId: liveChildRunId,
+        kind: "question",
+        questions: [{ id: "q-live", header: "Q", question: "Proceed?", options: [{ label: "Yes", description: "Go" }] }],
+        createdAt: "2026-11-27T12:00:00.000Z",
+      } as unknown as AgentInputRequest);
+      const liveWakeItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: parent.id,
+        itemId: liveWakeItemId,
+        content: "Child needs live answer",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          childQuestionWake: {
+            childConversationId: child.id,
+            childRunId: liveChildRunId,
+            requestId: liveReqId,
+          },
+        },
+      });
+      duringPrepHook = null;
+      let liveParentTurnId = "";
+      turnsQueueSpy.mockImplementationOnce(() => {
+        const begun = store.beginAgentTurn({
+          id: randomUUID(),
+          conversationId: parent.id,
+          runId: `run-${randomUUID()}`,
+          content: "Child needs live answer",
+          activateConversation: false,
+          providerId: parent.providerId,
+          harnessId: parent.modelSelection.harnessId,
+          backendProfileId: parent.modelSelection.backendProfileId,
+          model: parent.modelSelection.modelId,
+          modelAlias: parent.modelSelection.alias,
+          reasoningEffort: parent.modelSelection.reasoningEffort ?? "",
+          interactionMode: parent.interactionMode,
+          accessMode: parent.accessMode,
+          providerSessionBefore: null,
+          usageAtStart: null,
+          configurationRevision: parent.modelSelection.backendConfigurationRevision,
+          association: "authoritative",
+        });
+        liveParentTurnId = begun.turn.id;
+        return { message: begun.message, turn: begun.turn };
+      });
+      (baseDeps.turns as unknown as { start: ReturnType<typeof vi.fn> }).start = vi.fn(() => true);
+      await queueRuntime.schedule(parent.id);
+      expect(turnsQueueSpy).toHaveBeenCalledTimes(1);
+      store.settleAgentTurn(liveParentTurnId, { status: "completed" });
+
+      // Now verify mid-prep resolution via composite key withdraws the stale claim!
+      turnsQueueSpy.mockClear();
       const reqId = randomUUID();
       const childRunId = `run-${randomUUID()}`;
       const childTurnId = randomUUID();
-      pendingInputs.set(reqId, {
+      const staleInput = {
         id: reqId,
+        providerId: child.providerId,
         conversationId: child.id,
         turnId: childTurnId,
         runId: childRunId,
         kind: "question",
         questions: [{ id: "q1", header: "Q", question: "Proceed?", options: [{ label: "Yes", description: "Go" }] }],
         createdAt: "2026-11-27T12:00:00.000Z",
-      } as unknown as AgentInputRequest);
+      } as unknown as AgentInputRequest;
+      registerPendingInteraction(pendingInputs, staleInput);
       const wakeItemId = randomUUID();
       store.orchestration.queue.enqueue({
         conversationId: parent.id,
@@ -691,7 +767,7 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       });
       // Simulate child answering its question during async preparation!
       duringPrepHook = () => {
-        pendingInputs.delete(reqId);
+        pendingInputs.clear();
       };
       await queueRuntime.schedule(parent.id);
       expect(turnsQueueSpy).not.toHaveBeenCalled();
@@ -701,6 +777,464 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       // Verify QUEUE_ATTRIBUTION_STALE_CODE is exported and distinct.
       expect(QUEUE_ATTRIBUTION_STALE_CODE).toBe("queue-attribution-stale");
       expect(new RuntimeRequestError("stale", QUEUE_ATTRIBUTION_STALE_CODE).code).toBe(QUEUE_ATTRIBUTION_STALE_CODE);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("S48 + S49 + S50 + S51 + S53 + S54: desktop atomic remove, PC edit refusal, blocked delete, stale wake next item, late slash-command promote, and historical steer replay", async () => {
+    const { store, workspace } = createTempStore();
+    try {
+      const project = store.createProject("R3 Hardening Project", workspace);
+      const conv = store.createConversation(project.id, "Main chat");
+
+      // S48: Desktop message.queue.remove atomically settles scheduled_task_runs inside the same transaction (even without callback)!
+      const s48Task = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Desktop remove atomic",
+        prompt: "Scheduled work",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2026-11-27T13:00:00.000Z",
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s48RunId = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: s48RunId,
+        taskId: s48Task.id,
+        claimKey: `manual:${s48Task.id}:${s48RunId}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: "2026-11-27T12:00:00.000Z",
+        nextRunAtAfterClaim: "2026-11-27T13:00:00.000Z",
+      });
+      const s48ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conv.id,
+        itemId: s48ItemId,
+        content: s48Task.prompt,
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        queueHeld: true,
+        attribution: {
+          scheduledTask: {
+            taskId: s48Task.id,
+            runId: s48RunId,
+            title: s48Task.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      store.scheduledTasks.updateRun(s48RunId, {
+        state: "queued",
+        conversationId: conv.id,
+        queueItemId: s48ItemId,
+        updatedAt: "2026-11-27T12:00:01.000Z",
+      });
+
+      const dummyDeps = {
+        store,
+        turns: {
+          acquireTurnAdmission: async () => ({ conversationId: conv.id, token: Symbol("adm"), release: vi.fn() }),
+          isActive: () => false,
+          isClosing: () => false,
+          isReleasing: () => false,
+          waitForProviderCleanup: async () => true,
+          activeIdentity: () => null,
+          queue: vi.fn(),
+          start: vi.fn(() => true),
+        },
+        conversationAttachments: { retain: async () => [], release: async () => undefined, acceptRetention: vi.fn(), releaseRetention: vi.fn() },
+        backendProfileController: { validateSelection: (s: ModelSelection) => s, isExternalSelection: () => false, readiness: async () => ({ ready: true }) },
+        isolatedRuns: { has: () => false },
+        workspaceRuns: { has: () => false },
+        pendingApprovals: new Map(),
+        pendingInputs: new Map(),
+        dataDirectory: workspace,
+        enableProviders: true,
+        attachmentResolver: null,
+        generatedAttachments: { release: vi.fn() },
+        workflows: { resolveTurnSkills: async () => ({ routeKey: null, skills: [] }), assertTurnSkillsCurrent: vi.fn() },
+        providerTerminalResumes: { isActive: () => false, acquire: () => true, acquireWhenAvailable: async () => true, release: vi.fn() },
+        providerInfo: () => [],
+        broadcast: vi.fn(),
+        broadcastSnapshot: vi.fn(),
+        send: vi.fn(),
+      } as unknown as TurnInteractionCommandDependencies;
+      // Intentionally omit onScheduledCancelled to prove DB transaction alone settled scheduled_task_runs!
+      const desktopQueue = createQueuedMessageRuntime(dummyDeps, {
+        signal: new AbortController().signal,
+        track: (fn) => fn(),
+      });
+      await desktopQueue.start();
+      await desktopQueue.handler(null as never, {
+        type: "message.queue.remove",
+        requestId: randomUUID(),
+        payload: { conversationId: conv.id, id: s48ItemId },
+      });
+      expect(store.orchestration.queue.getItem(s48ItemId)?.state).toBe("cancelled");
+      expect(store.scheduledTasks.getRun(s48RunId)?.state).toBe("skipped");
+
+      // S49: Private Connect generic queue.edit refuses editing a scheduled-task item with an unsupported model override!
+      const s49ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conv.id,
+        itemId: s49ItemId,
+        content: "Desktop scheduled prompt",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        modelSelection: providerNativeModelSelection({ providerId: "pi", modelId: "provider-default" }),
+        attribution: {
+          scheduledTask: {
+            taskId: s48Task.id,
+            runId: randomUUID(),
+            title: s48Task.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      const pcEditRes = await handlePrivateConnectQueueCommand(
+        store,
+        {
+          deviceId: "dev-1",
+          sessionId: "sess-1",
+          scopes: ["view", "prompt"],
+          projectIds: [project.id],
+          grants: [],
+          grantVersion: 1,
+          expiresAt: "2030-01-01T00:00:00.000Z",
+        },
+        conv,
+        {
+          type: "queue.edit",
+          requestId: randomUUID(),
+          conversationId: conv.id,
+          id: s49ItemId,
+          expectedRevision: 0,
+          content: "Tampered prompt",
+        },
+      );
+      expect(pcEditRes.ok).toBe(false);
+      if (!pcEditRes.ok) expect(pcEditRes.code).toBe("forbidden");
+      store.orchestration.queue.cancel({ conversationId: conv.id, itemId: s49ItemId, reason: "withdrawn" });
+
+      // S50: Deleting a task withdraws a BLOCKED scheduled queue item even after the occurrence was failed & untracked!
+      const s50Task = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Blocked then deleted",
+        prompt: "Blocked prompt",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2026-11-27T13:00:00.000Z",
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s50RunId = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: s50RunId,
+        taskId: s50Task.id,
+        claimKey: `manual:${s50Task.id}:${s50RunId}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: "2026-11-27T12:00:00.000Z",
+        nextRunAtAfterClaim: "2026-11-27T13:00:00.000Z",
+      });
+      const s50ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: conv.id,
+        itemId: s50ItemId,
+        content: "Blocked prompt",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          scheduledTask: {
+            taskId: s50Task.id,
+            runId: s50RunId,
+            title: s50Task.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      store.orchestration.queue.block({ conversationId: conv.id, itemId: s50ItemId, blockedReason: "dispatch-failed", detail: "Provider error" });
+      store.scheduledTasks.updateRun(s50RunId, { state: "failed", error: "Provider error", finishedAt: "2026-11-27T12:01:00.000Z", updatedAt: "2026-11-27T12:01:00.000Z" });
+      const s50Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => conv,
+        broadcast: () => undefined,
+      });
+      s50Service.delete(s50Task.id);
+      expect(store.orchestration.queue.getItem(s50ItemId)?.state).toBe("cancelled");
+
+      // S51: Stale claim withdrawal after async prep marks progressed=true so a second unheld waiting item wakes immediately!
+      const s51Conv = store.createConversation(project.id, "S51 two-item chat");
+      const s51Task1 = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Stale head",
+        prompt: "First stale",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s51Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2026-11-27T13:00:00.000Z",
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s51Run1Id = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: s51Run1Id,
+        taskId: s51Task1.id,
+        claimKey: `manual:${s51Task1.id}:${s51Run1Id}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: "2026-11-27T12:00:00.000Z",
+        nextRunAtAfterClaim: "2026-11-27T13:00:00.000Z",
+      });
+      const s51Dispatched: string[] = [];
+      let s51PrepOnce = true;
+      const s51Deps = {
+        ...dummyDeps,
+        verifyProviderInstallation: async () => {
+          if (s51PrepOnce) {
+            s51PrepOnce = false;
+            store.scheduledTasks.delete(s51Task1.id);
+          }
+        },
+        turns: {
+          ...dummyDeps.turns,
+          acquireTurnAdmission: async () => ({ conversationId: s51Conv.id, token: Symbol("adm"), release: vi.fn() }),
+          queue: (req: { content: string }) => {
+            s51Dispatched.push(req.content);
+            const begun = store.beginAgentTurn({
+              id: randomUUID(),
+              conversationId: s51Conv.id,
+              runId: `run-${randomUUID()}`,
+              content: req.content,
+              activateConversation: false,
+              providerId: s51Conv.providerId,
+              harnessId: s51Conv.modelSelection.harnessId,
+              backendProfileId: s51Conv.modelSelection.backendProfileId,
+              model: s51Conv.modelSelection.modelId,
+              modelAlias: s51Conv.modelSelection.alias,
+              reasoningEffort: s51Conv.modelSelection.reasoningEffort ?? "",
+              interactionMode: s51Conv.interactionMode,
+              accessMode: s51Conv.accessMode,
+              providerSessionBefore: null,
+              usageAtStart: null,
+              configurationRevision: s51Conv.modelSelection.backendConfigurationRevision,
+              association: "authoritative",
+            });
+            return { message: begun.message, turn: begun.turn };
+          },
+        },
+      } as unknown as TurnInteractionCommandDependencies;
+      const s51Runtime = createQueuedMessageRuntime(s51Deps, {
+        signal: new AbortController().signal,
+        track: (fn) => fn(),
+      });
+      await s51Runtime.start();
+      const s51Item1 = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s51Conv.id,
+        itemId: s51Item1,
+        content: "First stale",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          scheduledTask: {
+            taskId: s51Task1.id,
+            runId: s51Run1Id,
+            title: s51Task1.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      const s51Task2 = store.scheduledTasks.create({
+        id: randomUUID(),
+        projectId: project.id,
+        title: "Second live occurrence",
+        prompt: "Second valid item",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: s51Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+        modelSelection: null,
+        nextRunAt: "2026-11-27T13:00:00.000Z",
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s51Run2Id = randomUUID();
+      store.scheduledTasks.claimRun({
+        runId: s51Run2Id,
+        taskId: s51Task2.id,
+        claimKey: `manual:${s51Task2.id}:${s51Run2Id}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: "2026-11-27T12:00:01.000Z",
+        nextRunAtAfterClaim: "2026-11-27T13:00:00.000Z",
+      });
+      const s51Item2 = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s51Conv.id,
+        itemId: s51Item2,
+        content: "Second valid item",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          scheduledTask: {
+            taskId: s51Task2.id,
+            runId: s51Run2Id,
+            title: s51Task2.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      store.scheduledTasks.updateRun(s51Run2Id, {
+        state: "queued",
+        conversationId: s51Conv.id,
+        queueItemId: s51Item2,
+        updatedAt: "2026-11-27T12:00:02.000Z",
+      });
+      await s51Runtime.schedule(s51Conv.id);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(store.orchestration.queue.getItem(s51Item1)?.state).toBe("cancelled");
+      expect(s51Dispatched).toEqual(["Second valid item"]);
+
+      // S53: promote_to_steer rechecks locked content after lease.ready when item was edited to a slash command mid-wait!
+      const s53Parent = store.createConversation(project.id, "S53 Parent");
+      const s53Child = store.createConversation(project.id, "S53 Child");
+      const s53ParentTurn = store.beginAgentTurn({
+        id: randomUUID(),
+        conversationId: s53Parent.id,
+        runId: `run-${randomUUID()}`,
+        content: "Manage child",
+        activateConversation: false,
+        providerId: s53Parent.providerId,
+        harnessId: s53Parent.modelSelection.harnessId,
+        backendProfileId: s53Parent.modelSelection.backendProfileId,
+        model: s53Parent.modelSelection.modelId,
+        modelAlias: s53Parent.modelSelection.alias,
+        reasoningEffort: s53Parent.modelSelection.reasoningEffort ?? "",
+        interactionMode: s53Parent.interactionMode,
+        accessMode: s53Parent.accessMode,
+        providerSessionBefore: null,
+        usageAtStart: null,
+        configurationRevision: s53Parent.modelSelection.backendConfigurationRevision,
+        association: "authoritative",
+      }).turn;
+      store.agentThreadManagement.attachManaged({
+        childConversationId: s53Child.id,
+        sourceConversationId: s53Parent.id,
+        sourceTurnId: s53ParentTurn.id,
+        sourceRunId: s53ParentTurn.runId,
+        sourceHarnessId: s53Parent.modelSelection.harnessId,
+        now: "2026-11-27T12:00:00.000Z",
+      });
+      const s53ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s53Child.id,
+        itemId: s53ItemId,
+        content: "Regular follow-up",
+        kind: "message",
+        createdBy: "agent",
+        creationSource: "mcp",
+      });
+      const steerSpy = vi.fn();
+      const s53Res = await executeManagedQueueMutation(
+        {
+          store,
+          turns: {
+            isActive: (id: string) => id === s53Child.id,
+            activeIdentity: () => ({ turnId: "active-turn", runId: "active-run" }),
+            acquireFollowUpAdmission: () => ({
+              conversationId: s53Child.id,
+              turnId: "active-turn",
+              runId: "active-run",
+              ready: Promise.resolve().then(() => {
+                // Edit queued item to a slash command WHILE lease.ready is pending!
+                store.orchestration.queue.edit({
+                  conversationId: s53Child.id,
+                  itemId: s53ItemId,
+                  expectedRevision: 0,
+                  content: "/context",
+                });
+              }),
+              release: vi.fn(),
+            }),
+            steer: steerSpy,
+          } as never,
+          broadcastConversationShell: vi.fn(),
+          broadcastSnapshot: vi.fn(),
+          broadcast: vi.fn(),
+          now: () => "2026-11-27T12:00:00.000Z",
+        } as never,
+        s53Parent,
+        s53Child,
+        { conversationId: s53Child.id, action: "promote_to_steer", itemId: s53ItemId },
+        randomUUID(),
+        new AbortController().signal,
+      );
+      expect(steerSpy).not.toHaveBeenCalled();
+      const s53Parsed = JSON.parse(s53Res.text) as { disposition: string; message: string };
+      expect(s53Parsed.disposition).toBe("queued");
+      expect(s53Parsed.message).toContain("Commands must run as a separate turn.");
+      expect(store.orchestration.queue.getItem(s53ItemId)?.state).toBe("waiting");
+
+      // S54: Historical queue.item-claimed (mode: 'steer') on a scheduled item still replays under rebuildProjections()!
+      const s54Conv = store.createConversation(project.id, "S54 Replay");
+      const s54ItemId = randomUUID();
+      store.orchestration.queue.enqueue({
+        conversationId: s54Conv.id,
+        itemId: s54ItemId,
+        content: "Historical scheduled item",
+        kind: "message",
+        createdBy: "system",
+        creationSource: "server",
+        attribution: {
+          scheduledTask: {
+            taskId: s48Task.id,
+            runId: randomUUID(),
+            title: s48Task.title,
+            interactionMode: "build",
+            accessMode: "supervised",
+          },
+        },
+      });
+      // Simulate a historical steer claim event already stored in orchestration_v2_events before S42 landed.
+      store.orchestration.events.commit({
+        actorId: "runtime",
+        commandId: `hist-steer-${randomUUID()}`,
+        commandType: "queue.claim",
+        threadId: s54Conv.id,
+        projectId: project.id,
+        command: { type: "queue.claim", itemId: s54ItemId, mode: "steer" },
+        expectedRevision: store.orchestration.events.revision(s54Conv.id),
+        events: [{ type: "queue.item-claimed", payload: { itemId: s54ItemId, mode: "steer", dispatchOrdinal: 1 } }],
+        result: { itemId: s54ItemId, dispatchOrdinal: 1 },
+      });
+      expect(() => store.orchestration.events.rebuildProjections()).not.toThrow();
+      expect(store.orchestration.queue.getItem(s54ItemId)?.state).toBe("dispatching");
     } finally {
       store.close();
     }

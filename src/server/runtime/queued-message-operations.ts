@@ -766,7 +766,7 @@ export function handleQueuedDispatchErrorOperation(
       detail: string,
     ): void;
   },
-): void {
+): boolean {
   const { store, turns } = ctx.dependencies;
   const queue = store.orchestration.queue;
   const { conversationId, entry, claim, error } = input;
@@ -780,6 +780,7 @@ export function handleQueuedDispatchErrorOperation(
     ));
   if (input.aborted || turns.isClosing()) {
     input.releaseClaimItem(conversationId, entry.id, "runtime-lost");
+    return false;
   } else if (error instanceof RuntimeRequestError && error.code === QUEUE_ATTRIBUTION_STALE_CODE) {
     if (currentV2 && currentV2.state === "dispatching" && currentV2.dispatchOrdinal === claim.dispatchOrdinal) {
       input.releaseClaimItem(conversationId, entry.id, "transient");
@@ -789,6 +790,7 @@ export function handleQueuedDispatchErrorOperation(
     } catch (cancelError) {
       if (!(cancelError instanceof OrchestrationConflict)) throw cancelError;
     }
+    return true;
   } else if (claimSuperseded) {
     if (currentV2 && currentV2.state === "dispatching" && currentV2.dispatchOrdinal === claim.dispatchOrdinal) {
       input.releaseClaimItem(conversationId, entry.id, "transient");
@@ -822,6 +824,7 @@ export function handleQueuedDispatchErrorOperation(
       }
     }
   }
+  return false;
 }
 
 export function onTurnSettledOperation(

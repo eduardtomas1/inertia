@@ -174,7 +174,7 @@ function statusBadge(task: ScheduledTask): { label: string; tone: "active" | "ru
   if (task.lastRunStatus === "running" || task.lastRunStatus === "queued" || task.lastRunStatus === "claimed") {
     return { label: task.lastRunStatus === "running" ? "Running" : "Queued", tone: "running" };
   }
-  if (task.lastRunStatus === "failed" || task.lastError) return { label: "Failed", tone: "failed" };
+  if (task.lastRunStatus === "failed") return { label: "Failed", tone: "failed" };
   return { label: "Active", tone: "active" };
 }
 
@@ -636,7 +636,7 @@ export function ScheduledTasksView({
                       )}
                       <span>{task.schedule.type === "once" ? `Once ${formatLocalTimestamp(task.schedule.runAt)}` : formatScheduledTaskSchedule(task.schedule)}</span>
                       {task.enabled && <span>Next {formatLocalTimestamp(task.nextRunAt)}</span>}
-                      <span>{task.lastRunAt ? `Last run ${formatLocalTimestamp(task.lastRunAt)}` : "Never run"}</span>
+                      <span>{task.lastRunStatus ? `Last run ${runStateLabel(task.lastRunStatus)}${task.lastRunAt ? ` · ${formatLocalTimestamp(task.lastRunAt)}` : ""}` : "Never run"}</span>
                     </p>
                     <p className="scheduled-task-meta">
                       {!projectScopeId && <span>{projectLabel(task.projectId)}</span>}

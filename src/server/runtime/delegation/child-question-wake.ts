@@ -21,6 +21,69 @@ import {
 import type { TurnController } from "../turns/turn-controller";
 import { neutralizeUntrustedAgentText, truncateUtf8 } from "../untrusted-agent-text";
 
+export function findPendingChildQuestionRequest(
+  pendingInputs: ReadonlyMap<string, AgentInputRequest>,
+  wake: ChildQuestionWakeAttribution,
+): AgentInputRequest | undefined {
+  const direct = pendingInputs.get(wake.requestId);
+  if (
+    direct
+    && direct.id === wake.requestId
+    && direct.conversationId === wake.childConversationId
+    && direct.runId === wake.childRunId
+  ) {
+    return direct;
+  }
+  for (const candidate of pendingInputs.values()) {
+    if (
+      candidate.id === wake.requestId
+      && candidate.conversationId === wake.childConversationId
+      && candidate.runId === wake.childRunId
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+export function isChildQuestionWakeLive(
+  dependencies: Pick<ChildQuestionWakeDependencies, "store" | "turns" | "pendingInputs" | "automaticWakes">,
+  parentConversationId: string,
+  wake: ChildQuestionWakeAttribution,
+): boolean {
+  const autoEnabled = dependencies.automaticWakes?.()
+    ?? dependencies.store.appSettings().delegationAutomaticWakes;
+  if (!autoEnabled) return false;
+  try {
+    const parent = dependencies.store.conversation(parentConversationId);
+    if (parent.archivedAt !== null) return false;
+  } catch {
+    return false;
+  }
+  const managed = dependencies.store.agentThreadManagement.managed(wake.childConversationId);
+  if (managed?.sourceConversationId !== parentConversationId) return false;
+  const request = findPendingChildQuestionRequest(dependencies.pendingInputs, wake);
+  if (!request) return false;
+  let child: Conversation;
+  try {
+    child = dependencies.store.conversation(request.conversationId);
+  } catch {
+    return false;
+  }
+  if (child.archivedAt !== null) return false;
+  if (!dependencies.turns.isActive(child.id) && child.status !== "needs-input") return false;
+  const latestTurn = dependencies.store.latestAgentTurnForConversation(child.id);
+  if (latestTurn && latestTurn.id === request.turnId && isAgentTurnTerminalStatus(latestTurn.status)) {
+    return false;
+  }
+  const pending = pendingInteractionForOwner(dependencies.pendingInputs, request, request.id)
+    ?? pendingInteractionForConversation(dependencies.pendingInputs, request.conversationId, request.id);
+  if (!pending || pending.turnId !== request.turnId || pending.runId !== request.runId) {
+    return false;
+  }
+  return agentAnswerable(pending);
+}
+
 export const MAX_CHILD_QUESTION_WAKE_BYTES = 12_000;
 const MAX_CHILD_QUESTION_PROJECTION_BYTES = 10_000;
 const MAX_CHILD_TITLE_CHARS = 120;
@@ -245,11 +308,7 @@ export class ChildQuestionWakeCoordinator {
     parentConversationId: string,
     wake: ChildQuestionWakeAttribution,
   ): boolean {
-    const pending = this.findPendingChildRequest(wake);
-    return this.automaticWakesEnabled()
-      && this.readActiveParent(parentConversationId) !== null
-      && pending !== undefined
-      && this.readLiveChildRequest(pending) !== null;
+    return isChildQuestionWakeLive(this.dependencies, parentConversationId, wake);
   }
 
   cancelIfStale(

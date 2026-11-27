@@ -60,6 +60,7 @@ export default function App({
   const prompt = promptDraft?.content ?? "";
   const [busy, setBusy] = useState(false);
   const [socket, setSocket] = useState<PrivateConnectSocket | null>(null);
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [hostUnavailable, setHostUnavailable] = useState(() => navigator.onLine === false);
   const [pairRetry, setPairRetry] = useState(0);
   const [requestedConversationId, setRequestedConversationId] = useState(initialConversationId);
@@ -69,14 +70,19 @@ export default function App({
   const conversationValidatorsRef = useRef(new Map<string, string>());
   const authorizedConversationIdsRef = useRef(new Set<string>());
   const selectedConversationRef = useRef<string | null>(null);
-  const scheduledTasksLoadedForCsrfRef = useRef<string | null>(null);
+  const scheduledTasksLoadedKeyRef = useRef<string | null>(null);
+  const scheduledTasksAuthorityGenRef = useRef(0);
+  const scheduledTasksRequestSeqRef = useRef(0);
 
   const clearWorkspace = useCallback((): void => {
+    scheduledTasksAuthorityGenRef.current += 1;
+    scheduledTasksRequestSeqRef.current += 1;
+    scheduledTasksLoadedKeyRef.current = null;
     setShell(null);
     setDetail(null);
     setScheduledTasks([]);
+    setScheduledTasksLoading(false);
     setScheduledTasksError(null);
-    scheduledTasksLoadedForCsrfRef.current = null;
     setPromptDrafts({});
     setSelectedConversation(null);
     selectedConversationRef.current = null;
@@ -254,6 +260,7 @@ export default function App({
           }
         });
         setSocket(next);
+        setConnectionGeneration((current) => current + 1);
       } catch (error) {
         if (isUnauthorized(error)) {
           clearWorkspace();
@@ -512,12 +519,17 @@ export default function App({
 
   const refreshScheduledTasks = useCallback(async (): Promise<void> => {
     if (hostUnavailable || !readyCsrf) return;
+    const authorityGen = scheduledTasksAuthorityGenRef.current;
+    const reqSeq = ++scheduledTasksRequestSeqRef.current;
     setScheduledTasksLoading(true);
     try {
       const response = await request(
         { protocolVersion: 1, type: "scheduled-tasks.list", requestId: crypto.randomUUID() },
         readyCsrf,
       );
+      if (authorityGen !== scheduledTasksAuthorityGenRef.current || reqSeq !== scheduledTasksRequestSeqRef.current) {
+        return;
+      }
       if (!response.ok) throw new Error(response.message);
       const raw = response.result as { kind?: unknown; tasks?: unknown };
       if (raw?.kind === "scheduled-tasks" && Array.isArray(raw.tasks)) {
@@ -529,23 +541,29 @@ export default function App({
       }
       setScheduledTasksError(null);
     } catch (error) {
+      if (authorityGen !== scheduledTasksAuthorityGenRef.current || reqSeq !== scheduledTasksRequestSeqRef.current) {
+        return;
+      }
       setScheduledTasksError(
         error instanceof Error ? error.message : "Scheduled tasks could not be loaded.",
       );
     } finally {
-      setScheduledTasksLoading(false);
+      if (authorityGen === scheduledTasksAuthorityGenRef.current && reqSeq === scheduledTasksRequestSeqRef.current) {
+        setScheduledTasksLoading(false);
+      }
     }
   }, [hostUnavailable, readyCsrf, request]);
 
   useEffect(() => {
     if (!readyCsrf || !shell || hostUnavailable) {
-      scheduledTasksLoadedForCsrfRef.current = null;
+      scheduledTasksLoadedKeyRef.current = null;
       return;
     }
-    if (scheduledTasksLoadedForCsrfRef.current === readyCsrf) return;
-    scheduledTasksLoadedForCsrfRef.current = readyCsrf;
+    const loadKey = `${readyCsrf}:${scheduledTasksAuthorityGenRef.current}:${connectionGeneration}`;
+    if (scheduledTasksLoadedKeyRef.current === loadKey) return;
+    scheduledTasksLoadedKeyRef.current = loadKey;
     void refreshScheduledTasks();
-  }, [hostUnavailable, readyCsrf, refreshScheduledTasks, shell]);
+  }, [connectionGeneration, hostUnavailable, readyCsrf, refreshScheduledTasks, shell]);
 
   const mutateScheduledTask = async (
     payload:

@@ -217,4 +217,69 @@ describe("Private Connect browser lifecycle", () => {
       ifNoneMatch: CONVERSATION_VALIDATOR,
     }));
   });
+
+  it("S52: reloads scheduled tasks on ordinary socket reconnect and discards stale HTTP responses after authority reset", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ csrf: "csrf-token" }), { status: 200 })));
+    const scheduledTask = {
+      id: "11111111-1111-4111-8111-111111111111",
+      projectId: "proj-1",
+      projectName: "Repo",
+      title: "Nightly check",
+      scheduleLabel: "Every 30 minutes",
+      enabled: true,
+      nextRunAt: "2030-01-01T00:30:00.000Z",
+      lastRunAt: null,
+      lastRunStatus: null,
+      lastError: null,
+      consecutiveFailures: 0,
+      boundConversationId: null,
+    };
+    const countListCalls = (): number =>
+      socket.request.mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length
+      + vi.mocked(apiRequest).mock.calls.filter(([req]) => (req as { type?: string }).type === "scheduled-tasks.list").length;
+
+    render(<App initialPairingFragment={null} />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
+    await waitFor(() => expect(countListCalls()).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
+    const beforeReconnect = countListCalls();
+
+    // Ordinary socket reconnect keeps same CSRF, shell, and online state -> must reload scheduled tasks.
+    vi.useFakeTimers();
+    await act(async () => {
+      notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.hostUnavailable);
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(countListCalls()).toBeGreaterThan(beforeReconnect);
+
+    // Stale in-flight HTTP response resolving after authorityChanged reset must be discarded.
+    let resolveStale!: (value: unknown) => void;
+    const stalePromise = new Promise((resolve) => { resolveStale = resolve; });
+    vi.mocked(apiRequest).mockImplementation((req) => {
+      if ((req as { type?: string }).type === "scheduled-tasks.list") {
+        return stalePromise as ReturnType<typeof apiRequest>;
+      }
+      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof apiRequest>;
+    });
+    socket.request.mockImplementation((req) => {
+      if ((req as { type?: string }).type === "scheduled-tasks.list") {
+        return stalePromise as ReturnType<typeof socket.request>;
+      }
+      return Promise.resolve({ type: "response", requestId: (req as { requestId: string }).requestId, ok: true, result: { kind: "not-modified" } }) as ReturnType<typeof socket.request>;
+    });
+
+    const refreshBtn = screen.getByRole("button", { name: /Refresh/i });
+    fireEvent.click(refreshBtn);
+    act(() => notifyClose?.(PRIVATE_CONNECT_SOCKET_CLOSE.authorityChanged));
+    await act(async () => {
+      resolveStale({
+        type: "response",
+        requestId: "stale-list",
+        ok: true,
+        result: { kind: "scheduled-tasks", tasks: [scheduledTask] },
+      });
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("Nightly check")).not.toBeInTheDocument();
+  });
 });

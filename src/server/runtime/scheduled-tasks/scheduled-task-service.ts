@@ -70,7 +70,7 @@ export interface ScheduledTaskStoreLike {
   project(projectId: string): Pick<Project, "id" | "name">;
   conversation(conversationId: string): Pick<Conversation, "id" | "projectId" | "title" | "archivedAt" | "accessMode" | "interactionMode" | "modelSelection">;
   agentTurn?(turnId: string): Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">;
-  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> & Partial<Pick<OrchestrationQueueRepository, "getItem" | "cancel">> };
+  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> & Partial<Pick<OrchestrationQueueRepository, "getItem" | "cancel" | "listActiveByScheduledTask">> };
 }
 
 export interface ScheduledTaskConversationCreateInput {
@@ -310,6 +310,10 @@ export class ScheduledTaskService {
       if (tracked.taskId === taskId && tracked.conversationId && tracked.queueItemId) {
         queuedItems.set(tracked.queueItemId, tracked.conversationId);
       }
+    }
+    const queueItemsByTask = this.dependencies.store.orchestration?.queue?.listActiveByScheduledTask?.(taskId) ?? [];
+    for (const entry of queueItemsByTask) {
+      queuedItems.set(entry.itemId, entry.conversationId);
     }
     if (!this.dependencies.repository.delete(taskId)) {
       throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
@@ -1006,6 +1010,14 @@ export class ScheduledTaskService {
       if (queueItem && (queueItem.state === "waiting" || queueItem.state === "dispatching")) {
         const nowIso = now.toISOString();
         this.dependencies.repository.updateRun(run.id, { state: "queued", turnId: null, updatedAt: nowIso });
+        const task = this.dependencies.repository.get(run.taskId);
+        if (task && (task.lastTurnId === run.turnId || task.lastRunStatus === "running")) {
+          this.dependencies.repository.update(task.id, {
+            now: nowIso,
+            lastRunStatus: "queued",
+            lastTurnId: null,
+          });
+        }
         this.trackRun({
           runId: run.id,
           taskId: run.taskId,
@@ -1015,7 +1027,7 @@ export class ScheduledTaskService {
           claimedAt: run.claimedAt,
           providerContent: "",
         });
-        return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
+        return task?.projectId ?? null;
       }
       return this.reconcileRunningRunOnBoot(run, now);
     }

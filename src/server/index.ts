@@ -801,7 +801,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     cancelStaleChildQuestionWake: (conversationId, itemId, wake) => delegation?.cancelStaleChildQuestionWake(conversationId, itemId, wake) ?? false,
     cancelStaleScheduledTask: (conversationId, itemId, scheduledTask) => scheduledTasks?.service.cancelIfStale(conversationId, itemId, scheduledTask) ?? false,
     onScheduledDispatched: (runId, turnId) => scheduledTasks?.service.bindRunTurn(runId, turnId),
-    onScheduledCancelled: (runId, reason) => scheduledTasks?.service.onRunQueueCancelled(runId, reason),
+    onScheduledCancelled: (runId, reason) => scheduledTasks?.service.onRunQueueCancelled(runId, reason, { alreadySettledInStore: true }),
     compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,
     usageLimitHold: createCachedAccountUsageLimitHold(store, (providerId, model, cwd) => usageRuntime?.service.cachedNativeAccount(providerId, model, cwd) ?? null),
   });

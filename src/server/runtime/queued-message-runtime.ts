@@ -17,11 +17,9 @@ import { createTurnInteractionCommandHandler, type TurnInteractionCommandDepende
 import type { QueuedMessagePersistence } from "./commands/turn-interaction-types";
 import { commandRejection } from "./commands/command-rejection";
 import type { CommandTicket } from "../orchestration-v2/command-authority";
+import { settleScheduledRunOnQueueCancel } from "../orchestration-v2/queue-repository";
 import { OrchestrationConflict, type CommandSource, type JsonValue } from "../orchestration-v2/types";
-import {
-  awaitMessageSendPreparation,
-  messageSendPreparationDeadline,
-} from "./commands/message-send-preparation";
+import { awaitMessageSendPreparation, messageSendPreparationDeadline } from "./commands/message-send-preparation";
 import { isHeld, UPDATE_HOLD_MESSAGE } from "./update-hold";
 import { CHECKOUT_RESTORE_IN_PROGRESS } from "./conversation-work-authority";
 import { watcherNoteDelivery, watcherSteerContent } from "./watcher/watcher-note-instruction";
@@ -464,7 +462,7 @@ export function createQueuedMessageRuntime(
       if (scheduledTaskAttr && turnId) options.onScheduledDispatched?.(scheduledTaskAttr.runId, turnId);
       progressed = true;
     } catch (error) {
-      handleQueuedDispatchErrorOperation(operationsContext, {
+      progressed = handleQueuedDispatchErrorOperation(operationsContext, {
         conversationId,
         entry: fresh,
         claim,
@@ -1049,6 +1047,7 @@ export function createQueuedMessageRuntime(
         }, () => {
           db.prepare("UPDATE queued_messages SET state = 'cancelled', content = '', attachments_json = '[]', error = NULL, queue_position = NULL, queue_held = 0 WHERE id = ? AND conversation_id = ?")
             .run(v2.id, conversationId);
+          settleScheduledRunOnQueueCancel(db, v2, "user", "Removed from the chat queue.");
           queue.pruneTerminal(conversationId);
         });
         return { kind: "removed", removed: target };

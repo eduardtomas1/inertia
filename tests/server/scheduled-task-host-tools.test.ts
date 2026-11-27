@@ -1,7 +1,12 @@
 // @inertia-test-suite portable
 
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createDelegationManagerFixture,
+  errorCode,
+  storeTurnInput,
+} from "../support/delegation-manager-fixture";
 import { z } from "zod";
 
 import type { Conversation, Project } from "../../src/shared/contracts";
@@ -627,5 +632,98 @@ describe("scheduled-task-host-tools", () => {
     const parsed = JSON.parse(listRes.text) as { tasks: Array<{ title: string; prompt: string }> };
     expect(parsed.tasks[0]?.title).toContain("<\\system-reminder>");
     expect(parsed.tasks[0]?.prompt).toContain("Human\\:");
+  });
+
+  it("enforces narrowed scheduled turn modes on AgentThreadManager host tools and auto-approval (S37)", async () => {
+    let scheduledService!: ScheduledTaskService;
+    const f = await createDelegationManagerFixture({
+      scheduledTasks: (store) => {
+        scheduledService = new ScheduledTaskService({
+          repository: store.scheduledTasks,
+          store,
+          broadcast: () => undefined,
+          createConversation: async (input) => store.createConversation(input.projectId, input.title, {
+            interactionMode: input.interactionMode,
+            accessMode: input.accessMode,
+            activate: false,
+          }),
+        });
+        return scheduledService;
+      },
+    });
+    try {
+      // Elevate the chat itself to full/build, then run a narrowed supervised/plan scheduled turn inside it.
+      f.store.updateConversation(f.source.id, { accessMode: "full", interactionMode: "build" });
+      const fullChat = f.store.conversation(f.source.id);
+      const narrowedTurn = f.store.beginAgentTurn({
+        ...storeTurnInput(f.store, fullChat.id, "Narrowed scheduled run"),
+        accessMode: "supervised",
+        interactionMode: "plan",
+      }).turn;
+      f.turns.active.set(fullChat.id, { turnId: narrowedTurn.id, runId: narrowedTurn.runId });
+
+      // 1) Cannot escalate accessMode via inertia_schedule_task
+      const schedEsc = await f.invokeAs({ conversation: fullChat, turn: narrowedTurn }, SCHEDULE_TASK_TOOL_NAME, {
+        title: "Escalate via schedule",
+        prompt: "Do privileged work",
+        schedule: { type: "interval", everyMs: 60_000 },
+        bindToCurrentThread: false,
+        accessMode: "full",
+        interactionMode: "build",
+      });
+      expect(schedEsc.success).toBe(false);
+      expect(errorCode(schedEsc)).toBe("access_mode_escalation_denied");
+
+      // 2) Cannot auto-approve a permitted supervised/plan schedule call despite the chat being full access
+      const approvalSpy = vi.fn(async () => "deny" as const);
+      const schedUnapproved = await f.invokeAs(
+        { conversation: fullChat, turn: narrowedTurn },
+        SCHEDULE_TASK_TOOL_NAME,
+        {
+          title: "Supervised schedule",
+          prompt: "Summarize logs",
+          schedule: { type: "interval", everyMs: 60_000 },
+          bindToCurrentThread: false,
+          accessMode: "supervised",
+          interactionMode: "plan",
+        },
+        { approval: approvalSpy },
+      );
+      expect(approvalSpy).toHaveBeenCalledOnce();
+      expect(schedUnapproved.success).toBe(false);
+      expect(errorCode(schedUnapproved)).toBe("user_denied");
+
+      // 3) Cannot escalate via inertia_create_conversation or inertia_delegate_task either
+      const createEsc = await f.invokeAs({ conversation: fullChat, turn: narrowedTurn }, "inertia_create_conversation", {
+        title: "Escalated child",
+        prompt: "Run privileged command",
+        accessMode: "full",
+        interactionMode: "build",
+      });
+      expect(createEsc.success).toBe(false);
+      expect(errorCode(createEsc)).toBe("access_mode_escalation_denied");
+
+      const delegateInteractionEsc = await f.invokeAs({ conversation: fullChat, turn: narrowedTurn }, "inertia_delegate_task", {
+        title: "Escalated delegate interaction",
+        task: "Run privileged command",
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      expect(delegateInteractionEsc.success).toBe(false);
+      expect(errorCode(delegateInteractionEsc)).toBe("interaction_mode_escalation_denied");
+
+      const delegateAccessEsc = await f.invokeAs({ conversation: fullChat, turn: narrowedTurn }, "inertia_delegate_task", {
+        title: "Escalated delegate access",
+        task: "Run privileged command",
+        accessMode: "full",
+        interactionMode: "plan",
+      });
+      expect(delegateAccessEsc.success).toBe(false);
+      expect(errorCode(delegateAccessEsc)).toBe("access_mode_escalation_denied");
+      expect(scheduledService.list(fullChat.projectId)).toHaveLength(0);
+    } finally {
+      scheduledService?.dispose();
+      await f.close();
+    }
   });
 });

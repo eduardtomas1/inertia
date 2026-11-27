@@ -799,6 +799,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     onWatcherNoteUndelivered: (note, reason) => watchers?.delivery.noteUndelivered(note, reason),
     cancelStaleWatcherNote: (conversationId, itemId) => watchers?.delivery.cancelIfStale(conversationId, itemId) ?? false,
     cancelStaleChildQuestionWake: (conversationId, itemId, wake) => delegation?.cancelStaleChildQuestionWake(conversationId, itemId, wake) ?? false,
+    cancelStaleScheduledTask: (conversationId, itemId, scheduledTask) => scheduledTasks?.service.cancelIfStale(conversationId, itemId, scheduledTask) ?? false,
     onScheduledDispatched: (runId, turnId) => scheduledTasks?.service.bindRunTurn(runId, turnId),
     onScheduledCancelled: (runId, reason) => scheduledTasks?.service.onRunQueueCancelled(runId, reason),
     compacting: (conversationId) => compactions.isCompacting(conversationId), delegated: () => delegation?.queueHooks,

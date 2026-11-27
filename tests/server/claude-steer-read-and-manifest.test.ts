@@ -220,7 +220,7 @@ describe("Manifest steering truth & shared follow-up capability helpers", () => 
     expect(support("opencode-sdk", "native-resume")).toBe("native");
     expect(support("cursor-sdk", "native-resume")).toBe("native");
     expect(support("pi-rpc", "native-resume")).toBe("unavailable");
-    expect(support("antigravity-cli", "native-resume")).toBe("unavailable");
+    expect(support("antigravity-acp", "native-resume")).toBe("negotiated");
     expect(support("cursor-acp", "native-resume")).toBe("negotiated");
     expect(support("kimi-acp", "native-resume")).toBe("negotiated");
     expect(support("grok-acp", "native-resume")).toBe("negotiated");

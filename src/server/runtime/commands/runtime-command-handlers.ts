@@ -199,6 +199,7 @@ export function createRuntimeCommandHandlers(services: RuntimeCommandHandlerServ
       agentSecrets: services.agentThreads.secrets,
       reportIncident: services.reportIncident,
       decorateDelegation: (delegation) => services.delegation.service.decorateDetail(delegation),
+      onConversationDeleted: (conversationId, projectId) => services.scheduledTasks.onConversationDeleted(conversationId, projectId),
       rollbackHistory: enableProviders
         ? (input) => rollbackConversationHistory({ store, providers, turns, providerTerminalResumes, terminals: services.terminals }, input, lifetimeSignal)
         : undefined,

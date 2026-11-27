@@ -538,11 +538,10 @@ export default function App({
   }, [hostUnavailable, readyCsrf, request]);
 
   useEffect(() => {
-    if (!readyCsrf) {
+    if (!readyCsrf || !shell || hostUnavailable) {
       scheduledTasksLoadedForCsrfRef.current = null;
       return;
     }
-    if (!shell || hostUnavailable) return;
     if (scheduledTasksLoadedForCsrfRef.current === readyCsrf) return;
     scheduledTasksLoadedForCsrfRef.current = readyCsrf;
     void refreshScheduledTasks();

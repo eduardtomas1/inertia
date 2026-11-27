@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import type { AccessMode, Conversation, RuntimeMutationEvent } from "../../shared/contracts";
+import type { AccessMode, AgentTurn, Conversation, RuntimeMutationEvent } from "../../shared/contracts";
 import { supportsActiveParentFollowUp } from "../../shared/follow-up-steer";
 import {
   MAX_QUEUED_USER_AND_AGENT_ITEMS,
@@ -126,6 +126,25 @@ function accessRank(mode: AccessMode): number {
   return mode === "supervised" ? 0 : mode === "auto-edit" ? 1 : 2;
 }
 
+/**
+ * Intersects a live conversation's modes with an active turn's effective modes
+ * (e.g. a narrowed scheduled turn) so host-tool caller ceilings and auto-approval
+ * can never escalate above the running turn's authority (S37).
+ */
+export function narrowConversationByTurn(
+  conversation: Conversation,
+  turn: Pick<AgentTurn, "accessMode" | "interactionMode"> | null | undefined,
+): Conversation {
+  if (!turn) return conversation;
+  const accessMode: AccessMode = accessRank(turn.accessMode) < accessRank(conversation.accessMode)
+    ? turn.accessMode : conversation.accessMode;
+  const interactionMode = conversation.interactionMode === "plan" || turn.interactionMode === "plan"
+    ? "plan" : "build";
+  return accessMode === conversation.accessMode && interactionMode === conversation.interactionMode
+    ? conversation
+    : { ...conversation, accessMode, interactionMode };
+}
+
 export function assertAccessWithinParent(requested: AccessMode, parent: AccessMode): void {
   if (accessRank(requested) > accessRank(parent)) {
     throw new ModeEscalationError("access_mode_escalation_denied", "A managed chat cannot exceed its parent chat's access mode.");
@@ -153,8 +172,15 @@ export function assertFreshManagedDispatchAuthority(
   store: RuntimeStore,
   sourceConversationId: string,
   targetConversationId: string,
+  sourceNarrowing?: Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
 ): { caller: Conversation; target: Conversation } {
-  const caller = store.conversation(sourceConversationId);
+  const storedCaller = store.conversation(sourceConversationId);
+  const caller = sourceNarrowing?.accessMode && sourceNarrowing?.interactionMode
+    ? narrowConversationByTurn(storedCaller, {
+      accessMode: sourceNarrowing.accessMode,
+      interactionMode: sourceNarrowing.interactionMode,
+    })
+    : storedCaller;
   const target = store.conversation(targetConversationId);
   if (target.projectId !== caller.projectId) {
     throw new Error("That chat is outside this turn's current-project authority.");
@@ -288,7 +314,7 @@ export async function steerManagedTurn(
   operationId: string,
   signal: AbortSignal,
   link?: ManagedFollowUpLink,
-  source?: Pick<Conversation, "id" | "title">,
+  source?: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
 ): Promise<ProviderHostToolResult> {
   const lease = dependencies.turns.acquireFollowUpAdmission(target.id);
   if (!lease) throw new Error("The target chat cannot accept a follow-up right now.");
@@ -296,7 +322,7 @@ export async function steerManagedTurn(
     await lease.ready;
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
     const freshSource = source
-      ? assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id).caller
+      ? assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source).caller
       : undefined;
     dispatching(dependencies, operationId, target);
     const providerContent = freshSource ? withAgentSenderNote(content, freshSource) : content;
@@ -333,7 +359,7 @@ export async function startManagedTurn(
   operationId: string,
   signal: AbortSignal,
   options: {
-    source?: Pick<Conversation, "id" | "title">;
+    source?: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>;
     restarted?: { stoppedTurnId: string; queuedMessageId?: string };
     link?: ManagedFollowUpLink;
     alreadyDispatching?: boolean;
@@ -354,7 +380,7 @@ export async function startManagedTurn(
     if (signal.aborted) throw new Error("The parent turn ended before dispatch.");
     let freshSource = options.source;
     if (options.source) {
-      freshSource = assertFreshManagedDispatchAuthority(dependencies.store, options.source.id, target.id).caller;
+      freshSource = assertFreshManagedDispatchAuthority(dependencies.store, options.source.id, target.id, options.source).caller;
     } else if (dependencies.store.conversation(target.id).archivedAt !== null) {
       throw new Error("The managed chat is archived and cannot accept new messages.");
     }
@@ -433,7 +459,7 @@ export function queueManagedMessage(
   content: string,
   operationId: string,
   options: {
-    source?: Pick<Conversation, "id" | "title">;
+    source?: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>;
     placement?: QueueEnqueuePlacement;
     queueHeld?: boolean;
     skipHoldInheritance?: true;
@@ -441,7 +467,7 @@ export function queueManagedMessage(
   } = {},
 ): { result: ProviderHostToolResult; itemId: string; queueHeld: boolean; position: number } {
   if (options.source) {
-    assertFreshManagedDispatchAuthority(dependencies.store, options.source.id, target.id);
+    assertFreshManagedDispatchAuthority(dependencies.store, options.source.id, target.id, options.source);
   }
   const queue = messageQueue(dependencies);
   const itemId = deterministicAgentQueueItemId(operationId);
@@ -523,7 +549,7 @@ async function confirmRestartStop(
  */
 export async function restartManagedTurn(
   dependencies: ManagedDispatchDependencies,
-  source: Pick<Conversation, "id" | "title">,
+  source: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
   target: Conversation,
   content: string,
   operationId: string,
@@ -532,7 +558,7 @@ export async function restartManagedTurn(
   link?: ManagedFollowUpLink,
 ): Promise<ProviderHostToolResult> {
   if (!restart) throw new Error(RESTART_IDLE);
-  assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id);
+  assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source);
   assertManagedTurnCanStart(dependencies, target);
   if (!sameTurnOwner(dependencies.turns.activeIdentity(target.id), restart)) {
     throw new Error(MANAGED_TURN_GONE_MESSAGE);
@@ -620,7 +646,7 @@ export async function restartManagedTurn(
         extraEvents: [enqueueEvent],
         extraAfterCommit: syncRow,
         commitExtraEventsOnNoOp: false,
-        beforeCommit: () => assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id),
+        beforeCommit: () => assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source),
       },
     );
   } catch (error) {
@@ -655,7 +681,7 @@ export async function restartManagedTurn(
     throw new Error("The parent turn ended after the managed chat stopped; the new message was not sent.");
   }
   try {
-    assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id);
+    assertFreshManagedDispatchAuthority(dependencies.store, source.id, target.id, source);
   } catch (error) {
     withdrawQueuedRestartItem();
     throw error;
@@ -781,7 +807,7 @@ export function managedSendApprovalDetail(
  */
 export async function dispatchManagedSend(
   dependencies: ManagedDispatchDependencies,
-  source: Pick<Conversation, "id" | "title">,
+  source: Pick<Conversation, "id" | "title"> & Partial<Pick<Conversation, "accessMode" | "interactionMode">>,
   target: Conversation,
   content: string,
   mode: SendMode,

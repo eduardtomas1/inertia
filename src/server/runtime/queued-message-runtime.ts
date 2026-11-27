@@ -3,7 +3,7 @@ import type WebSocket from "ws";
 import type { AgentTurn, ChatAttachment, ClientCommand, ModelSelection, ServerEvent } from "../../shared/contracts";
 import { chatAttachmentKind } from "../../shared/attachments";
 import { providerIdForHarness } from "../../shared/model-routing";
-import { MAX_QUEUED_USER_AND_AGENT_ITEMS, queueDeferredSteerCommandId, type ChildQuestionWakeAttribution } from "../../shared/orchestration-queue";
+import { MAX_QUEUED_USER_AND_AGENT_ITEMS, queueDeferredSteerCommandId, type ChildQuestionWakeAttribution, type ScheduledTaskQueueAttribution } from "../../shared/orchestration-queue";
 import { QUEUED_ROUTE_CHANGED_ERROR, type MessageQueueResult, type QueuedMessage } from "../../shared/queued-messages";
 import type { DelegatedCompletionAttribution } from "../../shared/orchestration-delegation";
 import type { WatcherNoteAttribution } from "../../shared/watcher";
@@ -89,6 +89,7 @@ interface QueuedMessageRuntimeOptions {
   onWatcherNoteUndelivered?(note: WatcherNoteAttribution, reason: string): void;
   cancelStaleWatcherNote?(conversationId: string, itemId: string): boolean;
   cancelStaleChildQuestionWake?(conversationId: string, itemId: string, wake: ChildQuestionWakeAttribution): boolean;
+  cancelStaleScheduledTask?(conversationId: string, itemId: string, scheduledTask: ScheduledTaskQueueAttribution): boolean;
   onScheduledDispatched?(runId: string, turnId: string): void;
   onScheduledCancelled?(runId: string, reason: string): void;
   compacting?(conversationId: string): boolean;
@@ -384,6 +385,7 @@ export function createQueuedMessageRuntime(
       changed(conversationId);
       return true;
     }
+    if (scheduledTaskAttr && options.cancelStaleScheduledTask?.(conversationId, first.id, scheduledTaskAttr)) { changed(conversationId); return true; }
     if (!queueItemRouteMatches(store, first, conversation)) {
       blockItem(
         conversationId,
@@ -1214,6 +1216,7 @@ export function createQueuedMessageRuntime(
     enqueueManagedMessage,
     withdrawWatcherNote,
     schedule,
+    onExternalQueueChanged: changed,
     editedAttachmentConversations: (_attachmentId: string): string[] => [],
     editedAttachmentMetadata: (_attachmentId: string) => null,
     onTurnSettled(turn: AgentTurn): void {

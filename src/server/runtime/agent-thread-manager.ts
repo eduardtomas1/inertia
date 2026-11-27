@@ -92,7 +92,7 @@ import {
 import { DelegatedWaitAbortedError, delegatedWaitTimeout } from "./delegation/task-wait";
 import {
   RESTART_IDLE, agentSenderHiddenInstruction, assertAccessWithinParent, assertManagedDispatchCeiling,
-  dispatchManagedSend, managedSendApprovalDetail, preflightManagedSend, sendSchema,
+  dispatchManagedSend, managedSendApprovalDetail, narrowConversationByTurn, preflightManagedSend, sendSchema,
   type ManagedFollowUpLink, type ManagedMessageQueue, type SendMode,
 } from "./managed-send-modes";
 import {
@@ -341,7 +341,7 @@ export class AgentThreadManager {
     if (conversation.projectId !== source.conversation.projectId) {
       throw new Error("The originating project authority changed.");
     }
-    return conversation;
+    return narrowConversationByTurn(conversation, turn);
   }
 
   private async invoke(
@@ -700,7 +700,7 @@ export class AgentThreadManager {
     if (target) this.dependencies.store.agentThreadManagement.transition(
       reserved.operation.id, ["approval-pending"], "approval-pending", target, this.now(),
     );
-    const liveSource = this.dependencies.store.conversation(source.conversation.id);
+    const liveSource = narrowConversationByTurn(this.dependencies.store.conversation(source.conversation.id), this.dependencies.store.agentTurn(source.turn.id) ?? source.turn);
     const autoApproveTool = options?.autoApproveToolName ?? toolName;
     if (!shouldAutoApproveManagedMutation(liveSource.accessMode, autoApproveTool)
       && !(liveSource.accessMode === "full" && (EXTENDED_FULL_ACCESS_AUTO_APPROVED_TOOLS.has(autoApproveTool) || SCHEDULED_TASK_FULL_ACCESS_AUTO_APPROVED_TOOLS.has(autoApproveTool)))) {
@@ -872,7 +872,7 @@ export class AgentThreadManager {
     toolName: AgentThreadMutationTool,
     args: unknown,
   ): ApprovalDetail {
-    const current = this.dependencies.store.conversation(source.conversation.id);
+    const current = narrowConversationByTurn(this.dependencies.store.conversation(source.conversation.id), this.dependencies.store.agentTurn(source.turn.id) ?? source.turn);
     if (toolName === DELEGATE_TASK_TOOL) {
       const input = delegateTaskSchema.parse(args);
       const created = this.approvalDetail(source, "inertia_create_conversation", delegateCreateInput(input, current));

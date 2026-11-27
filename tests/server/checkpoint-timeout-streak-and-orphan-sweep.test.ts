@@ -315,22 +315,34 @@ describe("checkpoint timeout streak, shared-folder contention, and orphaned ref 
     ).rejects.toBeInstanceOf(CheckpointError);
   });
 
-  it("pruneOrphanedCheckpointRefs deletes a symbolic checkpoint ref without dereferencing or deleting its target branch (S30)", async () => {
+  it("pruneOrphanedCheckpointRefs deletes multiple symbolic checkpoint refs in one batch without dereferencing or deleting target branches (S30 + S36)", async () => {
     const { root } = createRepo();
     const liveConvId = randomUUID();
     const orphanConvId = randomUUID();
     const mainSha = git(root, "rev-parse", "refs/heads/main");
-    const symRef = `refs/inertia/checkpoints/${orphanConvId}/sym-test`;
+    git(root, "branch", "victim1");
+    git(root, "branch", "victim2");
+    const symRef1 = `refs/inertia/checkpoints/${orphanConvId}/sym-test-1`;
+    const symRef2 = `refs/inertia/checkpoints/${orphanConvId}/sym-test-2`;
+    const normalOrphanRef = `refs/inertia/checkpoints/${orphanConvId}/turn-normal-orphan`;
+    git(root, "update-ref", normalOrphanRef, mainSha);
 
-    git(root, "symbolic-ref", symRef, "refs/heads/main");
-    expect(git(root, "symbolic-ref", symRef)).toBe("refs/heads/main");
+    git(root, "symbolic-ref", symRef1, "refs/heads/victim1");
+    git(root, "symbolic-ref", symRef2, "refs/heads/victim2");
+    expect(git(root, "symbolic-ref", symRef1)).toBe("refs/heads/victim1");
+    expect(git(root, "symbolic-ref", symRef2)).toBe("refs/heads/victim2");
 
     const sweep = await pruneOrphanedCheckpointRefs(root, new Set([liveConvId]));
-    expect(sweep).toEqual({ scanned: 1, deleted: 1 });
-    expect(refExists(root, symRef)).toBe(false);
-    expect(git(root, "for-each-ref", "--format=%(refname)", symRef)).toBe("");
-    expect(refExists(root, "refs/heads/main")).toBe(true);
-    expect(git(root, "rev-parse", "refs/heads/main")).toBe(mainSha);
+    expect(sweep).toEqual({ scanned: 3, deleted: 3 });
+    expect(refExists(root, symRef1)).toBe(false);
+    expect(refExists(root, symRef2)).toBe(false);
+    expect(refExists(root, normalOrphanRef)).toBe(false);
+    expect(git(root, "for-each-ref", "--format=%(refname)", symRef1)).toBe("");
+    expect(git(root, "for-each-ref", "--format=%(refname)", symRef2)).toBe("");
+    expect(refExists(root, "refs/heads/victim1")).toBe(true);
+    expect(refExists(root, "refs/heads/victim2")).toBe(true);
+    expect(git(root, "rev-parse", "refs/heads/victim1")).toBe(mainSha);
+    expect(git(root, "rev-parse", "refs/heads/victim2")).toBe(mainSha);
   });
 
   it("keeps later waiters serialized behind an active capture when a queued waiter aborts (S31)", async () => {

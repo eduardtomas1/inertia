@@ -72,7 +72,7 @@ describe("delegation boot order", () => {
   it("wires recovery between queue reconcile and scheduling in the runtime entry point", () => {
     const source = readFileSync(resolve("src/server/index.ts"), "utf8");
     const created = source.indexOf("delegation = createDelegationRuntime(");
-    const started = source.indexOf("queuedMessages.start(() => delegation?.recover());");
+    const started = source.indexOf("queuedMessages.start(async () => { await delegation?.recover(); scheduledTasks?.start(); });");
     expect(created).toBeGreaterThan(0);
     expect(started).toBeGreaterThan(created);
     expect(source).toContain("(settled) => delegation?.onTurnSettled(settled),");

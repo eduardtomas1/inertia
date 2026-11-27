@@ -369,11 +369,10 @@ export class ConversationRepository {
           "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scheduled_tasks'",
         ).get()
       ) {
-        const now = new Date().toISOString();
         cachedStatement(
           this.context.database,
-          "UPDATE scheduled_tasks SET enabled = 0, next_run_at = NULL, last_error = ?, updated_at = ? WHERE bound_conversation_id = ?",
-        ).run("The bound chat was deleted.", now, conversationId);
+          "DELETE FROM scheduled_tasks WHERE bound_conversation_id = ?",
+        ).run(conversationId);
       }
       cachedStatement(this.context.database, "DELETE FROM orchestration_v2_receipts WHERE thread_id = ?").run(conversationId);
       cachedStatement(this.context.database, "DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);

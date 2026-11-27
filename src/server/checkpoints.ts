@@ -1185,9 +1185,9 @@ export async function pruneOrphanedCheckpointRefs(
       const batch = orphans.slice(offset, offset + batchSize);
       await runGit(
         gitRoot,
-        checkpointGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "--stdin"]),
+        checkpointGitArguments(["-c", `core.hooksPath=${hooksDirectory}`, "update-ref", "--no-deref", "--stdin"]),
         {},
-        Buffer.from(`option no-deref\n${batch.map((ref) => `delete ${ref}\n`).join("")}`, "utf8"),
+        Buffer.from(batch.map((ref) => `delete ${ref}\n`).join(""), "utf8"),
         1024 * 1024,
         options.deadlineAt,
         options.signal,

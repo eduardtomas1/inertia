@@ -58,7 +58,9 @@ function wakeFor(f: DelegationManagerFixture, setup: Awaited<ReturnType<typeof f
   const queued = f.database.prepare(`SELECT id FROM queued_messages WHERE conversation_id = ?
     AND json_extract(delegated_completion_json, '$.generation') = ?`).get(setup.childId, setup.generation) as { id: string };
   // Admitted as the queue runtime admits a delivery: the queued row is claimed and accepted with the turn.
-  if (admission === "admitted") f.database.prepare("UPDATE queued_messages SET state = 'dispatching' WHERE id = ?").run(queued.id);
+  if (admission === "admitted") {
+    f.store.orchestration.queue.claim({ conversationId: setup.childId, itemId: queued.id, mode: "run" });
+  }
   const wake = beginStoreTurn(f.store, setup.childId, "Delegated task finished", { delegatedCompletion:
     { parentConversationId: setup.childId, generation: setup.generation, taskIds: [setup.g1.taskId] },
   ...(admission === "admitted" ? { queuedMessageId: queued.id } : {}) }, { admit: admission === "admitted" }).turn;

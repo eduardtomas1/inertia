@@ -473,7 +473,7 @@ describe("Migration 132 (PersistScheduledTasks) and ScheduledTaskRepository", ()
       expect(store.scheduledTasks.delete(task2.id)).toBe(false);
       expect(store.scheduledTasks.listRuns(task2.id)).toEqual([]);
 
-      // S33: deleting a bound chat disables its schedules instead of turning them into new-chat schedules
+      // S33 + S38: deleting a bound chat atomically deletes its bound schedules so they can never become unbound new-chat tasks
       const boundForDelete = store.createConversation(projectA.id, "Soon deleted chat");
       const deletedBoundTask = store.scheduledTasks.create({
         id: randomUUID(),
@@ -496,12 +496,7 @@ describe("Migration 132 (PersistScheduledTasks) and ScheduledTaskRepository", ()
         now: t1,
       });
       store.deleteConversation(boundForDelete.id);
-      expect(store.scheduledTasks.get(deletedBoundTask.id)).toMatchObject({
-        enabled: false,
-        nextRunAt: null,
-        boundConversationId: null,
-        lastError: "The bound chat was deleted.",
-      });
+      expect(store.scheduledTasks.get(deletedBoundTask.id)).toBeNull();
       expect(store.scheduledTasks.get(unboundTask.id)).toMatchObject({
         enabled: true,
         nextRunAt: t2,

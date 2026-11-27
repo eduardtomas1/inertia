@@ -66,7 +66,7 @@ export interface ScheduledTaskStoreLike {
   project(projectId: string): Pick<Project, "id" | "name">;
   conversation(conversationId: string): Pick<Conversation, "id" | "projectId" | "title" | "archivedAt" | "accessMode" | "interactionMode" | "modelSelection">;
   agentTurn?(turnId: string): Pick<AgentTurn, "id" | "conversationId" | "status" | "terminalReason" | "completedAt" | "updatedAt">;
-  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> & Partial<Pick<OrchestrationQueueRepository, "getItem">> };
+  orchestration?: { queue: Pick<OrchestrationQueueRepository, "enqueue"> & Partial<Pick<OrchestrationQueueRepository, "getItem" | "cancel">> };
 }
 
 export interface ScheduledTaskConversationCreateInput {
@@ -100,6 +100,7 @@ export interface ScheduledTaskEnqueuePromptResult {
 
 export interface ScheduledTaskMessageQueueLike {
   schedule?(conversationId: string): void | Promise<void>;
+  onExternalQueueChanged?(conversationId: string): void;
 }
 
 export interface ScheduledTaskServiceDependencies {
@@ -292,15 +293,75 @@ export class ScheduledTaskService {
 
   delete(taskId: string): boolean {
     const existing = this.dependencies.repository.get(taskId);
-    if (!existing || !this.dependencies.repository.delete(taskId)) {
+    if (!existing) throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
+    const queuedItems = new Map<string, string>();
+    for (const run of this.dependencies.repository.listActiveRuns()) {
+      if (run.taskId === taskId && run.conversationId && run.queueItemId) {
+        queuedItems.set(run.queueItemId, run.conversationId);
+      }
+    }
+    for (const tracked of this.trackedByRunId.values()) {
+      if (tracked.taskId === taskId && tracked.conversationId && tracked.queueItemId) {
+        queuedItems.set(tracked.queueItemId, tracked.conversationId);
+      }
+    }
+    if (!this.dependencies.repository.delete(taskId)) {
       throw userError(SCHEDULED_TASK_NOT_FOUND_MESSAGE);
     }
     for (const [runId, tracked] of this.trackedByRunId) {
       if (tracked.taskId === taskId) this.untrackRun(runId);
     }
+    const notifiedConversations = new Set<string>();
+    for (const [queueItemId, conversationId] of queuedItems) {
+      if (this.cancelQueuedScheduledItem(conversationId, queueItemId)) {
+        notifiedConversations.add(conversationId);
+      }
+    }
+    for (const conversationId of notifiedConversations) {
+      this.dependencies.messageQueue?.()?.onExternalQueueChanged?.(conversationId);
+    }
     this.broadcastChanged(existing.projectId);
     this.rescheduleTimer();
     return true;
+  }
+
+  onConversationDeleted(conversationId: string, projectId: string): void {
+    for (const [runId, tracked] of this.trackedByRunId) {
+      if (tracked.conversationId === conversationId) this.untrackRun(runId);
+    }
+    this.broadcastChanged(projectId);
+    this.rescheduleTimer();
+  }
+
+  cancelIfStale(
+    conversationId: string,
+    itemId: string,
+    scheduledTask: { taskId: string; runId: string },
+  ): boolean {
+    const task = this.dependencies.repository.get(scheduledTask.taskId);
+    const run = this.dependencies.repository.getRun(scheduledTask.runId);
+    const stale = !task
+      || !run
+      || run.taskId !== scheduledTask.taskId
+      || run.state === "completed"
+      || run.state === "failed"
+      || run.state === "skipped";
+    if (!stale) return false;
+    this.untrackRun(scheduledTask.runId);
+    return this.cancelQueuedScheduledItem(conversationId, itemId);
+  }
+
+  private cancelQueuedScheduledItem(conversationId: string, itemId: string): boolean {
+    const queue = this.dependencies.store.orchestration?.queue;
+    if (!queue?.cancel) return false;
+    const item = queue.getItem?.(itemId);
+    if (item && item.state !== "waiting" && item.state !== "blocked") return false;
+    try {
+      queue.cancel({ conversationId, itemId, reason: "withdrawn" });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async runNow(taskId: string): Promise<ScheduledTaskRunNowResult> {

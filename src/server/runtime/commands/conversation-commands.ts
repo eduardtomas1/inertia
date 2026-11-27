@@ -148,6 +148,7 @@ export interface ConversationCommandDependencies {
     schedule(conversationId: string): void | Promise<void>;
     onWorktreeSetupRetried?(conversationId: string): void;
   };
+  onConversationDeleted?(conversationId: string, projectId: string): void;
 }
 
 export function createConversationCommandHandler(
@@ -922,6 +923,7 @@ export function createConversationCommandHandler(
             finalConversation.id,
             recoveryRecords,
           );
+          dependencies.onConversationDeleted?.(finalConversation.id, finalConversation.projectId);
           for (const identity of recoveryRecords) {
             dependencies.reportIncident?.(providerCleanupIncident(identity));
           }

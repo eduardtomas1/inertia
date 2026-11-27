@@ -1279,6 +1279,7 @@ describe("ScheduledTaskService", () => {
         },
         onScheduledDispatched: (runId, turnId) => service?.bindRunTurn(runId, turnId),
         onScheduledCancelled: (runId, reason) => service?.onRunQueueCancelled(runId, reason),
+        cancelStaleScheduledTask: (conversationId, itemId, attr) => service?.cancelIfStale(conversationId, itemId, attr) ?? false,
       });
 
       service = new ScheduledTaskService({
@@ -1447,6 +1448,51 @@ describe("ScheduledTaskService", () => {
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "status", status: "running" });
       runtime.provider.resolve({ sessionId: "boot-resend-session" });
       await drain();
+
+      // 5) S39: deleting a scheduled task cancels its queued prompt immediately AND dispatch-time cancelIfStale blocks any orphaned item
+      const busyHoldId = randomUUID();
+      runtime.store.orchestration.queue.enqueue({
+        conversationId: runtime.conversationId,
+        itemId: busyHoldId,
+        content: "Hold queue before delete",
+        queueHeld: true,
+      });
+      const deleteQueuedTask = service.create({
+        projectId,
+        title: "Delete while queued",
+        prompt: "Should never run after delete",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: runtime.conversationId,
+      });
+      const deleteQueuedRun = await service.runNow(deleteQueuedTask.id);
+      expect(runtime.store.orchestration.queue.getItem(deleteQueuedRun.run.queueItemId!)?.state).toBe("waiting");
+
+      service.delete(deleteQueuedTask.id);
+      expect(runtime.store.orchestration.queue.getItem(deleteQueuedRun.run.queueItemId!)?.state).toBe("cancelled");
+
+      // Also verify dispatch-time stale-run withdrawal if a queued item references a missing/deleted task
+      const staleItemId = randomUUID();
+      runtime.store.orchestration.queue.enqueue({
+        conversationId: runtime.conversationId,
+        itemId: staleItemId,
+        content: "Stale deleted task prompt",
+        queueHeld: false,
+        skipHoldInheritance: true,
+        attribution: {
+          scheduledTask: {
+            taskId: randomUUID(),
+            runId: randomUUID(),
+            title: "Deleted externally",
+            accessMode: "supervised",
+            interactionMode: "plan",
+          },
+        },
+      });
+      runtime.store.orchestration.queue.cancel({ conversationId: runtime.conversationId, itemId: busyHoldId, reason: "user" });
+      await queue.schedule(runtime.conversationId);
+      await drain();
+      expect(runtime.store.orchestration.queue.getItem(staleItemId)?.state).toBe("cancelled");
+      expect(runtime.provider.runCount).toBe(5);
     } finally {
       abort.abort();
       service?.dispose();

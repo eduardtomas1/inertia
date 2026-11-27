@@ -15,6 +15,7 @@ import type { AgentApprovalDecision } from "../../src/server/provider/interactio
 import { AgentThreadManager } from "../../src/server/runtime/agent-thread-manager";
 import { ConversationContextRequestCoordinator } from "../../src/server/runtime/conversation-context-request-coordinator";
 import { DelegationTaskService } from "../../src/server/runtime/delegation/task-service";
+import type { ScheduledTaskService } from "../../src/server/runtime/scheduled-tasks/scheduled-task-service";
 import type { ManagedMessageQueue } from "../../src/server/runtime/managed-send-modes";
 
 const roots: string[] = [];
@@ -147,7 +148,9 @@ function fakeTurns(store: RuntimeStore, database: Database.Database, onSettled: 
   };
 }
 
-export async function createDelegationManagerFixture(options: { pollMs?: number } = {}): Promise<DelegationManagerFixture> {
+export async function createDelegationManagerFixture(
+  options: { pollMs?: number; scheduledTasks?: (store: RuntimeStore) => ScheduledTaskService } = {},
+): Promise<DelegationManagerFixture> {
   const root = await mkdtemp(join(tmpdir(), "inertia-delegation-manager-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -186,6 +189,7 @@ export async function createDelegationManagerFixture(options: { pollMs?: number 
   const source = store.createConversation(project.id, "Parent chat", { accessMode: "auto-edit" });
   const sourceTurn = turns.begin(source.id, "Coordinate the work").turn;
   turns.active.set(source.id, { turnId: sourceTurn.id, runId: sourceTurn.runId });
+  const scheduledTasksInstance = options.scheduledTasks?.(store);
   const manager = new AgentThreadManager({
     store,
     providers: { resolveModelRoute: () => ({ providerId: "codex" }) } as never,
@@ -199,6 +203,7 @@ export async function createDelegationManagerFixture(options: { pollMs?: number 
     contextRequests: new ConversationContextRequestCoordinator({ pendingInputs: inputs, contextPackets: store.contextPackets,
       broadcast: vi.fn(), broadcastConversationShell: vi.fn() }),
     delegation: service,
+    ...(scheduledTasksInstance ? { scheduledTasks: () => scheduledTasksInstance } : {}),
     messageQueue: () => messageQueue,
     providerInfo: () => [{ id: "codex", canRun: true, statusMessage: null }] as never,
     broadcastSnapshot: vi.fn(),

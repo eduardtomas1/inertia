@@ -293,16 +293,19 @@ export function settleScheduledRunOnQueueCancel(
   database.prepare(`UPDATE scheduled_task_runs
     SET state = 'skipped', error = COALESCE(error, ?), finished_at = COALESCE(finished_at, ?)
     WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, runId);
+  const latestRun = database.prepare(`SELECT id FROM scheduled_task_runs
+    WHERE task_id = ? ORDER BY claimed_at DESC, rowid DESC LIMIT 1`).get(runRow.task_id) as { id: string } | undefined;
+  if (latestRun && latestRun.id !== runId) return;
   const claimedMs = Date.parse(runRow.claimed_at);
   const nowMs = Date.parse(nowIso);
-  if (Number.isFinite(claimedMs) && Number.isFinite(nowMs) && (nowMs - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS) {
-    database.prepare(`UPDATE scheduled_tasks
-      SET last_run_at = ?, last_run_status = 'skipped',
-          last_conversation_id = ?,
-          last_turn_id = ?,
-          last_error = ?, updated_at = ?
-      WHERE id = ?`).run(nowIso, runRow.conversation_id, runRow.turn_id, note, nowIso, runRow.task_id);
-  }
+  const withinWindow = Number.isFinite(claimedMs) && Number.isFinite(nowMs)
+    && (nowMs - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS;
+  database.prepare(`UPDATE scheduled_tasks
+    SET last_run_at = ?, last_run_status = 'skipped',
+        last_conversation_id = ?,
+        last_turn_id = ?,
+        last_error = ?, updated_at = ?
+    WHERE id = ?`).run(nowIso, runRow.conversation_id, runRow.turn_id, withinWindow ? note : null, nowIso, runRow.task_id);
 }
 
 export class OrchestrationQueueRepository {

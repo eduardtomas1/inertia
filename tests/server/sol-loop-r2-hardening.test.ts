@@ -1538,6 +1538,111 @@ describe("sol-loop Wave A+B R2 hardening (S39 final admission, S41-S46)", () => 
       expect(s74Persisted?.lastRunStatus).toBe("queued");
       expect(s74Persisted?.lastTurnId).toBeNull();
       expect(s74Persisted?.lastError).toBeNull();
+
+      // S76: Running recurring task edited to a one-shot schedule that queues a newer occurrence ->
+      // older turn's failure must NOT overwrite the newer occurrence's queued summary!
+      let s76NowMs = Date.parse("2030-06-01T10:00:00.000Z");
+      const s76Conv = store.createConversation(project.id, "S76 Latest occurrence guard");
+      const s76Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s76Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(s76NowMs),
+      });
+      const s76Task = s76Service.create({
+        projectId: project.id,
+        title: "Recurring edited to once",
+        prompt: "Check status",
+        schedule: { type: "interval", everyMs: 600_000 },
+        boundConversationId: s76Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      const olderRun = await s76Service.runNow(s76Task.id);
+      const olderTurnId = randomUUID();
+      s76Service.bindRunTurn(olderRun.run.id, olderTurnId);
+      expect(store.scheduledTasks.get(s76Task.id)?.lastRunStatus).toBe("running");
+      expect(store.scheduledTasks.get(s76Task.id)?.lastTurnId).toBe(olderTurnId);
+
+      // Edit the running recurring task into a one-shot schedule due in 2 minutes, then let it fire!
+      s76NowMs += 60_000;
+      const onceDueIso = new Date(s76NowMs + 60_000).toISOString();
+      s76Service.update(s76Task.id, { schedule: { type: "once", runAt: onceDueIso }, enabled: true });
+      s76NowMs += 60_000;
+      await s76Service.tick();
+      const s76Runs = store.scheduledTasks.listRuns(s76Task.id);
+      expect(s76Runs).toHaveLength(2);
+      const newerRun = s76Runs[0]!;
+      expect(newerRun.id).not.toBe(olderRun.run.id);
+      expect(newerRun.state).toBe("queued");
+      expect(store.scheduledTasks.get(s76Task.id)?.lastRunStatus).toBe("queued");
+      expect(store.scheduledTasks.get(s76Task.id)?.lastTurnId).toBeNull();
+      expect(store.scheduledTasks.get(s76Task.id)?.lastError).toBeNull();
+
+      // Now the OLDER turn fails -> history records older run as failed, but task summary stays on the newer queued run!
+      s76NowMs += 10_000;
+      s76Service.onTurnSettled({
+        id: olderTurnId,
+        conversationId: s76Conv.id,
+        status: "failed",
+        terminalReason: "Older recurring turn failed",
+        completedAt: new Date(s76NowMs).toISOString(),
+        updatedAt: new Date(s76NowMs).toISOString(),
+      });
+      expect(store.scheduledTasks.getRun(olderRun.run.id)?.state).toBe("failed");
+      const s76SummaryAfterOlderFailure = store.scheduledTasks.get(s76Task.id);
+      expect(s76SummaryAfterOlderFailure?.lastRunStatus).toBe("queued");
+      expect(s76SummaryAfterOlderFailure?.lastTurnId).toBeNull();
+      expect(s76SummaryAfterOlderFailure?.lastError).toBeNull();
+
+      // S77: One-shot occurrence completing >24h after claim still transitions summary from running -> completed!
+      let s77NowMs = Date.parse("2030-07-01T10:00:00.000Z");
+      const s77Conv = store.createConversation(project.id, "S77 Late completion");
+      const s77Service = new ScheduledTaskService({
+        repository: store.scheduledTasks,
+        store,
+        createConversation: async () => s77Conv,
+        broadcast: () => undefined,
+        enableProviders: true,
+        now: () => new Date(s77NowMs),
+      });
+      const s77Task = s77Service.create({
+        projectId: project.id,
+        title: "Long one-shot job",
+        prompt: "Run migration audit",
+        schedule: { type: "once", runAt: "2030-07-01T10:05:00.000Z" },
+        boundConversationId: s77Conv.id,
+        freshSession: false,
+        accessMode: "supervised",
+        interactionMode: "build",
+      });
+      s77NowMs = Date.parse("2030-07-01T10:05:00.000Z");
+      await s77Service.tick();
+      const s77Run = store.scheduledTasks.listRuns(s77Task.id)[0]!;
+      const s77TurnId = randomUUID();
+      s77Service.bindRunTurn(s77Run.id, s77TurnId);
+      expect(store.scheduledTasks.get(s77Task.id)?.lastRunStatus).toBe("running");
+
+      // Advance >24 hours past claim and complete the turn.
+      s77NowMs += 25 * 60 * 60 * 1_000;
+      const s77DoneIso = new Date(s77NowMs).toISOString();
+      s77Service.onTurnSettled({
+        id: s77TurnId,
+        conversationId: s77Conv.id,
+        status: "completed",
+        terminalReason: null,
+        completedAt: s77DoneIso,
+        updatedAt: s77DoneIso,
+      });
+      expect(store.scheduledTasks.getRun(s77Run.id)?.state).toBe("completed");
+      const s77Summary = store.scheduledTasks.get(s77Task.id);
+      expect(s77Summary?.lastRunStatus).toBe("completed");
+      expect(s77Summary?.lastTurnId).toBe(s77TurnId);
+      expect(s77Summary?.lastError).toBeNull();
+      expect(s77Summary?.consecutiveFailures).toBe(0);
     } finally {
       store.close();
     }

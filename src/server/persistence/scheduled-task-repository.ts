@@ -495,7 +495,7 @@ export class ScheduledTaskRepository {
       SELECT ${RUN_COLUMNS}
       FROM scheduled_task_runs
       WHERE task_id = ?
-      ORDER BY claimed_at DESC, id DESC
+      ORDER BY claimed_at DESC, rowid DESC
       LIMIT ?
     `).all(taskId, effectiveLimit) as ScheduledTaskRunRow[];
     return rows.flatMap((row) => {
@@ -604,6 +604,8 @@ export class ScheduledTaskRepository {
               enabled = 0,
               last_run_at = ?,
               last_run_status = 'claimed',
+              last_turn_id = NULL,
+              last_error = NULL,
               updated_at = ?
           WHERE id = ?
         `).run(input.nextRunAtAfterClaim, run.claimedAt, run.claimedAt, run.taskId);
@@ -613,6 +615,8 @@ export class ScheduledTaskRepository {
           SET next_run_at = ?,
               last_run_at = ?,
               last_run_status = 'claimed',
+              last_turn_id = NULL,
+              last_error = NULL,
               updated_at = ?
           WHERE id = ?
         `).run(input.nextRunAtAfterClaim, run.claimedAt, run.claimedAt, run.taskId);
@@ -625,7 +629,7 @@ export class ScheduledTaskRepository {
             SELECT id
             FROM scheduled_task_runs
             WHERE task_id = ?
-            ORDER BY claimed_at DESC, id DESC
+            ORDER BY claimed_at DESC, rowid DESC
             LIMIT ?
           )
       `).run(run.taskId, run.taskId, MAX_SCHEDULED_TASK_RUN_HISTORY);

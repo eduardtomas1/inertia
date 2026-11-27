@@ -140,8 +140,17 @@ describe("Private Connect browser lifecycle", () => {
     render(<App initialPairingFragment={null} />);
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your workspace" })).toBeInTheDocument());
     await waitFor(() => expect(notifyClose).toEqual(expect.any(Function)));
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument());
     const initialConnectCalls = vi.mocked(connectPrivateConnectSocket).mock.calls.length;
-    vi.mocked(apiRequest).mockRejectedValueOnce(new TypeError("HTTP transport unavailable"));
+    const baseApiImpl = vi.mocked(apiRequest).getMockImplementation()!;
+    let rejectedStateFallback = false;
+    vi.mocked(apiRequest).mockImplementation((req, csrf) => {
+      if (!rejectedStateFallback && (req as { type?: string }).type === "state.get") {
+        rejectedStateFallback = true;
+        return Promise.reject(new TypeError("HTTP transport unavailable")) as ReturnType<typeof apiRequest>;
+      }
+      return baseApiImpl(req, csrf);
+    });
 
     vi.useFakeTimers();
     await act(async () => {
@@ -149,6 +158,7 @@ describe("Private Connect browser lifecycle", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
 
+    expect(rejectedStateFallback).toBe(true);
     expect(screen.getByText(/Offline — showing only data/iu)).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
     expect(vi.mocked(connectPrivateConnectSocket)).toHaveBeenCalledTimes(initialConnectCalls + 1);

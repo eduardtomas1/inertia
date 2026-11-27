@@ -456,13 +456,15 @@ export class ScheduledTaskService {
     });
     const task = this.dependencies.repository.get(existing.taskId);
     if (task) {
-      this.dependencies.repository.update(task.id, {
-        now: nowIso,
-        lastRunStatus: "running",
-        ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
-        lastTurnId: turnId,
-        lastError: null,
-      });
+      if (this.isLatestRunForTask(task.id, existing.id)) {
+        this.dependencies.repository.update(task.id, {
+          now: nowIso,
+          lastRunStatus: "running",
+          ...(existing.conversationId ? { lastConversationId: existing.conversationId } : {}),
+          lastTurnId: turnId,
+          lastError: null,
+        });
+      }
       this.broadcastChanged(task.projectId);
     }
     const existingTurn = this.readTurnOrNull(turnId);
@@ -492,13 +494,13 @@ export class ScheduledTaskService {
       const claimedMs = Date.parse(run.claimedAt);
       const withinWindow = Number.isFinite(claimedMs)
         && (now.getTime() - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS;
-      if (withinWindow) {
+      if (this.isLatestRunForTask(task.id, run.id)) {
         this.dependencies.repository.recordTaskOutcome(task.id, {
           lastRunAt: run.finishedAt ?? nowIso,
           lastRunStatus: "skipped",
           lastConversationId: run.conversationId,
           lastTurnId: run.turnId,
-          lastError: normalizeScheduledTaskError(run.error ?? reason),
+          lastError: withinWindow ? normalizeScheduledTaskError(run.error ?? reason) : null,
           consecutiveFailures: task.consecutiveFailures,
           updatedAt: nowIso,
         });
@@ -549,14 +551,18 @@ export class ScheduledTaskService {
 
     const task = this.dependencies.repository.get(run.taskId);
     if (!task) return;
-    if (withinWindow) {
+    if (this.isLatestRunForTask(task.id, run.id)) {
       this.dependencies.repository.recordTaskOutcome(task.id, {
         lastRunAt: settledAt,
         lastRunStatus: succeeded ? "completed" : "failed",
         lastConversationId: turn.conversationId,
         lastTurnId: turn.id,
-        lastError: errorMessage,
-        consecutiveFailures: succeeded ? 0 : task.consecutiveFailures + 1,
+        lastError: withinWindow ? errorMessage : null,
+        consecutiveFailures: succeeded
+          ? 0
+          : withinWindow
+            ? task.consecutiveFailures + 1
+            : task.consecutiveFailures,
         updatedAt: settledAt,
       });
     }
@@ -756,14 +762,16 @@ export class ScheduledTaskService {
           turnId: dispatched.turnId ?? null,
         };
       const updatedTask = dispatched.linkedTask
-        ?? this.dependencies.repository.update(freshTask.id, {
-          now: updatedAt,
-          lastRunAt: updatedAt,
-          lastRunStatus: "queued",
-          lastConversationId: resolved.conversationId,
-          lastTurnId: dispatched.turnId ?? null,
-          lastError: null,
-        });
+        ?? (this.isLatestRunForTask(freshTask.id, claimed.id)
+          ? this.dependencies.repository.update(freshTask.id, {
+              now: updatedAt,
+              lastRunAt: updatedAt,
+              lastRunStatus: "queued",
+              lastConversationId: resolved.conversationId,
+              lastTurnId: dispatched.turnId ?? null,
+              lastError: null,
+            })
+          : freshTask);
       this.trackRun({
         runId: updatedRun.id,
         taskId: freshTask.id,
@@ -783,20 +791,25 @@ export class ScheduledTaskService {
         state: "failed", conversationId: targetConversationId, error: message, finishedAt: failNow, updatedAt: failNow,
       });
       const currentTask = this.dependencies.repository.get(task.id) ?? task;
+      const isLatest = this.isLatestRunForTask(task.id, claimed.id);
       const nextFailures = currentTask.consecutiveFailures + 1;
       if (disableMissingTarget) {
         this.dependencies.repository.update(task.id, {
           enabled: false,
           nextRunAt: null,
           now: failNow,
-          lastRunAt: failNow,
-          lastRunStatus: "failed",
-          lastConversationId: targetConversationId,
-          lastTurnId: null,
-          lastError: message,
-          consecutiveFailures: nextFailures,
+          ...(isLatest
+            ? {
+                lastRunAt: failNow,
+                lastRunStatus: "failed" as const,
+                lastConversationId: targetConversationId,
+                lastTurnId: null,
+                lastError: message,
+                consecutiveFailures: nextFailures,
+              }
+            : {}),
         });
-      } else {
+      } else if (isLatest) {
         this.dependencies.repository.recordTaskOutcome(task.id, {
           lastRunAt: failNow,
           lastRunStatus: "failed",
@@ -901,14 +914,16 @@ export class ScheduledTaskService {
           queueItemId: input.queueItemId,
           updatedAt: input.requestedAt,
         });
-        linkedTask = this.dependencies.repository.update(input.task.id, {
-          now: input.requestedAt,
-          lastRunAt: input.requestedAt,
-          lastRunStatus: "queued",
-          lastConversationId: input.conversationId,
-          lastTurnId: null,
-          lastError: null,
-        });
+        if (this.isLatestRunForTask(input.task.id, input.run.id)) {
+          linkedTask = this.dependencies.repository.update(input.task.id, {
+            now: input.requestedAt,
+            lastRunAt: input.requestedAt,
+            lastRunStatus: "queued",
+            lastConversationId: input.conversationId,
+            lastTurnId: null,
+            lastError: null,
+          });
+        }
       },
     });
     void Promise.resolve(this.dependencies.messageQueue?.()?.schedule?.(input.conversationId)).catch(() => undefined);
@@ -971,6 +986,11 @@ export class ScheduledTaskService {
     }
   }
 
+  private isLatestRunForTask(taskId: string, runId: string): boolean {
+    const latest = this.dependencies.repository.listRuns(taskId, 1)[0];
+    return !latest || latest.id === runId;
+  }
+
   private settleNonTurnRun(
     run: ScheduledTaskRun,
     state: "failed" | "skipped",
@@ -992,14 +1012,14 @@ export class ScheduledTaskService {
     const claimedMs = Date.parse(run.claimedAt);
     const withinWindow = Number.isFinite(claimedMs)
       && (now.getTime() - claimedMs) <= SCHEDULED_TASK_FAILURE_TRACKING_WINDOW_MS;
-    if (withinWindow) {
+    if (this.isLatestRunForTask(task.id, run.id)) {
       this.dependencies.repository.recordTaskOutcome(task.id, {
         lastRunAt: nowIso,
         lastRunStatus: state,
         lastConversationId: run.conversationId,
         lastTurnId: run.turnId,
-        lastError: errorMessage,
-        consecutiveFailures: state === "failed" ? task.consecutiveFailures + 1 : task.consecutiveFailures,
+        lastError: withinWindow ? errorMessage : null,
+        consecutiveFailures: state === "failed" && withinWindow ? task.consecutiveFailures + 1 : task.consecutiveFailures,
         updatedAt: nowIso,
       });
     }
@@ -1049,7 +1069,7 @@ export class ScheduledTaskService {
         const projectId = runTx(() => {
           this.dependencies.repository.updateRun(run.id, { state: "queued", turnId: null, updatedAt: nowIso });
           const task = this.dependencies.repository.get(run.taskId);
-          if (task && (task.lastTurnId === run.turnId || task.lastRunStatus === "running")) {
+          if (task && this.isLatestRunForTask(task.id, run.id) && (task.lastTurnId === run.turnId || task.lastRunStatus === "running")) {
             this.dependencies.repository.update(task.id, {
               now: nowIso,
               lastRunStatus: "queued",

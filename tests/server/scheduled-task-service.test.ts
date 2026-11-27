@@ -155,6 +155,7 @@ class InMemoryScheduledTaskRepository implements ScheduledTaskRepositoryLike {
 
   listRuns(taskId: string, limit = 25): ScheduledTaskRun[] {
     return [...this.runs.values()]
+      .reverse()
       .filter((run) => run.taskId === taskId)
       .sort((left, right) => right.claimedAt.localeCompare(left.claimedAt, "en"))
       .slice(0, limit)

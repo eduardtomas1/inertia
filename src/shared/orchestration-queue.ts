@@ -133,6 +133,7 @@ export const scheduledTaskQueueAttributionSchema = z.strictObject({
   title: z.string().trim().min(1).max(160),
   interactionMode: z.enum(["build", "plan"]),
   accessMode: z.enum(["supervised", "auto-edit", "full"]),
+  requirePrivateConnectPromptSafety: z.literal(true).optional(),
 });
 export type ScheduledTaskQueueAttribution = z.infer<typeof scheduledTaskQueueAttributionSchema>;
 
@@ -332,6 +333,9 @@ export const queueEventSchema = z.discriminatedUnion("type", [
       attachmentIds: z.array(id).max(MAX_ATTACHMENT_COUNT),
       routeIdentity: routeIdentitySchema.optional(),
       modelSelection: modelSelectionSchema.nullable().optional(),
+      followsThreadSelection: z.literal(true).optional(),
+      freshContext: z.literal(true).optional(),
+      attribution: queueItemAttributionSchema.optional(),
       createdBy: z.enum(QUEUE_CREATED_BY),
       creationSource: z.enum(QUEUE_CREATION_SOURCES),
       deviceId: id.optional(),

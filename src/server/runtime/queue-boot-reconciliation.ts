@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import type { ModelSelection } from "../../shared/contracts";
 import type { RuntimeStore } from "../database";
 import {
   QUEUE_ITEM_PROJECTION,
@@ -7,6 +8,7 @@ import {
   queueUnreadFollowUpCommandId,
   type QueueCreatedBy,
   type QueueCreationSource,
+  type QueueItemAttribution,
   type QueueItemProjection,
 } from "../../shared/orchestration-queue";
 import type { QueueContentMismatch } from "../orchestration-v2/event-store";
@@ -253,6 +255,10 @@ function isUnattendedMessageCreationSource(source: string): boolean {
   return source === "mcp" || source === "scheduled" || source === "server";
 }
 
+function isScheduledTaskAttribution(attribution: QueueItemAttribution | undefined): boolean {
+  return attribution !== undefined && "scheduledTask" in attribution;
+}
+
 function isUnattendedQueueItem(
   store: RuntimeStore,
   db: OrchestrationDatabase,
@@ -260,7 +266,7 @@ function isUnattendedQueueItem(
   item: QueueItemProjection,
 ): boolean {
   if (item.kind !== "message") return false;
-  if (item.attribution !== undefined) return false;
+  if (item.attribution !== undefined && !isScheduledTaskAttribution(item.attribution)) return false;
   if (item.steerFollowUpOfRunId !== undefined) return false;
   if (!isUnattendedMessageCreationSource(item.creationSource)) return false;
 
@@ -290,6 +296,10 @@ interface TurnCreationProvenance {
   createdBy: QueueCreatedBy;
   creationSource: QueueCreationSource;
   deviceId?: string;
+  attribution?: QueueItemAttribution;
+  freshContext?: true;
+  followsThreadSelection?: true;
+  modelSelection?: ModelSelection | null;
   reusableDeliveredItemId: string | null;
   isUnattended: boolean;
   isExcluded: boolean;
@@ -331,13 +341,17 @@ function resolveTurnCreationProvenance(
   const reusableDeliveredItemId = sourceItem?.state === "delivered" ? sourceItem.id : null;
 
   if (sourceItem) {
-    if (sourceItem.kind !== "message" || sourceItem.attribution !== undefined) {
+    if (sourceItem.kind !== "message" || (sourceItem.attribution !== undefined && !isScheduledTaskAttribution(sourceItem.attribution))) {
       return { createdBy: "system", creationSource: "server", reusableDeliveredItemId: null, isUnattended: false, isExcluded: true };
     }
     return {
       createdBy: sourceItem.createdBy,
       creationSource: sourceItem.creationSource,
       ...(sourceItem.deviceId !== undefined ? { deviceId: sourceItem.deviceId } : {}),
+      ...(sourceItem.attribution !== undefined ? { attribution: sourceItem.attribution } : {}),
+      ...(sourceItem.freshContext !== undefined ? { freshContext: sourceItem.freshContext } : {}),
+      ...(sourceItem.followsThreadSelection !== undefined ? { followsThreadSelection: sourceItem.followsThreadSelection } : {}),
+      ...(sourceItem.modelSelection !== undefined ? { modelSelection: sourceItem.modelSelection } : {}),
       reusableDeliveredItemId,
       isUnattended: isUnattendedMessageCreationSource(sourceItem.creationSource),
       isExcluded: false,
@@ -711,7 +725,12 @@ function reconcileConversationQueueOnBoot(
               createdBy: provenance.createdBy,
               creationSource: provenance.creationSource,
               ...(provenance.deviceId !== undefined ? { deviceId: provenance.deviceId } : {}),
-              modelSelection: latestTurn.modelSelection,
+              ...(provenance.attribution !== undefined ? { attribution: provenance.attribution } : {}),
+              ...(provenance.freshContext !== undefined ? { freshContext: provenance.freshContext } : {}),
+              ...(provenance.followsThreadSelection !== undefined ? { followsThreadSelection: provenance.followsThreadSelection } : {}),
+              modelSelection: provenance.followsThreadSelection
+                ? null
+                : (provenance.modelSelection !== undefined ? provenance.modelSelection : latestTurn.modelSelection),
               requestedAt: latestTurn.requestedAt,
               queueHeld,
               ...(bootAutoResend ? { bootAutoResend: true } : {}),

@@ -22,7 +22,7 @@ import { OrchestrationConflict, type CommandSource } from "../orchestration-v2/t
 import { delegatedSteerContent } from "./delegation/delivery-instruction";
 import { commandRejection } from "./commands/command-rejection";
 import { requestAgentStop, SUPERSEDED_STOP_CODE } from "./commands/agent-stop-command";
-import { QUEUE_CLAIM_SUPERSEDED_CODE, type SendMessageCommandOptions } from "./commands/message-send-command";
+import { QUEUE_ATTRIBUTION_STALE_CODE, QUEUE_CLAIM_SUPERSEDED_CODE, type SendMessageCommandOptions } from "./commands/message-send-command";
 import {
   awaitMessageSendPreparation,
   MessageSendPreparationTimeoutError,
@@ -780,6 +780,15 @@ export function handleQueuedDispatchErrorOperation(
     ));
   if (input.aborted || turns.isClosing()) {
     input.releaseClaimItem(conversationId, entry.id, "runtime-lost");
+  } else if (error instanceof RuntimeRequestError && error.code === QUEUE_ATTRIBUTION_STALE_CODE) {
+    if (currentV2 && currentV2.state === "dispatching" && currentV2.dispatchOrdinal === claim.dispatchOrdinal) {
+      input.releaseClaimItem(conversationId, entry.id, "transient");
+    }
+    try {
+      queue.cancel({ conversationId, itemId: entry.id, reason: "withdrawn", detail: publicRuntimeError(error) });
+    } catch (cancelError) {
+      if (!(cancelError instanceof OrchestrationConflict)) throw cancelError;
+    }
   } else if (claimSuperseded) {
     if (currentV2 && currentV2.state === "dispatching" && currentV2.dispatchOrdinal === claim.dispatchOrdinal) {
       input.releaseClaimItem(conversationId, entry.id, "transient");

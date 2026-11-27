@@ -379,6 +379,9 @@ export async function executeManagedQueueMutation(
   if (currentItem.kind !== "message" || (currentItem.state !== "waiting" && currentItem.state !== "blocked")) {
     throw new Error("Only a waiting or blocked message item can be promoted to steer.");
   }
+  if (currentItem.attribution && "scheduledTask" in currentItem.attribution) {
+    throw new Error("Scheduled task items must run as their own turn and cannot be steered into a running turn.");
+  }
   if (!dependencies.turns.isActive(target.id)) {
     throw new Error("The managed chat has no running turn to steer.");
   }

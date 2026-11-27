@@ -6,6 +6,8 @@ import type { Conversation, ModelSelection, TurnRequestContext } from "../../../
 import { MAX_CHAT_ATTACHMENT_BYTES, isExtractedDocumentAttachmentMimeType } from "../../../shared/attachments";
 import { COMMAND_ONLY_STEER_REFUSED, isCommandOnlyPrompt, supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { providerIdForHarness } from "../../../shared/model-routing";
+import { privateConnectPromptSafetyForHarness, privateConnectPromptSafetyIsUsable } from "../../../shared/private-connect/prompt-safety";
+import { agentAnswerable } from "../managed-child-questions";
 import { OrchestrationConflict, type CommandSource, type JsonValue } from "../../orchestration-v2/types";
 import { hasIncompleteWorktreeSetup } from "../../workspace-path-authority";
 import { MESSAGE_ADMISSION_UNAVAILABLE, RuntimeRequestError } from "../../runtime-errors";
@@ -55,6 +57,7 @@ type SendRoute =
   | { kind: "new-turn"; handedOff: boolean; contextPacketIds: readonly string[]; resolvedTurnContext: TurnRequestContext | undefined };
 
 export const QUEUE_CLAIM_SUPERSEDED_CODE = "queue-claim-superseded";
+export const QUEUE_ATTRIBUTION_STALE_CODE = "queue-attribution-stale";
 
 export interface SendMessageCommandOptions {
   modelSelectionOverride?: ModelSelection;
@@ -139,6 +142,7 @@ function assertTurnSkillsCurrentForSend(
 function assertQueuedClaimCurrent(
   dependencies: TurnInteractionCommandDependencies,
   conversation: Conversation,
+  effectiveSelection: ModelSelection,
 ): void {
   const queued = dependencies.queuedMessage;
   if (!queued) return;
@@ -158,6 +162,48 @@ function assertQueuedClaimCurrent(
       "The queued message claim was held or superseded before admission.",
       QUEUE_CLAIM_SUPERSEDED_CODE,
     );
+  }
+  if (v2Item) {
+    dependencies.assertQueuedAttributionCurrent?.(v2Item);
+    if (v2Item.attribution && "scheduledTask" in v2Item.attribution) {
+      const attr = v2Item.attribution.scheduledTask;
+      const task = dependencies.store.scheduledTasks.get(attr.taskId);
+      const run = dependencies.store.scheduledTasks.getRun(attr.runId);
+      if (!task || !run || run.taskId !== attr.taskId || run.state === "completed" || run.state === "failed" || run.state === "skipped") {
+        throw new RuntimeRequestError("The scheduled task or occurrence is no longer active.", QUEUE_ATTRIBUTION_STALE_CODE);
+      }
+      if (attr.requirePrivateConnectPromptSafety) {
+        if (attr.accessMode !== "supervised" || conversation.accessMode !== "supervised") {
+          throw new RuntimeRequestError("PrivateConnect prompting requires Supervised access on the desktop.");
+        }
+        const safety = privateConnectPromptSafetyForHarness(effectiveSelection.harnessId);
+        if (!privateConnectPromptSafetyIsUsable(safety)) {
+          throw new RuntimeRequestError(safety.explanation);
+        }
+      }
+    } else if (v2Item.attribution && "childQuestionWake" in v2Item.attribution) {
+      const wake = v2Item.attribution.childQuestionWake;
+      const pending = dependencies.pendingInputs.get(wake.requestId);
+      const managed = dependencies.store.agentThreadManagement.managed(wake.childConversationId);
+      const childConv = managed?.sourceConversationId === conversation.id
+        ? (() => { try { return dependencies.store.conversation(wake.childConversationId); } catch { return null; } })()
+        : null;
+      const childLatest = childConv ? dependencies.store.latestAgentTurnForConversation(childConv.id) : null;
+      const childTurnTerminal = childLatest && pending && childLatest.id === pending.turnId
+        && (childLatest.status === "completed" || childLatest.status === "failed" || childLatest.status === "cancelled" || childLatest.status === "interrupted");
+      const wakeLive = dependencies.store.appSettings().delegationAutomaticWakes
+        && childConv !== null
+        && childConv.archivedAt === null
+        && (dependencies.turns.isActive(childConv.id) || childConv.status === "needs-input")
+        && pending !== undefined
+        && pending.conversationId === wake.childConversationId
+        && pending.runId === wake.childRunId
+        && !childTurnTerminal
+        && agentAnswerable(pending);
+      if (!wakeLive) {
+        throw new RuntimeRequestError("The child question wake is no longer live.", QUEUE_ATTRIBUTION_STALE_CODE);
+      }
+    }
   }
   if (conversation.archivedAt !== null || !queuedWorkspaceMatches(dependencies, conversation)) {
     throw new RuntimeRequestError("The chat changed while its queued message was being prepared.");
@@ -841,7 +887,7 @@ async function startNewTurn(input: NewTurnInput): Promise<void> {
     scheduledDispatch?.assertCurrent();
     const latestConversation = dependencies.store.conversation(conversation.id);
     if (dependencies.queuedMessage) {
-      assertQueuedClaimCurrent(dependencies, latestConversation);
+      assertQueuedClaimCurrent(dependencies, latestConversation, selectionOverride ?? latestConversation.modelSelection);
     } else if (latestConversation.archivedAt != null) {
       throw new RuntimeRequestError("Archived chats are read-only until restored.");
     }

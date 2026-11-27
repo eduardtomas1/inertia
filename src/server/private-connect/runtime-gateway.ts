@@ -714,6 +714,23 @@ export class PrivateConnectRuntimeGateway {
       if (!privateConnectPromptSafetyIsUsable(safety)) {
         return failedResponse(requestId, "forbidden", safety.explanation);
       }
+      return null;
+    }
+    if (this.dependencies.scheduledTasks?.effectivePromptSafety) {
+      const safety = this.dependencies.scheduledTasks.effectivePromptSafety(task);
+      if (!privateConnectPromptSafetyIsUsable(safety)) {
+        return failedResponse(requestId, "forbidden", safety.explanation);
+      }
+      return null;
+    }
+    const inherited = this.dependencies.shell().conversations.find(
+      (conversation) => conversation.projectId === task.projectId && conversation.archivedAt === null,
+    );
+    if (inherited) {
+      const safety = this.promptSafety(inherited);
+      if (!privateConnectPromptSafetyIsUsable(safety)) {
+        return failedResponse(requestId, "forbidden", safety.explanation);
+      }
     }
     return null;
   }

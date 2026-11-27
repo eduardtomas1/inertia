@@ -396,6 +396,9 @@ export function projectQueueEvent(
         || payload.dispatchOrdinal !== item.dispatchOrdinal + 1) {
         throw new OrchestrationConflict("revision-conflict");
       }
+      if (payload.mode === "steer" && item.attribution !== undefined && "scheduledTask" in item.attribution) {
+        throw new OrchestrationConflict("revision-conflict");
+      }
       const cleared = withoutBlockedFields(item);
       const claimed = queueItemProjectionSchema.parse({
         ...cleared,
@@ -517,13 +520,16 @@ export function projectQueueEvent(
         attachmentIds: payload.attachmentIds,
         ...(payload.routeIdentity !== undefined ? { routeIdentity: payload.routeIdentity } : {}),
         ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
+        ...(payload.followsThreadSelection !== undefined ? { followsThreadSelection: payload.followsThreadSelection } : {}),
         queuePosition: null,
         queueHeld: payload.queueHeld,
+        ...(payload.freshContext !== undefined ? { freshContext: payload.freshContext } : {}),
         ...(payload.bootAutoResend !== undefined ? { bootAutoResend: payload.bootAutoResend } : {}),
         requestedAt: payload.requestedAt,
         editedAt: existing?.editedAt ?? null,
         state: "waiting",
         dispatchOrdinal: existing?.dispatchOrdinal ?? 0,
+        ...(payload.attribution !== undefined ? { attribution: payload.attribution } : {}),
       });
       const nextActiveIds = insertWithPlacement(state.activeItemIds, requeued.id, payload.placement ?? "front");
       activeItems.set(requeued.id, requeued);

@@ -241,17 +241,23 @@ export class ChildQuestionWakeCoordinator {
     };
   }
 
+  isWakeLive(
+    parentConversationId: string,
+    wake: ChildQuestionWakeAttribution,
+  ): boolean {
+    const pending = this.findPendingChildRequest(wake);
+    return this.automaticWakesEnabled()
+      && this.readActiveParent(parentConversationId) !== null
+      && pending !== undefined
+      && this.readLiveChildRequest(pending) !== null;
+  }
+
   cancelIfStale(
     parentConversationId: string,
     itemId: string,
     wake: ChildQuestionWakeAttribution,
   ): boolean {
-    const pending = this.findPendingChildRequest(wake);
-    const live = this.automaticWakesEnabled()
-      && this.readActiveParent(parentConversationId) !== null
-      && pending !== undefined
-      && this.readLiveChildRequest(pending) !== null;
-    if (live) return false;
+    if (this.isWakeLive(parentConversationId, wake)) return false;
 
     try {
       this.dependencies.store.orchestration.queue.cancel({

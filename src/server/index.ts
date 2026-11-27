@@ -813,8 +813,18 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   scheduledTasks = createScheduledTaskRuntime({
     store, creation: () => agentThreads?.creation, messageQueue: () => queuedMessages,
+    providerInfo: () => providerInfo,
     broadcast, broadcastSnapshot: flushSnapshot, broadcastConversationShell,
     enableProviders, isUpdateHeld: () => updatePreparation.isAdmissionClosed(),
+  });
+  store.orchestration.queue.onCancel((item, reason) => {
+    if (item.attribution && "scheduledTask" in item.attribution) {
+      scheduledTasks?.service.onRunQueueCancelled(
+        item.attribution.scheduledTask.runId,
+        `The queued scheduled prompt was cancelled (${reason}).`,
+        { alreadySettledInStore: true },
+      );
+    }
   });
   void queuedMessages.start(async () => { await delegation?.recover(); scheduledTasks?.start(); });
   const compactionDependencies: ConversationCompactionCommandDependencies = { store, providers, backendProfileController, turns, isolatedRuns, providerTerminalResumes, enableProviders, lifetimeSignal: runtimeLifetimeAbort.signal, compactions, instructions: turns, interaction: turnInteractionDependencies, settings: () => store.settings(), refreshProviderAccount: (providerId) => refreshProviderInfo(providerId), providerInfo: () => providerInfo, broadcast, broadcastConversationShell, send }; startIdleCompaction(compactionDependencies, { signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork });

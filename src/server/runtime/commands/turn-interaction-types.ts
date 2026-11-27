@@ -12,6 +12,7 @@ import type {
   ServerEvent,
 } from "../../../shared/contracts";
 import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
+import type { QueueItemProjection } from "../../../shared/orchestration-queue";
 import type { RuntimeStore } from "../../database";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { prepareDocumentAttachments } from "../attachments/document-attachment-context";
@@ -47,10 +48,12 @@ export interface ScheduledDelivery {
   accessMode: AccessMode;
   interactionMode: InteractionMode;
   freshContext?: boolean;
+  requirePrivateConnectPromptSafety?: boolean;
 }
 
 export interface TurnInteractionCommandDependencies {
   queuedMessage?: QueuedMessage;
+  assertQueuedAttributionCurrent?(item: QueueItemProjection): void;
   undeliveredFollowUps?: {
     enqueue(input: UndeliveredFollowUp, handoffId: string, persist?: QueuedMessagePersistence): Promise<MessageQueueResult>;
     adopt(input: UndeliveredFollowUp, unconfirmed: string | null): MessageQueueResult;

@@ -198,6 +198,9 @@ export interface QueueRequeueUndeliveredInput {
   deviceId?: string;
   routeIdentity?: string;
   modelSelection?: ModelSelection | null;
+  followsThreadSelection?: true;
+  freshContext?: true;
+  attribution?: QueueItemAttribution;
   requestedAt?: string;
   queueHeld?: boolean;
   bootAutoResend?: true;
@@ -267,12 +270,19 @@ function parseSelectionJson(raw: string | null) {
 }
 
 export class OrchestrationQueueRepository {
+  private readonly cancelListeners = new Set<(item: QueueItemProjection, reason: QueueCancelReason) => void>();
+
   constructor(
     private readonly database: Database.Database,
     private readonly events: OrchestrationEventStore,
     private readonly access: QueueRepositoryAccess,
     private readonly clock: () => string = () => new Date().toISOString(),
   ) {}
+
+  onCancel(listener: (item: QueueItemProjection, reason: QueueCancelReason) => void): () => void {
+    this.cancelListeners.add(listener);
+    return () => { this.cancelListeners.delete(listener); };
+  }
 
   revision(threadId: string): number {
     return this.events.revision(threadId);
@@ -523,7 +533,8 @@ export class OrchestrationQueueRepository {
   }
 
   cancel(input: QueueCancelInput): QueueMutationResult<QueueItemProjection> {
-    return this.database.transaction((): QueueMutationResult<QueueItemProjection> => {
+    let cancelledPrevious: QueueItemProjection | null = null;
+    const outcome = this.database.transaction((): QueueMutationResult<QueueItemProjection> => {
       const conversation = this.access.conversation(input.conversationId);
       const commandType = input.commandType ?? "message.queue.remove";
       const { identity, command } = this.commandContext(conversation, input.source,
@@ -532,6 +543,7 @@ export class OrchestrationQueueRepository {
       if (this.events.receipt(identity, command, commandType)) {
         return { replayed: true, value: this.requireItem(input.itemId), events: [] };
       }
+      const previous = this.getItem(input.itemId);
       const committed = this.events.commit({
         ...identity, command, commandType, expectedRevision: this.events.revision(conversation.id),
         events: [{
@@ -543,9 +555,23 @@ export class OrchestrationQueueRepository {
         this.cancelRowInTable(conversation.id, input.itemId);
         this.syncActiveRowsToTable(conversation.id);
         this.pruneTerminal(conversation.id);
+        if (previous?.attribution && "scheduledTask" in previous.attribution) {
+          const nowIso = this.clock();
+          const note = input.detail ?? `The queued scheduled prompt was cancelled (${input.reason}).`;
+          this.database.prepare(`UPDATE scheduled_task_runs
+            SET state = 'skipped', error = COALESCE(error, ?), finished_at = COALESCE(finished_at, ?)
+            WHERE id = ? AND state IN ('claimed', 'queued')`).run(note, nowIso, previous.attribution.scheduledTask.runId);
+        }
       });
+      if (!committed.replayed) cancelledPrevious = previous;
       return { replayed: committed.replayed, value: this.requireItem(input.itemId), events: committed.events };
     }).immediate();
+    if (cancelledPrevious) {
+      for (const listener of this.cancelListeners) {
+        try { listener(cancelledPrevious, input.reason); } catch { /* listener errors must not break cancel */ }
+      }
+    }
+    return outcome;
   }
 
   hold(input: QueueHoldInput): QueueMutationResult<QueueItemProjection[]> {
@@ -756,6 +782,9 @@ export class OrchestrationQueueRepository {
             contentRef: { chars: queueContentCharCount(content), editRevision },
             attachmentIds: attachments.map(({ id }) => id), routeIdentity,
             ...(modelSelection !== undefined ? { modelSelection } : {}),
+            ...(input.followsThreadSelection !== undefined ? { followsThreadSelection: input.followsThreadSelection } : {}),
+            ...(input.freshContext !== undefined ? { freshContext: input.freshContext } : {}),
+            ...(input.attribution !== undefined ? { attribution: input.attribution } : {}),
             createdBy, creationSource, ...(input.deviceId !== undefined ? { deviceId: input.deviceId } : {}),
             requestedAt, queueHeld, ...(input.bootAutoResend ? { bootAutoResend: true } : {}), placement: input.placement ?? "front",
           },
@@ -765,24 +794,25 @@ export class OrchestrationQueueRepository {
         const digest = queuedIntentDigest(content, attachments);
         const projected = this.requireItem(input.itemId);
         const selectionJson = modelSelection ? JSON.stringify(modelSelection) : null;
+        const followsFlag = input.followsThreadSelection ? 1 : 0;
         const updated = this.database.prepare(`UPDATE queued_messages
           SET content = ?, attachments_json = ?, intent_digest = ?, route_identity = ?,
               state = 'waiting', error = NULL, turn_id = NULL, user_message_id = ?,
               queue_position = ?, queue_held = ?, edit_revision = ?, run_id = NULL, delivery_mode = NULL,
-              selection_json = COALESCE(?, selection_json)
+              selection_json = COALESCE(?, selection_json), follows_thread_selection = ?
           WHERE id = ? AND conversation_id = ?`).run(
           content, JSON.stringify(attachments), digest, routeIdentity, input.userMessageId,
-          projected.queuePosition, projected.queueHeld ? 1 : 0, editRevision, selectionJson, input.itemId, conversation.id,
+          projected.queuePosition, projected.queueHeld ? 1 : 0, editRevision, selectionJson, followsFlag, input.itemId, conversation.id,
         );
         if (updated.changes === 0) {
           this.database.prepare(`INSERT INTO queued_messages (
             id, conversation_id, content, attachments_json, intent_digest, creation_digest, route_identity, state,
             created_at, user_message_id, queue_position, queue_held, kind, created_by, creation_source, device_id,
             edit_revision, dispatch_ordinal, selection_json, follows_thread_selection
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, 'message', ?, ?, ?, ?, ?, ?, 0)`).run(
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, 'message', ?, ?, ?, ?, ?, ?, ?)`).run(
             projected.id, conversation.id, content, JSON.stringify(attachments), digest, digest, routeIdentity,
             requestedAt, input.userMessageId, projected.queuePosition, projected.queueHeld ? 1 : 0,
-            createdBy, creationSource, input.deviceId ?? null, editRevision, projected.dispatchOrdinal, selectionJson,
+            createdBy, creationSource, input.deviceId ?? null, editRevision, projected.dispatchOrdinal, selectionJson, followsFlag,
           );
         }
         this.syncActiveRowsToTable(conversation.id);

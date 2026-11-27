@@ -6,6 +6,7 @@ import {
 import {
   privateConnectPromptSafetyForHarness,
   privateConnectPromptSafetyIsUsable,
+  type PrivateConnectPromptSafety,
 } from "../../shared/private-connect/prompt-safety";
 import type {
   PrivateConnectRuntimeAuthorization,
@@ -43,6 +44,7 @@ export interface PrivateConnectScheduledTaskGatewayHandlers {
   list(projectId?: string): ScheduledTask[];
   get(taskId: string): ScheduledTask | null;
   projectName(projectId: string): string | null;
+  effectivePromptSafety?(task: ScheduledTask): PrivateConnectPromptSafety;
   toggle(taskId: string, enabled: boolean): Promise<ScheduledTask> | ScheduledTask;
   runNow(taskId: string): Promise<{ task: ScheduledTask; conversationId: string | null }>;
   remove(taskId: string): Promise<boolean> | boolean;

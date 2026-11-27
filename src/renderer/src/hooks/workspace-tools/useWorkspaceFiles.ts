@@ -229,6 +229,7 @@ export function useWorkspaceFiles({
     requestedLocation?: WorkspaceFileLocation,
     literalPath = false,
     headingId?: string,
+    loadDualViewSource = false,
   ) => {
     if (!project) return;
     void loadWorkspaceFileActions().then(
@@ -250,6 +251,7 @@ export function useWorkspaceFiles({
         setFilePreviewError,
         setFilePreviewLoading,
         setActionError,
+        loadDualViewSource,
       ]),
       () => {
         if (authorityRef.current !== authority) return;

@@ -1,0 +1,231 @@
+.workspace-media-viewer {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  background: var(--fill);
+}
+
+.workspace-media-viewer.is-compact {
+  flex: 1 1 0;
+}
+
+.workspace-media-image-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-media-video-wrap {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  place-items: center;
+  padding: clamp(8px, 2vw, 20px);
+}
+
+.workspace-media-video {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-xs);
+  background: #000;
+}
+
+.workspace-media-video:focus-visible,
+.workspace-media-audio:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.workspace-media-audio-wrap {
+  display: flex;
+  width: min(460px, calc(100% - 32px));
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+
+.workspace-media-audio-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--fill-strong);
+}
+
+.workspace-media-audio-meta {
+  display: flex;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.workspace-media-audio-meta strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-media-audio-meta span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.workspace-media-audio {
+  width: 100%;
+}
+
+.workspace-media-error {
+  display: flex;
+  width: min(360px, calc(100% - 28px));
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.workspace-media-error strong {
+  color: var(--text);
+  font-size: var(--text-base);
+}
+
+.workspace-media-error span {
+  font-size: var(--text-sm);
+  line-height: var(--leading-chrome);
+}
+
+.workspace-media-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.workspace-media-dialog-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-media-dialog-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  background: var(--fill-strong);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.workspace-media-dialog-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-panel-media-preview {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--fill);
+}
+
+.files-panel-media-bar {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font-size: var(--text-xs);
+}
+
+.files-panel-media-bar-info {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.files-panel-media-bar-info > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.files-panel-media-bar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.files-panel-media-bar-actions button {
+  display: inline-flex;
+  min-height: var(--control-height-small);
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.files-panel-media-bar-actions button:hover {
+  color: var(--text);
+  background: var(--fill);
+}
+
+.files-panel-media-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}

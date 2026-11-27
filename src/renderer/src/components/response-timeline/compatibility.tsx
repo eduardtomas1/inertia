@@ -130,7 +130,7 @@ function CompatibilityDisclosure({
                         ? <div className="message-meta"><span>System</span>{props.showTimestamps && <TooltipText tooltip={formatFullDateTime(message.createdAt)}><time dateTime={message.createdAt}>{formatMessageTime(message.createdAt)}</time></TooltipText>}</div>
                         : message.privateConnectDeviceId && <div className="message-meta"><MessageOrigin message={message} /></div>}
                       {message.role === "assistant"
-                        ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} />
+                        ? <ResponseMarkdown content={message.content} projectRoot={props.projectRoot} projectBaseRoot={props.projectBaseRoot} projectId={props.projectId} conversationId={props.conversationId} defaultCodeWrap={props.defaultCodeWrap} onOpenProjectFile={props.onOpenTurnFile} onPreviewMedia={props.onPreviewMedia} />
                         : <div className="message-body">{message.content}</div>}
                       <SentMessageAttachmentList attachments={message.attachments} />
                     </article>

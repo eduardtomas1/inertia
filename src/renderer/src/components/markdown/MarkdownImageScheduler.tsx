@@ -33,6 +33,17 @@ interface ScheduledImageRegistration {
   dispose: () => void;
 }
 
+const VIEWPORT_MARGIN_PX = 600;
+
+function isElementNearViewport(element: HTMLElement): boolean {
+  if (typeof element.getBoundingClientRect !== "function") return false;
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) return false;
+  const viewportHeight = globalThis.innerHeight || 0;
+  if (viewportHeight <= 0) return true;
+  return rect.bottom >= -VIEWPORT_MARGIN_PX && rect.top <= viewportHeight + VIEWPORT_MARGIN_PX;
+}
+
 class MarkdownImageScheduler {
   private readonly entries = new Map<symbol, ScheduledImageEntry>();
   private readonly elementTokens = new Map<Element, symbol>();
@@ -62,10 +73,24 @@ class MarkdownImageScheduler {
     };
   }
 
+  activate(): void {
+    if (!this.disposed) return;
+    this.disposed = false;
+    this.observer?.disconnect();
+    this.observer = undefined;
+    for (const entry of this.entries.values()) {
+      entry.admitted = false;
+      entry.near = false;
+      entry.state = "waiting";
+    }
+    this.rebalanceAdmissions();
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.observer?.disconnect();
+    this.observer = undefined;
     this.entries.clear();
     this.elementTokens.clear();
     this.activeLoads = 0;
@@ -82,7 +107,10 @@ class MarkdownImageScheduler {
         const token = this.elementTokens.get(observation.target);
         const entry = token ? this.entries.get(token) : undefined;
         if (!entry?.admitted) continue;
-        const near = observation.isIntersecting || observation.intersectionRatio > 0;
+        const near =
+          observation.isIntersecting
+          || observation.intersectionRatio > 0
+          || isElementNearViewport(entry.element);
         if (entry.near === near) continue;
         entry.near = near;
         if (!near && (entry.state === "loading" || entry.state === "loaded")) {
@@ -106,11 +134,10 @@ class MarkdownImageScheduler {
       }
       if (shouldAdmit) {
         entry.admitted = true;
-        entry.near = false;
-        this.update(entry, "waiting");
         const observer = this.intersectionObserver();
+        entry.near = observer ? isElementNearViewport(entry.element) : true;
+        this.update(entry, "waiting");
         if (observer) observer.observe(entry.element);
-        else entry.near = true;
       } else {
         this.intersectionObserver()?.unobserve(entry.element);
         if (entry.state === "loading") this.activeLoads -= 1;
@@ -172,7 +199,10 @@ export function MarkdownImageSchedulerProvider({
   const schedulerRef = useRef<MarkdownImageScheduler | null>(null);
   if (!schedulerRef.current) schedulerRef.current = new MarkdownImageScheduler();
   const scheduler = schedulerRef.current;
-  useEffect(() => () => scheduler.dispose(), [scheduler]);
+  useEffect(() => {
+    scheduler.activate();
+    return () => scheduler.dispose();
+  }, [scheduler]);
   return (
     <MarkdownImageSchedulerContext.Provider value={scheduler}>
       {children}

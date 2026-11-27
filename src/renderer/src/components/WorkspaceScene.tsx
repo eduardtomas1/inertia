@@ -2,6 +2,7 @@ import {
   lazy,
   memo,
   Suspense,
+  useCallback,
   useRef,
   useState,
   type ComponentProps,
@@ -27,6 +28,7 @@ import { WatcherDockHost } from "./watcher/WatcherDockHost";
 import type { SettingsViewProps } from "./settings/settingsTypes";
 import { LoadingMark } from "./ui";
 import type { Project } from "@shared/contracts";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
 import type { WorkspacePanelProps, WorkspacePanelTab } from "./WorkspacePanel";
 import type { UsageSurfaceProps } from "./UsageSurface";
 import type { AttachmentsSurfaceProps } from "./AttachmentsSurface";
@@ -34,6 +36,7 @@ import type { BackgroundTasksSurfaceProps } from "./BackgroundTasksSurface";
 import type { WorkspaceRunsModel } from "../utils/workspaceRuns";
 import { useChatMinimumHeight } from "../hooks/useChatMinimumHeight";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
+import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { SplitLayout, SplitPaneOwner } from "../utils/splitLayout";
 import type { WorkspacePreviewOwner } from "../utils/workspacePreviewFocus";
 import {
@@ -96,6 +99,9 @@ const PreviewPanel = lazySurface(
 const WorkspaceChangesPanel = lazySurface(
   loadWorkspaceChangesPanel,
   (module) => module.WorkspaceChangesPanel,
+);
+const WorkspaceMediaPreviewDialog = lazy(
+  () => import("./media/WorkspaceMediaPreviewDialog"),
 );
 
 function WorkspaceToolFallback(): JSX.Element {
@@ -183,9 +189,13 @@ function WorkspaceToolSurface({
   tools,
   owner,
   terminalTarget,
+  onPreviewMedia,
+  detached = false,
 }: Pick<ConversationPaneScene, "resizeHandle" | "tools"> & {
   owner: WorkspacePreviewOwner;
   terminalTarget: (node: HTMLDivElement | null) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
+  detached?: boolean;
 }): JSX.Element {
   return (
     <>
@@ -208,10 +218,23 @@ function WorkspaceToolSurface({
                   : <WorkspaceChangesPanel {...tools.changes} />
               )}
               {tools.activeTool === "files" && (
-                <FilesPanel key={tools.filesKey} {...tools.files} />
+                <FilesPanel
+                  key={tools.filesKey}
+                  {...tools.files}
+                  onPreviewMedia={tools.files.onPreviewMedia ?? onPreviewMedia}
+                />
               )}
               {tools.activeTool === "goal" && <GoalPanel {...tools.goal} />}
-              {tools.activeTool === "plan" && <PlanPanel {...tools.plan} />}
+              {tools.activeTool === "plan" && (
+                <PlanPanel
+                  {...tools.plan}
+                  markdown={tools.plan.markdown ? {
+                    ...tools.plan.markdown,
+                    ...(detached ? { projectBaseRoot: undefined } : {}),
+                    onPreviewMedia: tools.plan.markdown.onPreviewMedia ?? onPreviewMedia,
+                  } : undefined}
+                />
+              )}
               {tools.activeTool === "preview" && (
                 <PreviewPanel owner={owner} {...tools.preview} />
               )}
@@ -257,9 +280,13 @@ function ConversationPane({
   resizeHandle,
   tools,
   owner,
+  onPreviewMedia,
+  detached = false,
 }: ConversationPaneScene & {
   owner: WorkspacePreviewOwner;
   detachedChat?: DetachedConversationPlaceholderProps | null;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
+  detached?: boolean;
 }): JSX.Element {
   const containerRef = resizeHandle?.containerRef as
     | RefObject<HTMLDivElement | null>
@@ -294,7 +321,12 @@ function ConversationPane({
                 ? { ...checkoutBranch, respondsToHeaderRequests: owner === "primary" }
                 : null}
             >
-              <ChatWorkspace {...chat} embedded />
+              <ChatWorkspace
+                {...chat}
+                {...(detached ? { projectBaseRoot: undefined } : {})}
+                onPreviewMedia={chat.onPreviewMedia ?? onPreviewMedia}
+                embedded
+              />
             </CheckoutBranchControlProvider>
           )}
         <TerminalDock tools={tools} containerRef={chatRef} surfaceTarget={terminalTarget} />
@@ -305,6 +337,8 @@ function ConversationPane({
         tools={tools}
         owner={owner}
         terminalTarget={setTerminalTarget}
+        onPreviewMedia={onPreviewMedia}
+        detached={detached}
       />
     </div>
   );
@@ -329,6 +363,64 @@ function WorkspaceSceneView({
   const SettingsView = useLoadedSurface(loadSettingsView, view === "settings");
   const chatColumnRef = useRef<HTMLDivElement>(null);
   const [terminalTarget, setTerminalTarget] = useState<HTMLDivElement | null>(null);
+  const [previewMediaTarget, setPreviewMediaTarget] = useState<WorkspaceMediaPreviewTarget | null>(null);
+  // Suspend any native Browser WebContentsView before the lazy dialog chunk loads.
+  useNativePreviewSuspension(previewMediaTarget !== null);
+  const isDetachedWindow = chat.conversationContextHandoffEnabled === false
+    || Boolean(tools?.panel.hiddenSurfaces?.includes("preview"));
+  const previewOwnerRef = useRef({
+    target: previewMediaTarget,
+    primaryChat: chat,
+    splitPanes: splitScene?.panes,
+  });
+  previewOwnerRef.current = {
+    target: previewMediaTarget,
+    primaryChat: chat,
+    splitPanes: splitScene?.panes,
+  };
+  const matchingPreviewChat = previewMediaTarget && splitScene?.panes
+    ? splitScene.panes.find((pane) => pane.scene && (
+        previewMediaTarget.conversationId
+          ? pane.conversationId === previewMediaTarget.conversationId
+          : pane.project?.id === previewMediaTarget.projectId
+      ))?.scene?.chat ?? chat
+    : chat;
+  const canShowMediaInFiles = Boolean(
+    previewMediaTarget
+    && !(
+      !previewMediaTarget.conversationId
+      && matchingPreviewChat.conversation?.worktreePath
+      && matchingPreviewChat.project?.normalizedPath
+      && matchingPreviewChat.conversation.worktreePath !== matchingPreviewChat.project.normalizedPath
+    ),
+  );
+  const onPreviewMedia = useCallback((target: WorkspaceMediaPreviewTarget) => {
+    setPreviewMediaTarget(target);
+  }, []);
+  const onCloseMediaPreview = useCallback(() => {
+    setPreviewMediaTarget(null);
+  }, []);
+  const onShowMediaInFiles = useCallback((relativePath: string) => {
+    const { target, primaryChat, splitPanes } = previewOwnerRef.current;
+    const matchingPane = target && splitPanes
+      ? splitPanes.find((pane) => pane.scene && (
+          target.conversationId
+            ? pane.conversationId === target.conversationId
+            : pane.project?.id === target.projectId
+        ))
+      : undefined;
+    const openTurnFile = matchingPane?.scene?.chat.onOpenTurnFile ?? primaryChat.onOpenTurnFile;
+    openTurnFile?.(relativePath);
+    setPreviewMediaTarget(null);
+  }, []);
+  const onOpenMediaExternally = useCallback((target: WorkspaceMediaPreviewTarget) => {
+    void window.inertia?.openProjectPath({
+      projectId: target.projectId,
+      ...(target.conversationId ? { conversationId: target.conversationId } : {}),
+      relativePath: target.relativePath,
+      action: "open-externally",
+    })?.catch(() => undefined);
+  }, []);
   useChatMinimumHeight(chatColumnRef);
   return (
     <>
@@ -348,7 +440,12 @@ function WorkspaceSceneView({
               ? undefined
               : pane.onOpenInWindow,
             content: pane.scene ? (
-              <ConversationPane owner={pane.owner} {...pane.scene} />
+              <ConversationPane
+                owner={pane.owner}
+                {...pane.scene}
+                onPreviewMedia={onPreviewMedia}
+                detached={isDetachedWindow}
+              />
             ) : (
               <ConversationPane
                 owner="primary"
@@ -358,6 +455,8 @@ function WorkspaceSceneView({
                 checkoutBranch={checkoutBranch}
                 resizeHandle={resizeHandle}
                 tools={tools}
+                onPreviewMedia={onPreviewMedia}
+                detached={isDetachedWindow}
               />
             ),
           }))}
@@ -375,7 +474,11 @@ function WorkspaceSceneView({
                 ? { ...checkoutBranch, respondsToHeaderRequests: true }
                 : null}
             >
-              <ChatWorkspace {...chat} />
+              <ChatWorkspace
+                {...chat}
+                {...(isDetachedWindow ? { projectBaseRoot: undefined } : {})}
+                onPreviewMedia={chat.onPreviewMedia ?? onPreviewMedia}
+              />
             </CheckoutBranchControlProvider>
           )}
           <TerminalDock tools={tools} containerRef={chatColumnRef} surfaceTarget={terminalTarget} />
@@ -391,7 +494,20 @@ function WorkspaceSceneView({
           tools={tools}
           owner="primary"
           terminalTarget={setTerminalTarget}
+          onPreviewMedia={onPreviewMedia}
+          detached={isDetachedWindow}
         />
+      )}
+
+      {previewMediaTarget !== null && (
+        <Suspense fallback={null}>
+          <WorkspaceMediaPreviewDialog
+            target={previewMediaTarget}
+            onClose={onCloseMediaPreview}
+            onShowInFiles={canShowMediaInFiles ? onShowMediaInFiles : undefined}
+            onOpenExternally={onOpenMediaExternally}
+          />
+        </Suspense>
       )}
     </>
   );

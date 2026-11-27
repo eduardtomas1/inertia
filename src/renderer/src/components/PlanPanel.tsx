@@ -2,6 +2,7 @@ import clsx from "clsx";
 import { useId, useState, type ComponentProps } from "react";
 import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, Copy, ListPlus, MessageSquarePlus, Play, RotateCcw } from "lucide-react";
 import { todoDraftFromPlanStep } from "@shared/todos";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
 
 import { useCopiedState } from "../hooks/useCopiedState";
 import { planDocument, planDocumentIsLong, planInlineSegments } from "../utils/planDocument";
@@ -24,7 +25,10 @@ export type PlanStep = {
 export type PlanMarkdownContext = Pick<
   ComponentProps<typeof ResponseMarkdown>,
   "projectRoot" | "projectId" | "conversationId" | "defaultCodeWrap" | "onOpenProjectFile"
->;
+> & {
+  projectBaseRoot?: string;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
+};
 
 export type PlanPanelProps = {
   steps: PlanStep[];

@@ -17,6 +17,7 @@ interface PdfAttachmentPreviewProps {
   source: string;
   title: string;
   onFailure: () => void;
+  onPageCount?: (pageCount: number) => void;
   loadAttachment: (source: string) => Promise<{
     bytes: Uint8Array;
     getDocument: typeof getDocument;
@@ -31,18 +32,28 @@ interface PdfAttachmentPreviewProps {
   };
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT"
+    || tag === "TEXTAREA"
+    || tag === "SELECT"
+    || target.isContentEditable;
+}
+
 export function PdfAttachmentPreview({
   source,
   title,
   onFailure,
+  onPageCount,
   loadAttachment,
   prepareCanvas,
 }: PdfAttachmentPreviewProps): React.JSX.Element {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const documentRef = useRef<PDFDocumentProxy | null>(null);
   const taskRef = useRef<PDFDocumentLoadingTask | null>(null);
   const renderRef = useRef<{ cancel(): void } | null>(null);
+  const [loadedDocument, setLoadedDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [stageWidth, setStageWidth] = useState(0);
@@ -60,6 +71,9 @@ export function PdfAttachmentPreview({
 
   useEffect(() => {
     let cancelled = false;
+    setLoadedDocument(null);
+    setPageCount(0);
+    setPageNumber(1);
     setRendering(true);
     void (async () => {
       const { bytes, getDocument } = await loadAttachment(source);
@@ -74,9 +88,10 @@ export function PdfAttachmentPreview({
         await task.destroy();
         return;
       }
-      documentRef.current = document;
+      setLoadedDocument(document);
       setPageCount(document.numPages);
       setPageNumber(1);
+      onPageCount?.(document.numPages);
     })().catch(() => {
       if (!cancelled) onFailure();
     });
@@ -84,21 +99,20 @@ export function PdfAttachmentPreview({
       cancelled = true;
       renderRef.current?.cancel();
       renderRef.current = null;
-      documentRef.current = null;
+      setLoadedDocument(null);
       const task = taskRef.current;
       taskRef.current = null;
       if (task) void task.destroy();
     };
-  }, [loadAttachment, onFailure, source]);
+  }, [loadAttachment, onFailure, onPageCount, source]);
 
   useEffect(() => {
-    const document = documentRef.current;
     const canvas = canvasRef.current;
-    if (!document || !canvas || pageCount === 0 || stageWidth === 0) return;
+    if (!loadedDocument || !canvas || pageCount === 0 || stageWidth === 0) return;
     let cancelled = false;
     setRendering(true);
     renderRef.current?.cancel();
-    void document.getPage(pageNumber).then(async (page) => {
+    void loadedDocument.getPage(pageNumber).then(async (page) => {
       if (cancelled) return;
       const { context, viewport } = prepareCanvas(canvas, page, stageWidth);
       const render = page.render({
@@ -119,10 +133,29 @@ export function PdfAttachmentPreview({
       cancelled = true;
       renderRef.current?.cancel();
     };
-  }, [onFailure, pageCount, pageNumber, prepareCanvas, stageWidth]);
+  }, [loadedDocument, onFailure, pageCount, pageNumber, prepareCanvas, stageWidth]);
 
   return (
-    <div ref={stageRef} className="pdf-attachment-preview">
+    <div
+      ref={stageRef}
+      className="pdf-attachment-preview"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (
+          event.ctrlKey
+          || event.metaKey
+          || event.altKey
+          || isEditableKeyboardTarget(event.target)
+        ) return;
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setPageNumber((current) => Math.max(1, current - 1));
+        } else if (event.key === "ArrowRight" && pageCount > 0) {
+          event.preventDefault();
+          setPageNumber((current) => Math.min(pageCount, current + 1));
+        }
+      }}
+    >
       <div
         className="pdf-attachment-preview-toolbar"
         aria-label="PDF page navigation"

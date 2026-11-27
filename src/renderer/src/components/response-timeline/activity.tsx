@@ -34,6 +34,8 @@ import type {
   AgentActivity,
   AgentTurn,
 } from "@shared/contracts";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import {
   activityAttentionSeverity,
   activityCommandLine,
@@ -104,6 +106,21 @@ import { TurnBlockTime, TurnFoldRow, type TurnFoldControl } from "./TurnFold";
 export { ReasoningSummary } from "./thinking";
 
 const FailureDiagnostics = lazy(() => import("./failurePanel"));
+
+type MarkdownRoutingProps = {
+  projectRoot: string;
+  projectBaseRoot?: string;
+  projectId: string;
+  conversationId: string;
+  defaultCodeWrap: boolean;
+  onOpenProjectFile: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+    headingId?: string,
+  ) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
+};
 
 export function LiveElapsed({
   startedAt,
@@ -338,18 +355,15 @@ function TimelineActivityRow(props: React.ComponentProps<typeof ActivityRow>): R
 export const CommentaryRow = memo(function CommentaryRow({
   entry,
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  onPreviewMedia,
   showTime = false,
-}: {
+}: MarkdownRoutingProps & {
   entry: Extract<TurnExecutionStreamEntry, { kind: "commentary" }>;
-  projectRoot: string;
-  projectId: string;
-  conversationId: string;
-  defaultCodeWrap: boolean;
-  onOpenProjectFile: (path: string) => void;
   showTime?: boolean;
 }): React.JSX.Element {
   const taskCreator = useTaskCreator();
@@ -382,10 +396,12 @@ export const CommentaryRow = memo(function CommentaryRow({
               <StreamingMarkdownText
                 content={entry.content}
                 projectRoot={projectRoot}
+                projectBaseRoot={projectBaseRoot}
                 projectId={projectId}
                 conversationId={conversationId}
                 defaultCodeWrap={defaultCodeWrap}
                 onOpenProjectFile={onOpenProjectFile}
+                onPreviewMedia={onPreviewMedia}
               />
             </div>
           )
@@ -393,11 +409,13 @@ export const CommentaryRow = memo(function CommentaryRow({
             <ResponseMarkdown
               content={entry.content}
               projectRoot={projectRoot}
+              projectBaseRoot={projectBaseRoot}
               projectId={projectId}
               conversationId={conversationId}
               defaultCodeWrap={defaultCodeWrap}
               announceCopyFeedback={entry.message !== null}
               onOpenProjectFile={onOpenProjectFile}
+              onPreviewMedia={onPreviewMedia}
             />
           )}
       {timed && <TurnBlockTime createdAt={entry.createdAt} />}
@@ -618,28 +636,25 @@ function ExecutionStream({
   showTimes = false,
   label = "Agent work transcript",
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  onPreviewMedia,
   onBeforeToggle,
   onAfterToggle,
-}: {
+}: MarkdownRoutingProps & {
   entries: TurnWorkStreamEntry[];
   live?: boolean;
   showTimes?: boolean;
   label?: string;
-  projectRoot: string;
-  projectId: string;
-  conversationId: string;
-  defaultCodeWrap: boolean;
-  onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
   if (entries.length === 0) return null;
   const lastIndex = entries.reduce((last, entry, index) => entry.kind === "subagent-group" ? last : index, -1);
-  const markdown = { projectRoot, projectId, conversationId, defaultCodeWrap, onOpenProjectFile };
+  const markdown: MarkdownRoutingProps = { projectRoot, projectBaseRoot, projectId, conversationId, defaultCodeWrap, onOpenProjectFile, onPreviewMedia };
   return (
     <div className="turn-execution-stream" role="list" aria-label={label}>
       {entries.map((entry, index) => {
@@ -778,23 +793,20 @@ export function SettledWorkDetails({
   reasoningContent,
   includesReasoning,
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  onPreviewMedia,
   onBeforeToggle,
   onAfterToggle,
-}: {
+}: MarkdownRoutingProps & {
   id?: string;
   entries: TurnWorkStreamEntry[];
   turn: ResponseTurn;
   reasoningContent: string;
   includesReasoning: boolean;
-  projectRoot: string;
-  projectId: string;
-  conversationId: string;
-  defaultCodeWrap: boolean;
-  onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element {
@@ -803,10 +815,12 @@ export function SettledWorkDetails({
       <ExecutionStream
         entries={entries}
         projectRoot={projectRoot}
+        projectBaseRoot={projectBaseRoot}
         projectId={projectId}
         conversationId={conversationId}
         defaultCodeWrap={defaultCodeWrap}
         onOpenProjectFile={onOpenProjectFile}
+        onPreviewMedia={onPreviewMedia}
         onBeforeToggle={onBeforeToggle}
         onAfterToggle={onAfterToggle}
       />
@@ -834,14 +848,16 @@ export function WorkLog({
   delegated = NO_DELEGATED_WORK,
   showThinking,
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  onPreviewMedia,
   onBeforeToggle,
   onAfterToggle,
   fold = null,
-}: {
+}: MarkdownRoutingProps & {
   turn: ResponseTurn;
   autoCollapse: boolean;
   reasoningContent: string;
@@ -852,15 +868,11 @@ export function WorkLog({
   /** Delegated tasks, each placed where it started. */
   delegated?: DelegatedWork;
   showThinking: boolean;
-  projectRoot: string;
-  projectId: string;
-  conversationId: string;
-  defaultCodeWrap: boolean;
-  onOpenProjectFile: (path: string) => void;
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
   fold?: TurnFoldControl | null;
 }): React.JSX.Element | null {
+  const markdown: MarkdownRoutingProps = { projectRoot, projectBaseRoot, projectId, conversationId, defaultCodeWrap, onOpenProjectFile, onPreviewMedia };
   const [expanded, setExpanded] = useState(!autoCollapse);
   const [failureExpanded, setFailureExpanded] = useState(!autoCollapse);
   const workWasActive = useRef(turn.isActive);
@@ -1010,11 +1022,7 @@ export function WorkLog({
           key="stream"
           entries={stream}
           live
-          projectRoot={projectRoot}
-          projectId={projectId}
-          conversationId={conversationId}
-          defaultCodeWrap={defaultCodeWrap}
-          onOpenProjectFile={onOpenProjectFile}
+          {...markdown}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />
@@ -1067,11 +1075,7 @@ export function WorkLog({
                   key="work-stream"
                   entries={workStream}
                   showTimes={fold.showTimes}
-                  projectRoot={projectRoot}
-                  projectId={projectId}
-                  conversationId={conversationId}
-                  defaultCodeWrap={defaultCodeWrap}
-                  onOpenProjectFile={onOpenProjectFile}
+                  {...markdown}
                   onBeforeToggle={onBeforeToggle}
                   onAfterToggle={onAfterToggle}
                 />
@@ -1118,11 +1122,7 @@ export function WorkLog({
           key="stream"
           entries={exchange}
           label="Follow-up messages"
-          projectRoot={projectRoot}
-          projectId={projectId}
-          conversationId={conversationId}
-          defaultCodeWrap={defaultCodeWrap}
-          onOpenProjectFile={onOpenProjectFile}
+          {...markdown}
           onBeforeToggle={onBeforeToggle}
           onAfterToggle={onAfterToggle}
         />
@@ -1178,11 +1178,7 @@ export function WorkLog({
                 turn={turn}
                 reasoningContent={reasoningContent}
                 includesReasoning={includesReasoning}
-                projectRoot={projectRoot}
-                projectId={projectId}
-                conversationId={conversationId}
-                defaultCodeWrap={defaultCodeWrap}
-                onOpenProjectFile={onOpenProjectFile}
+                {...markdown}
                 onBeforeToggle={onBeforeToggle}
                 onAfterToggle={onAfterToggle}
               />

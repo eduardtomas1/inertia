@@ -4,11 +4,18 @@ import type {
   WorkspaceFilePreview,
 } from "@shared/contracts";
 import {
+  classifyWorkspaceMediaPath,
+  isBinaryWorkspaceMediaPath,
+} from "@shared/workspace-media-preview";
+import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
-import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
-import { validatedWorkspaceFileLocation } from "../../utils/workspaceFileReference";
+import {
+  validatedWorkspaceFileLocation,
+  workspaceFileReference,
+  type WorkspaceFileLocation,
+} from "../../utils/workspaceFileReference";
 import {
   workspaceFileWriteCommand,
   type WorkspaceFileWriteIdentity,
@@ -38,6 +45,7 @@ type SelectWorkspaceFileOptions = readonly [
   setFilePreviewError: Dispatch<SetStateAction<string | null>>,
   setFilePreviewLoading: Dispatch<SetStateAction<boolean>>,
   setActionError: (message: string | null) => void,
+  loadDualViewSource?: boolean,
 ];
 
 export async function selectWorkspaceFile([
@@ -58,6 +66,7 @@ export async function selectWorkspaceFile([
   setFilePreviewError,
   setFilePreviewLoading,
   setActionError,
+  loadDualViewSource = false,
 ]: SelectWorkspaceFileOptions): Promise<void> {
   if (authorityRef.current !== authority) return;
   const generation = ++generationRef.current;
@@ -68,6 +77,17 @@ export async function selectWorkspaceFile([
     : null);
   setFilePreview(null);
   setFilePreviewError(null);
+  const mediaDescriptor = classifyWorkspaceMediaPath(path);
+  const hasExplicitLocation = requestedLocation !== undefined
+    || (!literalPath && workspaceFileReference(path)?.location !== undefined);
+  if (
+    isBinaryWorkspaceMediaPath(path)
+    || (mediaDescriptor?.isTextDualView && !hasExplicitLocation && !loadDualViewSource)
+  ) {
+    setFilePreviewLoading(false);
+    setActionError(null);
+    return;
+  }
   setFilePreviewLoading(true);
   try {
     const { file, location } = await readWorkspaceFileSelection({
@@ -102,7 +122,9 @@ export async function selectWorkspaceFile([
       ? error.message
       : "The file could not be opened.";
     setFilePreviewError(message);
-    setActionError(message);
+    if (!mediaDescriptor?.isTextDualView) {
+      setActionError(message);
+    }
   } finally {
     if (
       generationRef.current === generation

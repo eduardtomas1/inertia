@@ -1,4 +1,6 @@
 import { useMemo, useRef } from "react";
+import type { WorkspaceMediaPreviewTarget } from "@shared/workspace-media-preview";
+import type { WorkspaceFileLocation } from "../../utils/workspaceFileReference";
 import { ResponseMarkdown } from "../ResponseMarkdown";
 import {
   splitStreamingMarkdown,
@@ -9,17 +11,26 @@ import {
 export function StreamingMarkdownText({
   content,
   projectRoot,
+  projectBaseRoot,
   projectId,
   conversationId,
   defaultCodeWrap,
   onOpenProjectFile,
+  onPreviewMedia,
 }: {
   content: string;
   projectRoot: string;
+  projectBaseRoot?: string;
   projectId: string;
   conversationId?: string;
   defaultCodeWrap: boolean;
-  onOpenProjectFile?: (path: string) => void;
+  onOpenProjectFile?: (
+    path: string,
+    location?: WorkspaceFileLocation,
+    literalPath?: boolean,
+    headingId?: string,
+  ) => void;
+  onPreviewMedia?: (target: WorkspaceMediaPreviewTarget) => void;
 }): React.JSX.Element {
   const splitRef = useRef<StreamingMarkdownSplit | undefined>(undefined);
   const split = splitStreamingMarkdown(content, splitRef.current);
@@ -31,10 +42,12 @@ export function StreamingMarkdownText({
       <ResponseMarkdown
         content={definitions ? `${block}\n\n${definitions}` : block}
         projectRoot={projectRoot}
+        projectBaseRoot={projectBaseRoot}
         projectId={projectId}
         conversationId={conversationId}
         defaultCodeWrap={defaultCodeWrap}
         onOpenProjectFile={onOpenProjectFile}
+        onPreviewMedia={onPreviewMedia}
       />
     </div>
   )), [
@@ -42,6 +55,8 @@ export function StreamingMarkdownText({
     defaultCodeWrap,
     definitions,
     onOpenProjectFile,
+    onPreviewMedia,
+    projectBaseRoot,
     projectId,
     projectRoot,
     settledTexts,

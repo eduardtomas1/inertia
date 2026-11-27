@@ -20,6 +20,7 @@ import { AGENT_THREAD_QUESTION_ANSWERS_SCHEMA_VERSION } from "../../src/server/p
 import { CHECKPOINT_EXPIRATION_SCHEMA_VERSION } from "../../src/server/persistence/migrations/checkpoint-expiration";
 import { PREFERRED_EDITOR_SCHEMA_VERSION } from "../../src/server/persistence/migrations/preferred-editor";
 import { MESSAGE_SEARCH_INDEX_SCHEMA_VERSION } from "../../src/server/persistence/migrations/message-search-index";
+import { NATIVE_ANTIGRAVITY_ACP_HARNESS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/native-antigravity-acp-harness";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import {
   RuntimeStartupBlockerError,
@@ -46,6 +47,8 @@ describe("orchestrator-v2 development databases from before a main sync", () => 
     ["92e23166", 118],
     ["e37ff42b", 123],
     ["d290381c", 126],
+    ["22bb7578-v123", 123],
+    ["22bb7578", 130],
   ] as const satisfies readonly (readonly [PreMergeSync, number])[])(
     "refuses a database from before the %s sync with a typed blocker and leaves it and its backups unchanged",
     (sync, latest) => {
@@ -55,7 +58,11 @@ describe("orchestrator-v2 development databases from before a main sync", () => 
       simulatePreMergeOrchestratorV2Database(legacy, sync);
       expect(legacy.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(latest);
       // This build would treat the recorded numbers as main's migrations and skip them.
-      if (sync === "d290381c") {
+      if (sync === "22bb7578" || sync === "22bb7578-v123") {
+        expect(legacy.prepare("SELECT 1 FROM sqlite_master WHERE name = 'message_search_documents'").get()).toBeDefined();
+        const profilesSql = legacy.prepare("SELECT sql FROM sqlite_master WHERE name = 'model_backend_profiles'").pluck().get() as string;
+        expect(profilesSql).not.toContain("'antigravity-acp'");
+      } else if (sync === "d290381c") {
         expect(legacy.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'sent_to_user'").get()).toBeDefined();
         expect(legacy.prepare("SELECT 1 FROM sqlite_master WHERE name = 'message_search_documents'").get()).toBeUndefined();
       } else {
@@ -100,6 +107,7 @@ describe("orchestrator-v2 development databases from before a main sync", () => 
       CHECKPOINT_EXPIRATION_SCHEMA_VERSION,
       PREFERRED_EDITOR_SCHEMA_VERSION,
       MESSAGE_SEARCH_INDEX_SCHEMA_VERSION,
+      NATIVE_ANTIGRAVITY_ACP_HARNESS_SCHEMA_VERSION,
       ORCHESTRATION_V2_SCHEMA_VERSION,
       CURRENT_DATABASE_SCHEMA_VERSION - 1,
       undefined,

@@ -297,4 +297,57 @@ describe("Migration 131 (PersistQueueItemOrderDeliveryAndSelection) and boot ado
       store.close();
     }
   });
+
+  it("S21: normalizes legacy built-in antigravity-cli queued route_identity to antigravity-acp during v122->v131 upgrade", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-m131-agy-"));
+    directories.push(directory);
+    const path = join(directory, "inertia.sqlite");
+    const db = new Database(path);
+    db.pragma("foreign_keys = ON");
+    migrateRuntimeDatabase(db, 122);
+
+    const now = "2026-11-01T10:00:00.000Z";
+    const projectId = randomUUID();
+    const convId = randomUUID();
+    const queuedId = randomUUID();
+    const legacySelection = {
+      harnessId: "antigravity-cli",
+      backendProfileId: "builtin:antigravity",
+      backendProfileDisplayName: "Google Antigravity",
+      modelId: "provider-default",
+      alias: null,
+      reasoningEffort: null,
+      contextWindowOverride: null,
+      providerOptions: {},
+      capabilities: [],
+      backendConfigurationRevision: 0,
+    };
+    db.prepare(`INSERT INTO projects (id, name, path, normalized_path, repository_relative_path, git_repository_limit, color, status, created_at, updated_at)
+      VALUES (?, 'AgyProj', ?, ?, '.', 16, '#6f76d9', 'ready', ?, ?)`).run(projectId, directory, directory, now, now);
+    db.prepare(`INSERT INTO conversations (id, project_id, title, provider_id, model_selection_json, model, reasoning_effort,
+      interaction_mode, access_mode, created_at, updated_at)
+      VALUES (?, ?, 'Antigravity chat', 'antigravity', ?, 'provider-default', '', 'build', 'supervised', ?, ?)`).run(
+      convId, projectId, JSON.stringify(legacySelection), now, now,
+    );
+    const legacyRoute = JSON.stringify([projectId, null, "antigravity", legacySelection, "provider-default", "", "build", "supervised"]);
+    db.prepare(`INSERT INTO queued_messages (id, conversation_id, content, attachments_json, intent_digest, route_identity, state, created_at)
+      VALUES (?, ?, 'Pending Antigravity prompt', '[]', ?, ?, 'waiting', ?)`).run(
+      queuedId, convId, "a".repeat(64), legacyRoute, now,
+    );
+
+    migrateRuntimeDatabase(db);
+    const row = db.prepare("SELECT selection_json, route_identity FROM queued_messages WHERE id = ?").get(queuedId) as {
+      selection_json: string;
+      route_identity: string;
+    };
+    expect(JSON.parse(row.selection_json)).toMatchObject({
+      harnessId: "antigravity-acp",
+      backendProfileId: "builtin:antigravity",
+    });
+    expect(JSON.parse(row.route_identity)[3]).toMatchObject({
+      harnessId: "antigravity-acp",
+      backendProfileId: "builtin:antigravity",
+    });
+    db.close();
+  });
 });

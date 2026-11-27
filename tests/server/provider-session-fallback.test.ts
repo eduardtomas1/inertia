@@ -32,6 +32,7 @@ import { createKimiAcpHarness } from "../../src/server/provider/kimi-acp-harness
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { ProviderInstallationLeaseCoordinator } from "../../src/server/provider/installation-lease";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
+import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import {
   captured,
   fakeAppServer as createFakeAppServer,
@@ -906,5 +907,121 @@ describe("fresh-session-fallback environment hygiene and cancellation fidelity",
     expect(receivedEnvironments[1]).toEqual({ SECRET_API_KEY: "top-secret-token" });
     expect(receivedEnvironments[1]).not.toBe(callerEnvironment);
     expect(nextCancel).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("S22: preserves provider metadata and session-command learning across fresh-session fallback rebind", async () => {
+    const metadataCache = new ProviderMetadataCache();
+    const learnScopedSpy = vi.spyOn(metadataCache, "learnScoped");
+    const learnSpy = vi.spyOn(metadataCache, "learn");
+    let attemptIndex = 0;
+    const harness: AgentHarness = {
+      ...createKimiAcpHarness(),
+      start(options: AgentHarnessStartOptions): AgentHarnessRun {
+        attemptIndex += 1;
+        const isFirst = attemptIndex === 1;
+        const result = (async (): Promise<ProviderRunResult> => {
+          await Promise.resolve();
+          if (isFirst) {
+            return {
+              ...providerRunTerminal(options.input, "failed"),
+              text: "",
+              textTruncated: false,
+              exitCode: 1,
+              signal: null,
+              cleanupConfirmed: true,
+              failure: unavailable,
+            };
+          }
+          options.callbacks?.onEvent?.({
+            type: "extension",
+            extension: "kimi-acp",
+            providerId: "kimi",
+            conversationId: options.input.conversationId,
+            runId: options.input.runId,
+            turnId: options.input.turnId,
+            event: {
+              type: "metadata",
+              source: "session",
+              complete: true,
+              metadata: {
+                models: [
+                  {
+                    id: "kimi-k2-fallback",
+                    label: "Kimi K2 Fallback",
+                    description: "Fallback model",
+                    isDefault: true,
+                    inputModalities: ["text", "image"],
+                    reasoningOptions: [],
+                    defaultReasoningEffort: "",
+                  },
+                ],
+                commands: [
+                  { name: "review", description: "Run review after fallback", argumentHint: null },
+                ],
+              },
+            },
+          });
+          return {
+            ...providerRunTerminal(options.input, "completed"),
+            sessionId: "fresh-session-s22",
+            text: "Done after fallback",
+            textTruncated: false,
+            exitCode: 0,
+            signal: null,
+            cleanupConfirmed: true,
+          };
+        })();
+        return {
+          harnessId: "kimi-acp",
+          providerId: "kimi",
+          cancel: () => undefined,
+          result,
+          extension: {
+            kind: "kimi-acp",
+            respondToApproval: () => false,
+            respondToInput: () => false,
+          },
+        };
+      },
+    };
+
+    const manager = ProviderManager.createForTests(
+      { metadataCache, commands: { kimi: "kimi" } },
+      new AgentHarnessRegistry([harness]),
+    );
+    try {
+      const runInput = nativeProviderRunInput({
+        providerId: "kimi",
+        conversationId: "fallback-conversation-s22",
+        cwd: process.cwd(),
+        prompt: "Original prompt",
+        interactionMode: "build",
+        access: "supervised",
+        sessionId: "stale-session-s22",
+      });
+      const replacementEvents: ProviderEvent[] = [];
+      const result = await manager.run(runInput, {
+        freshSessionFallback: () => ({
+          prompt: "Continue on fresh session",
+          onEvent: (event) => { replacementEvents.push(event); },
+        }),
+      });
+      expect(result.status).toBe("completed");
+      expect(replacementEvents.some((event) => event.type === "metadata")).toBe(true);
+      expect(learnScopedSpy).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ models: [expect.objectContaining({ id: "kimi-k2-fallback" })] }),
+        "session",
+        { merge: false },
+      );
+      expect(learnSpy).toHaveBeenCalledTimes(1);
+      expect(manager.reportedProviderCommands({
+        providerId: "kimi",
+        cwd: runInput.cwd,
+        conversationId: runInput.conversationId,
+      })).toEqual([expect.objectContaining({ name: "review" })]);
+    } finally {
+      await manager.disposeAll();
+    }
   });
 });

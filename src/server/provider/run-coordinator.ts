@@ -374,26 +374,31 @@ export class ProviderRunCoordinator {
       input.backendProfile,
       executable,
     );
+    const learnMetadataFromEvent = (event: ProviderEvent): void => {
+      if (event.type !== "metadata") return;
+      if (event.metadata.commands && !isIsolatedProviderConversationId(conversationId)) {
+        this.options.learnSessionCommands?.({ conversationId, providerId, cwd: input.cwd }, event.metadata.commands);
+      }
+      if (event.metadata.models || event.metadata.rateLimits) {
+        this.options.metadataCache.learnScoped(runMetadataScope, event.metadata, event.source, { merge: !event.complete });
+        if (ownsLegacyProviderMetadata) {
+          this.options.metadataCache.learn(
+            event.providerId,
+            this.options.resolvedCommandFor(event.providerId) ?? this.options.commandFor(event.providerId),
+            event.metadata,
+            event.source,
+            { merge: !event.complete },
+          );
+        }
+      }
+    };
+    const wrapOnEvent = (forward?: (event: ProviderEvent) => void) => (event: ProviderEvent): void => {
+      learnMetadataFromEvent(event);
+      forward?.(event);
+    };
     const managerCallbacks: ProviderRunCallbacks = {
       ...callbacks,
-      onEvent: (event) => {
-        if (event.type === "metadata") {
-          if (event.metadata.commands && !isIsolatedProviderConversationId(conversationId)) this.options.learnSessionCommands?.({ conversationId, providerId, cwd: input.cwd }, event.metadata.commands);
-          if (event.metadata.models || event.metadata.rateLimits) {
-            this.options.metadataCache.learnScoped(runMetadataScope, event.metadata, event.source, { merge: !event.complete });
-            if (ownsLegacyProviderMetadata) {
-              this.options.metadataCache.learn(
-                event.providerId,
-                this.options.resolvedCommandFor(event.providerId) ?? this.options.commandFor(event.providerId),
-                event.metadata,
-                event.source,
-                { merge: !event.complete },
-              );
-            }
-          }
-        }
-        callbacks.onEvent?.(event);
-      },
+      onEvent: wrapOnEvent(callbacks.onEvent),
     };
     let active!: ActiveRun;
     let protocolViolation: ProviderRuntimeError | null = null;
@@ -648,7 +653,7 @@ export class ProviderRunCoordinator {
           active.negotiatedCapabilities.clear();
           const { sessionId: _resumedSession, ...replacementInput } = input;
           requiredCapabilities = requiredCapabilitiesFor(replacementInput);
-          currentEmitter = compatibilityEmitter.rebind(onEvent);
+          currentEmitter = compatibilityEmitter.rebind(wrapOnEvent(onEvent));
           return providerCallbacksFromHarness(currentEmitter, observeCapability);
         }, historyInjectionAdmitted));
       } finally {

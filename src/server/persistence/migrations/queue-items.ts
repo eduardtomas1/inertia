@@ -110,7 +110,18 @@ export const queueItemsMigration: DatabaseMigrationDefinition = {
         AND queue_position IS NULL;
 
       UPDATE queued_messages
-      SET selection_json = json_extract(route_identity, '$[3]')
+      SET selection_json = CASE
+            WHEN json_extract(route_identity, '$[3].harnessId') = 'antigravity-cli'
+              AND json_extract(route_identity, '$[3].backendProfileId') = 'builtin:antigravity'
+            THEN json_set(json_extract(route_identity, '$[3]'), '$.harnessId', 'antigravity-acp')
+            ELSE json_extract(route_identity, '$[3]')
+          END,
+          route_identity = CASE
+            WHEN json_extract(route_identity, '$[3].harnessId') = 'antigravity-cli'
+              AND json_extract(route_identity, '$[3].backendProfileId') = 'builtin:antigravity'
+            THEN json_set(route_identity, '$[3].harnessId', 'antigravity-acp')
+            ELSE route_identity
+          END
       WHERE kind = 'message'
         AND selection_json IS NULL
         AND json_valid(route_identity)

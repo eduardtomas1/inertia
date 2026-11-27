@@ -324,6 +324,24 @@ describe("chat rollback with file restore", () => {
     } finally { runtime.store.close(); }
   }, 120_000);
 
+  it("refuses the file restore when a tracked file changed by the rolled-back turns was edited afterwards", async () => {
+    const runtime = await gitRuntime();
+    try {
+      const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+      const second = await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+      writeFileSync(join(runtime.workspace, "notes.txt"), "rolled back plus user edit\n");
+      const restore = vi.fn(restoreConversationCheckpoint);
+      const result = await rollback(dependencies(runtime, unsupported, restore), runtime.conversationId, first.id);
+      expect(result).toMatchObject({ transfer: "portable", rolledBackTurns: 1, files: { outcome: "refused" } });
+      expect(result.files.message).toContain("notes.txt");
+      expect(result.files.message).toContain("modified afterwards");
+      expect(restore).not.toHaveBeenCalled();
+      expect(read(runtime, "notes.txt")).toBe("rolled back plus user edit\n");
+      expect(runtime.store.orchestration.history.rolledBack(second.id)).toBe(true);
+      expect(filesRecord(runtime.store, result.rollbackId)).toMatchObject({ state: "refused" });
+    } finally { runtime.store.close(); }
+  }, 120_000);
+
   it("records a failed restore durably after the context rollback applied, across a restart", async () => {
     const runtime = await gitRuntime();
     const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
@@ -563,6 +581,34 @@ describe("file restore fencing", () => {
           expect(read(runtime, "notes.txt")).toBe("base notes\n");
         }
         expect(runtime.store.conversationWork.restoreBlocksConversation(other.id)).toBe(false);
+      } finally { runtime.store.close(); }
+    }, 120_000);
+
+  it.each(["same", "nested", "ancestor", "sibling"] as const)(
+    "applies the isolation rule to project-scoped terminals without a conversation id, owner=%s",
+    async (owner) => {
+      const runtime = await gitRuntime();
+      try {
+        const first = await finish(runtime, "first", { "notes.txt": "retained\n" });
+        await finish(runtime, "second", { "notes.txt": "rolled back\n" });
+        const path = owner === "same" ? runtime.workspace : ownerPath(runtime, owner);
+        const refused = owner !== "sibling";
+        const terminals: TerminalScopes = { liveSessionScopes: () => [{ cwd: path, conversationId: null }] };
+        const restore = vi.fn(restoreConversationCheckpoint);
+        const result = await rollback(dependencies(runtime, unsupported, restore, terminals), runtime.conversationId, first.id);
+        expect(result.files.outcome).toBe(refused ? "refused" : "restored");
+        expect(restore).toHaveBeenCalledTimes(refused ? 0 : 1);
+        expect(read(runtime, "notes.txt")).toBe(refused ? "rolled back\n" : "retained\n");
+        const before = read(runtime, "notes.txt");
+        const checkpointId = runtime.store.agentTurn(first.id).checkpointId!;
+        const revert = revertHandler(runtime, terminals);
+        if (refused) {
+          await expect(revert(checkpointId)).rejects.toThrow(CHECKOUT_RESTORE_BUSY);
+          expect(read(runtime, "notes.txt")).toBe(before);
+        } else {
+          await revert(checkpointId);
+          expect(read(runtime, "notes.txt")).toBe("base notes\n");
+        }
       } finally { runtime.store.close(); }
     }, 120_000);
 

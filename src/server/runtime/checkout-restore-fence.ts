@@ -26,7 +26,7 @@ export function claimCheckoutForRestore(
     isolated = !activity.turns.checkoutActivityConversationIds().some((otherId) =>
       otherId !== conversationId && work.conversationOverlapsReservation(otherId, conversationId))
       && !(activity.terminals?.liveSessionScopes() ?? []).some((session) =>
-        session.conversationId !== null && session.conversationId !== conversationId
+        session.conversationId !== conversationId
         && work.overlapsReservation(conversationId, session.cwd));
   } finally {
     if (!isolated) release();

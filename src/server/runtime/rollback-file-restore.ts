@@ -73,7 +73,7 @@ function recordedScope(store: RuntimeStore, turnIds: readonly string[]): Recorde
     if (artifact.absenceReason === "not-repository") continue;
     if (artifact.status !== "ready" || artifact.completeness !== "complete") return outcome("refused", UNRECORDED);
     const { beforeRef, afterRef, createdAt } = store.turnGitArtifactStorage(turnId);
-    finalRef = afterRef;
+    if (afterRef) finalRef = afterRef;
     if (artifact.files.length === 0) continue;
     if (!beforeRef || !artifact.repositoryIdentity || !artifact.worktreeIdentity) return outcome("refused", UNRECORDED);
     scope ??= { target: { turn, beforeRef, createdAt }, finalRef: null, repositoryIdentity: artifact.repositoryIdentity,
@@ -115,11 +115,69 @@ async function withSnapshot<T>(repositoryPath: string, conversationId: string, s
   finally { await deleteCheckpoint(repositoryPath, current.ref, conversationId).catch(() => undefined); }
 }
 
+function restoredTargets(files: readonly { path: string; previousPath: string | null; status: string }[]): string[] {
+  const targets = new Set<string>();
+  for (const file of files) {
+    if (file.status === "added" || file.status === "copied") continue;
+    if (file.status === "renamed") {
+      if (file.previousPath) targets.add(file.previousPath);
+      continue;
+    }
+    targets.add(file.path);
+  }
+  return [...targets];
+}
+
 async function changedFiles(repositoryPath: string, scope: RecordedScope, ref: string, deadlineAt: number) {
   const state = await captureGitArtifactState(repositoryPath, ref, { deadlineAt });
   if (state.repositoryIdentity !== scope.repositoryIdentity || state.worktreeIdentity !== scope.worktreeIdentity) return null;
   const comparison = await compareGitSnapshots(repositoryPath, scope.target.beforeRef, ref, { deadlineAt, maxBytes: 1_024 });
-  return { truncated: comparison.summaryTruncated, files: comparison.files };
+  if (comparison.summaryTruncated || comparison.files.length === 0) {
+    return {
+      truncated: comparison.summaryTruncated,
+      files: comparison.files,
+      finalMissing: false,
+      finalTruncated: false,
+      editedAfter: [] as string[],
+    };
+  }
+  const overwriteTargets = restoredTargets(comparison.files);
+  if (overwriteTargets.length === 0) {
+    return {
+      truncated: false,
+      files: comparison.files,
+      finalMissing: false,
+      finalTruncated: false,
+      editedAfter: [] as string[],
+    };
+  }
+  if (!scope.finalRef) {
+    return {
+      truncated: false,
+      files: comparison.files,
+      finalMissing: true,
+      finalTruncated: false,
+      editedAfter: [] as string[],
+    };
+  }
+  const sinceFinal = await compareGitSnapshots(repositoryPath, scope.finalRef, ref, { deadlineAt, maxBytes: 1_024 });
+  if (sinceFinal.summaryTruncated) {
+    return {
+      truncated: false,
+      files: comparison.files,
+      finalMissing: false,
+      finalTruncated: true,
+      editedAfter: [] as string[],
+    };
+  }
+  const changedAfter = new Set(sinceFinal.files.flatMap(({ path, previousPath }) => previousPath ? [path, previousPath] : [path]));
+  return {
+    truncated: false,
+    files: comparison.files,
+    finalMissing: false,
+    finalTruncated: false,
+    editedAfter: overwriteTargets.filter((path) => changedAfter.has(path)),
+  };
 }
 
 async function leftovers(repositoryPath: string, scope: RecordedScope, ref: string, deadlineAt: number) {
@@ -203,6 +261,13 @@ async function restoreClaimed(store: RuntimeStore, input: RollbackFileRestoreInp
       .filter((path) => !scope.paths.has(path)))];
     if (outside.length) {
       return outcome("refused", `Files the rolled-back turns did not change were modified since (${listed(outside)}), so files were left unchanged.`);
+    }
+    if (before.finalMissing) return outcome("refused", UNRECORDED);
+    if (before.finalTruncated) {
+      return outcome("refused", "Too many files changed after the rolled-back turns finished, so files were left unchanged.");
+    }
+    if (before.editedAfter.length) {
+      return outcome("refused", `Files the rolled-back turns changed were modified afterwards (${listed(before.editedAfter)}), so files were left unchanged.`);
     }
     input.beginRestore();
     const checkpoint: CheckpointSummary = { id: scope.target.turn.id, conversationId: input.conversationId,

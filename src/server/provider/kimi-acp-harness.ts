@@ -553,7 +553,7 @@ function startKimiRun(
           }),
           "session/new",
         );
-        sessionId = created.sessionId;
+        sessionId = boundedId(created.sessionId, "session");
         emitter.session(sessionId);
         commandAdvertisements.establish(sessionId);
         modes = created.modes;

@@ -1970,4 +1970,39 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       });
     }
   });
+
+  it("rejects empty or control-character session IDs from session/new before emitting session events", async () => {
+    for (const badId of ["", "bad\u0000id"]) {
+      const root = portableFixtureRoot(`cursor ACP invalid session id ${badId.length}`);
+      roots.push(root);
+      const command = portableNodeExecutable(root, "cursor-agent");
+      writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: ${JSON.stringify(badId)}, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+});
+`);
+      const manager = ProviderManager.createForTests(
+        { commands: { cursor: command } },
+        new AgentHarnessRegistry([createCursorAcpHarness()]),
+      );
+      const events: string[] = [];
+      await expect(manager.run(nativeProviderRunInput({
+        providerId: "cursor",
+        conversationId: `cursor-bad-session-${badId.length}`,
+        cwd: root,
+        prompt: "Hello",
+        interactionMode: "build",
+        access: "supervised",
+      }), { onEvent: (event) => events.push(event.type) })).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "malformed-protocol" },
+      });
+      expect(events).not.toContain("session");
+    }
+  });
 });

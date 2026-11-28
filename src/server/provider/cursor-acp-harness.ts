@@ -635,7 +635,7 @@ function startCursorRun(
         cwd: options.input.cwd,
         mcpServers: hostMcpServers,
       }), "session/new");
-      sessionId = created.sessionId;
+      sessionId = boundedSessionId(created.sessionId);
       todoSessions.reset(sessionId);
       emitter.session(sessionId);
       commandAdvertisements.establish(sessionId);
@@ -1221,6 +1221,12 @@ function failedCursorRun(
 
 function bounded(value: string): string { return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS); }
 function boundedToolStateText(value: string): string { return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS); }
+function boundedSessionId(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.length > 1_000) {
+    throw new Error("Cursor ACP sent an invalid session identity.");
+  }
+  return value;
+}
 function boundedToolActivityId(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.length > MAX_TOOL_ACTIVITY_ID_CHARS) {
     throw new Error("Cursor ACP sent an invalid tool call identity.");

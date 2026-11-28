@@ -1056,4 +1056,30 @@ setInterval(() => {}, 1000);
       });
     }
   });
+
+  it("rejects empty or control-character session IDs from session/new before emitting session events", async () => {
+    for (const badId of ["", "bad\u0000id"]) {
+      const root = portableFixtureRoot(`grok ACP invalid session id ${badId.length}`);
+      roots.push(root);
+      const command = writeNodeFlagExecutable(root, "grok", grokAgent(null, `
+        if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
+        if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+        if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: ${JSON.stringify(badId)}, configOptions: [] } });
+      `));
+      const events: string[] = [];
+      await expect(managerFor(root, command).run(nativeProviderRunInput({
+        providerId: "grok",
+        conversationId: `grok-bad-session-${badId.length}`,
+        cwd: root,
+        prompt: "Hello",
+        interactionMode: "build",
+        access: "supervised",
+      }), { onEvent: (event) => events.push(event.type) })).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "malformed-protocol" },
+      });
+      expect(events).not.toContain("session");
+    }
+  });
 });

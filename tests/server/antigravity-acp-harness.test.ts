@@ -1862,4 +1862,52 @@ describe("Antigravity ACP harness", { concurrent: false }, () => {
       cleanupConfirmed: true,
     });
   });
+
+  it("fails closed with protocol-overflow and terminates the process when approval or input budgets are exceeded", async () => {
+    const root = makeRoot("antigravity ACP approval overflow");
+    const floodCmd = (prefix: string) => writeFakeAgy(root, null, `
+      if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initReply({})} });
+      if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
+        sessionId: "agy-flood",
+        modes: ${JSON.stringify(CONFIRMED_DEFAULT_MODE)},
+        configOptions: [],
+      } });
+      if (message.method === "session/prompt") {
+        for (let i = 1; i <= 65; i += 1) {
+          send({
+            jsonrpc: "2.0",
+            id: 1000 + i,
+            method: "session/request_permission",
+            params: {
+              sessionId: "agy-flood",
+              toolCall: { toolCallId: "${prefix}" + i, title: "Request " + i, kind: "execute" },
+              options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+            },
+          });
+        }
+        setTimeout(() => {
+          send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "agy-flood", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Completed despite overflow" } } } });
+          send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+        }, 100);
+      }
+    `);
+    for (const prefix of ["call_", "interaction_"]) {
+      const result = await managerFor(floodCmd(prefix)).run(nativeProviderRunInput({
+        providerId: "antigravity",
+        conversationId: `agy-flood-${prefix}`,
+        cwd: root,
+        prompt: "Flood",
+        interactionMode: "build",
+        access: "supervised",
+      }));
+      expect(result).toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: {
+          reason: "protocol-overflow",
+          terminalEvent: "transport/frame",
+        },
+      });
+    }
+  });
 });

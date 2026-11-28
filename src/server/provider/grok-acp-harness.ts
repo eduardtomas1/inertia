@@ -319,15 +319,21 @@ function startGrokRun(
       acp.methods.client.session.requestPermission,
       async ({ params, signal }) => {
         if (!ownsActivePrompt(params.sessionId)) return { outcome: { outcome: "cancelled" } };
-        return grokPermission(
-          params,
-          redactHostMcpPayload(params),
-          signal,
-          options,
-          emitter.rich,
-          approvals,
-          hostMcpToolNames,
-        );
+        try {
+          return await grokPermission(
+            params,
+            redactHostMcpPayload(params),
+            signal,
+            options,
+            emitter.rich,
+            approvals,
+            hostMcpToolNames,
+          );
+        } catch (error) {
+          wireError ??= error instanceof Error ? error : new Error("Grok ACP failed a permission request.");
+          requestProcessTermination(true);
+          throw wireError;
+        }
       },
     )
     .onNotification(acp.methods.client.session.update, (value) => {
@@ -384,17 +390,25 @@ function startGrokRun(
         emitter.activity("system", "info", ACP_WATCHER_QUESTION_DECLINED);
         return GROK_QUESTION_CANCELLED_RESPONSE;
       }
+      if (signal.aborted) return GROK_QUESTION_CANCELLED_RESPONSE;
       const displayRequest = parseGrokQuestionRequest(redactHostMcpPayload(rawParams));
       const requestId = randomUUID();
-      const answers = await new Promise<Record<string, string[]>>((resolve) => {
-        if (inputs.size >= MAX_PENDING_INTERACTIONS) {
-          throw new Error("Grok exceeded the bounded input budget.");
-        }
-        inputs.set(requestId, { resolve, settled: false });
-        signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
-        emitter.capability("structured-input", true);
-        emitter.rich({ type: "input", request: grokInputRequest(requestId, displayRequest) });
-      });
+      let answers: Record<string, string[]>;
+      try {
+        answers = await new Promise<Record<string, string[]>>((resolve) => {
+          if (inputs.size >= MAX_PENDING_INTERACTIONS) {
+            throw new Error("Grok exceeded the bounded input budget.");
+          }
+          inputs.set(requestId, { resolve, settled: false });
+          signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
+          emitter.capability("structured-input", true);
+          emitter.rich({ type: "input", request: grokInputRequest(requestId, displayRequest) });
+        });
+      } catch (error) {
+        wireError ??= error instanceof Error ? error : new Error("Grok ACP failed a question request.");
+        requestProcessTermination(true);
+        throw wireError;
+      }
       if (signal.aborted || !ownsActivePrompt(providerRequest.sessionId)) {
         return GROK_QUESTION_CANCELLED_RESPONSE;
       }
@@ -477,7 +491,7 @@ function startGrokRun(
     ),
   );
   wireGuard.once("error", (error: Error) => {
-    wireError = error;
+    wireError ??= error;
   });
   child.stdout.pipe(wireGuard);
   const stream = acp.ndJsonStream(
@@ -853,7 +867,7 @@ async function grokPermission(
       ? { outcome: { outcome: "selected", optionId: allow.optionId } }
       : { outcome: { outcome: "cancelled" } };
   }
-  if (!permissionDisplayIsSafe(displayParams)) {
+  if (!permissionDisplayIsSafe(displayParams) || signal.aborted) {
     return { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();

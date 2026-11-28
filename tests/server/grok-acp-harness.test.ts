@@ -999,4 +999,61 @@ setInterval(() => {}, 1000);
       }
     }
   });
+
+  it("fails closed with protocol-overflow when approval or input budgets are exceeded", async () => {
+    for (const mode of ["approval", "question"] as const) {
+      const root = portableFixtureRoot(`grok ACP ${mode} overflow`);
+      roots.push(root);
+      const flood = mode === "approval"
+        ? `
+        for (let i = 1; i <= 65; i += 1) {
+          send({
+            jsonrpc: "2.0",
+            id: 1000 + i,
+            method: "session/request_permission",
+            params: {
+              sessionId: "grok-flood",
+              toolCall: { toolCallId: "call_" + i, title: "Request " + i, kind: "execute" },
+              options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+            },
+          });
+        }`
+        : `
+        for (let i = 1; i <= 65; i += 1) {
+          send({
+            jsonrpc: "2.0",
+            id: 1000 + i,
+            method: "_x.ai/ask_user_question",
+            params: {
+              sessionId: "grok-flood",
+              toolCallId: "qcall_" + i,
+              questions: [{ question: "Choose " + i, options: [{ label: "A" }, { label: "B" }], multiSelect: false }],
+            },
+          });
+        }`;
+      const command = writeNodeFlagExecutable(root, "grok", grokAgent(null, `
+        if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initResult("{}", `[{ id: "cached_token" }]`)} });
+        if (message.method === "authenticate") return send({ jsonrpc: "2.0", id: message.id, result: {} });
+        if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "grok-flood", configOptions: [] } });
+        if (message.method === "session/prompt") {${flood}
+          setTimeout(() => {
+            send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "grok-flood", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Completed despite overflow" } } } });
+            send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+          }, 100);
+        }
+      `));
+      await expect(managerFor(root, command).run(nativeProviderRunInput({
+        providerId: "grok",
+        conversationId: `grok-flood-${mode}`,
+        cwd: root,
+        prompt: "Flood",
+        interactionMode: "build",
+        access: "supervised",
+      }))).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "protocol-overflow", terminalEvent: "transport/frame" },
+      });
+    }
+  });
 });

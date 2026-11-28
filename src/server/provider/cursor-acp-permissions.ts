@@ -100,7 +100,7 @@ export async function askCursorPermission(
   emit: CursorRichEmitter,
   approvals: Map<string, PendingCursorApproval>,
 ): Promise<RequestPermissionResponse> {
-  if (!cursorPermissionDisplayIsSafe(displayParams)) {
+  if (!cursorPermissionDisplayIsSafe(displayParams) || signal.aborted) {
     return { outcome: { outcome: "cancelled" } };
   }
   const fileMutation = isCursorFileMutationKind(params.toolCall.kind);

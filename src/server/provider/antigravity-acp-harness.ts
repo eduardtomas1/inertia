@@ -340,16 +340,15 @@ function startAntigravityRun(
       acp.methods.client.session.requestPermission,
       async ({ params, signal }) => {
         if (!ownsActivePrompt(params.sessionId)) return { outcome: { outcome: "cancelled" } };
-        return antigravityPermission(
-          params,
-          redactHostMcpPayload(params),
-          signal,
-          options,
-          emitter.rich,
-          approvals,
-          inputs,
-          emitter.activity,
-        );
+        try {
+          return await antigravityPermission(
+            params, redactHostMcpPayload(params), signal, options, emitter.rich, approvals, inputs, emitter.activity,
+          );
+        } catch (error) {
+          wireError ??= error instanceof Error ? error : new Error("Antigravity ACP failed a permission request.");
+          requestProcessTermination(true);
+          throw wireError;
+        }
       },
     )
     .onNotification(acp.methods.client.session.update, (value): ParsedSessionUpdateFrame | null => {
@@ -456,7 +455,7 @@ function startAntigravityRun(
     ),
   );
   wireGuard.once("error", (error: Error) => {
-    wireError = error;
+    wireError ??= error;
   });
   child.stdout.pipe(wireGuard);
   const stream = promptFrames.wrap(acp.ndJsonStream(
@@ -864,7 +863,7 @@ async function antigravityPermission(
         : { outcome: { outcome: "cancelled" } };
     }
   }
-  if (!permissionDisplayIsSafe(displayParams)) {
+  if (!permissionDisplayIsSafe(displayParams) || signal.aborted) {
     return { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
@@ -916,6 +915,7 @@ async function antigravityInputPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   inputs: Map<string, PendingInput>,
 ): Promise<RequestPermissionResponse> {
+  if (signal.aborted) return { outcome: { outcome: "cancelled" } };
   const requestId = randomUUID();
   const request = antigravityInputRequest(requestId, input);
   const answers = await new Promise<Record<string, string[]>>((resolve) => {

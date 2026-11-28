@@ -326,15 +326,21 @@ function startCursorRun(
       if (!ownsActivePrompt() || params.sessionId !== sessionId) {
         return { outcome: { outcome: "cancelled" } };
       }
-      return await cursorPermission(
-        params,
-        redactHostMcpPayload(params),
-        signal,
-        options,
-        emitter.rich,
-        approvals,
-        hostMcpToolNames,
-      );
+      try {
+        return await cursorPermission(
+          params,
+          redactHostMcpPayload(params),
+          signal,
+          options,
+          emitter.rich,
+          approvals,
+          hostMcpToolNames,
+        );
+      } catch (error) {
+        providerEventError ??= error instanceof Error ? error : new Error("Cursor ACP failed a permission request.");
+        requestProcessTermination(true);
+        throw providerEventError;
+      }
     })
     .onNotification(acp.methods.client.session.update, (value) =>
       handleCursorProviderEvent(
@@ -391,15 +397,23 @@ function startCursorRun(
       );
       const requestId = randomUUID();
       const request = cursorQuestions(requestId, params);
-      const answers = await new Promise<Record<string, string[]>>((resolve) => {
-        if (inputs.size >= MAX_PENDING_CURSOR_INTERACTIONS) {
-          throw new Error("Cursor exceeded the bounded question budget.");
-        }
-        inputs.set(requestId, { resolve, settled: false });
-        signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
-        emitter.capability("structured-input", true);
-        emitter.rich({ type: "input", request });
-      });
+      if (signal.aborted) return { outcome: { outcome: "cancelled" } };
+      let answers: Record<string, string[]>;
+      try {
+        answers = await new Promise<Record<string, string[]>>((resolve) => {
+          if (inputs.size >= MAX_PENDING_CURSOR_INTERACTIONS) {
+            throw new Error("Cursor exceeded the bounded question budget.");
+          }
+          inputs.set(requestId, { resolve, settled: false });
+          signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
+          emitter.capability("structured-input", true);
+          emitter.rich({ type: "input", request });
+        });
+      } catch (error) {
+        providerEventError ??= error instanceof Error ? error : new Error("Cursor ACP failed a question request.");
+        requestProcessTermination(true);
+        throw providerEventError;
+      }
       if (signal.aborted || !ownsActivePrompt()) return { outcome: { outcome: "cancelled" } };
       return {
         outcome: {

@@ -77,7 +77,7 @@ export function cursorRuntimeFailure(
 ): ProviderRunFailure {
   const normalized = message.toLowerCase();
   const reason: ProviderRunFailure["reason"] =
-    /oversized|bounded event rate|bounded tool activity/u.test(normalized)
+    /oversized|bounded (?:approval|question|event rate|tool activity)/u.test(normalized)
       ? "protocol-overflow"
       : /malformed|unserializable|invalid utf|not valid.*utf-?8|unexpected token|valid json|cursor acp sent an invalid|invalid (?:.* identity|session update)/u.test(normalized)
         ? "malformed-protocol"

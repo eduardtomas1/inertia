@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { parseRuntimeCommand } from "../../src/server/runtime-protocol";
 
 import type {
   AgentApprovalRequest,
@@ -1405,5 +1406,34 @@ describe("detached chat workspace tools", () => {
       payload: { conversationId: OTHER_CONVERSATION, activityId: REQUEST },
     };
     expect(detachedChatCommandRejection(authority, otherRead, withoutArchived)).toBe(REJECTED);
+  });
+
+  it("authorizes message.queue.resume and message.queue.reorder only for the detached window's own chat", () => {
+    const ownResume: ClientCommand = {
+      type: "message.queue.resume",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION },
+    };
+    const otherResume: ClientCommand = {
+      type: "message.queue.resume",
+      requestId: REQUEST,
+      payload: { conversationId: OTHER_CONVERSATION },
+    };
+    const ownReorder: ClientCommand = {
+      type: "message.queue.reorder",
+      requestId: REQUEST,
+      payload: { conversationId: CONVERSATION, id: REQUEST, beforeId: null },
+    };
+    const otherReorder: ClientCommand = {
+      type: "message.queue.reorder",
+      requestId: REQUEST,
+      payload: { conversationId: OTHER_CONVERSATION, id: REQUEST, beforeId: null },
+    };
+    expect(parseRuntimeCommand(Buffer.from(JSON.stringify(ownResume)), false).command).toEqual(ownResume);
+    expect(parseRuntimeCommand(Buffer.from(JSON.stringify(ownReorder)), false).command).toEqual(ownReorder);
+    expect(rejection(ownResume)).toBeNull();
+    expect(rejection(ownReorder)).toBeNull();
+    expect(rejection(otherResume)).toBe(REJECTED);
+    expect(rejection(otherReorder)).toBe(REJECTED);
   });
 });

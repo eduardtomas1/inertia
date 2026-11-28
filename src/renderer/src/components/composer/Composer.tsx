@@ -376,7 +376,7 @@ export const Composer = memo(function Composer({
     dismissMenu("context-change");
     const queueOwned = queueOwnedAttachmentIdsRef.current;
     return () => {
-      const unsent = attachmentsRef.current.filter(({ id }) =>
+      const unsent = editingQueuedRef.current ? [] : attachmentsRef.current.filter(({ id }) =>
         !pendingAttachmentIdsRef.current.has(id) && !queueOwned.has(id));
       attachmentsRef.current = [];
       keepComposerDraftAttachments(ownerId, unsent, (id) => releaseAttachmentRef.current(id));

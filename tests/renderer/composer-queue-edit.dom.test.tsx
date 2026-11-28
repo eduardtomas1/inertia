@@ -266,6 +266,39 @@ describe("in-place queued message editing in Composer", () => {
     expect(within(secondBanner).getByRole("button", { name: "Cancel" })).toBeEnabled();
   });
 
+  it("does not restore a released staged upload into the draft after switching conversations mid-edit", async () => {
+    const first = conversation("80808080-8080-4080-8080-808080808087");
+    const second = conversation("80808080-8080-4080-8080-808080808088");
+    const stagedImg = makeAttachment("82828282-8282-4282-8282-828282828287", "staged.png");
+    const item = makeEntry(first.id, 1, { content: "Queued with upload" });
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const run = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => ({
+      kind: "message.queue",
+      conversationId: (command.payload as { conversationId: string }).conversationId,
+      entries: (command.payload as { conversationId: string }).conversationId === first.id ? [item] : [],
+      receipt: null,
+    }));
+    const props = (current: typeof first) => composerProps(current, {
+      running: true,
+      latestTurn: runningTurn,
+      onQueueCommand: run,
+      onReleaseAttachment,
+      onImportAttachments: async () => makeLease([stagedImg]),
+    });
+
+    const view = render(<Composer {...props(first)} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 }));
+    fireEvent.paste(input, { clipboardData: { files: [new File(["png"], "staged.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "Remove attachment staged.png" });
+
+    view.rerender(<Composer {...props(second)} />);
+    await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledWith(stagedImg.id));
+    view.rerender(<Composer {...props(first)} />);
+    await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
+    expect(screen.queryByRole("button", { name: "Remove attachment staged.png" })).toBeNull();
+  });
+
   it("routes prefill into the active edit without clobbering localStorage and enforces the N11 pending-request gate while allowing compaction", async () => {
     const current = conversation("80808080-8080-4080-8080-808080808085");
     const item = makeEntry(current.id, 1, { content: "Base edit" });

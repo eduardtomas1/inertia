@@ -785,6 +785,9 @@ function reconcileConversationQueueOnBoot(
         .filter((item) => item.requestedAt <= steer.requestedAt)
         .map(({ id }) => id);
       const commandId = queueUnreadFollowUpCommandId(turn.id, message.id);
+      const command = { type: "queue.requeue-unread-steer", conversationId, turnId: turn.id, messageId: message.id };
+      if (store.orchestration.events.receipt({ actorId: "runtime", commandId, projectId: store.conversation(conversationId).projectId,
+        threadId: conversationId }, command, "queue.requeue-unread-steer")) continue;
       queue.enqueue({
         conversationId,
         itemId,
@@ -800,11 +803,7 @@ function reconcileConversationQueueOnBoot(
         queueHeld: true,
         requestedAt: steer.requestedAt,
         origin: "requeue",
-        source: {
-          actorId: "runtime",
-          commandId,
-          command: { type: "queue.requeue-unread-steer", conversationId, turnId: turn.id, messageId: message.id },
-        },
+        source: { actorId: "runtime", commandId, command },
         commandType: "queue.requeue-unread-steer",
       });
       report.requeuedUnreadSteers.push(itemId);

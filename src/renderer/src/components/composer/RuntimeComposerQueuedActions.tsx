@@ -167,6 +167,7 @@ export function RuntimeComposerQueuedActions({
   latestError.current = error;
   const errorEntry = useRef<string | null>(null);
   const owner = useRef(conversationId);
+  const resetFor = useRef<string | null>(null);
   const revision = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -240,24 +241,27 @@ export function RuntimeComposerQueuedActions({
         }
       });
     };
-    queueSignature.current = "[]";
-    serverRevisionRef.current = -1;
-    setQueue([]);
+    if (resetFor.current !== conversationId) {
+      resetFor.current = conversationId;
+      queueSignature.current = "[]";
+      serverRevisionRef.current = -1;
+      setQueue([]);
+      setHeld(false);
+      setHoldReason(null);
+      setCanResume(false);
+      setExpanded(false);
+      setRuntimeQueueSummary(conversationId, {
+        userCount: 0,
+        totalCount: 0,
+        held: false,
+        holdReason: null,
+        canResume: false,
+        latestRevision: 0,
+      });
+    }
     setPendingIntents(getPendingQueueIntents(conversationId));
-    setHeld(false);
-    setHoldReason(null);
-    setCanResume(false);
-    setExpanded(false);
     setError(null);
     setBusy(false);
-    setRuntimeQueueSummary(conversationId, {
-      userCount: 0,
-      totalCount: 0,
-      held: false,
-      holdReason: null,
-      canResume: false,
-      latestRevision: 0,
-    });
     refresh();
     const onQueueChanged = (event: Event): void => {
       const detail = parseRuntimeQueueChangedDetail((event as CustomEvent<unknown>).detail);

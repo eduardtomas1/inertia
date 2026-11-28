@@ -327,6 +327,7 @@ describe("delegated result deliveries in the parent queue", () => {
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
     process.on("unhandledRejection", onUnhandled);
+    const warn = vi.spyOn(console, "warn");
     try {
       const parentTurn = f.startParent();
       f.provider.steerSupported = false;
@@ -346,7 +347,9 @@ describe("delegated result deliveries in the parent queue", () => {
       f.store.close();
       await new Promise((resolve) => setTimeout(resolve, 60));
       expect(unhandled).toEqual([]);
+      expect(warn).toHaveBeenCalledWith("Delegated delivery offer retry did not finish.", expect.any(String));
     } finally {
+      warn.mockRestore();
       process.off("unhandledRejection", onUnhandled);
       await f.close().catch(() => undefined);
     }

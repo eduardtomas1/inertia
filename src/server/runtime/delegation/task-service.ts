@@ -462,7 +462,9 @@ export class DelegationTaskService {
     const delayMs = Math.max(0, (this.dependencies.offerRetryDelayMs ?? DEFAULT_OFFER_RETRY_DELAY_MS)(attempt));
     const timer = setTimeout(() => {
       if (this.#disposed || this.#offerRetries.get(conversationId)?.timer !== timer) return;
-      void this.offer([conversationId]).catch(() => undefined);
+      void this.offer([conversationId]).catch((error: unknown) => {
+        console.warn("Delegated delivery offer retry did not finish.", error instanceof Error ? error.message : "unknown error");
+      });
     }, delayMs);
     timer.unref?.();
     this.#offerRetries.set(conversationId, { attempt, timer });

@@ -60,6 +60,7 @@ afterEach(async () => {
 function host(): PrivateConnectGatewayHost {
   return {
     pairingAllowed: () => true,
+    pairingCapabilityLive: () => true,
     pairStart: async () => ({ requestId: "33333333-3333-4333-8333-333333333333", expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123456" }),
     pairStatus: async () => ({ status: "pending", requestId: "33333333-3333-4333-8333-333333333333", expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123456" }),
     session: (cookie) => cookie === "session-token" ? session : null,
@@ -788,5 +789,106 @@ describe("Private Connect loopback gateway", () => {
     expect(concurrentCalls).toBe(PRIVATE_CONNECT_LIMITS.requestsPerMinute);
     expect(concurrentResults.filter((status) => status === 400)).toHaveLength(PRIVATE_CONNECT_LIMITS.requestsPerMinute);
     expect(concurrentResults.filter((status) => status === 429)).toHaveLength(10);
+  });
+
+  function pairingFixture(nowValue: () => number) {
+    const root = mkdtempSync(join(tmpdir(), "inertia-private-connect-gateway-quota-"));
+    writeFileSync(join(root, "index.html"), "<html>ok</html>");
+    const valid = {
+      invitationId: "77777777-7777-4777-8777-777777777777",
+      secret: "S".repeat(43),
+      requestId: "88888888-8888-4888-8888-888888888888",
+      nonce: "N".repeat(43),
+    };
+    const calls = { start: new Map<string, number>(), status: new Map<string, number>() };
+    const verifyingHost: PrivateConnectGatewayHost = {
+      ...host(),
+      pairingCapabilityLive: (stage, id) => id === (stage === "start" ? valid.invitationId : valid.requestId),
+      async pairStart(request) {
+        const id = request.invitation.invitationId;
+        calls.start.set(id, (calls.start.get(id) ?? 0) + 1);
+        if (id !== valid.invitationId || request.invitation.pairingSecret !== valid.secret) throw new Error("Invalid invitation.");
+        return { requestId: valid.requestId, expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123-456" };
+      },
+      async pairStatus(requestId, browserNonce) {
+        calls.status.set(requestId, (calls.status.get(requestId) ?? 0) + 1);
+        if (requestId !== valid.requestId || browserNonce !== valid.nonce) throw new Error("Invalid status request.");
+        return { status: "pending", requestId, expiresAt: "2030-01-01T00:05:00.000Z", comparisonCode: "123-456" };
+      },
+    };
+    const server = new PrivateConnectGatewayServer({ host: verifyingHost, staticRoot: root, now: () => new Date(nowValue()) });
+    servers.push(server);
+    const post = async (address: { port: number }, stage: "start" | "status", body: unknown, login?: string) => {
+      const response = await fetch(`http://${hostHeader(address)}/api/pair/${stage}`, {
+        method: "POST",
+        headers: {
+          Origin: `https://${hostHeader(address)}`,
+          "Content-Type": "application/json",
+          ...(login ? { "Tailscale-User-Login": login } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      await response.arrayBuffer();
+      return response.status;
+    };
+    const start = (address: { port: number }, invitationId: string, secret: string, nonce: string, login?: string) => post(address, "start", {
+      invitation: {
+        protocolVersion: 1,
+        hostId: "11111111-1111-4111-8111-111111111111",
+        invitationId,
+        pairingSecret: secret,
+        createdAt: "2029-12-31T23:55:00.000Z",
+        expiresAt: "2030-01-01T00:05:00.000Z",
+      },
+      deviceId: session.deviceId,
+      deviceLabel: "browser",
+      browserNonce: nonce,
+    }, login);
+    const status = (address: { port: number }, requestId: string, nonce: string, login?: string) =>
+      post(address, "status", { requestId, browserNonce: nonce }, login);
+    return { server, valid, calls, start, status };
+  }
+
+  it("keeps a valid pairing available after a header-less loopback peer fails against other invitations", async () => {
+    const { server, valid, start, status } = pairingFixture(() => 7_000_000);
+    const address = await server.start();
+    const unrelated = (index: number) => `99999999-9999-4999-8999-${String(index + 1).padStart(12, "0")}`;
+    const failedStarts: number[] = [];
+    for (let index = 0; index < PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute + 5; index += 1) {
+      failedStarts.push(await start(address, unrelated(index), "X".repeat(43), "B".repeat(43)));
+    }
+    expect(new Set(failedStarts)).toEqual(new Set([400]));
+    expect(await start(address, valid.invitationId, valid.secret, valid.nonce)).toBe(202);
+    const failedPolls: number[] = [];
+    for (let index = 0; index < PRIVATE_CONNECT_LIMITS.requestsPerMinute + 5; index += 1) {
+      failedPolls.push(await status(address, unrelated(index), "W".repeat(43)));
+    }
+    expect(new Set(failedPolls)).toEqual(new Set([400]));
+    expect(await status(address, valid.requestId, valid.nonce)).toBe(200);
+  });
+
+  it("bounds secret checks against one invitation when callers rotate the identity header", async () => {
+    let nowValue = 8_000_000;
+    const { server, valid, calls, start, status } = pairingFixture(() => nowValue);
+    const address = await server.start();
+    const startCap = PRIVATE_CONNECT_LIMITS.pairingAttemptsPerMinute * 2;
+    const startStatuses: number[] = [];
+    for (let index = 0; index < 400; index += 1) {
+      startStatuses.push(await start(address, valid.invitationId, `X${String(index).padStart(42, "0")}`, "B".repeat(43), `rotating-${index}@example.com`));
+    }
+    expect(calls.start.get(valid.invitationId)).toBe(startCap);
+    expect(startStatuses.slice(0, startCap)).toEqual(Array.from({ length: startCap }, () => 400));
+    expect(new Set(startStatuses.slice(startCap))).toEqual(new Set([429]));
+    expect(await start(address, valid.invitationId, valid.secret, valid.nonce, "owner@example.com")).toBe(429);
+    nowValue += 61_000;
+    expect(await start(address, valid.invitationId, valid.secret, valid.nonce, "owner@example.com")).toBe(202);
+
+    const statusCap = PRIVATE_CONNECT_LIMITS.requestsPerMinute * 2;
+    const pollStatuses: number[] = [];
+    for (let index = 0; index < statusCap + 5; index += 1) {
+      pollStatuses.push(await status(address, valid.requestId, `W${String(index).padStart(42, "0")}`, `rotating-${index}@example.com`));
+    }
+    expect(calls.status.get(valid.requestId)).toBe(statusCap);
+    expect(new Set(pollStatuses.slice(statusCap))).toEqual(new Set([429]));
   });
 });

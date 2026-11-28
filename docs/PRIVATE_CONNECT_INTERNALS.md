@@ -54,11 +54,21 @@ no platform-specific path is left unexercised.
 The gateway derives its `connect-src` socket sources from the already-validated
 `Host` header rather than allowing the whole `wss:` scheme, so a compromised
 page cannot open a socket to an unrelated host. The CSRF guard is compared in
-constant time. Rate limiting keys on the loopback peer address, which behind
-Tailscale Serve is shared by every remote browser; that is deliberate, because
-keying on a client-supplied Tailscale identity header would let a caller
-rotate the header to escape the bound. Authenticated limits are keyed per
-device instead.
+constant time. Authenticated limits are keyed per device. Pairing limits are
+keyed per invitation or pairing-request identifier, not per loopback peer
+address, which behind Tailscale Serve is shared by every remote browser. A
+failed check is counted only when the host's `pairingCapabilityLive` reports
+that the identifier names the current invitation or a pending pairing, so
+floods of unknown identifiers neither reach a secret comparison nor spend the
+real invitation's budget. The gateway reserves a failure slot before awaiting
+the host, so overlapping requests cannot exceed the bound, and releases it when
+the check succeeds. The `Tailscale-User-Login` header, or the socket address
+when the header is absent, only splits an identifier's failure budget into
+per-caller shares of the stage limit; the identifier's total is twice that
+limit. Serve removes client-supplied copies of the header
+(https://tailscale.com/kb/1312/serve), but a local process can reach the
+loopback port directly and rotate it, so the total is the bound that holds
+against rotation.
 
 On startup, the main process removes only regular legacy
 `remote-access.vault` and transaction files inside the user-data directory,

@@ -228,6 +228,7 @@ export async function captureRequiredCheckpoint(
       path,
       join(dataDirectory, "checkpoint-indexes"),
       conversationId,
+      { phase: "other" },
     );
   } catch (error) {
     throw new RuntimeRequestError(

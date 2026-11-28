@@ -132,7 +132,7 @@ function sharedElsewhere(store: RuntimeStore, conversationId: string, scope: Rec
 
 async function withSnapshot<T>(repositoryPath: string, conversationId: string, storage: string, deadlineAt: number,
   inspect: (ref: string) => Promise<T>): Promise<T> {
-  const current = await createCheckpoint(repositoryPath, storage, conversationId, { deadlineAt });
+  const current = await createCheckpoint(repositoryPath, storage, conversationId, { deadlineAt, phase: "other" });
   try { return await inspect(current.ref); }
   finally { await deleteCheckpoint(repositoryPath, current.ref, conversationId).catch(() => undefined); }
 }

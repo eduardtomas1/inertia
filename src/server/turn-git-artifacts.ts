@@ -342,7 +342,7 @@ export class TurnGitArtifactManager {
           repositoryPath,
           this.#checkpointDirectory,
           input.turn.conversationId,
-          operation,
+          { ...operation, phase: "pre-turn" },
         );
         beforeRef = privateCheckpoint.ref;
         checkpointId = null;
@@ -392,7 +392,7 @@ export class TurnGitArtifactManager {
         repositoryPath,
         this.#checkpointDirectory,
         turn.conversationId,
-        operation,
+        { ...operation, phase: "pre-turn" },
       ),
     ]);
     const stopped = operation.signal.aborted;
@@ -482,7 +482,7 @@ export class TurnGitArtifactManager {
         repositoryPath,
         this.#checkpointDirectory,
         input.turn.conversationId,
-        operation,
+        { ...operation, phase: "post-turn" },
       );
       afterRef = postSnapshot.ref;
       const after = await captureGitArtifactState(
@@ -825,7 +825,7 @@ export class TurnGitArtifactManager {
         repositoryPath,
         this.#checkpointDirectory,
         conversationId,
-        operation,
+        { ...operation, phase: "other" },
       )).ref;
       const comparison = await compareGitSnapshots(
         repositoryPath,

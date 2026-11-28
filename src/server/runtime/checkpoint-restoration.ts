@@ -46,7 +46,7 @@ export async function restoreConversationCheckpoint(
     await assertCheckpointPreservesIgnoredFiles(repositoryPath, checkpoint.ref, deadlineAt);
     const status = await getRepositoryStatus(repositoryPath, { deadlineAt });
     const recovery = await createCheckpoint(
-      repositoryPath, storage, checkpoint.conversationId, { deadlineAt },
+      repositoryPath, storage, checkpoint.conversationId, { deadlineAt, phase: "other" },
     );
     // Persist the recovery before the first destructive Git operation. If
     // persistence fails, preserve its Git ref and leave the worktree alone.

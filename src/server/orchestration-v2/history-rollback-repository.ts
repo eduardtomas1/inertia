@@ -88,9 +88,12 @@ export class HistoryRollbackRepository {
       input.nativeConversationId) as { revision: number; payload_json: string } | undefined;
     const cursorRow = this.events.projection("history-cursor", input.threadId);
     const cursor = cursorRow ? historyCursorSchema.parse(cursorRow.value) : null;
+    const rolledBackAt = cursor ? (this.database.prepare(`SELECT MAX(revision) FROM orchestration_v2_entities
+      WHERE kind = 'rolled-back-turn' AND thread_id = ? AND json_extract(payload_json, '$.rollbackId') = ?`).pluck()
+      .get(input.threadId, cursor.rollbackId) as number | null) ?? cursorRow!.revision : 0;
     if (cursor?.transfer === "native" && cursor.providerInstanceId === input.providerInstanceId
       && cursor.nativeConversationId === input.nativeConversationId
-      && cursorRow!.revision > (boundary?.revision ?? 0)) return cursor.physicalHeadId;
+      && rolledBackAt > (boundary?.revision ?? 0)) return cursor.physicalHeadId;
     if (!boundary) return null;
     const settled = orchestrationNativeBoundarySchema.parse(JSON.parse(boundary.payload_json));
     return settled.phase === "settled" ? settled.persistedHeadId : null;

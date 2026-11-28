@@ -140,7 +140,7 @@ export class ScheduledTaskService {
 
   providerContentForQueueItem(queueItemId: string): string | null {
     const runId = this.trackedByQueueItemId.get(queueItemId);
-    return runId ? (this.trackedByRunId.get(runId)?.providerContent ?? null) : null;
+    return runId ? (this.trackedByRunId.get(runId)?.providerContent || null) : null;
   }
 
   create(rawInput: ScheduledTaskCreateInput): ScheduledTask {
@@ -782,6 +782,7 @@ export class ScheduledTaskService {
     let targetConversationId: string | null = null;
     try {
       const resolved = await this.resolveTargetConversation(dispatchTask, claimed, nowIso, options?.requirePrivateConnectPromptSafety);
+      if (this.disposed || !this.dependencies.repository.get(task.id) || !this.dependencies.repository.getRun(claimed.id)) throw userError("Scheduled task is no longer available.");
       targetConversationId = resolved.conversationId;
       const providerContent = withAgentSenderNote(dispatchTask.prompt, {
         conversationId: dispatchTask.id, title: dispatchTask.title, kind: "scheduled",
@@ -850,7 +851,8 @@ export class ScheduledTaskService {
         this.dependencies.repository.updateRun(claimed.id, {
           state: "failed", conversationId: targetConversationId, error: message, finishedAt: failNow, updatedAt: failNow,
         });
-        const currentTask = this.dependencies.repository.get(task.id) ?? task;
+        const currentTask = this.dependencies.repository.get(task.id);
+        if (!currentTask) return;
         const isLatest = this.isLatestRunForTask(task.id, claimed.id);
         const nextFailures = currentTask.consecutiveFailures + 1;
         if (disableMissingTarget) {
@@ -1152,14 +1154,13 @@ export class ScheduledTaskService {
       if (queueItem.state === "blocked") {
         return this.settleNonTurnRun(run, "failed", queueItem.detail ?? "The queued scheduled prompt was blocked.", now, false);
       }
-      if (queueItem.state === "delivered" && queueItem.delivery?.turnId) {
+      if (queueItem.state === "delivered") {
+        if (!queueItem.delivery?.turnId) return this.settleNonTurnRun(run, "failed", "The delivered scheduled prompt is missing its turn reference after restart.", now, false);
         const bound = this.bindRunTurn(run.id, queueItem.delivery.turnId);
-        if (!bound) return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
-        if (bound.state === "completed" || bound.state === "failed" || bound.state === "skipped") {
-          return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
-        }
+        if (!bound || bound.state === "completed" || bound.state === "failed" || bound.state === "skipped") return this.dependencies.repository.get(run.taskId)?.projectId ?? null;
         return this.reconcileRunningRunOnBoot(bound, now);
       }
+      if (queueItem.state === "waiting" || queueItem.state === "dispatching") this.trackRun({ runId: run.id, taskId: run.taskId, conversationId: run.conversationId ?? queueItem.threadId, queueItemId: queueItem.id, turnId: null, claimedAt: run.claimedAt, providerContent: "" });
       return null;
     }
     if (run.state === "running") {

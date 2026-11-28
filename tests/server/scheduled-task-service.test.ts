@@ -1543,4 +1543,160 @@ describe("ScheduledTaskService", () => {
       runtime.store.close();
     }
   });
+
+  it("does not enqueue or track a run when the task is deleted while createConversation is in flight", async () => {
+    const repo = new InMemoryScheduledTaskRepository();
+    const store: ScheduledTaskStoreLike = {
+      project(projectId) {
+        if (projectId === PROJECT_ID) return { id: PROJECT_ID, name: "Alpha" };
+        throw new RecordNotFoundError(`Project ${projectId} not found.`);
+      },
+      conversation(conversationId) {
+        throw new RecordNotFoundError(`Conversation ${conversationId} not found.`);
+      },
+    };
+    let resolveCreate!: (conv: Pick<Conversation, "id" | "projectId" | "title" | "archivedAt">) => void;
+    let notifyCreatedStarted!: () => void;
+    const startedGate = new Promise<void>((resolve) => { notifyCreatedStarted = resolve; });
+    const createdPromise = new Promise<Pick<Conversation, "id" | "projectId" | "title" | "archivedAt">>((resolve) => { resolveCreate = resolve; });
+    const enqueueScheduledPrompt = vi.fn(async (input: ScheduledTaskEnqueuePromptInput) => ({
+      queueItemId: input.queueItemId,
+    }));
+
+    const service = new ScheduledTaskService({
+      repository: repo,
+      store,
+      createConversation: async () => {
+        notifyCreatedStarted();
+        return await createdPromise;
+      },
+      enqueueScheduledPrompt,
+      broadcast: () => undefined,
+    });
+    try {
+      const task = service.create({
+        projectId: PROJECT_ID,
+        title: "Deleted mid-dispatch",
+        prompt: "Should never enqueue after delete",
+        schedule: { type: "interval", everyMs: 60_000 },
+        boundConversationId: null,
+      });
+
+      const running = service.runNow(task.id);
+      await startedGate;
+      service.delete(task.id);
+      resolveCreate({ id: randomUUID(), projectId: PROJECT_ID, title: "Deleted mid-dispatch", archivedAt: null });
+
+      await expect(running).rejects.toThrow();
+      expect(enqueueScheduledPrompt).not.toHaveBeenCalled();
+    } finally {
+      service.dispose();
+    }
+  });
+
+  it("settles a queued boot run whose queue item is delivered without turnId and tracks waiting boot runs without returning empty providerContent", () => {
+    const repo = new InMemoryScheduledTaskRepository();
+    const queueItems = new Map<string, Partial<QueueItemProjection>>();
+    const boundId = randomUUID();
+    const store: ScheduledTaskStoreLike = {
+      project(projectId) {
+        if (projectId === PROJECT_ID) return { id: PROJECT_ID, name: "Alpha" };
+        throw new RecordNotFoundError(`Project ${projectId} not found.`);
+      },
+      conversation(conversationId) {
+        if (conversationId === boundId) {
+          return {
+            id: boundId,
+            projectId: PROJECT_ID,
+            title: "Bound",
+            archivedAt: null,
+            accessMode: "supervised",
+            interactionMode: "build",
+            modelSelection: MODEL_SELECTION,
+          };
+        }
+        throw new RecordNotFoundError(`Conversation ${conversationId} not found.`);
+      },
+      orchestration: {
+        queue: {
+          enqueue: () => { throw new Error("unexpected enqueue"); },
+          getItem: (id: string) => (queueItems.get(id) as QueueItemProjection | undefined) ?? null,
+        },
+      },
+    };
+    const service = new ScheduledTaskService({
+      repository: repo,
+      store,
+      createConversation: async () => ({ id: boundId, projectId: PROJECT_ID, title: "Bound", archivedAt: null }),
+      broadcast: () => undefined,
+    });
+    try {
+      const wedgedTask = service.create({
+        projectId: PROJECT_ID,
+        title: "Delivered without turnId",
+        prompt: "Check status",
+        schedule: { type: "interval", everyMs: 60_000 },
+      });
+      const wedgedQueueItemId = randomUUID();
+      const wedgedRun = repo.claimRun({
+        runId: randomUUID(),
+        taskId: wedgedTask.id,
+        claimKey: `wedged:${wedgedTask.id}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: new Date().toISOString(),
+        nextRunAtAfterClaim: wedgedTask.nextRunAt,
+      })!;
+      repo.updateRun(wedgedRun.id, {
+        state: "queued",
+        conversationId: boundId,
+        queueItemId: wedgedQueueItemId,
+        updatedAt: new Date().toISOString(),
+      });
+      queueItems.set(wedgedQueueItemId, {
+        id: wedgedQueueItemId,
+        threadId: boundId,
+        state: "delivered",
+      });
+
+      const waitingTask = service.create({
+        projectId: PROJECT_ID,
+        title: "Waiting across boot",
+        prompt: "Run after boot",
+        schedule: { type: "interval", everyMs: 60_000 },
+      });
+      const waitingQueueItemId = randomUUID();
+      const waitingRun = repo.claimRun({
+        runId: randomUUID(),
+        taskId: waitingTask.id,
+        claimKey: `waiting:${waitingTask.id}`,
+        trigger: "manual",
+        scheduledFor: null,
+        claimedAt: new Date().toISOString(),
+        nextRunAtAfterClaim: waitingTask.nextRunAt,
+      })!;
+      repo.updateRun(waitingRun.id, {
+        state: "queued",
+        conversationId: boundId,
+        queueItemId: waitingQueueItemId,
+        updatedAt: new Date().toISOString(),
+      });
+      queueItems.set(waitingQueueItemId, {
+        id: waitingQueueItemId,
+        threadId: boundId,
+        state: "waiting",
+      });
+
+      service.start();
+
+      expect(repo.getRun(wedgedRun.id)?.state).toBe("failed");
+      expect(repo.hasActiveQueuedOrRunningOccurrence(wedgedTask.id)).toBe(false);
+      expect(service.providerContentForQueueItem(waitingQueueItemId)).toBeNull();
+      const bound = service.bindRunTurn(waitingQueueItemId, "turn-after-boot");
+      expect(bound?.id).toBe(waitingRun.id);
+      expect(bound?.turnId).toBe("turn-after-boot");
+    } finally {
+      service.dispose();
+    }
+  });
 });

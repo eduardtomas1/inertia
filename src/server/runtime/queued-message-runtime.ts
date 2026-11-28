@@ -1172,6 +1172,9 @@ export function createQueuedMessageRuntime(
       sendOptions?: { textOnly?: boolean },
     ): Promise<void> => {
       await running.get(conversationId)?.catch(() => undefined);
+      if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+      if (store.conversationWork.restoreBlocksConversation(conversationId)) throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS);
+      validateManualSendOperation(operationsContext, conversationId, id, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
       if (turns.isActive(conversationId)) {
         await sendDuringTurn(conversationId, id, requestId, { releaseHeld: true, textOnly: sendOptions?.textOnly });
       } else {

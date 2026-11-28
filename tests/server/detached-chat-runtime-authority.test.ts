@@ -1408,7 +1408,7 @@ describe("detached chat workspace tools", () => {
     expect(detachedChatCommandRejection(authority, otherRead, withoutArchived)).toBe(REJECTED);
   });
 
-  it("authorizes message.queue.resume and message.queue.reorder only for the detached window's own chat", () => {
+  it("authorizes message.queue.resume only for the detached window's own chat and keeps message.queue.reorder off the client boundary", () => {
     const ownResume: ClientCommand = {
       type: "message.queue.resume",
       requestId: REQUEST,
@@ -1419,21 +1419,16 @@ describe("detached chat workspace tools", () => {
       requestId: REQUEST,
       payload: { conversationId: OTHER_CONVERSATION },
     };
-    const ownReorder: ClientCommand = {
+    const reorder = {
       type: "message.queue.reorder",
       requestId: REQUEST,
       payload: { conversationId: CONVERSATION, id: REQUEST, beforeId: null },
     };
-    const otherReorder: ClientCommand = {
-      type: "message.queue.reorder",
-      requestId: REQUEST,
-      payload: { conversationId: OTHER_CONVERSATION, id: REQUEST, beforeId: null },
-    };
     expect(parseRuntimeCommand(Buffer.from(JSON.stringify(ownResume)), false).command).toEqual(ownResume);
-    expect(parseRuntimeCommand(Buffer.from(JSON.stringify(ownReorder)), false).command).toEqual(ownReorder);
+    const parsedReorder = parseRuntimeCommand(Buffer.from(JSON.stringify(reorder)), false);
+    expect(parsedReorder.command).toBeUndefined();
+    expect(parsedReorder.error?.type).toBe("request.error");
     expect(rejection(ownResume)).toBeNull();
-    expect(rejection(ownReorder)).toBeNull();
     expect(rejection(otherResume)).toBe(REJECTED);
-    expect(rejection(otherReorder)).toBe(REJECTED);
   });
 });

@@ -93,7 +93,7 @@ export const agentCommandSchemas = [
   z.strictObject({ ...requestBase, type: z.literal("message.queue.stop-and-send"), payload: z.strictObject({
     conversationId: z.uuid(), id: z.uuid(), turnId: z.uuid(), content: z.string().trim().min(1).max(20_000), attachments: attachmentsSchema,
   }) }),
-  ...phase5QueueCommandSchemas,
+  messageQueueResumeCommandSchema,
   z
     .object({
       ...requestBase,

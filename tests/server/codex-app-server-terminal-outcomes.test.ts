@@ -777,6 +777,8 @@ describe("Codex rejecting the native thread's encrypted history", () => {
     ["JSON", '{"error":{"code":"x"},"headers":{"a":"dummy-sensitive","b":"}{"},"status":400}', '{"error":{"code":"x"},"headers":"[redacted]","status":400}'],
     ["JSON inside a JSON string", '"{\\"headers\\":{\\"a\\":\\"dummy-sensitive\\"},\\"status\\":400}"',
       '"{\\"headers\\":\\"[redacted]\\",\\"status\\":400}"'],
+    ["JSON inside a JSON string with braces and escaped quotes in values", '"{\\"headers\\":{\\"a\\":\\"}\\\\\\"{\\",\\"x-codex-turn-state\\":\\"dummy-sensitive\\"},\\"status\\":400}"',
+      '"{\\"headers\\":\\"[redacted]\\",\\"status\\":400}"'],
     ["Rust debug text", 'status: 400, headers: {"a": "dummy-sensitive"}, body: x', 'status: 400, headers:[redacted], body: x'],
     ["a map cut off by a bound", '{"headers":{"a":"dummy-sensitive', '{"headers":"[redacted]"'],
     ["text without headers", "Codex could not continue.", "Codex could not continue."],

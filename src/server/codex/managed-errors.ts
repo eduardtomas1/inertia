@@ -77,11 +77,35 @@ export function redactCodexErrorHeaders(text: string): string {
   HEADER_MAP_KEY.lastIndex = 0;
   for (let match = HEADER_MAP_KEY.exec(text); match; match = HEADER_MAP_KEY.exec(text)) {
     const key = match[1]!;
+    const escaped = key.startsWith("\\");
     let end = match.index + match[0].length;
     let depth = 1;
     let inString = false;
     for (; end < text.length && depth > 0; end += 1) {
       const character = text[end];
+      if (escaped) {
+        if (character === "\\") {
+          let backslashes = 1;
+          while (text[end + backslashes] === "\\") backslashes += 1;
+          if (text[end + backslashes] === "\"") {
+            if (backslashes % 2 === 0) {
+              end += backslashes;
+              break;
+            }
+            if (backslashes % 4 === 1) inString = !inString;
+            end += backslashes;
+          } else {
+            end += backslashes - 1;
+          }
+        } else if (character === "\"") {
+          break;
+        } else if (!inString && character === "{") {
+          depth += 1;
+        } else if (!inString && character === "}") {
+          depth -= 1;
+        }
+        continue;
+      }
       if (character === "\\") end += 1;
       else if (character === "\"") inString = !inString;
       else if (!inString && character === "{") depth += 1;

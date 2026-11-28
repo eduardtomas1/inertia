@@ -26,6 +26,8 @@ import { claudeModelScopedWindows } from "../../src/server/provider/claude-rate-
 import { parseGrokExitPlanRequest } from "../../src/server/provider/grok-acp-extensions";
 import { grokErrorDetail, grokStopFailure } from "../../src/server/provider/grok-acp-support";
 import { planSteps as grokPlanSteps } from "../../src/server/provider/grok-acp-projection";
+import { antigravityErrorDetail, antigravityStopFailure } from "../../src/server/provider/antigravity-acp-support";
+import { planSteps as antigravityPlanSteps, sanitizeAntigravitySessionTitle } from "../../src/server/provider/antigravity-acp-projection";
 import { kimiErrorDetail, kimiStopFailure } from "../../src/server/provider/kimi-acp-support";
 import { planSteps as kimiPlanSteps } from "../../src/server/provider/kimi-acp-projection";
 import { markdownPlanSteps } from "../../src/server/provider/markdown-plan-steps";
@@ -125,17 +127,21 @@ describe("other providers' text truncation", () => {
 
   it("cuts an ACP stop reason on a code point boundary", () => {
     expect(acpStopReasonMessage("Cursor", crossing(63))).toBe(`Cursor stopped with reason: ${"x".repeat(63)}.`);
-    for (const failure of [grokStopFailure(crossing(159)), kimiStopFailure(crossing(159))]) {
+    for (const failure of [grokStopFailure(crossing(159)), kimiStopFailure(crossing(159)), antigravityStopFailure(crossing(159))]) {
       expect(failure).toMatchObject({ technicalDetail: `Stop reason: ${"x".repeat(159)}`, terminalEvent: `session/prompt:${"x".repeat(159)}` });
     }
   });
 
-  it.each([["Grok", grokErrorDetail], ["Kimi", kimiErrorDetail]])("cuts a %s error detail on a code point boundary", (_name, errorDetail) => {
+  it.each([["Grok", grokErrorDetail], ["Kimi", kimiErrorDetail], ["Antigravity", antigravityErrorDetail]])("cuts a %s error detail on a code point boundary", (_name, errorDetail) => {
     expect(errorDetail(new Error(crossing(max - 1)), "fallback")).toBe("x".repeat(max - 1));
   });
 
-  it.each([["Grok", grokPlanSteps], ["Kimi", kimiPlanSteps]])("cuts a %s plan step on a code point boundary", (_name, planSteps) => {
+  it.each([["Grok", grokPlanSteps], ["Kimi", kimiPlanSteps], ["Antigravity", antigravityPlanSteps]])("cuts a %s plan step on a code point boundary", (_name, planSteps) => {
     expect(planSteps([{ content: crossing(max - 1), status: "pending" }])).toEqual([{ step: "x".repeat(max - 1), status: "pending" }]);
+  });
+
+  it("cuts an Antigravity session title on a code point boundary", () => {
+    expect(sanitizeAntigravitySessionTitle(crossing(239))).toBe("x".repeat(239));
   });
 
   it("cuts Pi and OpenCode 2 model names on a code point boundary", () => {

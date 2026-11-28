@@ -20,6 +20,7 @@ import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
+import { clipCodeUnits } from "../../shared/code-units";
 import { INERTIA_VERSION } from "../../shared/version";
 import {
   createOwnedProcessTreeTermination,
@@ -574,7 +575,7 @@ function startAntigravityRun(
           }),
           "session/new",
         );
-        sessionId = created.sessionId;
+        sessionId = boundedId(created.sessionId, "session");
         emitter.session(sessionId);
         commandAdvertisements.establish(sessionId);
         modes = created.modes;
@@ -1215,15 +1216,15 @@ function failedAntigravityRun(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function boundedToolStateText(value: string): string {
-  return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS);
 }
 
 function boundedId(value: string, label: string): string {
-  if (!value || value.length > 1_000 || value.includes("\0")) {
+  if (!value || value.length > 1_000 || /[\u0000-\u001F\u007F-\u009F]/u.test(value)) {
     throw new Error(`Antigravity ACP sent an invalid ${label} identity.`);
   }
   return value;

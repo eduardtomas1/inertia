@@ -1910,4 +1910,33 @@ describe("Antigravity ACP harness", { concurrent: false }, () => {
       });
     }
   });
+
+  it("rejects empty or control-character session IDs from session/new before emitting session events", async () => {
+    const root = makeRoot("antigravity ACP invalid session id");
+    for (const badId of ["", "bad\u0000id"]) {
+      const events: ProviderEvent[] = [];
+      const badSessionCmd = writeFakeAgy(root, null, `
+        if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${initReply({})} });
+        if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
+          sessionId: ${JSON.stringify(badId)},
+          modes: ${JSON.stringify(CONFIRMED_DEFAULT_MODE)},
+          configOptions: [],
+        } });
+      `);
+      const result = await managerFor(badSessionCmd).run(nativeProviderRunInput({
+        providerId: "antigravity",
+        conversationId: `agy-bad-session-${badId.length}`,
+        cwd: root,
+        prompt: "Hello",
+        interactionMode: "build",
+        access: "supervised",
+      }), { onEvent: (event) => events.push(event) });
+      expect(result).toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "malformed-protocol" },
+      });
+      expect(events.some((event) => event.type === "session")).toBe(false);
+    }
+  });
 });

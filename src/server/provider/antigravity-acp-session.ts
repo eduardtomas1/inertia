@@ -8,6 +8,7 @@ import type {
   SessionModeState,
 } from "@agentclientprotocol/sdk/unstable";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import { acpConfigSelected, assertAcpConfigSelection } from "./acp-config-options";
 import { acpReadOnlyWatcher } from "./acp-watcher";
 import type { ProviderRunInput } from "./contracts";
@@ -282,5 +283,5 @@ export async function antigravityPrompt(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }

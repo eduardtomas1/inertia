@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { Transform, type TransformCallback } from "node:stream";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import { parseAcpSessionNotificationOrIgnoredCommands } from "./acp-command-advertisement";
 import { validAcpJsonRpcEnvelope } from "./acp-json-rpc";
 import { acpStopReasonMessage } from "./acp-stop-reasons";
@@ -141,7 +142,7 @@ export function antigravitySpawnFailure(
 }
 
 export function antigravityStopFailure(stopReason: string): ProviderRunFailure {
-  const safeStopReason = stopReason.slice(0, MAX_STOP_REASON_CHARS);
+  const safeStopReason = clipCodeUnits(stopReason, MAX_STOP_REASON_CHARS);
   return {
     reason: "provider-error",
     message: acpStopReasonMessage("Antigravity", safeStopReason),
@@ -331,7 +332,7 @@ export function antigravityErrorDetail(error: unknown, fallback: string): string
     }
     current = record.cause;
   }
-  return (parts.join("\n") || fallback).slice(0, MAX_ERROR_DETAIL_CHARS);
+  return clipCodeUnits(parts.join("\n") || fallback, MAX_ERROR_DETAIL_CHARS);
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

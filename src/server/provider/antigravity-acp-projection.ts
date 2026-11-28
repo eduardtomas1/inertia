@@ -6,6 +6,7 @@ import type {
   Usage,
 } from "@agentclientprotocol/sdk/unstable";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import type { ProviderModel } from "../../shared/contracts";
 import { acpPermissionDetail } from "./acp-permission-detail";
 import type { createAgentHarnessEmitter } from "./agent-harness";
@@ -371,11 +372,13 @@ export function sanitizeAntigravitySessionTitle(
   value: string | null | undefined,
 ): string {
   if (typeof value !== "string") return "";
-  return value
-    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, MAX_SESSION_TITLE_CHARS);
+  return clipCodeUnits(
+    value
+      .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim(),
+    MAX_SESSION_TITLE_CHARS,
+  );
 }
 
 function boundQuestionText(text: string, limit: number): string {
@@ -441,5 +444,5 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }

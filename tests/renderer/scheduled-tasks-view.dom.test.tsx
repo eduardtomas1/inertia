@@ -511,6 +511,27 @@ describe("ScheduledTasksView", () => {
     expect(document.activeElement).toBe(restoredDeleteBtn);
   });
 
+  it("returns focus to the trigger when the schedule form closes and to New schedule after a delete", async () => {
+    const user = userEvent.setup();
+    mountView([{ task: makeTask(), recentRuns: [] }]);
+
+    const editBtn = await screen.findByRole("button", { name: "Edit" });
+    await user.click(editBtn);
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Title" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(editBtn);
+
+    const newBtn = screen.getByRole("button", { name: "New schedule" });
+    await user.click(newBtn);
+    await user.click(screen.getByRole("button", { name: "Close schedule form" }));
+    expect(document.activeElement).toBe(newBtn);
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Confirm delete" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Morning repo check" })).toBeNull());
+    expect(document.activeElement).toBe(newBtn);
+  });
+
   it("S91: Run now opens a newly created chat once it arrives in snapshot", async () => {
     const user = userEvent.setup();
     const createdConvId = "99999999-9999-4999-8999-999999999999";

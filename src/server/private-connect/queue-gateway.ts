@@ -127,13 +127,11 @@ export function projectPrivateConnectQueue(
   const activeItems = queue.listActive(conversation.id).slice(0, MAX_PROJECTED_QUEUE_ITEMS);
   const activeHarnessId = activeHarnessIdForConversation(store, conversation);
   const items: PrivateConnectQueueItem[] = activeItems.map((item) => {
-    const contentRow = queue.getContent(conversation.id, item.id);
-    const content = sanitizePrivateConnectContent(
-      contentRow?.content ?? "",
-      MAX_QUEUE_ITEM_CONTENT_CHARS,
-    );
+    const rawContent = queue.getContent(conversation.id, item.id)?.content ?? "";
+    const content = sanitizePrivateConnectContent(rawContent, MAX_QUEUE_ITEM_CONTENT_CHARS);
     const attachmentCount = Math.min(20, item.attachmentIds.length);
     const editable = item.kind === "message"
+      && content === rawContent
       && item.attribution === undefined
       && attachmentCount === 0
       && item.steerFollowUpOfRunId === undefined
@@ -283,6 +281,10 @@ export async function handlePrivateConnectQueueCommand(
     }
     if (item.steerFollowUpOfRunId !== undefined) {
       return fail("forbidden", "Unread follow-ups cannot be edited.");
+    }
+    const rawContent = queue.getContent(conversation.id, request.id)?.content ?? "";
+    if (sanitizePrivateConnectContent(rawContent, MAX_QUEUE_ITEM_CONTENT_CHARS) !== rawContent) {
+      return fail("forbidden", "This queued message has content hidden from paired devices. Edit it on the desktop.");
     }
     if (item.state !== "waiting" && item.state !== "blocked") {
       return fail("stale", "That queued message can no longer be edited.");
@@ -453,6 +455,7 @@ export function trimPrivateConnectQueueToBudget(
     let high = item.content.length;
     const original = item.content;
     item.content = "";
+    item.editable = false;
     if (measureBytes(response) > maxBytes) continue;
     while (low < high) {
       const middle = Math.ceil((low + high) / 2);

@@ -27,6 +27,7 @@ import {
 import type { PrivateConnectAuditEvent, PrivateConnectDevice } from "../../src/main/private-connect/store";
 import { RuntimeStore } from "../../src/server/database";
 import { PrivateConnectRuntimeGateway } from "../../src/server/private-connect/runtime-gateway";
+import { trimPrivateConnectQueueToBudget } from "../../src/server/private-connect/queue-gateway";
 
 const directories: string[] = [];
 const stores: RuntimeStore[] = [];
@@ -271,6 +272,48 @@ describe("Private Connect queue protocol, main bridge, and runtime gateway", () 
     const conflictReq = { ...request1, requestId: randomUUID(), content: "Different prompt body" };
     const conflicted = await restartedGateway.preparePrompt(f.collaborate, conflictReq);
     expect(conflicted).toMatchObject({ ok: false, code: "invalid" });
+  });
+
+  it("marks queued messages whose projection is redacted or trimmed as not editable and refuses remote edits of them", async () => {
+    const f = createFixture({ active: true });
+    const redactedId = randomUUID();
+    const raw = "Run this:\n```sh\nnpm test -- --filter queue\n```\nthen read /home/user/project/notes.md";
+    f.store.orchestration.queue.enqueue({ conversationId: f.conversation.id, itemId: redactedId, content: raw });
+
+    const detail = await f.gateway.request(f.collaborate, {
+      type: "conversation.get",
+      requestId: randomUUID(),
+      conversationId: f.conversation.id,
+    });
+    if (!detail.ok || detail.result.kind !== "conversation") throw new Error("expected conversation detail");
+    const projected = detail.result.detail.queue?.items.find(({ id }) => id === redactedId);
+    expect(projected?.content).not.toBe(raw);
+    expect(projected?.editable).toBe(false);
+
+    const edit = await f.gateway.request(f.collaborate, {
+      type: "queue.edit",
+      requestId: randomUUID(),
+      conversationId: f.conversation.id,
+      id: redactedId,
+      expectedRevision: 0,
+      content: `${projected?.content ?? ""} please`,
+    });
+    expect(edit).toMatchObject({ ok: false, code: "forbidden" });
+    expect(f.store.orchestration.queue.getContent(f.conversation.id, redactedId)?.content).toBe(raw);
+
+    const trimmed = {
+      type: "response" as const,
+      requestId: randomUUID(),
+      ok: true as const,
+      result: {
+        kind: "conversation" as const,
+        detail: { queue: { revision: 1, held: false, holdReason: null, canResume: false, items: [{ ...projected!, content: "x".repeat(400), editable: true }] } },
+      },
+    };
+    const emptySize = JSON.stringify({ ...trimmed, result: { ...trimmed.result, detail: { queue: { ...trimmed.result.detail.queue, items: [{ ...trimmed.result.detail.queue.items[0]!, content: "" }] } } } }).length;
+    trimPrivateConnectQueueToBudget(trimmed as never, (value) => JSON.stringify(value).length, emptySize + 100);
+    expect(trimmed.result.detail.queue.items[0]?.content.length).toBeLessThan(400);
+    expect(trimmed.result.detail.queue.items[0]?.editable).toBe(false);
   });
 
   it("handles queue.edit (text-only, CRLF, revision), queue.remove (with attachments), queue.send, and queue.resume", async () => {

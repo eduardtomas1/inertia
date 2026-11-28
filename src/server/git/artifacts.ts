@@ -317,7 +317,7 @@ export async function compareGitSnapshots(
   const beforeRef = validateArtifactRef(beforeReference);
   const afterRef = validateArtifactRef(afterReference);
   const paths = options.paths
-    ? await validatedPaths(root, options.paths, {
+    ? await validatedPaths(await canonicalDirectoryPath(repositoryPath, options), options.paths, {
         deadlineAt: options.deadlineAt,
         signal: options.signal,
       })

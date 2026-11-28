@@ -717,9 +717,11 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
       store.close();
     }
     const region = await showChat(app, chat);
+    const transcriptGap = () => page.getByLabel("Thread transcript", { exact: true }).evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
     const turnWith = (step: number) => page.locator("[data-turn-id]").filter({ has: page.getByText(`Step ${step} of the long delegated history.`, { exact: true }) });
     const latestFold = turnWith(46).getByRole("button", { name: /^Worked/u });
-    await latestFold.click(); await expect(page.getByRole("button", { name: "12 subagents, 12 done" })).toBeVisible(); await latestFold.click();
+    await latestFold.click(); await expect(page.getByRole("button", { name: "12 subagents, 12 done" })).toBeVisible(); await expect.poll(transcriptGap).toBeLessThanOrEqual(1);
+    await latestFold.click(); await expect.poll(transcriptGap).toBeLessThanOrEqual(1);
     await expect(page.getByText("Step 1 of the long delegated history.", { exact: true })).toHaveCount(0);
     const finished = region.getByRole("button", { name: "Finished 38 · 2 failed" });
     await expect(finished).toBeVisible();
@@ -732,7 +734,7 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
 
     const targetFold = turnWith(45).getByRole("button", { name: /^Worked/u });
     await expect(targetFold).toBeInViewport({ ratio: 1 }); // Scrolling to it would be reading history.
-    await targetFold.click();
+    await targetFold.click(); await expect.poll(transcriptGap).toBeLessThanOrEqual(1);
     const group = page.getByRole("button", { name: "2 subagents, 2 done" });
     await expect(group).toBeInViewport({ ratio: 1 });
     await group.click();
@@ -750,8 +752,7 @@ test("keeps the whole chat's tasks in the panel when the transcript loads only i
     await expect(region.getByRole("button", { name: "Show fewer finished tasks" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Jump to latest", exact: true })).toBeHidden();
     await expect(page.locator(".composer-region > .timeline-jump")).toHaveCount(0);
-    await expect.poll(() => page.getByLabel("Thread transcript", { exact: true }).evaluate((element) =>
-      element.scrollHeight - element.clientHeight - element.scrollTop)).toBeLessThanOrEqual(1);
+    await expect.poll(transcriptGap).toBeLessThanOrEqual(1);
     await expectLayoutHolds(app, region);
     await capture(page, info, "background-tasks-long-history-dark");
     expect(app.rendererErrors).toEqual([]);

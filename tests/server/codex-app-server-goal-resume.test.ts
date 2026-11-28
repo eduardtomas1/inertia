@@ -44,11 +44,21 @@ let updatedAt = 1800000001;
 let goalTurnRunning = false;
 let approved = false;
 let goalSet = false;
+let pausedGoal = false;
+let userTurnPending = false;
 const goal = () => ({ threadId, objective: "Ship the release", status: goalStatus, tokenBudget: null,
   tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1800000000, updatedAt });
 const setGoal = (status) => { goalStatus = status; updatedAt += 1; send({ method: "thread/goal/updated", params: { threadId, turnId: null, goal: goal() } }); };
 const turn = (id, status) => ({ id, status, items: [], error: null });
 const delta = (turnId, text) => send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: turnId + "-message", delta: text } });
+const finishUserTurn = () => {
+  if (!userTurnPending) return;
+  if (scenario === "finished-before-start" && !pausedGoal) return;
+  if (scenario === "finished-before-start-approval" && (!approved || !pausedGoal)) return;
+  userTurnPending = false;
+  if (goalStatus === "active") setGoal("complete");
+  send({ method: "turn/completed", params: { threadId, turn: turn("user-turn", "completed") } });
+};
 const continueGoal = () => {
   goalTurnRunning = true;
   send({ method: "thread/goal/updated", params: { threadId, turnId: null, goal: goal() } });
@@ -87,6 +97,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "thread/goal/set") {
     goalStatus = message.params.status;
+    if (goalStatus === "paused") pausedGoal = true;
     updatedAt += 1;
     send({ id: message.id, result: { goal: goal() } });
     send({ method: "thread/goal/updated", params: { threadId, turnId: null, goal: goal() } });
@@ -95,11 +106,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       delta("goal-turn", "Goal reply.");
       if (!approval || approved) finishGoalTurn("completed");
     }
+    finishUserTurn();
     return;
   }
   if (message.id === "goal-approval") {
     approved = true;
     if (scenario === "goal-start-approval" && goalSet) finishGoalTurn("completed");
+    finishUserTurn();
     return;
   }
   if (message.method === "turn/interrupt") {
@@ -123,6 +136,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: { turn: turn(id, "inProgress") } });
     if (id === "user-turn") send({ method: "turn/started", params: { threadId, turn: turn(id, "inProgress") } });
     delta(id, "Reply to the user.");
+    if (finishedBefore) {
+      userTurnPending = true;
+      finishUserTurn();
+      return;
+    }
     if (goalStatus === "active") setGoal("complete");
     send({ method: "turn/completed", params: { threadId, turn: turn(id, "completed") } });
     return;

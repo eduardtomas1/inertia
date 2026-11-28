@@ -213,6 +213,17 @@ describe("keyed Claude launch redaction", () => {
     expectNoFragments(JSON.stringify(redactor.payload({ output: [{ text: encoded }] })));
   });
 
+  it("keeps an own __proto__ key of a redacted payload as data, not as its prototype", () => {
+    const redactor = new ClaudeLaunchRedactor(claudeKeyedLaunchSecrets({ ANTHROPIC_API_KEY: LONG_KEY }));
+    const payload = JSON.parse(`{"__proto__":{"injected":true},"text":"key ${LONG_KEY}"}`) as Record<string, unknown>;
+
+    const redacted = redactor.payload(payload);
+
+    expect(Object.hasOwn(redacted, "__proto__")).toBe(true);
+    expect(redacted.injected).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(redacted))).toEqual(JSON.parse('{"__proto__":{"injected":true},"text":"key [redacted]"}'));
+  });
+
   it("masks wrapped base64 streamed across chunks and holds no more than the encoded form", () => {
     const redactor = new ClaudeLaunchRedactor(claudeKeyedLaunchSecrets({ ANTHROPIC_API_KEY: LONG_KEY }));
     const encoded = `${wrap(Buffer.from(`${LONG_KEY}\n`).toString("base64"), 76)}\n`;

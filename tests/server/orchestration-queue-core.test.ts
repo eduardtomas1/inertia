@@ -251,12 +251,14 @@ describe("Phase 5 Package 1 V2 queue repository & projector", () => {
       expect(queue.getContent(conversation.id, firstId)?.attachments.map(({ id }) => id)).toEqual([att1.id]);
 
       // Stale expectedRevision is refused.
+      const staleCommandId = randomUUID();
       expect(() => queue.edit({
         conversationId: conversation.id,
         itemId: firstId,
         expectedRevision: 0,
         content: "Stale update",
-      })).toThrow(OrchestrationConflict);
+        source: { actorId: "human", commandId: staleCommandId, command: { type: "message.queue.edit", requestId: staleCommandId } },
+      })).toThrow("revision-conflict");
 
       // Edit with explicit attachments replaces attachments.
       const replaced = queue.edit({
@@ -670,14 +672,14 @@ describe("Phase 5 Package 1 V2 queue repository & projector", () => {
       const secondConversation = store.createConversation(project.id, "Second chat");
       const sharedCommandId = randomUUID();
       const authority = store.orchestration.authority;
-      const makeCommand = (conversationId: string) => ({
+      const sharedCommand = {
         type: "message.queue.enqueue",
         requestId: sharedCommandId,
-        payload: { conversationId, id: randomUUID(), content: "Same command id", attachments: [] },
-      });
+        payload: { id: randomUUID(), content: "Same command id", attachments: [] },
+      };
 
       const first = await authority.begin({
-        source: { actorId: "human", commandId: sharedCommandId, command: makeCommand(conversation.id) },
+        source: { actorId: "human", commandId: sharedCommandId, command: sharedCommand },
         threadId: conversation.id,
         projectId: project.id,
         commandType: "message.queue.enqueue",
@@ -688,7 +690,7 @@ describe("Phase 5 Package 1 V2 queue repository & projector", () => {
 
       // Concurrent second thread with the same (actorId, commandId) must conflict immediately.
       await expect(authority.begin({
-        source: { actorId: "human", commandId: sharedCommandId, command: makeCommand(secondConversation.id) },
+        source: { actorId: "human", commandId: sharedCommandId, command: sharedCommand },
         threadId: secondConversation.id,
         projectId: project.id,
         commandType: "message.queue.enqueue",
@@ -700,7 +702,7 @@ describe("Phase 5 Package 1 V2 queue repository & projector", () => {
 
       // Even after settlement, the second thread still gets command-conflict.
       await expect(authority.begin({
-        source: { actorId: "human", commandId: sharedCommandId, command: makeCommand(secondConversation.id) },
+        source: { actorId: "human", commandId: sharedCommandId, command: sharedCommand },
         threadId: secondConversation.id,
         projectId: project.id,
         commandType: "message.queue.enqueue",

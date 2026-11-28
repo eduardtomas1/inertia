@@ -448,16 +448,17 @@ export async function listIndexedGitPaths(
 ): Promise<Set<string>> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return new Set();
-  const root = await repositoryRoot(repositoryPath, options);
+  await repositoryRoot(repositoryPath, options);
+  const workspace = await canonicalDirectoryPath(repositoryPath, options);
   const indexed = new Set<string>();
   for (let offset = 0; offset < unique.length; offset += MAX_DIFF_FILES) {
     const batch = await validatedEntryPaths(
-      root,
+      workspace,
       unique.slice(offset, offset + MAX_DIFF_FILES),
       options,
     );
     const listed = await runGitInspection(
-      root,
+      workspace,
       ["ls-files", "-z", "--", ...literalPathspecs(batch)],
       {
         deadlineAt: options.deadlineAt,

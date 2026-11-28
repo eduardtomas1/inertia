@@ -270,6 +270,7 @@ export async function repositoryRoot(
 const MAX_GIT_MARKER_FILE_BYTES = 4_096;
 const MAX_DIRECT_GIT_CONFIG_BYTES = 65_536;
 const GIT_WORKTREE_OR_INCLUDE_CONFIG_PATTERN = /\bworktree\s*=|^\s*\[include(?:if)?\b/imu;
+const GIT_VALID_HEAD_PATTERN = /^(?:ref:\s*refs\/|[0-9a-f]{40})/iu;
 
 function hasGitDirectoryEnvOverride(): boolean {
   return Boolean(
@@ -278,19 +279,6 @@ function hasGitDirectoryEnvOverride(): boolean {
     || process.env.GIT_WORK_TREE
     || process.env.GIT_OBJECT_DIRECTORY,
   );
-}
-
-async function isRegularFile(
-  path: string,
-  options: GitPathInspectionOptions,
-): Promise<boolean> {
-  try {
-    const info = await awaitPathInspection(async () => await lstat(path), options);
-    return info.isFile() && !info.isSymbolicLink();
-  } catch (error) {
-    if (error instanceof GitError) throw error;
-    return false;
-  }
 }
 
 async function isDirectoryPath(
@@ -353,7 +341,8 @@ async function tryDirectGitMetadataDirectories(
   } else {
     return null;
   }
-  if (!(await isRegularFile(join(gitDir, "HEAD"), options))) return null;
+  const head = await readSmallRegularFile(join(gitDir, "HEAD"), MAX_GIT_MARKER_FILE_BYTES, options);
+  if (head === null || !GIT_VALID_HEAD_PATTERN.test(head)) return null;
   const commonDirFile = join(gitDir, "commondir");
   let commonDir = gitDir;
   let commonDirInfo;
@@ -377,6 +366,7 @@ async function tryDirectGitMetadataDirectories(
     if (!(await isDirectoryPath(commonDir, options))) return null;
   }
   if (!(await isDirectoryPath(join(commonDir, "objects"), options))) return null;
+  if (!(await isDirectoryPath(join(commonDir, "refs"), options))) return null;
   return { gitDir, commonDir };
 }
 

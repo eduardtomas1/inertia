@@ -1,6 +1,6 @@
-import { lstat, mkdtemp, rm, unlink } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { AgentTurn, CheckpointSummary } from "../../shared/contracts";
 import type { RollbackFiles } from "../../shared/orchestration-history";
@@ -252,6 +252,8 @@ async function removeCreated(repositoryPath: string, paths: readonly string[], d
       const [entry] = await validatedEntryPaths(root, [path], options);
       const target = resolve(root, entry!);
       if (!isContained(root, target) || !isContained(workspace, target) || target === workspace) continue;
+      const canonicalParent = await realpath(dirname(target));
+      if (!isContained(root, canonicalParent) || !isContained(workspace, canonicalParent)) continue;
       if (!(await lstat(target)).isFile()) continue;
       await unlink(target);
       removed.push(path);

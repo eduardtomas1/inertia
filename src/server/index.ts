@@ -1175,6 +1175,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         mascotStatus.close();
         watchers?.dispose();
         scheduledTasks?.dispose();
+        delegation?.dispose();
         secureFileAuthorities.clear();
         try {
           await runRuntimeShutdownPhases({

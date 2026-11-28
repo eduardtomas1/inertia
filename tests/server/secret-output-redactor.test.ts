@@ -425,4 +425,22 @@ describe("secret output redactor: security hardening (keys, over-depth, streamin
     expect(activityJoined).toBe("out=[redacted]\n");
     expect(JSON.stringify([...reasoningEvents, ...activityEvents, ...finished.events])).not.toContain("99887766");
   });
+
+  it("strips ANSI/OSC control sequences from a segment snapshot before matching, like streamed text", () => {
+    const value = redactor([TOKEN]);
+    const snapshot = (text: string): ProviderEvent => ({ ...BASE, type: "text-snapshot", itemId: "pi:1:text", text, scope: "segment" });
+    const emitted = [
+      ...value.events(text("Abandoned")),
+      ...value.events(snapshot("value=tok-\u001b[0msecret-99887766 split=tok-\u001b]0;t")),
+      ...value.events(text("\u0007secret-99887766 done")),
+      ...value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events,
+    ];
+    expect(JSON.stringify(emitted)).not.toContain("99887766");
+    let shown = "";
+    for (const event of emitted) {
+      if (event.type === "text-snapshot") shown = event.text;
+      else if (event.type === "text") shown += event.text;
+    }
+    expect(shown).toBe("value=[redacted] split=[redacted] done");
+  });
 });

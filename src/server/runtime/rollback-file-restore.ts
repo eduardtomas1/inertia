@@ -249,8 +249,8 @@ async function removeCreated(repositoryPath: string, paths: readonly string[], d
   const removed: string[] = [];
   for (const path of paths) {
     try {
-      const [entry] = await validatedEntryPaths(root, [path], options);
-      const target = resolve(root, entry!);
+      const [entry] = await validatedEntryPaths(workspace, [path], options);
+      const target = resolve(workspace, entry!);
       if (!isContained(root, target) || !isContained(workspace, target) || target === workspace) continue;
       const canonicalParent = await realpath(dirname(target));
       if (!isContained(root, canonicalParent) || !isContained(workspace, canonicalParent)) continue;

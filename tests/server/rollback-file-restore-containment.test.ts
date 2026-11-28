@@ -110,8 +110,8 @@ describe("rollback file restore symlink containment", () => {
       hooks.onDeleteCheckpoint = () => {
         deleteCalls += 1;
         if (deleteCalls === 2) {
-          rmSync(join(appWorkspace, "nested"), { recursive: true, force: true });
-          symlinkSync("../secret", join(appWorkspace, "nested"));
+          rmSync(join(appWorkspace, "packages", "app", "nested"), { recursive: true, force: true });
+          symlinkSync(siblingDir, join(appWorkspace, "packages", "app", "nested"));
         }
       };
 
@@ -146,6 +146,105 @@ describe("rollback file restore symlink containment", () => {
 
       expect(result.files.outcome).toBe("restored");
       expect(existsSync(join(siblingDir, "keep.txt"))).toBe(true);
+    } finally {
+      runtime.store.close();
+    }
+  }, 60_000);
+
+  it("removes the file a rolled-back turn created in a subdirectory project and keeps the user file at the root-relative path", async () => {
+    let manager!: TurnGitArtifactManager;
+    const runtime = await createTurnControllerTestRuntime({
+      createTurnCheckpoint: (turn, signal) => manager.createTurnCheckpoint(turn, signal),
+      captureGitBefore: (input) => manager.captureBefore(input),
+      captureGitArtifacts: (input) => manager.finalize(input),
+    });
+    manager = new TurnGitArtifactManager(runtime.store, join(runtime.directory, "data"));
+    managers.push(manager);
+
+    try {
+      const repoRoot = runtime.workspace;
+      const appWorkspace = join(repoRoot, "packages", "app");
+      const siblingDir = join(repoRoot, "packages", "secret");
+      mkdirSync(appWorkspace, { recursive: true });
+      mkdirSync(siblingDir, { recursive: true });
+
+      git(repoRoot, "init", "-b", "main");
+      git(repoRoot, "config", "core.autocrlf", "false");
+      git(repoRoot, "config", "user.name", "Inertia Test");
+      git(repoRoot, "config", "user.email", "test@inertia.local");
+      writeFileSync(join(appWorkspace, "base.txt"), "base\n");
+      writeFileSync(join(siblingDir, "keep.txt"), "do not delete\n");
+      mkdirSync(join(appWorkspace, "nested"), { recursive: true });
+      writeFileSync(join(appWorkspace, "nested", "keep.txt"), "user file\n");
+      git(repoRoot, "add", ".");
+      git(repoRoot, "commit", "-m", "base");
+
+      const subProject = runtime.store.createProject("App Subdir", appWorkspace);
+      const subConv = runtime.store.createConversation(subProject.id, "Subdir chat", {
+        providerId: "codex",
+        model: "gpt-test",
+        reasoningEffort: "high",
+        interactionMode: "build",
+        accessMode: "supervised",
+      });
+
+      const runTurn = async (label: string, write: () => void) => {
+        const runs = runtime.provider.runCount;
+        const queued = runtime.controller.queue({
+          conversationId: subConv.id,
+          content: `${label} request`,
+          turnCheckpoint: true,
+        });
+        runtime.controller.start(queued.turn.id);
+        await vi.waitFor(() => expect(runtime.provider.runCount).toBe(runs + 1), { timeout: 20_000, interval: 20 });
+        write();
+        runtime.provider.resolve({ text: `${label} answer`, sessionId: `${label}-sess` });
+        await vi.waitFor(() => expect(runtime.store.agentTurn(queued.turn.id).status).toBe("completed"), { timeout: 20_000, interval: 20 });
+        await vi.waitFor(() => expect(runtime.store.turnGitArtifact(queued.turn.id)?.status).toBe("ready"), { timeout: 20_000, interval: 20 });
+        return queued.turn;
+      };
+
+      const first = await runTurn("first", () => {
+        writeFileSync(join(appWorkspace, "base.txt"), "first\n");
+      });
+      const second = await runTurn("second", () => {
+        mkdirSync(join(appWorkspace, "packages", "app", "nested"), { recursive: true });
+        writeFileSync(join(appWorkspace, "packages", "app", "nested", "keep.txt"), "created in turn 2\n");
+      });
+      void second;
+
+      const result = await rollbackConversationHistory(
+        {
+          store: runtime.store,
+          turns: runtime.controller,
+          providerTerminalResumes: new ProviderTerminalResumeRegistry(runtime.store.conversationWork),
+          providers: {
+            resolveModelRoute: runtime.provider.resolveModelRoute,
+            isRunning: (id: string) => runtime.provider.isRunning(id),
+            nativeConversation: vi.fn(async (request) => ({
+              operationId: request.operationId,
+              identity: request.source.identity,
+              status: "unsupported" as const,
+              reason: "native-history-control-unavailable",
+            })),
+          },
+        },
+        {
+          conversationId: subConv.id,
+          turnId: first.id,
+          restoreFiles: true,
+          source: {
+            actorId: "human",
+            commandId: "rollback-subdirectory-test",
+            command: { type: "conversation.rollback", conversationId: subConv.id, turnId: first.id, restoreFiles: true },
+          },
+        },
+        new AbortController().signal,
+      );
+
+      expect(result.files.outcome).toBe("restored");
+      expect(existsSync(join(appWorkspace, "nested", "keep.txt"))).toBe(true);
+      expect(existsSync(join(appWorkspace, "packages", "app", "nested", "keep.txt"))).toBe(false);
     } finally {
       runtime.store.close();
     }

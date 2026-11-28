@@ -10,6 +10,7 @@ import type {
   ContentBlock,
   InitializeResponse,
   RequestPermissionRequest,
+  RequestPermissionResponse,
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
@@ -458,9 +459,16 @@ function startCursorRun(
           { optionId: "reject-plan", name: "Deny", kind: "reject_once" },
         ],
       };
-      const decision = await (options.input.interactionMode === "plan" ? askCursorPermission : cursorPermission)(
-        permission, permission, signal, options, emitter.rich, approvals,
-      );
+      let decision: RequestPermissionResponse;
+      try {
+        decision = await (options.input.interactionMode === "plan" ? askCursorPermission : cursorPermission)(
+          permission, permission, signal, options, emitter.rich, approvals,
+        );
+      } catch (error) {
+        providerEventError ??= error instanceof Error ? error : new Error("Cursor ACP failed a plan request.");
+        requestProcessTermination(true);
+        throw providerEventError;
+      }
       if (!ownsActivePrompt() || signal.aborted || decision.outcome.outcome !== "selected") {
         return { outcome: { outcome: "cancelled" } };
       }

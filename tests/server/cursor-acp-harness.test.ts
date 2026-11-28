@@ -1896,8 +1896,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(manager.activeConversationIds()).toEqual([]);
   });
 
-  it("fails closed with protocol-overflow when approval or question budgets are exceeded", async () => {
-    for (const mode of ["approval", "question"] as const) {
+  it("fails closed with protocol-overflow when approval, question or plan budgets are exceeded", async () => {
+    for (const mode of ["approval", "question", "plan"] as const) {
       const root = portableFixtureRoot(`cursor ACP ${mode} overflow`);
       roots.push(root);
       const command = portableNodeExecutable(root, "cursor-agent");
@@ -1915,7 +1915,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     }`
-        : `
+        : mode === "question"
+        ? `
     for (let i = 1; i <= 65; i += 1) {
       send({
         jsonrpc: "2.0",
@@ -1925,6 +1926,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           toolCallId: "qcall_" + i,
           questions: [{ id: "q_" + i, prompt: "Choose " + i, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }],
         },
+      });
+    }`
+        : `
+    for (let i = 1; i <= 65; i += 1) {
+      send({
+        jsonrpc: "2.0",
+        id: 1000 + i,
+        method: "cursor/create_plan",
+        params: { toolCallId: "plan_" + i, plan: "Plan " + i, todos: [] },
       });
     }`;
       writeNodeSubcommand(root, "acp", `

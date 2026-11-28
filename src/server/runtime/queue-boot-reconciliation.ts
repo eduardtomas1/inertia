@@ -661,8 +661,7 @@ function reconcileConversationQueueOnBoot(
   }
   db.prepare("UPDATE queued_messages SET state = 'waiting', error = NULL WHERE conversation_id = ? AND state = 'dispatching'")
     .run(conversationId);
-  db.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE conversation_id = ? AND steer_when_ready_run_id IS NOT NULL")
-    .run(conversationId);
+  queue.clearSteerWhenReady({ conversationId });
 
   // 4. Requeue interrupted runs that never observed a provider turn (`!hasProviderTurnObservation`, `delivery = 'not-delivered'`).
   const autoResentThisBoot = new Set<string>();

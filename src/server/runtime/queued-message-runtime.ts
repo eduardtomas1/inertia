@@ -1092,8 +1092,7 @@ export function createQueuedMessageRuntime(
     const items = listQueueEntries(store, conversationId)
       .filter((entry) => entry.state === "waiting" && !entry.queueHeld && entry.steerWhenReadyRunId === runId);
     for (const item of items) {
-      db.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE id = ? AND conversation_id = ?")
-        .run(item.id, conversationId);
+      queue.clearSteerWhenReady({ conversationId, itemId: item.id });
       if (!turns.isActive(conversationId)) break;
       try {
         await sendDuringTurn(conversationId, item.id, queueDeferredSteerCommandId(item.id, runId, attemptId), { releaseHeld: false });

@@ -367,6 +367,28 @@ describe("delegated task core", () => {
     } finally { fixture.close(); }
   });
 
+  it("disarms a parent's newest armed task behind more than a page of older settled tasks", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Delegate");
+      const fresh = fixture.delegate(source, { title: "Fresh" });
+      const settle = fixture.database.prepare(`INSERT INTO delegated_tasks
+        (task_id, parent_conversation_id, source_turn_id, source_run_id, child_conversation_id, operation_id, kind,
+         original_task_id, status, completion_wake, wake_armed, delivery_state, delivery_generation, result_turn_id,
+         created_at, updated_at)
+        SELECT ?, parent_conversation_id, source_turn_id, source_run_id, child_conversation_id, NULL, kind,
+          original_task_id, 'completed', completion_wake, 0, 'disposed', NULL, 'settled-turn', ?, ?
+        FROM delegated_tasks WHERE task_id = ?`);
+      for (let index = 0; index < 1_024; index += 1) {
+        const createdAt = new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString();
+        settle.run(index.toString(16).padStart(64, "0"), createdAt, createdAt, fresh.task.taskId);
+      }
+      expect(fixture.delegation.disarm({ parentConversationId: fixture.parentId, scope: "conversation",
+        sourceTurnId: null, reason: "stop", trigger: "stop-1" })).toEqual([fresh.task.taskId]);
+      expect(fixture.delegation.get(fresh.task.taskId)!.wakeArmed).toBe(false);
+    } finally { fixture.close(); }
+  });
+
   it("decorates detail summaries with needsAction from the task's own active turn only", async () => {
     const fixture = await createDelegationFixture();
     try {

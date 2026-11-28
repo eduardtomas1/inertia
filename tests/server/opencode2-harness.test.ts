@@ -51,7 +51,8 @@ if(mode==="workspace"){events.write("data: "+JSON.stringify({type:"session.text.
 if(mode==="lost"){events.end();return;}
 if(mode==="permission"){emit("permission.asked",{id:"perm_test",action:"shell",resources:["test command"]});return;}
 if(mode==="corrupt-history"){history=[];end();return;}
-if(mode==="hold")return;
+if(mode==="hold"||mode==="delete-404")return;
+if(mode==="crash"){setTimeout(()=>process.exit(1),20);return;}
 if(mode==="host"){
  const response=await fetch(mcpConfig.url,{method:"POST",headers:{...mcpConfig.headers,"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:"native-host",method:"tools/call",params:{name:"echo",arguments:{message:"hello"}}})});
  const result=await response.json();if(result.result?.content?.[0]?.text!=="host reply")return events.end();
@@ -61,7 +62,7 @@ if(type==="compaction"){history[0]={id:body.id,type:"compaction",status:"complet
 emit("session.text.delta",{sessionID:"ses_other",assistantMessageID:"msg_other",ordinal:0,delta:"unrelated"});answer();return;}
 if(p.includes("/permission/")){empty();emit("form.created",{form:{id:"frm_test",sessionID:info.id,title:"Choose",fields:[{key:"choice",type:"string",options:[{value:"a",label:"First"},{value:"b",label:"Second"}]}]}});return;}
 if(p.includes("/form/")){empty();answer();return;}
-if(req.method==="DELETE"&&p.includes("/inbox/")){pending=pending.filter(x=>x.id!==p.split("/").at(-1));return empty();}
+if(req.method==="DELETE"&&p.includes("/inbox/")){const id=p.split("/").at(-1);const had=pending.some(x=>x.id===id);pending=pending.filter(x=>x.id!==id);if(mode==="delete-404"&&!had){res.writeHead(404);res.end();return;}return empty();}
 if(p.endsWith("/interrupt")){active=false;return json({interrupted:true});}
 if(["PUT","DELETE","PATCH","POST"].includes(req.method))return empty();
 res.writeHead(404);res.end();});
@@ -154,6 +155,19 @@ describe("OpenCode 2 owned production turn", () => {
     expect(cancelled.sort()).toEqual(inputs.sort());
     expect(requests.findIndex((r) => r.path.endsWith("/interrupt"))).toBeGreaterThan(requests.findLastIndex((r) => r.path.includes("/inbox/")));
     expect(requests.find((r) => r.path.endsWith("/interrupt"))?.query).toBe("?resume=false");
+    expect(await loopbackPortIsOpen(f.port())).toBe(false);
+  });
+  it("still interrupts and confirms cleanup when inbox deletion returns 404 for an already-delivered prompt", async () => {
+    const f = fixture("delete-404"); const run = f.start();
+    await waitFor("prompt admission", () => f.requests().some((r) => r.path.endsWith("/prompt")));
+    run.cancel(false);
+    expect(await run.result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    expect(f.requests().some((r) => r.path.endsWith("/interrupt") && r.query === "?resume=false")).toBe(true);
+    expect(await loopbackPortIsOpen(f.port())).toBe(false);
+  });
+  it("confirms cleanup when the owned server crashes mid-turn after prompt admission", async () => {
+    const f = fixture("crash");
+    expect(await f.start().result).toMatchObject({ status: "failed", cleanupConfirmed: true });
     expect(await loopbackPortIsOpen(f.port())).toBe(false);
   });
   it("bounds a silent run and supports exact native compaction without a fake user prompt", async () => {

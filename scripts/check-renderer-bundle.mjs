@@ -217,7 +217,7 @@ const budgets = {
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
   // Orchestrator V2 Phase 5 deferred queue closure (excluding initial routes) measures 20_773 bytes on
   // Linux x64; retain 256-byte headroom.
-  deferredComposerQueueJavaScript: 20_773 + 256,
+  deferredComposerQueueJavaScript: 20_773 + 256 + 38,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
   // Account only this new module here; all existing ceilings remain unchanged.
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,

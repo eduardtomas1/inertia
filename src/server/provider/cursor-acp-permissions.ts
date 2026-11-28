@@ -20,6 +20,7 @@ import {
 } from "./acp-host-tool-permission";
 import { acpReadOnlyWatcher } from "./acp-watcher";
 import type { AgentApprovalDecision } from "./interactions";
+import { clipCodeUnits } from "../../shared/code-units";
 
 export const MAX_PENDING_CURSOR_INTERACTIONS = 64;
 const MAX_APPROVAL_TEXT_CHARS = 1024 * 1024;
@@ -126,10 +127,8 @@ export async function askCursorPermission(
           : fileMutation
             ? "file-change"
             : "permissions",
-        title: (displayParams.toolCall.title || "Cursor requested permission")
-          .slice(0, MAX_APPROVAL_TEXT_CHARS),
-        detail: acpPermissionDetail(displayParams, "Cursor requested permission.")
-          .slice(0, MAX_APPROVAL_TEXT_CHARS),
+        title: clipCodeUnits(displayParams.toolCall.title || "Cursor requested permission", MAX_APPROVAL_TEXT_CHARS),
+        detail: clipCodeUnits(acpPermissionDetail(displayParams, "Cursor requested permission."), MAX_APPROVAL_TEXT_CHARS),
         cwd: options.input.cwd,
         permissionRoots: [],
         availableDecisions: ["approve", "deny", "cancel"],

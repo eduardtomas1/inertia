@@ -86,32 +86,9 @@ const budgets = {
   // worktree list add 19,230 bytes over main's cap (971,790 measured on Windows
   // x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Subagent task visibility: the per-turn trace store, the row helper module
-  // and the delegated-row height estimate add 1,889 bytes over main's cap
-  // (973,679 measured on Windows x64), and the same 1,889 bytes to the detached
-  // chat below (854,072 measured). See
-  // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
-  // Grok's shared provider maps add 1,054 bytes (974,733 measured). Keep 256 bytes.
-  // Custom agents: the /calling composer menu, the selected-agent chip, the
-  // called-agent transcript row and the agent contracts add 6,979 bytes over
-  // main's cap (982,983 measured on Windows x64), and 6,950 bytes to the
-  // detached chat below (862,844 measured). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  // Messages to the user (inertia_send_to_user): the sentToUser message check,
-  // the timeline partition, its stream entry and row estimate add 644 bytes
-  // (993,363 measured on macOS ARM64).
-  // Performance/reliability/security pass: streaming coalescing, sidebar/shell
-  // caches, composer keystroke isolation, incremental timeline delta patching,
-  // and sync WS delivery add 5,444 bytes (1,013,929 measured on Linux x64).
-  // Agent secret request reliability fixes (monotonic live status retention,
-  // bounded single-loop reveal, native preview suspension, passive scene retry):
-  // +1,013 bytes; keep 256 bytes headroom.
-  // Agent-linked media viewer: WorkspaceScene lazy lightbox host, native
-  // preview suspension, and shared media-path classification add ~2.2 KiB to
-  // both initial chat routes; the lightbox/video/PDF/spreadsheet viewers stay
-  // deferred below. Follow-up pane-owner tracking, per-pane dismissal, and
-  // openProjectPath error-string handling add 918 bytes; keep 256 bytes headroom.
-  mainWorkbenchFirstLoadJavaScript: 800.2 * kibibyte + 1_032 + 806 + 1_156 + 3_324 + 1_744 + 4_975 + 164 + 1_600 + 535 - 2_900 + 8_261 + 369 + 141 + 48 + 315 + 10_522 + 2_061 + 1_664 + 351 + 3_465 + 1_252 + 18 + 193 + 7_770 + 142 + 117 + 302 + 112 + 570 + 926 + 936 + 489 + 367 + 553 + 329 + 310 + 90 + 263 - 12_249 + 323 + 242 + 647 + 918 + 604 + 744 + 1_122 + 378 + 853 + 215 + 234 + 869 + 419 + 233 + 494 + 379 + 860 + 4_736 + 3_421 + 960 + 9_004 + 381 + 342 + 21 + 841 + 8_439 + 2_660 + 863 + 35 + 34 + 211 - 28 + 166 + 21 + 7_368 + 551 + 257 + 1_576 + 1_634 + 1 + 9 + 115 + 249 + 7_757 + 315 + 396 + 8_666 + 341 + 548 + 6 + 115 + 171 + 379 + 155 + 7_168 + 558 + 470 + 61 + 41 + 114 + 1_267 + 23 + 316 + 6 + 1_891 + 240 + 1_130 + 328 + 152 + 248 + 289 + 335 + 2_489 + 1_657 + 19_230 + 1_889 + 1_054 + 256 + 454 + 38 + 57 + 466 + 6_979 + 1_159 + 277 + 284 + 5_724 + 191 + 2_098 + 139 + 644 + 111 + 14_605 + 240 + 286 + 5_444 + 1_013 + 2_239 + 256 + 918 + 256,
+  // Main sync onto cd0949a8 (#784 media preview polish) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 1_014_344 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  mainWorkbenchFirstLoadJavaScript: 1_014_344 + 512,
   // Immediate prompt-history caret placement is also used in detached chats.
   // With Snapshot integration this route measures 579,589 bytes on macOS ARM64;
   // allow the new behavior 0.25 KiB while retaining only 251 bytes of headroom.
@@ -123,12 +100,9 @@ const budgets = {
   // moved into this window add 8,415 bytes over main's cap (852,183 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Grok's shared provider maps add 1,054 bytes (855,126 measured). Keep 256 bytes.
-  // Messages to the user add the same 644 bytes to the detached chat (875,741
-  // measured on macOS ARM64).
-  // Performance/reliability/security pass adds 5,372 bytes (896,021 measured on Linux x64).
-  // Agent secret request reliability fixes add 1,013 bytes; keep 256 bytes headroom.
-  detachedChatFirstLoadJavaScript: 613.8 * kibibyte + 1_032 + 699 + 1_156 + 566 + 1_691 + 4_875 + 1_270 + 535 + 109 + 1_056 + 824 + 129 + 256 + 7_023 + 369 + 141 + 48 + 315 + 7_489 + 2_041 + 1_536 + 351 + 1_929 + 1_059 + 3_748 + 296 + 104 + 3_430 + 8_892 + 151 + 342 + 841 + 6_875 + 2_619 - 873 + 35 + 20 + 61 - 28 + 1_160 + 21 + 809 + 80 + 10_983 + 352 + 123 + 249 + 7_389 + 315 + 396 + 8_290 + 10 + 548 + 6 + 115 + 5_988 + 109_315 - 150 + 204 + 114 + 606 + 18 + 5 + 1_407 + 1_130 + 351 + 272 + 56 + 343 + 1_593 + 127 + 8_415 + 1_889 + 1_054 + 256 + 417 + 38 + 57 + 6_950 + 790 + 3_222 + 271 + 284 + 5_490 + 191 + 2_002 + 139 + 644 + 111 + 14_391 + 240 + 286 + 5_372 + 1_013 + 2_239 + 256 + 930 + 256,
+  // Main sync onto cd0949a8 (#784 media preview polish) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 895_907 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  detachedChatFirstLoadJavaScript: 895_907 + 512,
   // The token pass and the plain surfaces measure 241,004 bytes on every
   // platform; keep only narrow cross-platform headroom.
   // The accent-derived selection token adds 324 bytes (242,870 measured).
@@ -149,9 +123,9 @@ const budgets = {
   // Custom agents: the settings section entry and its search rows add 843
   // bytes over main's cap (102,199 measured on Windows x64). See
   // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  // AgentSecretsSettings refresh generation guard, reconnect reload & archived
-  // chat notice add 307 bytes (114,979 measured on Linux x64); keep 256 bytes.
-  settingsJavaScript: 50 * kibibyte + 6_939 + 8_296 + 2_962 + 12_114 + 18_425 + 256 + 659 + 505 + 843 + 3_672 + 124 + 256 + 8_421 + 307 + 256,
+  // Main sync onto b1b41fbf (#781 + #780) with Orchestrator V2 measures 115_989 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  settingsJavaScript: 115_989 + 512,
   deferredIssueReportJavaScript: 13 * kibibyte + 824,
   // Account quotas, source setup and deliberate reset confirmation load on demand.
   deferredUsageLimitsJavaScript: 19.7 * kibibyte + 1_591 + 6 + 1 + 242 + 2 + 1_623,
@@ -176,10 +150,15 @@ const budgets = {
   // Move to background add 1,766 bytes.
   // Grok in the shared provider lists adds 18 bytes (21,232 measured). Keep 256 bytes.
   deferredBackgroundTasksJavaScript: 18 * kibibyte + 859 + 49 + 24 + 23 + 21 + 22 + 2 + 16 + 1_766 + 18 + 256,
-  // Nesting a watcher under its chat in the Work tab adds 6 bytes over v0.0.73
-  // (21,132 measured on Linux x64).
-  deferredTasksViewJavaScript: 20 * kibibyte + 469 + 108 + 52 + 17 + 6 + 22 + 5 + 25_894 + 226 + 475,
-  deferredLibraryViewJavaScript: 30_595,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 47_557 bytes on
+  // Linux x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  deferredTasksViewJavaScript: 47_557 + 512,
+  // Orchestrator V2 Wave B deferred ScheduledTasksView chunk (schedules-*.js) measures 23_906 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  deferredScheduledTasksJavaScript: 23_906 + 512,
+  // Main sync onto 6d8ab80f with Orchestrator V2 measures 30_616 bytes on
+  // Windows x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  deferredLibraryViewJavaScript: 30_616 + 512,
   deferredDiagnosticsJavaScript: 13 * kibibyte + 6_546,
   // Tools-offer integration onto main 2f470060 (#630): the worktree section in
   // Project settings add 6,387 bytes over main's cap (24,045 measured on
@@ -196,7 +175,7 @@ const budgets = {
   deferredCustomAgentsSettingsJavaScript: 29_962 + 8_423 + 1_353 + 423 + 5 + 147,
   deferredCliConversationImportJavaScript: 9_797 + 256,
   // "Add a watcher…" / "Open watcher" and its availability rules add 605 bytes.
-  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43 + 282,
+  deferredThreadActionsJavaScript: 8 * kibibyte + 75 + 255 + 605 + 1 - 43 + 210 + 282,
   deferredProjectCustomizeJavaScript: 11.125 * kibibyte + 363 + 406,
   deferredProjectColorContrastJavaScript: 1.875 * kibibyte,
   deferredReviewNoteJavaScript: 1.5 * kibibyte,
@@ -206,30 +185,10 @@ const budgets = {
   // history and blame add 9,775 bytes over main's cap (127,535 measured on
   // Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Agent-linked media viewer: binary media preview dispatch + SVG/CSV dual-view toggle.
-  filesFirstLoadJavaScript: 115 * kibibyte + 9_775 + 33 + 1_127 + 5_353,
-  // Agent-linked media viewer: inline video/audio/document cards, clickable images,
-  // link-wrapped static cards, and file:// / parent-root resolution.
-  // Follow-up visual polish, summary guard, geometry preservation, and streaming
-  // scheduler inheritance add 2,111 bytes; keep 256 bytes headroom.
-  deferredMarkdownJavaScript: 440 * kibibyte + 9_100 + 2_111 + 256,
-  // Custom agents: the called-agent block and its children load with the
-  // transcript, 2,515 bytes over its cap (616,915 measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  // Placing each subagent group where it started (subagentGroups.ts and the
-  // group block) adds 1,466 bytes (653,806 measured on Linux x64); keep 64.
-  // Messages to the user: the sent-message row and its place in the work log
-  // add 829 bytes (654,635 measured on macOS ARM64).
-  // Performance/reliability/security pass: incremental reasoning summary,
-  // streaming markdown block cache, and virtualized scroll tracking add 2,340
-  // bytes (660,833 measured on Linux x64).
-  // Agent secret request reliability fixes (chronological stream interleaving,
-  // caret-preserving mask toggle, decline UX, min-length validation): +2,055
-  // bytes; keep 256 bytes headroom.
-  // Agent-linked media viewer: inline media cards, media FileChip kinds, and
-  // onPreviewMedia / projectBaseRoot threading. Follow-up visual & streaming
-  // polish adds 2,072 bytes; keep 256 bytes headroom.
-  transcriptJavaScript: 600 * kibibyte + 2_515 + 26_419 + 7_839 + 186 + 204 + 9 + 457 + 3 + 308 + 1_466 + 64 + 829 + 4_050 + 2_340 + 2_055 + 16_840 + 256 + 2_072 + 256,
+  // Main sync onto cd0949a8 (#784 media preview polish) with Orchestrator V2; keep 512-byte cross-platform headroom.
+  filesFirstLoadJavaScript: 169_649 + 512,
+  deferredMarkdownJavaScript: 459_962 + 2_111 + 512,
+  transcriptJavaScript: 726_926 + 2_072 + 512,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   // Inspectable snapshot accessibility context brings the deferred preview to 12.0 KiB.
   // Pointer/keyboard image zoom and its pan arithmetic add 4,418 measured
@@ -241,7 +200,9 @@ const budgets = {
   // initial chat routes. Follow-up Copy path, Reload, Retry, Copy CSV, bounded
   // CSV/TSV tokenizer + delimiter detection, and visual polish measure 38,908 bytes.
   deferredWorkspaceMediaPreviewJavaScript: 38_908 + 512,
-  deferredPreviewJavaScript: 8 * kibibyte + 1_130 + 1_479,
+  // Main sync onto 29fb5e78 (v0.0.85) with Orchestrator V2 measures 10_569 bytes on
+  // Linux x64 (preview picker & annotation additions); retain 512-byte headroom.
+  deferredPreviewJavaScript: 10_569 + 512,
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte + 2_567,
@@ -254,7 +215,9 @@ const budgets = {
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredProviderMaintenanceJavaScript: 5 * kibibyte,
-  deferredComposerQueueJavaScript: 8 * kibibyte + 4_995 + 19 + 69 + 1 + 3_681,
+  // Orchestrator V2 Phase 5 deferred queue closure (excluding initial routes) measures 20_773 bytes on
+  // Linux x64; retain 256-byte headroom.
+  deferredComposerQueueJavaScript: 20_773 + 256,
   // Explicit recovery of pre-v55 saved prompts loads with the deferred stash menu.
   // Account only this new module here; all existing ceilings remain unchanged.
   deferredLegacyPromptStashJavaScript: 1.5 * kibibyte,
@@ -268,7 +231,9 @@ const budgets = {
   // find bar and Add selection to prompt add 41,322 bytes over main's cap
   // (68,551 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  deferredTerminalJavaScript: 25.5 * kibibyte + 494 + 106 + 159 + 198 + 160 + 41_322,
+  // Main sync onto 6d8ab80f with Orchestrator V2 measures 68_564 bytes on
+  // Windows x64; the cap keeps the branch's 512-byte cross-platform headroom.
+  deferredTerminalJavaScript: 68_564 + 512,
   // Branch search/tracking and the Git overview load only when opened.
   deferredGitMenusJavaScript: 8.875 * kibibyte + 245 + 50,
   deferredWorkspaceHeaderActionsJavaScript: 18.75 * kibibyte + 2_850 + 32,
@@ -276,10 +241,9 @@ const budgets = {
   // alias from the grown shared chunks add 22 bytes over main's cap (22,149
   // measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Custom agents lengthen a minified import alias by 11 bytes (22,160
-  // measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  detachedChatJavaScript: 16 * kibibyte + 8_610 - 3_554 + 181 + 184 + 34 + 56 + 232 + 22 + 11 + 300 + 369,
+  // Main sync onto e37ff42b with Orchestrator V2 measures 22_225 bytes on
+  // macOS arm64; the cap keeps the branch's 512-byte cross-platform headroom.
+  detachedChatJavaScript: 22_225 + 512,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte + 205 + 47,
   deferredIconRegionJavaScript: 12_995,
@@ -324,25 +288,9 @@ const budgets = {
   // task creation, diff readability, commit, history, blame and worktrees) add
   // 73,804 bytes over main's cap (2,535,368 measured on Windows x64). See
   // docs/pr-evidence/tools-offer-integration/renderer-bundle.json.
-  // Subagent task visibility: the delegated-task timeline row, its steps and
-  // presentation helpers add 10,553 bytes over main's cap (2,545,921 measured
-  // on Windows x64). See
-  // docs/pr-evidence/subagent-task-visibility/renderer-bundle.json.
-  // Grok's shared contracts and the provider menu add 19,225 bytes (2,565,146 measured). Keep 256 bytes.
-  // Custom agents: the agent library contracts, validators, marks and the
-  // called-agent renderer wiring add 31,710 bytes over main's cap (2,600,295
-  // measured on Windows x64). See
-  // docs/pr-evidence/custom-agents/renderer-bundle.json.
-  // In-place subagent groups add 1,554 bytes (2,678,914 measured on Linux x64); keep 64.
-  // Messages to the user add 1,612 core bytes (2,680,526 measured on macOS ARM64).
-  // Performance/reliability/security pass adds 7,721 core bytes (2,724,181 measured on Linux x64).
-  // Agent secret request reliability fixes add 2,467 core bytes (2,726,904
-  // measured on Linux x64); keep 256 bytes headroom.
-  // Agent-linked media viewer: shared media classification, inline media
-  // markdown embeds, and WorkspaceScene/FilesPanel wiring (lightbox & viewers
-  // are separately capped in deferredWorkspaceMediaPreviewJavaScript above).
-  // Follow-up fixes & visual polish add 2,443 core bytes; keep 256 bytes headroom.
-  coreJavaScript: 2_294_495 + 256 + 368 + 303 + 432 + 843 + 1_985 + 3_788 + 74 + 294 + 20 + 1_114 + 10_267 + 381 + 474 + 34 + 605 + 94 + 27 + 7_250 + 5_734 + 4_167 + 1_078 + 28 + 35 + 260 + 174 + 319 + 64 + 690 + 47 + 30 + 10_987 + 206 + 1_312 + 250 + 1_188 + 4_982 + 354 + 51_987 + 266 + 103 + 46 + 1_203 + 2_331 + 11_100 + 1_051 + 661 + 6 + 110 + 171 + 595 + 1_705 + 15_327 + 2_692 - 1_916 + 217 + 114 + 2_140 + 22 + 337 + 7 + 1_959 + 240 + 1_377 + 848 + 177 + 248 + 289 + 133 + 308 + 9_044 + 1_657 + 73_804 + 10_553 + 19_225 + 256 + 1_855 + 38 + 824 + 466 + 31_710 + 29_167 + 16_704 + 407 + 204 + 293 + 26_069 + 194 + 371 + 2_549 + 712 + 256 + 139 + 1_554 + 64 + 1_612 + 111 + 34_987 + 307 + 372 + 349 + 7_721 + 2_467 + 14_816 + 256 + 2_443 + 256,
+  // Main sync onto cd0949a8 (#784 media preview polish) with Orchestrator V2 Phase 5 + Wave B Scheduled Tasks measures 2_854_516 bytes on
+  // Linux x64; keep 512-byte cross-platform headroom.
+  coreJavaScript: 2_854_516 + 512,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -682,8 +630,22 @@ const deferredProviderAuthJavaScriptBytes = await assetBytes(
 const deferredProviderMaintenanceJavaScriptBytes = await assetBytes(
   `assets/${deferredProviderMaintenanceJavaScript}`,
 );
-const deferredComposerQueueJavaScriptBytes = await assetBytes(
-  `assets/${deferredComposerQueueJavaScript}`,
+if (
+  entryJavaScriptClosure.has(deferredComposerQueueJavaScript)
+  || mainWorkbenchJavaScriptClosure.has(deferredComposerQueueJavaScript)
+  || detachedChatJavaScriptClosure.has(deferredComposerQueueJavaScript)
+) {
+  throw new Error(
+    "Renderer bundle check found the deferred composer queue surface in an initial chat route.",
+  );
+}
+const deferredComposerQueueJavaScriptBytes = await closureBytes(
+  await javaScriptClosure(deferredComposerQueueJavaScript),
+  new Set([
+    ...entryJavaScriptClosure,
+    ...mainWorkbenchJavaScriptClosure,
+    ...detachedChatJavaScriptClosure,
+  ]),
 );
 const deferredTerminalJavaScriptBytes = await assetBytes(
   `assets/${deferredTerminalJavaScript}`,
@@ -876,6 +838,12 @@ if (entryJavaScriptClosure.has(tasksViewEntry) || mainWorkbenchJavaScriptClosure
   throw new Error("The Tasks view must remain deferred from the initial chat routes");
 }
 const deferredTasksViewJavaScriptBytes = await assetBytes(`assets/${tasksViewEntry}`);
+const scheduledTasksViewEntry = assetNames.find((name) => /^schedules-.*\.js$/u.test(name));
+if (!scheduledTasksViewEntry) throw new Error("Missing deferred Scheduled tasks view");
+if (entryJavaScriptClosure.has(scheduledTasksViewEntry) || mainWorkbenchJavaScriptClosure.has(scheduledTasksViewEntry) || detachedChatJavaScriptClosure.has(scheduledTasksViewEntry)) {
+  throw new Error("The Scheduled tasks view must remain deferred from the initial chat routes");
+}
+const deferredScheduledTasksJavaScriptBytes = await assetBytes(`assets/${scheduledTasksViewEntry}`);
 const libraryEntries = [/^library-(?!menu-).*\.js$/u, /^library-menu-.*\.js$/u].map((pattern) => {
   const entry = assetNames.find((name) => pattern.test(name));
   if (!entry) throw new Error(`Missing deferred Library surface: ${pattern}`);
@@ -932,6 +900,7 @@ const coreJavaScriptBytes =
   - deferredCliConversationImportJavaScriptBytes
   - deferredBackgroundTasksJavaScriptBytes
   - deferredTasksViewJavaScriptBytes
+  - deferredScheduledTasksJavaScriptBytes
   - deferredLibraryViewJavaScriptBytes
   - deferredIconRegionJavaScriptBytes
   - deferredProjectSettingsJavaScriptBytes
@@ -980,6 +949,7 @@ const measurements = {
   deferredAttachmentStorageSettingsJavaScript: deferredAttachmentStorageSettingsJavaScriptBytes,
   deferredBackgroundTasksJavaScript: deferredBackgroundTasksJavaScriptBytes,
   deferredTasksViewJavaScript: deferredTasksViewJavaScriptBytes,
+  deferredScheduledTasksJavaScript: deferredScheduledTasksJavaScriptBytes,
   deferredLibraryViewJavaScript: deferredLibraryViewJavaScriptBytes,
   deferredIconRegionJavaScript: deferredIconRegionJavaScriptBytes,
   deferredProjectSettingsJavaScript: deferredProjectSettingsJavaScriptBytes,

@@ -371,6 +371,28 @@ describe("model backend profile controller", () => {
     runtimeStore.close();
   });
 
+  it("validates a Pi chat's native selection from Pi's own configuration", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const pi: ProviderInfo = {
+      ...nativeProvider(),
+      id: "pi",
+      label: "Pi",
+      command: "pi",
+      models: [{ id: "anthropic/claude-test", label: "Claude Test", description: "", isDefault: true, inputModalities: ["text"],
+        reasoningOptions: [], defaultReasoningEffort: "" }],
+    };
+    expect(controller.profiles([pi]).map(({ id }) => id)).toContain("builtin:pi");
+    const selection = providerNativeModelSelection({ providerId: "pi", modelId: "anthropic/claude-test" });
+    expect(controller.validateSelection(selection)).toMatchObject({
+      harnessId: "pi-rpc",
+      backendProfileId: "builtin:pi",
+      modelId: "anthropic/claude-test",
+    });
+    expect(controller.detail("builtin:pi")).toMatchObject({ id: "builtin:pi", protocol: "pi-native" });
+    runtimeStore.close();
+  });
+
   it("classifies every canonical provider backend as native", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
@@ -381,11 +403,14 @@ describe("model backend profile controller", () => {
       "kimi",
       "opencode",
       "antigravity",
+      "grok",
+      "pi",
     ];
 
     for (const providerId of providers) {
       expect(controller.isExternalSelection(providerNativeModelSelection({ providerId })))
         .toBe(false);
+      expect(controller.profiles([]).map(({ id }) => id)).toContain(providerNativeModelSelection({ providerId }).backendProfileId);
     }
     expect(controller.isExternalSelection(modelSelectionForBackendProfile(
       persistedCredentialProfile(),

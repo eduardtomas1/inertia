@@ -1089,10 +1089,16 @@ describe("agent secret service: in-flight saves and keychain reconciliation", ()
     services.splice(services.indexOf(first.service), 1);
 
     let failCount = 1;
+    let restoredWrites = 0;
     const second = await openHarness({
       directory: first.directory,
       start: false,
       platform: process.platform,
+      writeFile: async (root, token, fileName, value, options) => {
+        const target = await writeAgentSecretFile(root, token, fileName, value, options);
+        restoredWrites += 1;
+        return target;
+      },
       resolve: async (reference) => {
         if (reference === agentSecretReference(requestId) && failCount-- > 0) {
           throw new Error("Keychain temporarily locked");
@@ -1112,7 +1118,10 @@ describe("agent secret service: in-flight saves and keychain reconciliation", ()
 
     // Retry triggered by sweep succeeds.
     second.service.sweep();
-    await vi.waitFor(() => expect(second.service.filePath(requestId)).toBe(file));
+    await vi.waitFor(() => {
+      expect(restoredWrites).toBe(1);
+      expect(second.service.filePath(requestId)).toBe(file);
+    });
     expect(readFileSync(file, "utf8")).toBe(SECRET);
     expect(second.service.output.text(`leaked ${SECRET}`)).toBe("leaked [redacted]");
     first.service.shutdown();

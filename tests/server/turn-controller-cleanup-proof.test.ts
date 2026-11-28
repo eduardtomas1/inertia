@@ -37,7 +37,7 @@ describe("TurnController exact provider cleanup proof", () => {
     expect(stopOwned).toHaveBeenCalledWith(runtime.conversationId, {
       runId: queued.turn.runId,
       turnId: queued.turn.id,
-    });
+    }, undefined, { escalated: expect.any(Function) });
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
       terminalReason: null,
     });
@@ -95,7 +95,7 @@ describe("TurnController exact provider cleanup proof", () => {
       expect(stopOwned).toHaveBeenCalledWith(runtime.conversationId, {
         runId: queued.turn.runId,
         turnId: queued.turn.id,
-      });
+      }, undefined, { escalated: expect.any(Function) });
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         status: "failed",
         terminalReason: "turn-start-failed",
@@ -137,7 +137,7 @@ describe("TurnController exact provider cleanup proof", () => {
     expect(stopOwned).toHaveBeenCalledWith(runtime.conversationId, {
       runId: queued.turn.runId,
       turnId: queued.turn.id,
-    });
+    }, undefined, { escalated: expect.any(Function) });
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
       status: "failed",
       terminalReason: "turn-start-failed",
@@ -203,7 +203,7 @@ describe("TurnController exact provider cleanup proof", () => {
     expect(stopOwned).toHaveBeenCalledWith(runtime.conversationId, {
       runId: queued.turn.runId,
       turnId: queued.turn.id,
-    });
+    }, undefined, { escalated: expect.any(Function) });
     expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
       status: "failed",
       terminalReason: "provider-error",

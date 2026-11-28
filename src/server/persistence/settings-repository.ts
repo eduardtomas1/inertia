@@ -75,6 +75,7 @@ export class SettingsRepository {
         compact_before_cache_expires = ?,
         claude_auto_compact_window = ?,
         codex_auto_compact_token_limit = ?,
+        delegation_automatic_wakes = ?,
         muted_custom_colors = ?,
         preferred_editor = ?
       WHERE id = 1
@@ -123,6 +124,7 @@ export class SettingsRepository {
       Number(next.compactBeforeCacheExpires),
       next.claudeAutoCompactWindow,
       next.codexAutoCompactTokenLimit,
+      Number(next.delegationAutomaticWakes),
       Number(mutedCustomColors),
       parsePreferredEditor(next.preferredEditor),
     );

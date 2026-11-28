@@ -10,6 +10,7 @@ import { RuntimeStore } from "../../src/server/database";
 import { agentContextReadsMigration } from "../../src/server/persistence/migrations/agent-context-reads";
 import { AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION } from "../../src/server/persistence/migrations/agent-context-read-managed-access";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
+import { removeOrchestratorV2FromFixture } from "../support/legacy-project-settings-schema";
 import type { Conversation } from "../../src/shared/contracts";
 
 const roots: string[] = [];
@@ -110,6 +111,7 @@ describe("RecordManagedAgentContextReads migration", () => {
       INSERT INTO agent_context_reads SELECT * FROM agent_context_reads_current;
       DROP TABLE agent_context_reads_current;
     `);
+    removeOrchestratorV2FromFixture(legacy);
     legacy.prepare("DELETE FROM schema_migrations WHERE version >= ?").run(AGENT_CONTEXT_READ_MANAGED_ACCESS_SCHEMA_VERSION);
     const before = readRows(legacy);
     expect(before).toEqual([

@@ -42,6 +42,7 @@ describe("add provider menu", () => {
       ["opencode", "OpenCode", "Not detected"],
       ["antigravity", "Antigravity", "Not detected"],
       ["kimi", "Kimi Code", "Not detected"],
+      ["pi", "Pi", "Not detected"],
     ]);
     expect(nextAddProviderMenuIndex(0, "ArrowRight", 6, 2)).toBe(1);
     expect(nextAddProviderMenuIndex(0, "ArrowDown", 6, 2)).toBe(2);

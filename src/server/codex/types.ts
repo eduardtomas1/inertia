@@ -15,6 +15,7 @@ import type {
   ProviderGoalMutation,
   ProviderRunFailure,
   ProviderSteerInput,
+  ProviderHistoryInjection,
   ProviderHostToolBridge,
 } from "../provider/contracts";
 import type { ProcessTreeTerminator } from "../process-lifecycle";
@@ -56,6 +57,8 @@ export interface CodexAppServerOptions {
   sessionDeveloperInstructions?: string;
   /** Exact-run Inertia tools; advertised only on new provider threads. */
   hostTools?: ProviderHostToolBridge;
+  /** Restored history to inject before the turn starts; `prompt` keeps it inline otherwise. */
+  historyInjection?: ProviderHistoryInjection;
   /** Test seam that may shorten, but never extend, host-tool approval expiry. */
   hostToolApprovalTimeoutMs?: number;
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */
@@ -82,6 +85,7 @@ export interface CodexAppServerOptions {
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta">,
   ) => void;
   onSession?: (sessionId: string) => void;
+  onNativeBoundary?: (threadId: string, turnId: string, phase: "started" | "settled") => void;
   onStatus?: (
     status: "running" | "delegated" | "retrying",
     providerState?: string,
@@ -136,8 +140,14 @@ export interface CodexAppServerResult {
   diagnostic?: string;
   failure?: ProviderRunFailure;
   compatibilityError?: "full-access-unsupported" | "fast-mode-unsupported";
-  continuationError?: "stale-provider-session" | "resume-rejected";
+  /**
+   * `thread-in-use`: another Codex client holds the thread's writer lock. The
+   * turn is refused; the session is neither rejected nor unavailable.
+   */
+  continuationError?: "stale-provider-session" | "resume-rejected" | "thread-in-use";
   sessionInstructionApplied?: false;
+  /** See `ProviderRunResult.providerStopReason`: the hook stop of the turn that ended the run. */
+  providerStopReason?: string;
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;
   cleanupReason?: PosixCleanupFailureReason;

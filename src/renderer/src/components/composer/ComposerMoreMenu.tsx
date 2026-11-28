@@ -62,7 +62,7 @@ export function ComposerMoreMenu({
   selectedFastMode,
   conversation,
   disabled,
-  running,
+  running: _running,
   menuController,
   onRunAction,
   onUpdateReasoningEffort,
@@ -96,7 +96,7 @@ export function ComposerMoreMenu({
     (item) => item.value === effectiveAccess,
   ) ?? accessOptions[2]!;
   const runLocked = useWatcherRunLock(conversation.id);
-  const settingsLocked = disabled || running || conversationUpdatePending;
+  const settingsLocked = disabled || conversationUpdatePending;
   const branchFolded = branch !== null && folded.has("branch");
   const foldedAttention = branchFolded ? branch.attention : null;
 
@@ -244,7 +244,7 @@ export function ComposerMoreMenu({
     access: {
       label: "Access",
       value: access.label,
-      disabled: disabled || running || runLocked,
+      disabled: disabled || conversationUpdatePending || runLocked,
     },
   };
   const moreRootItems: Array<{

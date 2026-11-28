@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Every coding agent, one calm desktop.</strong><br />
-  Run Codex, Claude, Cursor, Grok, Kimi Code, OpenCode and Antigravity side by side,<br />
+  Run Codex, Claude, Cursor, Grok, Kimi Code, OpenCode, Antigravity and Pi side by side,<br />
   next to your projects, Git review and terminals, in a workspace that stays on your computer.
 </p>
 
@@ -46,7 +46,7 @@ Inertia is a desktop app for working with coding agents. Each chat belongs to a 
 - **Work in AutoCAD and SketchUp.** Turn on **Agent CAD tools** for a project and the agent can read the drawing or model you have open, preview a change, and apply it as one Undo step. See [AutoCAD and SketchUp](docs/user/cad.md).
 - **Get visual answers.** An agent can reply with a chart, table, diagram or mockup rendered in the chat, themed like the app and sandboxed from the network and your files. See [Visual replies](docs/user/chats-and-agents.md#visual-replies).
 - **Spend less on long chats.** Return to a chat of 200K tokens or more on a Claude subscription, an Anthropic key or an OpenAI key after its prompt cache has expired and the send button reads **Compact and send**. Claude chats compact on their own at 400K tokens instead of near 1M, and can compact while idle before their cache expires; Codex chats compact at 300K. See [Compact on return](docs/user/chats-and-agents.md#compact-on-return).
-- **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** lets the agent act without asking.
+- **Choose the access you are comfortable with.** **Supervised** keeps provider approvals, **Auto-accept edits** allows supported file edits, and **Full access** runs commands and edits without approval prompts. Claude Code still asks about a few actions its own safety checks or settings protect, and refuses a removal its dangerous-removal check flags.
 
 ## Find anything
 

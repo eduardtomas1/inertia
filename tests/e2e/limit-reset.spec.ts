@@ -49,6 +49,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
   }
   if (message.method === "thread/goal/get") send({ id: message.id, result: { goal: null } });
   if (message.method === "thread/start" || message.method === "thread/resume") send({ id: message.id, result: { thread: { id: threadId }, model: "gpt-test", serviceTier: message.params.serviceTier ?? null } });
+  if (message.method === "thread/inject_items") return send({ id: message.id, error: { code: -32601, message: "Method not found" } });
   if (message.method !== "turn/start") return;
   const state = JSON.parse(fs.readFileSync(path, "utf8")); state.turns += 1; fs.writeFileSync(path, JSON.stringify(state));
   const turn = { id: "reset-turn-" + state.turns, status: "inProgress", items: [], error: null };

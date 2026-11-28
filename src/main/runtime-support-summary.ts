@@ -102,7 +102,11 @@ export function renderSupportSummary(
           `Startup blockers: ${startupBlockerCode}`,
           `Quarantine reason: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
             ? "prior-runtime-cleanup-unconfirmed"
-            : "provider-maintenance-recovery-required"}`,
+            : startupBlockerCode === "orchestration-projection-invalid"
+              ? "orchestration-projection-rebuild-failed"
+              : startupBlockerCode === "orchestrator-v2-development-database"
+                ? "orchestrator-v2-development-database"
+                : "provider-maintenance-recovery-required"}`,
           `Cleanup proof: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
             ? "unconfirmed"
             : "unavailable"}`,

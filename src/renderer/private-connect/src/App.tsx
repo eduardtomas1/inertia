@@ -7,6 +7,10 @@ import {
   type PrivateConnectResponse,
 } from "../../../shared/private-connect/protocol";
 import {
+  privateConnectScheduledTaskSchema,
+  type PrivateConnectScheduledTask,
+} from "../../../shared/private-connect/runtime-contract";
+import {
   apiRequest,
   browserDeviceId,
   connectPrivateConnectSocket,
@@ -19,7 +23,9 @@ import { CheckingScreen, OfflineScreen, PairScreen, WaitingScreen } from "./pair
 import { onPrivateConnectConversationNavigation } from "./pwa";
 import { createPrivateConnectPairingNonce } from "../../../shared/private-connect/pairing-link";
 import { WorkspaceShell } from "./workspace/WorkspaceShell";
-import type { Detail, Shell } from "./types";
+import type { ConversationDetailWithQueue } from "./workspace/ConversationPane";
+import { privateConnectQueueProjectionSchema } from "./workspace/QueueSection";
+import type { Shell } from "./types";
 
 type PairState =
   | { kind: "checking" }
@@ -44,13 +50,17 @@ export default function App({
   const [pair, setPair] = useState<PairState>(() => ({ kind: "checking" }));
   const [browserNonce] = useState(createPrivateConnectPairingNonce);
   const [shell, setShell] = useState<Shell | null>(null);
-  const [detail, setDetail] = useState<Detail | null>(null);
+  const [detail, setDetail] = useState<ConversationDetailWithQueue | null>(null);
+  const [scheduledTasks, setScheduledTasks] = useState<PrivateConnectScheduledTask[]>([]);
+  const [scheduledTasksLoading, setScheduledTasksLoading] = useState(false);
+  const [scheduledTasksError, setScheduledTasksError] = useState<string | null>(null);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, PromptDraft>>({});
   const promptDraft = selectedConversation ? promptDrafts[selectedConversation] : undefined;
   const prompt = promptDraft?.content ?? "";
   const [busy, setBusy] = useState(false);
   const [socket, setSocket] = useState<PrivateConnectSocket | null>(null);
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
   const [hostUnavailable, setHostUnavailable] = useState(() => navigator.onLine === false);
   const [pairRetry, setPairRetry] = useState(0);
   const [requestedConversationId, setRequestedConversationId] = useState(initialConversationId);
@@ -60,10 +70,22 @@ export default function App({
   const conversationValidatorsRef = useRef(new Map<string, string>());
   const authorizedConversationIdsRef = useRef(new Set<string>());
   const selectedConversationRef = useRef<string | null>(null);
+  const scheduledTasksLoadedKeyRef = useRef<string | null>(null);
+  const scheduledTasksAuthorityGenRef = useRef(0);
+  const scheduledTasksRequestSeqRef = useRef(0);
+  const transportGenerationRef = useRef(0);
+  const socketRef = useRef<PrivateConnectSocket | null>(null);
+  const refreshScheduledTasksRef = useRef<(options?: { silent?: boolean }) => Promise<void>>(async () => undefined);
 
   const clearWorkspace = useCallback((): void => {
+    scheduledTasksAuthorityGenRef.current += 1;
+    scheduledTasksRequestSeqRef.current += 1;
+    scheduledTasksLoadedKeyRef.current = null;
     setShell(null);
     setDetail(null);
+    setScheduledTasks([]);
+    setScheduledTasksLoading(false);
+    setScheduledTasksError(null);
     setPromptDrafts({});
     setSelectedConversation(null);
     selectedConversationRef.current = null;
@@ -78,6 +100,7 @@ export default function App({
   }, []);
   const demoteSocket = useCallback((candidate: PrivateConnectSocket, error: unknown): void => {
     if (!isSocketOnlyFailure(error)) return;
+    if (socketRef.current === candidate) socketRef.current = null;
     setSocket((current) => current === candidate ? null : current);
     candidate.close();
   }, []);
@@ -207,6 +230,7 @@ export default function App({
   const readyCsrf = pair.kind === "ready" ? pair.csrf : null;
   useEffect(() => {
     if (pair.kind !== "ready" || !readyCsrf) {
+      socketRef.current = null;
       setSocket(null);
       return;
     }
@@ -216,6 +240,7 @@ export default function App({
     let unsubscribeClose: (() => void) | null = null;
     const retry = (): void => {
       if (cancelled || retryTimer !== null) return;
+      socketRef.current = null;
       setSocket(null);
       retryTimer = window.setTimeout(() => {
         retryTimer = null;
@@ -240,7 +265,10 @@ export default function App({
             retry();
           }
         });
+        socketRef.current = next;
+        transportGenerationRef.current += 1;
         setSocket(next);
+        setConnectionGeneration((current) => current + 1);
       } catch (error) {
         if (isUnauthorized(error)) {
           clearWorkspace();
@@ -257,24 +285,35 @@ export default function App({
       if (retryTimer !== null) window.clearTimeout(retryTimer);
       unsubscribeClose?.();
       current?.close();
+      socketRef.current = null;
       setSocket(null);
     };
   }, [clearWorkspace, noteRequestFailure, pair.kind, readyCsrf]);
 
-  const request = useCallback(async (value: Parameters<PrivateConnectSocket["request"]>[0], csrf: string) => {
-    const currentSocket = socket;
+  const request = useCallback(async (
+    value: Parameters<PrivateConnectSocket["request"]>[0],
+    csrf: string,
+    isFresh?: () => boolean,
+    preferredSocket?: PrivateConnectSocket | null,
+  ) => {
+    const currentSocket = preferredSocket !== undefined ? preferredSocket : socketRef.current;
+    const transportGen = transportGenerationRef.current;
+    const transportFresh = (): boolean =>
+      transportGen === transportGenerationRef.current && (!isFresh || isFresh());
     try {
       const response = currentSocket
         ? await currentSocket.request(value)
         : await apiRequest(value, csrf);
-      setHostUnavailable(false);
+      if (transportFresh()) setHostUnavailable(false);
       return response;
     } catch (error) {
-      if (currentSocket) demoteSocket(currentSocket, error);
-      noteRequestFailure(error);
+      if (transportFresh()) {
+        if (currentSocket) demoteSocket(currentSocket, error);
+        noteRequestFailure(error);
+      }
       throw error;
     }
-  }, [demoteSocket, noteRequestFailure, socket]);
+  }, [demoteSocket, noteRequestFailure]);
 
   useEffect(() => {
     if (pair.kind !== "waiting") return;
@@ -303,12 +342,12 @@ export default function App({
         type: "state.get",
         requestId: crypto.randomUUID(),
         ifNoneMatch: stateValidatorRef.current,
-      }, readyCsrf);
+      }, readyCsrf, undefined, socket);
       if (!cancelled) applyStateResponse(response);
     };
     void load().catch((error) => { if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "State could not be loaded." } : current); });
     return () => { cancelled = true; };
-  }, [applyStateResponse, readyCsrf, request]);
+  }, [applyStateResponse, readyCsrf, request, socket]);
 
   useEffect(() => {
     if (!readyCsrf || !selectedConversation) return;
@@ -319,13 +358,13 @@ export default function App({
       requestId: crypto.randomUUID(),
       conversationId: selectedConversation,
       ifNoneMatch: conversationValidatorsRef.current.get(selectedConversation) ?? null,
-    }, readyCsrf).then((response) => {
+    }, readyCsrf, undefined, socket).then((response) => {
       if (!cancelled) applyConversationResponse(response, selectedConversation);
     }).catch((error) => {
       if (!cancelled) setPair((current) => current.kind === "ready" ? { ...current, error: error instanceof Error ? error.message : "Conversation could not be loaded." } : current);
     });
     return () => { cancelled = true; };
-  }, [applyConversationResponse, readyCsrf, request, selectedConversation]);
+  }, [applyConversationResponse, readyCsrf, request, selectedConversation, socket]);
 
   useEffect(() => {
     if (!readyCsrf || !socket) return;
@@ -353,6 +392,7 @@ export default function App({
       if (cancelled) return;
       if (stateOutcome.status === "rejected") throw stateOutcome.reason;
       applyStateResponse(stateOutcome.value);
+      void refreshScheduledTasksRef.current({ silent: true });
       if (
         selectedConversation
         && authorizedConversationIdsRef.current.has(selectedConversation)
@@ -441,6 +481,146 @@ export default function App({
     }
   };
 
+  const refreshSelectedConversation = useCallback(async (conversationId: string, csrf: string): Promise<void> => {
+    conversationValidatorsRef.current.delete(conversationId);
+    const updated = await request({
+      protocolVersion: 1,
+      type: "conversation.get",
+      requestId: crypto.randomUUID(),
+      conversationId,
+      ifNoneMatch: null,
+    }, csrf);
+    applyConversationResponse(updated, conversationId);
+  }, [applyConversationResponse, request]);
+
+  const mutateQueue = async (
+    payload: Record<string, unknown>,
+    fallbackError: string,
+  ): Promise<boolean> => {
+    if (hostUnavailable || pair.kind !== "ready" || !selectedConversation || !shell?.capabilities.scopes.includes("private:prompt")) return false;
+    setBusy(true);
+    setPair((current) => current.kind === "ready" ? { ...current, error: null } : current);
+    try {
+      const response = await request({
+        protocolVersion: 1,
+        requestId: crypto.randomUUID(),
+        conversationId: selectedConversation,
+        ...payload,
+      } as Parameters<PrivateConnectSocket["request"]>[0], pair.csrf);
+      if (!response.ok) {
+        if (response.code === "stale") {
+          await refreshSelectedConversation(selectedConversation, pair.csrf).catch(() => undefined);
+        }
+        throw new Error(response.message);
+      }
+      await refreshSelectedConversation(selectedConversation, pair.csrf).catch(() => undefined);
+      return true;
+    } catch (error) {
+      setPair((current) => current.kind === "ready"
+        ? { ...current, error: error instanceof Error ? error.message : fallbackError }
+        : current);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendQueueItem = (id: string): Promise<void> =>
+    mutateQueue({ type: "queue.send", id }, "The queued message could not be sent.").then(() => undefined);
+
+  const editQueueItem = (id: string, expectedRevision: number, content: string): Promise<boolean> =>
+    mutateQueue({ type: "queue.edit", id, expectedRevision, content }, "The queued message could not be edited.");
+
+  const removeQueueItem = (id: string): Promise<void> =>
+    mutateQueue({ type: "queue.remove", id }, "The queued message could not be removed.").then(() => undefined);
+
+  const resumeQueue = (): Promise<void> =>
+    mutateQueue({ type: "queue.resume" }, "The queue could not be resumed.").then(() => undefined);
+
+  const refreshScheduledTasks = useCallback(async (options?: { silent?: boolean }): Promise<void> => {
+    if (hostUnavailable || !readyCsrf) return;
+    const authorityGen = scheduledTasksAuthorityGenRef.current;
+    const reqSeq = ++scheduledTasksRequestSeqRef.current;
+    const isFresh = (): boolean =>
+      authorityGen === scheduledTasksAuthorityGenRef.current
+      && reqSeq === scheduledTasksRequestSeqRef.current;
+    if (!options?.silent) setScheduledTasksLoading(true);
+    try {
+      const response = await request(
+        { protocolVersion: 1, type: "scheduled-tasks.list", requestId: crypto.randomUUID() },
+        readyCsrf,
+        isFresh,
+      );
+      if (!isFresh()) return;
+      if (!response.ok) throw new Error(response.message);
+      const raw = response.result as { kind?: unknown; tasks?: unknown };
+      if (raw?.kind === "scheduled-tasks" && Array.isArray(raw.tasks)) {
+        const parsed = raw.tasks.flatMap((entry) => {
+          const item = privateConnectScheduledTaskSchema.safeParse(entry);
+          return item.success ? [item.data] : [];
+        });
+        setScheduledTasks(parsed);
+      }
+      setScheduledTasksError(null);
+    } catch (error) {
+      if (authorityGen !== scheduledTasksAuthorityGenRef.current || reqSeq !== scheduledTasksRequestSeqRef.current) {
+        return;
+      }
+      if (!options?.silent) {
+        setScheduledTasksError(
+          error instanceof Error ? error.message : "Scheduled tasks could not be loaded.",
+        );
+      }
+    } finally {
+      if (isFresh()) {
+        setScheduledTasksLoading(false);
+      }
+    }
+  }, [hostUnavailable, readyCsrf, request]);
+  refreshScheduledTasksRef.current = refreshScheduledTasks;
+
+  useEffect(() => {
+    if (!readyCsrf || !shell || hostUnavailable) {
+      scheduledTasksLoadedKeyRef.current = null;
+      return;
+    }
+    const loadKey = `${readyCsrf}:${scheduledTasksAuthorityGenRef.current}:${connectionGeneration}`;
+    if (scheduledTasksLoadedKeyRef.current === loadKey) return;
+    scheduledTasksLoadedKeyRef.current = loadKey;
+    void refreshScheduledTasks();
+  }, [connectionGeneration, hostUnavailable, readyCsrf, refreshScheduledTasks, shell]);
+
+  const mutateScheduledTask = async (
+    payload:
+      | { type: "scheduled-task.toggle"; taskId: string; enabled: boolean }
+      | { type: "scheduled-task.run-now"; taskId: string }
+      | { type: "scheduled-task.delete"; taskId: string },
+    fallbackError: string,
+  ): Promise<void> => {
+    if (hostUnavailable || !readyCsrf || !shell?.capabilities.scopes.includes("private:prompt")) return;
+    setBusy(true);
+    setScheduledTasksError(null);
+    try {
+      const response = await request({ protocolVersion: 1, requestId: crypto.randomUUID(), ...payload }, readyCsrf);
+      if (!response.ok) throw new Error(response.message);
+      await refreshScheduledTasks();
+    } catch (error) {
+      void refreshScheduledTasks({ silent: true });
+      throw error instanceof Error && error.message ? error : new Error(fallbackError);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleScheduledTask = (taskId: string, enabled: boolean): Promise<void> =>
+    mutateScheduledTask({ type: "scheduled-task.toggle", taskId, enabled }, "The scheduled task could not be updated.");
+
+  const runScheduledTaskNow = (taskId: string): Promise<void> =>
+    mutateScheduledTask({ type: "scheduled-task.run-now", taskId }, "The scheduled task could not be started.");
+
+  const deleteScheduledTask = (taskId: string): Promise<void> =>
+    mutateScheduledTask({ type: "scheduled-task.delete", taskId }, "The scheduled task could not be deleted.");
+
   const signOut = async (): Promise<void> => {
     if (pair.kind !== "ready") return;
     try {
@@ -466,7 +646,9 @@ export default function App({
     <WorkspaceShell
       shell={shell}
       detail={detail}
-      error={pair.error ?? promptDraft?.error ?? null}
+      scheduledTasks={scheduledTasks}
+      scheduledTasksLoading={scheduledTasksLoading}
+      error={pair.error ?? scheduledTasksError ?? promptDraft?.error ?? null}
       prompt={prompt}
       busy={busy}
       offline={hostUnavailable}
@@ -490,6 +672,14 @@ export default function App({
       onSendPrompt={() => void sendPrompt()}
       onAnswer={(answers) => void answerQuestions(answers)}
       onStopRun={() => void stopRun()}
+      onSendQueueItem={sendQueueItem}
+      onEditQueueItem={editQueueItem}
+      onRemoveQueueItem={removeQueueItem}
+      onResumeQueue={resumeQueue}
+      onRefreshScheduledTasks={refreshScheduledTasks}
+      onToggleScheduledTask={toggleScheduledTask}
+      onRunScheduledTaskNow={runScheduledTaskNow}
+      onDeleteScheduledTask={deleteScheduledTask}
       onSignOut={() => void signOut()}
     />
   );
@@ -497,8 +687,21 @@ export default function App({
 
 type ProjectionResult =
   | { kind: "state"; validator: string; state: Shell }
-  | { kind: "conversation"; validator: string; detail: Detail }
+  | { kind: "conversation"; validator: string; detail: ConversationDetailWithQueue }
   | { kind: "not-modified"; validator: string };
+
+function parseConversationDetailWithQueue(raw: unknown): ConversationDetailWithQueue | null {
+  const direct = privateConnectConversationDetailSchema.safeParse(raw);
+  if (direct.success) return direct.data as ConversationDetailWithQueue;
+  if (!raw || typeof raw !== "object" || !("queue" in raw)) return null;
+  const { queue, ...rest } = raw as Record<string, unknown>;
+  const base = privateConnectConversationDetailSchema.safeParse(rest);
+  if (!base.success) return null;
+  if (queue === undefined) return base.data;
+  const parsedQueue = privateConnectQueueProjectionSchema.safeParse(queue);
+  if (!parsedQueue.success) return null;
+  return { ...base.data, queue: parsedQueue.data };
+}
 
 function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }>): ProjectionResult | null {
   const result = response.result;
@@ -515,9 +718,9 @@ function projectionResult(response: Extract<PrivateConnectResponse, { ok: true }
       : null;
   }
   if (kind === "conversation" && "detail" in result) {
-    const detail = privateConnectConversationDetailSchema.safeParse(result.detail);
-    return detail.success
-      ? { kind, validator: result.validator, detail: detail.data }
+    const detail = parseConversationDetailWithQueue(result.detail);
+    return detail
+      ? { kind, validator: result.validator, detail }
       : null;
   }
   return kind === "not-modified"

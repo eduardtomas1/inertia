@@ -1,6 +1,8 @@
 export const RUNTIME_STARTUP_BLOCKER_CODES = [
   "prior-runtime-cleanup-unconfirmed",
   "provider-installation-quarantined",
+  "orchestration-projection-invalid",
+  "orchestrator-v2-development-database",
 ] as const;
 
 export type RuntimeStartupBlockerCode =
@@ -27,6 +29,8 @@ export const RUNTIME_STARTUP_FAILURE_MESSAGES = [
   "The local runtime could not start.",
   "Runtime startup is blocked because prior process cleanup remains unconfirmed.",
   "Provider installation recovery requires manual attention.",
+  "The orchestration projection could not be rebuilt from saved history.",
+  "This database was created by an earlier orchestrator-v2 development build and must be reset.",
   ...RUNTIME_STARTUP_FAILURE_CATEGORIES.flatMap((category) => [
     categorizedRuntimeStartupFailureMessage("initialization", category),
     categorizedRuntimeStartupFailureMessage("startup completion", category),
@@ -88,7 +92,11 @@ export function runtimeStartupFailureMessage(
     ? "Runtime startup is blocked because prior process cleanup remains unconfirmed."
     : blockerCode === "provider-installation-quarantined"
       ? "Provider installation recovery requires manual attention."
-      : "The local runtime could not start.";
+      : blockerCode === "orchestration-projection-invalid"
+        ? "The orchestration projection could not be rebuilt from saved history."
+        : blockerCode === "orchestrator-v2-development-database"
+          ? "This database was created by an earlier orchestrator-v2 development build and must be reset."
+          : "The local runtime could not start.";
 }
 
 /**

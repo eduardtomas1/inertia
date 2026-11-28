@@ -23,6 +23,7 @@ interface ComposerPrefillOptions {
   ) => void;
   setMessage: Dispatch<SetStateAction<string>>;
   textareaRef: CurrentValue<HTMLTextAreaElement | null>;
+  skipDraftPersistenceRef?: CurrentValue<boolean>;
 }
 
 function mergeComposerPrefill(current: string, text: string): string {
@@ -45,6 +46,7 @@ export function useComposerPrefill({
   persistDraftChange,
   setMessage,
   textareaRef,
+  skipDraftPersistenceRef,
 }: ComposerPrefillOptions): void {
   const applyPrefill = useEffectEvent((text: string): void => {
     setMessage((current) => {
@@ -52,7 +54,9 @@ export function useComposerPrefill({
       if (next !== current) {
         markEditorChanged(conversationIdRef.current);
         draftValueRef.current = next;
-        persistDraftChange(conversationIdRef.current, current, next);
+        if (!skipDraftPersistenceRef?.current) {
+          persistDraftChange(conversationIdRef.current, current, next);
+        }
       }
       return next;
     });

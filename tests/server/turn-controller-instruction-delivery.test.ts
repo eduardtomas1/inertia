@@ -651,6 +651,12 @@ describe("hidden instruction delivery", () => {
 
     await runTurn(runtime, "one");
     runtime.store.updateConversation(runtime.conversationId, { providerSessionId: null });
+    // Orchestrator V2 resumes from the chat's provider backing, so the session is lost only with it.
+    const first = runtime.store.latestAgentTurnForConversation(runtime.conversationId)!;
+    const backing = runtime.store.orchestration.backings.current({
+      threadId: runtime.conversationId, providerId: "cursor", identity: first.continuationIdentity!,
+    });
+    runtime.store.orchestration.backings.invalidate(backing!, "uncertain-delivery");
 
     expect(() => runtime.controller.queue({
       conversationId: runtime.conversationId,
@@ -659,6 +665,24 @@ describe("hidden instruction delivery", () => {
     expect(runtime.store.agentTurnsForConversation(runtime.conversationId)).toHaveLength(1);
     const next = await runTurn(runtime, "two", "session-2");
     expect(next.sessionId).toBeUndefined();
+    expect(next.prompt).toContain("[build-mode]");
+    runtime.store.close();
+  });
+
+  it("sends a slash command after a slash command on the resumed session without restored history", async () => {
+    const { runtime } = await chatRuntime("cursor");
+    reportCommands(runtime, "advisor");
+
+    // A first-turn command withholds the instruction pack, which defers a history delta to the session's next turn.
+    const firstCommand = await runTurn(runtime, "/advisor fable");
+    expect(firstCommand.prompt).toBe("/advisor fable");
+    expect(runtime.store.turnLedgerRepository.promptWithheld(
+      runtime.store.latestAgentTurnForConversation(runtime.conversationId)!.id,
+    )).toBe(true);
+    const secondCommand = await runTurn(runtime, "/advisor opus");
+    expect(secondCommand).toMatchObject({ sessionId: "session-1", prompt: "/advisor opus" });
+    const next = await runTurn(runtime, "two");
+    expect(next.sessionId).toBe("session-1");
     expect(next.prompt).toContain("[build-mode]");
     runtime.store.close();
   });

@@ -6,7 +6,7 @@ export class ConversationProviderContact {
   constructor(
     private readonly store: Pick<RuntimeStore, "assertConversationProvider" | "conversationPath">,
     private readonly providers: Pick<ProviderManager, "codexControlContext" | "claudeSkills">
-      & Partial<Pick<ProviderManager, "providerCommands">>,
+      & Partial<Pick<ProviderManager, "piSkills" | "providerCommands">>,
   ) {}
 
   async codexControl(conversationId: string): ReturnType<ProviderManager["codexControlContext"]> {
@@ -20,6 +20,12 @@ export class ConversationProviderContact {
   ): ReturnType<ProviderManager["claudeSkills"]> {
     this.store.assertConversationProvider(conversationId, "claude");
     return await this.providers.claudeSkills(this.store.conversationPath(conversationId), forceReload);
+  }
+
+  async piSkills(conversationId: string): ReturnType<ProviderManager["piSkills"]> {
+    this.store.assertConversationProvider(conversationId, "pi");
+    if (!this.providers.piSkills) throw new Error("Pi skill discovery is unavailable.");
+    return await this.providers.piSkills(this.store.conversationPath(conversationId));
   }
 
   async codexControlAt(cwd: string): ReturnType<ProviderManager["codexControlContext"]> {
@@ -42,5 +48,10 @@ export class ConversationProviderContact {
     forceReload: boolean,
   ): ReturnType<ProviderManager["claudeSkills"]> {
     return await this.providers.claudeSkills(cwd, forceReload);
+  }
+
+  async piSkillsAt(cwd: string): ReturnType<ProviderManager["piSkills"]> {
+    if (!this.providers.piSkills) throw new Error("Pi skill discovery is unavailable.");
+    return await this.providers.piSkills(cwd);
   }
 }

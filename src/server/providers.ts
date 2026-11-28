@@ -1,3 +1,6 @@
+import { acquireProviderRunInstallation } from "./provider/provider-run-installation";
+import { CursorSdkController } from "./provider/cursor-sdk-controller";
+import type { CursorSdkStatus } from "./provider/cursor-sdk-service";
 import { codexUsageContext, readManagedClaudeUsage, readManagedOpenCodeAccount, type CodexControlContext } from "./provider/usage-context";
 export type { CodexControlContext } from "./provider/usage-context";
 import { randomUUID } from "node:crypto";
@@ -8,9 +11,7 @@ import {
   CURSOR_ACP_TERMINAL_RESUME_VERIFIED_VERSION,
   cursorVersionHasVerifiedAcpTerminalResume,
 } from "../shared/provider-terminal-resume";
-import {
-  type BackendCompatibilityProbeResult,
-} from "../shared/backend-probe";
+import { type BackendCompatibilityProbeResult } from "../shared/backend-probe";
 import {
   modelBackendProfileSchema,
   providerNativeBackendProfile,
@@ -18,10 +19,7 @@ import {
   type ModelBackendProfile,
   type ModelSelection,
 } from "../shared/model-routing";
-import {
-  providerChildEnvironment,
-  providerEnvironment,
-} from "./environment";
+import { providerChildEnvironment, providerEnvironment } from "./environment";
 import { validateProviderRunInput } from "./provider/adapters";
 import {
   AgentHarnessRegistry,
@@ -66,7 +64,9 @@ import {
   ProviderMetadataCache,
   type ProviderMetadata,
 } from "./provider/metadata";
-import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
+import { discoverClaudeSkills, discoverPiSkills } from "./provider/native-skill-discovery";
+import { executeNativeConversation, type NativeConversationExecutionContext } from "./provider/native-conversation-service";
+import type { NativeConversationRequest, NativeConversationResult } from "./provider/native-conversation-operations";
 import type { ProviderSlashCommand } from "../shared/contracts";
 import { ProviderCommandCatalog, type ProviderCommandScope } from "./provider/provider-command-catalog";
 import {
@@ -92,7 +92,6 @@ import {
   recordBackendProbeEvidence,
 } from
   "./provider/custom-backend-probe-admission";
-import { isProcessTreeTerminationUnconfirmed } from "./process-lifecycle";
 import { ProviderCleanupLedger, providerCleanupUnconfirmedError } from "./provider/provider-cleanup-ledger";
 import {
   ProviderRunCoordinator,
@@ -140,6 +139,7 @@ export class ProviderManager {
   private readonly commandCatalog: ProviderCommandCatalog;
   private readonly updateRequirements = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
+  private readonly cursorSdkController: CursorSdkController;
   private readonly harnessRegistry: AgentHarnessRegistry;
   private readonly metadataCache: ProviderMetadataCache;
   private readonly detectProviderImplementation: typeof detectProvider;
@@ -220,6 +220,7 @@ export class ProviderManager {
         "Production ProviderManager construction requires installation authority.",
       );
     }
+    this.cursorSdkController = new CursorSdkController(options.cursorSdk, () => this.processEnvironment ?? process.env);
     this.commands = { ...options.commands };
     this.dataDirectory = options.dataDirectory;
     this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_PROVIDER_CANCEL_GRACE_MS, 30_000));
@@ -242,6 +243,7 @@ export class ProviderManager {
         this.installationRecovery.report(providerId, "probe-cleanup-unconfirmed"),
     });
     this.capabilityAuthority = new ProviderCapabilityAuthority({
+      cursorSdkEvidence: () => this.cursorSdkController.currentInstallation()?.evidence,
       metadataCache: this.metadataCache,
       resolvedExecutable: (providerId) =>
         this.resolvedCommands.get(providerId),
@@ -291,10 +293,12 @@ export class ProviderManager {
       cancelGraceMs: this.cancelGraceMs,
       forceStopBudgetMs: options.forceStopBudgetMs,
       harnessRegistry: this.harnessRegistry,
+      cursorSdk: options.cursorSdk,
       metadataCache: this.metadataCache,
       resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
       conversationProviderGate: this.conversationProviderGate,
       commandFor: (providerId) => this.commandFor(providerId),
+      commandForRun: (input) => input.harnessId === "cursor-sdk" ? this.cursorSdkController.requireInstallation().node : this.commandFor(input.providerId),
       resolvedCommandFor: (providerId) => this.resolvedCommands.get(providerId),
       rememberResolvedCommand: (providerId, executable) => {
         this.resolvedCommands.set(providerId, executable);
@@ -323,30 +327,10 @@ export class ProviderManager {
               configured,
             )
           : this.testManagerCapabilityAvailable(input, capabilityId),
-      acquireInstallationUse: (input, executable) => {
-        const admission = this.installationAuthority.acquire(
-          input.providerId,
-          executable,
-          input.backendProfile,
-          "provider-run",
-          input.runId,
-        );
-        const finished = this.installationRecovery.trackRun(input.providerId);
-        return {
-          release: () => {
-            const released = this.installationAuthority.release(admission);
-            if (released) finished();
-            return released;
-          },
-          quarantine: (reason) => {
-            this.installationAuthority.quarantine(admission, reason);
-          },
-          liftQuarantine: () => {
-            finished();
-            if (admission) this.installationLeases?.liftQuarantine(admission.identity, admission.owner.operationId);
-          },
-        };
-      },
+      acquireInstallationUse: (input, executable) => acquireProviderRunInstallation(input, executable, {
+        leases: this.installationLeases, authority: this.installationAuthority,
+        recovery: this.installationRecovery, cursorSdk: this.cursorSdkController,
+      }),
       onCleanupUnconfirmed: (identity, cleanupReason) => {
         options.onRunCleanupUnconfirmed?.(identity, cleanupReason);
         this.installationRecovery.report(identity.providerId, "run-cleanup-unconfirmed");
@@ -389,6 +373,15 @@ export class ProviderManager {
 
   activeConversationIds(): string[] {
     return this.runCoordinator.activeConversationIds();
+  }
+
+  cursorSdkStatus(signal: AbortSignal): Promise<CursorSdkStatus> { return this.cursorSdkController.status(signal); }
+
+  cursorSdkModels(signal: AbortSignal) { return this.cursorSdkController.discoverModels(signal); }
+
+  loginCursorSdk(onUrl: (url: string) => void, signal: AbortSignal): Promise<{ expiresAt: number }> {
+    this.assertProviderConfigurationMutable("cursor");
+    return this.cursorSdkController.login(onUrl, signal);
   }
 
   harnessCapabilities(providerId?: ProviderId): readonly AgentHarnessCapabilities[] {
@@ -549,6 +542,7 @@ export class ProviderManager {
   }
 
   resolveModelRoute(selectionInput: ModelSelection): ResolvedModelRoute {
+    if (selectionInput.harnessId === "cursor-sdk") this.cursorSdkController.requireModel(selectionInput.modelId);
     return resolveModelRoute({
       backendProfiles: this.backendProfiles,
       backendCompatibilities: this.backendCompatibilities,
@@ -572,6 +566,7 @@ export class ProviderManager {
   }
 
   invalidateInstallationEvidence(providerId: ProviderId): void {
+    if (providerId === "cursor") this.cursorSdkController.invalidate();
     this.capabilityAuthority.invalidate(providerId);
     this.resolvedCommands.delete(providerId);
     this.commandCatalog.forgetFailures(providerId);
@@ -848,6 +843,7 @@ export class ProviderManager {
       this.processEnvironment = environment.env;
       return await prepareProviderAuthLaunch({
         providerId, executable, cwd, environment: environment.env,
+        installationVersion: this.metadataCache.nativeScope(providerId).version,
         signal: this.lifetimeSignal, installationAuthority: this.installationAuthority,
         ...(method ? { method } : {}),
       });
@@ -1058,53 +1054,41 @@ export class ProviderManager {
       this.installationAuthority, (env) => { this.processEnvironment = env; });
   }
 
+  nativeConversation(request: NativeConversationRequest, selection: ModelSelection, context: NativeConversationExecutionContext): Promise<NativeConversationResult> {
+    return this.trackAuxiliary(async () => {
+      const route = this.resolveModelRoute(selection);
+      const executable = this.resolvedCommands.get(route.providerId) ?? (await this.detect(route.providerId, { cwd: context.sourceCwd ?? context.cwd, signal: context.signal })).executable;
+      if (!executable) throw new ProviderRuntimeError("invalid_input", "The native provider executable is unavailable.");
+      return await executeNativeConversation(request, selection, context, { route, executable, registry: this.harnessRegistry,
+        installationVersion: this.metadataCache.nativeScope(route.providerId).version,
+        resolveRoute: () => this.resolveModelRoute(selection),
+        installation: this.installationAuthority, lifetimeSignal: this.lifetimeSignal, isRunning: (id) => this.isRunning(id),
+        gate: this.conversationProviderGate, resolveLaunch: this.resolveBackendLaunchOptions });
+    });
+  }
+
+  async piSkills(cwd: string): Promise<Awaited<ReturnType<typeof discoverPiSkills>>> {
+    this.installationAuthority.assertRecoveryComplete("pi");
+    const executable = this.resolvedCommands.get("pi") ?? (await this.detect("pi", { cwd })).executable;
+    if (!executable) throw new ProviderRuntimeError("invalid_input", "Pi is not installed.");
+    return await discoverPiSkills(this.installationAuthority, executable, cwd, (operation) => this.trackAuxiliary(operation),
+      this.lifetimeSignal);
+  }
+
   async claudeSkills(
     cwd: string,
     forceReload: boolean,
     context: ProviderInstallationReadContext = {},
-  ): Promise<Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>> {
+  ): Promise<Awaited<ReturnType<typeof discoverClaudeSkills>>> {
     if (!context.installationVerificationAuthority) this.installationAuthority.assertRecoveryComplete("claude");
     let executable = this.resolvedCommands.get("claude");
     if (!executable) executable = (await this.detect("claude", { ...context, cwd })).executable;
     if (!executable) throw new ProviderRuntimeError("invalid_input", "Claude CLI is not installed.");
     this.assertVersionSupported("claude");
-    const environment = await providerEnvironment();
-    this.processEnvironment = environment.env;
-    const authority = context.installationVerificationAuthority;
-    const admission = this.installationAuthority.acquire(
-      "claude",
-      executable,
-      providerNativeBackendProfile("claude"),
-      "metadata-discovery",
-      this.installationAuthority.operationIdentity("metadata-discovery", authority),
-      authority,
-    );
-    let skills: Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>;
-    try {
-      skills = await readClaudeAgentSdkSkills(
-        executable,
-        providerChildEnvironment("claude", environment.env),
-        cwd,
-        forceReload,
-      );
-    } catch (error) {
-      if (isProcessTreeTerminationUnconfirmed(error)) {
-        this.installationAuthority.quarantineUnconfirmedCleanup(
-          admission,
-          "claude-skill-discovery-cleanup-unconfirmed",
-        );
-      } else {
-        this.installationAuthority.release(admission);
-      }
-      throw error;
-    }
-    if (!this.installationAuthority.release(admission)) {
-      throw new ProviderRuntimeError(
-        "lifecycle_corruption",
-        "Claude skill discovery could not release exact installation authority.",
-      );
-    }
-    return skills;
+    return await discoverClaudeSkills(this.installationAuthority, executable, cwd, forceReload, {
+      ...(context.installationVerificationAuthority ? { authority: context.installationVerificationAuthority } : {}),
+      rememberEnvironment: (environment) => { this.processEnvironment = environment; },
+    });
   }
 
   providerCommands(scope: ProviderCommandScope): Promise<ProviderSlashCommand[]> {
@@ -1173,8 +1157,9 @@ export class ProviderManager {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs = this.cancelGraceMs,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
-    return this.runCoordinator.stopOwned(conversationId, identity, graceMs);
+    return this.runCoordinator.stopOwned(conversationId, identity, graceMs, hooks);
   }
 
   beginShutdown(deadlineAt: number): void {
@@ -1233,6 +1218,8 @@ export class ProviderManager {
     if (resolved) return resolved;
     const configured = this.commands[providerId]?.trim();
     if (configured && !configured.includes("\0")) return configured;
+    const piExecutable = providerId === "pi" ? this.processEnvironment?.INERTIA_PI_EXECUTABLE?.trim() : undefined;
+    if (piExecutable && !/[\u0000\r\n]/u.test(piExecutable)) return piExecutable;
     return PROVIDER_INFO[providerId].command;
   }
 
@@ -1240,6 +1227,7 @@ export class ProviderManager {
     const configured = this.commands[providerId]?.trim();
     return configured && !configured.includes("\0")
       ? configured
-      : PROVIDER_INFO[providerId].command;
+      : providerId === "pi" ? this.processEnvironment?.INERTIA_PI_EXECUTABLE?.trim() || PROVIDER_INFO.pi.command
+        : PROVIDER_INFO[providerId].command;
   }
 }

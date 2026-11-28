@@ -2,6 +2,7 @@ import type { SessionConfigOption } from "@agentclientprotocol/sdk/unstable";
 
 import type { ProviderModel } from "../../shared/contracts";
 import type { createAgentHarnessEmitter } from "./agent-harness";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 
@@ -57,5 +58,5 @@ function selectChoices(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }

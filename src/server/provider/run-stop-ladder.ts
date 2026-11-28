@@ -36,8 +36,9 @@ export async function runStopLadder(options: {
   forceStopBudgetMs?: number;
   cancel: () => void;
   settledResult: () => OwnedProviderStopResult;
+  hooks?: { escalated?(): void };
 }): Promise<OwnedProviderStopResult> {
-  const { active, graceMs, forceStopBudgetMs, cancel, settledResult } = options;
+  const { active, graceMs, forceStopBudgetMs, cancel, settledResult, hooks } = options;
   const escalated = new Promise<void>((resolve) => {
     active.escalateStop = resolve;
   });
@@ -58,6 +59,7 @@ export async function runStopLadder(options: {
     clearTimeout(active.hardKillTimer);
     active.hardKillTimer = undefined;
   }
+  hooks?.escalated?.();
   forceCancelHarness(active);
   const forceBudgetMs = forceStopBudgetMs
     ?? forceTerminationBudgetMs(process.platform);

@@ -639,6 +639,32 @@ describe("TurnController coalesced streaming", () => {
     reopened.close();
   });
 
+  it("removes a segment a replacement emptied when boot recovery interrupts its turn", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Crash mid-replacement." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "text", text: "Checked." });
+    runtime.provider.emit({ ...identity, type: "activity", kind: "tool", phase: "completed", label: "read", activityId: "t-1" });
+    runtime.provider.emit({ ...identity, type: "text", text: "Abandoned" });
+    runtime.scheduler.runThrough(100);
+    expect(runtime.store.snapshot().messages.map(({ content }) => content)).toContain("Abandoned");
+    runtime.provider.emit({ ...identity, type: "text-snapshot", itemId: "pi:2:text", text: "", scope: "segment" });
+
+    // The utility process disappears while the emptied segment's message is still open. Its provider cleanup is
+    // then confirmed, as boot does for a dead runtime generation, before recovery runs.
+    const generation = runtime.store.providerRunOwnership.all()[0]?.runtimeGenerationId;
+    runtime.store.close();
+    const reopened = new RuntimeStore(runtime.databasePath, runtime.workspacePath, { recoverInterruptedRuns: false });
+    if (generation) reopened.providerRunOwnership.clearRuntimeGeneration(generation);
+    reopened.recoverInterruptedRuns();
+    expect(reopened.agentTurn(queued.turn.id)).toMatchObject({ status: "interrupted", terminalAssistantMessageId: null });
+    expect(reopened.snapshot().messages
+      .filter(({ turnId, role }) => turnId === queued.turn.id && role === "assistant")
+      .map(({ content }) => content)).toEqual(["Checked."]);
+    reopened.close();
+  });
+
   it("hydrates an already projected live suffix exactly once for each renderer", async () => {
     const deliveries = new Map<string, ServerEvent[]>();
     const hub = new RuntimeSyncHub<string>((socket, event) => {
@@ -984,6 +1010,133 @@ describe("TurnController coalesced streaming", () => {
       status: "completed",
     }));
     expect(runtime.scheduler.timers).toHaveLength(0);
+    await closeRuntime(runtime);
+  });
+
+  it("replaces the turn's reasoning when the provider republishes it whole (T3 4ecbe5508)", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Think twice." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "Earlier message. " });
+    runtime.scheduler.runThrough(100);
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "Abandoned attempt" });
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "Earlier message. ", replace: true });
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "Replacement attempt" });
+    runtime.provider.resolve({ status: "completed", text: "" });
+    await flushPromises();
+
+    expect(runtime.store.snapshot().reasonings.filter(({ turnId }) => turnId === queued.turn.id))
+      .toEqual([expect.objectContaining({ content: "Earlier message. Replacement attempt" })]);
+    expect(runtime.events.filter(({ type }) => type === "agent.reasoning")).toEqual([
+      expect.objectContaining({ text: "Earlier message. " }),
+      expect.objectContaining({ text: "Earlier message. ", replace: true }),
+      expect.objectContaining({ text: "Replacement attempt" }),
+    ]);
+    await closeRuntime(runtime);
+  });
+
+  it.each([
+    ["joined with blank lines (Pi, Grok, OpenCode)", "A\n\nB\n\nC"],
+    ["concatenated (Codex, Claude)", "ABC"],
+  ])("corrects only the last of three messages when the final result is %s", async (_style, final) => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Three steps." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    // The streamed last message differs from the result, so the result is mapped onto the closed segments.
+    for (const [index, text] of ["A", "B", "C draft"].entries()) {
+      if (index > 0) runtime.provider.emit({ ...identity, type: "text-boundary" });
+      runtime.provider.emit({ ...identity, type: "text", text });
+      if (index < 2) runtime.provider.emit({ ...identity, type: "activity", kind: "tool", phase: "completed", label: "read", activityId: `t-${index}` });
+    }
+    runtime.provider.resolve({ status: "completed", text: final });
+    await flushPromises();
+    const messages = runtime.store.snapshot().messages.filter(({ turnId, role }) => turnId === queued.turn.id && role === "assistant");
+    expect(messages.map(({ content }) => content)).toEqual(["A", "B", "C"]);
+    expect(runtime.store.agentTurn(queued.turn.id).terminalAssistantMessageId).toBe(messages[2]!.id);
+    await closeRuntime(runtime);
+  });
+
+  it("tells renderers when the final result empties the open segment, and settles without its message", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Two steps." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "text", text: "Checked." });
+    runtime.provider.emit({ ...identity, type: "activity", kind: "tool", phase: "completed", label: "read", activityId: "t-1" });
+    runtime.provider.emit({ ...identity, type: "text", text: "Abandoned" });
+    runtime.scheduler.runThrough(100);
+    runtime.provider.resolve({ status: "completed", text: "Checked." });
+    await flushPromises();
+    const messages = runtime.store.snapshot().messages.filter(({ turnId, role }) => turnId === queued.turn.id && role === "assistant");
+    expect(messages.map(({ content }) => content)).toEqual(["Checked."]);
+    expect(runtime.store.agentTurn(queued.turn.id).terminalAssistantMessageId).toBe(messages[0]!.id);
+    const replaced = runtime.events.findIndex((event) => event.type === "agent.text" && event.replace === true && event.text === "");
+    expect(replaced).toBeGreaterThan(-1);
+    expect(runtime.events[replaced + 1]).toEqual({ type: "conversation.detail.invalidated", conversationId: runtime.conversationId });
+    await closeRuntime(runtime);
+  });
+
+  it("does not start the last message with the blank line a joined result puts between two messages", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Two steps." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "text", text: "First." });
+    runtime.provider.emit({ ...identity, type: "text-boundary" });
+    runtime.provider.emit({ ...identity, type: "text", text: "Second." });
+    runtime.provider.resolve({ status: "completed", text: "First.\n\nSecond." });
+    await flushPromises();
+    expect(runtime.store.snapshot().messages.filter(({ turnId, role }) => turnId === queued.turn.id && role === "assistant")
+      .map(({ content }) => content)).toEqual(["First.", "Second."]);
+    await closeRuntime(runtime);
+  });
+
+  it("keeps unsaved reasoning when a replacement equals what streamed", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Think once." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "B" });
+    runtime.provider.emit({ ...identity, type: "reasoning-summary", text: "B", replace: true });
+    runtime.provider.resolve({ status: "completed", text: "" });
+    await flushPromises();
+    expect(runtime.store.snapshot().reasonings.filter(({ turnId }) => turnId === queued.turn.id))
+      .toEqual([expect.objectContaining({ content: "B" })]);
+    expect(runtime.events.filter(({ type }) => type === "agent.reasoning")).toEqual([
+      expect.objectContaining({ text: "B" }),
+    ]);
+    await closeRuntime(runtime);
+  });
+
+  it("replaces only the open assistant segment, leaving earlier segments before their activity", async () => {
+    const runtime = await controllerRuntime();
+    const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Read and answer." });
+    runtime.controller.start(queued.turn.id);
+    const identity = providerIdentity(runtime);
+    runtime.provider.emit({ ...identity, type: "text", text: "Let me read the file." });
+    runtime.provider.emit({ ...identity, type: "activity", kind: "tool", phase: "started", label: "read", activityId: "read-1" });
+    runtime.provider.emit({ ...identity, type: "activity", kind: "tool", phase: "completed", label: "read", activityId: "read-1" });
+    runtime.provider.emit({ ...identity, type: "text-boundary" });
+    runtime.provider.emit({ ...identity, type: "text", text: "Abandoned attempt" });
+    runtime.scheduler.runThrough(100);
+    runtime.provider.emit({ ...identity, type: "text-snapshot", itemId: "pi:2:text", text: "", scope: "segment" });
+    runtime.provider.emit({ ...identity, type: "text", text: "Final answer" });
+    runtime.provider.resolve({ status: "completed", text: "Let me read the file.\n\nFinal answer" });
+    await flushPromises();
+
+    const messages = runtime.store.snapshot().messages
+      .filter(({ turnId, role }) => turnId === queued.turn.id && role === "assistant");
+    expect(messages.map(({ content }) => content)).toEqual(["Let me read the file.", "Final answer"]);
+    const activity = runtime.store.conversationDetail(runtime.conversationId)!.activities.find(({ title }) => title === "read")!;
+    expect(Date.parse(messages[0]!.createdAt)).toBeLessThanOrEqual(Date.parse(activity.createdAt));
+    expect(Date.parse(messages[1]!.createdAt)).toBeGreaterThanOrEqual(Date.parse(activity.createdAt));
+    expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.text", text: "", replace: true }));
+    // A detail loaded before the replacement must not keep showing the abandoned text.
+    const replaced = runtime.events.findIndex((event) => event.type === "agent.text" && event.replace === true);
+    expect(runtime.events[replaced + 1]).toEqual({ type: "conversation.detail.invalidated", conversationId: runtime.conversationId });
+    expect(runtime.events.some(({ type }) => type === "agent.text.replaced")).toBe(false);
     await closeRuntime(runtime);
   });
 

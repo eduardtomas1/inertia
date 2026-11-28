@@ -21,8 +21,8 @@ function queueRunner(): ReturnType<typeof vi.fn<QueueCommandRunner>> {
     kind: "message.queue",
     conversationId: command.payload.conversationId,
     entries: [],
-    receipt: command.type === "message.queue.get" ? null : {
-      id: command.payload.id!, conversationId: command.payload.conversationId,
+    receipt: command.type === "message.queue.get" || !("id" in command.payload) || !command.payload.id ? null : {
+      id: command.payload.id, conversationId: command.payload.conversationId,
       content: "content" in command.payload ? command.payload.content : "", attachments: [],
       state: "waiting", createdAt: "2026-10-05T00:00:00.000Z", error: null, turnId: null, userMessageId: null,
     },
@@ -89,27 +89,47 @@ describe("Stop and send for routes without live follow-ups", () => {
     expect(stopAndSends()).toHaveLength(1);
   });
 
-  it("does not offer Stop and send while another message waits in the queue", async () => {
+  it("still offers Stop and send while another message waits in the queue", async () => {
     const current = conversation("76767676-7676-4676-8676-767676767676");
     const waiting = {
       id: "77777777-7777-4777-8777-777777777777", conversationId: current.id, content: "Earlier queued message",
       attachments: [], state: "waiting" as const, createdAt: "2026-10-05T00:00:00.000Z", error: null, turnId: null, userMessageId: null,
     };
-    const run = vi.fn<QueueCommandRunner>(async () => ({ kind: "message.queue", conversationId: current.id, entries: [waiting], receipt: null }));
+    const run = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => ({
+      kind: "message.queue",
+      conversationId: current.id,
+      entries: [waiting],
+      receipt: command.type === "message.queue.stop-and-send"
+        ? {
+            id: command.payload.id,
+            conversationId: current.id,
+            content: command.payload.content,
+            attachments: [],
+            state: "waiting",
+            createdAt: "2026-10-05T00:00:01.000Z",
+            error: null,
+            turnId: null,
+            userMessageId: null,
+          }
+        : null,
+    }));
     render(<Composer {...composerProps(current, {
       running: true, latestTurn: runningTurn("kimi-acp"), onQueueCommand: run,
     })} />);
     expect(await screen.findByText("Earlier queued message")).toBeVisible();
     const input = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(input, { target: { value: "Do this instead." } });
-    expect(screen.getByRole("button", { name: "Stop agent" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Stop and send" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Stop and send" })).toBeEnabled();
 
     await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
 
-    expect(await screen.findByText("Send or remove the queued message first.")).toBeVisible();
-    expect(run.mock.calls.map(([command]) => command.type)).not.toContain("message.queue.stop-and-send");
-    expect(input).toHaveValue("Do this instead.");
+    await waitFor(() => expect(run.mock.calls.map(([command]) => command.type)).toContain("message.queue.stop-and-send"));
+    const command = run.mock.calls.find(([candidate]) => candidate.type === "message.queue.stop-and-send")![0];
+    expect(command.payload).toMatchObject({
+      conversationId: current.id, turnId, content: "Do this instead.", attachments: [],
+    });
+    expect(screen.queryByText("Send or remove the queued message first.")).toBeNull();
+    await waitFor(() => expect(input).toHaveValue(""));
   });
 
   it("still offers Stop and send while only a watcher's note waits in the queue", async () => {

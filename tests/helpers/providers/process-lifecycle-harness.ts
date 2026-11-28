@@ -110,9 +110,9 @@ export const PROCESS_LIFECYCLE_CAPABILITIES_FOR_TESTS = {
       modelMetadata: "unavailable-in-current-harness",
     },
   },
-} as const satisfies Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity" | "grok">, AgentHarnessCapabilities>>;
+} as const satisfies Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity" | "grok" | "pi">, AgentHarnessCapabilities>>;
 
-const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity" | "grok">, AgentHarnessId>> = {
+const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi" | "antigravity" | "grok" | "pi">, AgentHarnessId>> = {
   codex: "codex-cli",
   claude: "claude-cli",
   cursor: "cursor-cli",
@@ -131,6 +131,7 @@ export function createProcessLifecycleHarnessForTests(
   providerId: ProviderId,
   options: ProcessLifecycleHarnessForTestsOptions = {},
 ): AgentHarness {
+  if (providerId === "pi") throw new Error("Pi requires its native RPC harness.");
   if (providerId === "antigravity") {
     throw new Error("Antigravity is available only through its native headless harness.");
   }

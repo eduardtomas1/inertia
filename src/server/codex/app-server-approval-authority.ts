@@ -38,6 +38,10 @@ interface CodexApprovalAuthorityHost {
   handleNotification: (method: string, params: JsonObject) => void;
   writeMessage: (message: JsonObject) => boolean;
   failMalformedProtocol: (summary: string, message: string) => void;
+  /** A goal turn the run is stopping because no run owns it. */
+  isStoppedTurn?: (providerTurnId: string) => boolean;
+  /** turn/start's response named another turn, so these held turns were never the run's. */
+  discardedTurnStarts?: (turns: Array<{ turnId: string; completed: boolean }>) => void;
 }
 
 export class CodexApprovalAuthority {
@@ -63,14 +67,12 @@ export class CodexApprovalAuthority {
         : undefined);
       return false;
     }
-    if (this.host.cancelRequested()) {
+    if (this.host.cancelRequested() || (providerTurnId && this.host.isStoppedTurn?.(providerTurnId))) {
       this.host.writeMessage({ id, result: codexApprovalResult(approval.protocol, "cancel") });
       return false;
     }
     if (approval.protocol !== "legacy-review" && providerTurnId) {
-      const beforeStartResponse = providerThreadId === this.host.providerThreadId()
-        && this.host.phase() === "starting-turn"
-        && this.host.requestedTurnId?.() === null;
+      const beforeStartResponse = this.beforeTurnStartResponse(providerThreadId);
       if (beforeStartResponse || this.host.subagents.isAwaitingChildTurn(providerThreadId, providerTurnId)) {
         this.defer(id, method, params, approval.protocol, providerThreadId, providerTurnId, beforeStartResponse);
         return false;
@@ -111,9 +113,7 @@ export class CodexApprovalAuthority {
   ): boolean {
     if (
       !turnId
-      || this.host.phase() !== "starting-turn"
-      || this.host.requestedTurnId?.() !== null
-      || threadId !== this.host.providerThreadId()
+      || !this.beforeTurnStartResponse(threadId)
       || this.host.completedTurnIds.has(turnId)
       || turnId === this.host.activeTurnId()
     ) return false;
@@ -126,7 +126,32 @@ export class CodexApprovalAuthority {
     return true;
   }
 
+  /** Whether a turn Codex started on its own is waiting for turn/start's response. */
+  holdsTurnStart(): boolean {
+    return this.preResponse.holdsTurnStart();
+  }
+
+  /** Replays the turn Codex started while the run was opening, for a run that asked for a goal. */
+  replayHeldTurnStart(): void {
+    const turnId = this.preResponse.firstStartedTurnId();
+    if (turnId) this.replayPreResponse(turnId);
+  }
+
+  /**
+   * Turn-scoped updates are held until turn/start's response names the run's
+   * turn. For a resumed thread that window opens with thread/resume (T3
+   * 47583f868); a goal turn Codex continues there is stopped rather than held
+   * unless the run asked for the goal.
+   */
+  private beforeTurnStartResponse(threadId: string | undefined): boolean {
+    if (threadId === undefined || threadId !== this.host.providerThreadId()) return false;
+    const phase = this.host.phase();
+    return phase === "opening" || (phase === "starting-turn" && this.host.requestedTurnId?.() === null);
+  }
+
   replayPreResponse(turnId: string): void {
+    const others = this.preResponse.otherStartedTurns(turnId);
+    if (others.length > 0) this.host.discardedTurnStarts?.(others);
     for (const { method, params, requestId } of this.preResponse.take(turnId)) {
       if (requestId === undefined) this.host.handleNotification(method, params);
       else this.replay(requestId);

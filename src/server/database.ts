@@ -1,7 +1,11 @@
 import { LimitResetRepository } from "./persistence/limit-reset-repository";
+import type { AttemptObserver } from "./orchestration-v2/attempt-fence";
+import { OrchestratedTurnRepository } from "./orchestration-v2/turn-repository";
+import type { CommandSource } from "./orchestration-v2/types";
 import { RestartContinuationRepository } from "./persistence/restart-continuation-repository"; import { WorkspaceToolReads } from "./persistence/workspace-tool-reads";
 import { HtmlRenderRepository } from "./persistence/html-render-repository"; import { SentToUserRepository } from "./persistence/sent-to-user-repository"; import { WatcherLinkRepository } from "./persistence/watcher-link-repository"; import { CodexThreadToolPackRepository } from "./persistence/codex-thread-tool-pack-repository"; import { IdleCompactionCandidateRepository } from "./persistence/idle-compaction-candidate-repository";
 import type { MessageSearchTarget } from "../shared/message-search";
+import { PROVIDER_STOP_NOTICE_TITLE } from "../shared/activity-display";
 import { cliConversationImport, cliSessionOwnership, importedCliConversation, importCliConversation, type CliConversationImportInput, type CliConversationImportRecord, type CliSessionOwnership } from "./persistence/cli-conversation-import";
 import type { ConversationHistoryRequest } from "../shared/conversation-history";
 import { closeDatabaseAfterBackupCancellation } from "./persistence/database-backup-close";
@@ -40,6 +44,7 @@ import type { PersistedProviderMetadata } from "./provider/metadata";
 import type { SanitizedTurnExecutionManifest } from "./runtime/turns/request-context";
 import { BackendProfileRepository } from "./persistence/backend-profile-repository";
 import { AgentThreadManagementRepository } from "./persistence/agent-thread-management-repository";
+import { ObservedChildRepository } from "./persistence/observed-child-repository";
 import { AgentWorkflowRepository, type NativeAgentGoalMergeResult } from "./persistence/agent-workflow-repository";
 import { ConversationRepository } from "./persistence/conversation-repository";
 import { ConversationContextPacketRepository } from "./persistence/conversation-context-packet-repository";
@@ -60,6 +65,7 @@ import { exportDatabaseRecoveryData, importDatabaseRecoveryData, type DatabaseRe
 import { ExecutionLedgerRepository } from "./persistence/execution-ledger-repository";
 import { GitArtifactRepository } from "./persistence/git-artifact-repository";
 import { migrateRuntimeDatabase } from "./persistence/migrations/runtime-catalog";
+import { assertNotPreMergeOrchestratorV2Database } from "./persistence/orchestrator-v2-development-database";
 import { openRuntimeConnection } from "./persistence/runtime-connection-pragmas";
 import { requireRow } from "./persistence/required-row";
 import { ProviderMetadataRepository } from "./persistence/provider-metadata-repository"; import { ProviderRunOwnershipRepository } from "./persistence/provider-run-ownership-repository";
@@ -79,6 +85,7 @@ import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { QueuedMessageRepository } from "./persistence/queued-message-repository";
+import { ScheduledTaskRepository } from "./persistence/scheduled-task-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import type { UsagePricing } from "./usage/price-list";
 import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
@@ -88,11 +95,7 @@ import { indexMessageSearchBatch, mergeMessageSearchIndex, type MessageSearchInd
 import type { BackgroundTaskCursor, BackgroundTasksResult } from "../shared/background-tasks";
 import type { ArchivedConversationsPage, ArchivedConversationsRequest } from "../shared/archived-conversations";
 import type { ActivityDetailReadResult } from "../shared/activity-detail";
-import type {
-  AgentTurnRow,
-  ConversationRow,
-  ProjectRow,
-} from "./persistence/rows";
+import type { AgentTurnRow, ConversationRow, ProjectRow } from "./persistence/rows";
 import type {
   AgentTurnLifecycleUpdate,
   BackendKeyCheck,
@@ -122,6 +125,7 @@ export class RuntimeStore {
   private readonly backendProfileRepository: BackendProfileRepository;
   private readonly agentWorkflowRepository: AgentWorkflowRepository;
   readonly agentThreadManagement: AgentThreadManagementRepository;
+  readonly observedChildren: ObservedChildRepository;
   private readonly conversationRepository: ConversationRepository;
   readonly contextPackets: ConversationContextPacketRepository;
   readonly conversationWorktrees: ConversationWorktreeRepository;
@@ -139,11 +143,13 @@ export class RuntimeStore {
   readonly transcriptRepository: TranscriptRepository;
   readonly limitResets: LimitResetRepository;
   readonly queuedMessages: QueuedMessageRepository;
+  readonly scheduledTasks: ScheduledTaskRepository;
   readonly htmlRenders: HtmlRenderRepository;
   readonly sentToUser: SentToUserRepository;
   readonly codexThreadToolPacks = new CodexThreadToolPackRepository(() => this.database); readonly idleCompactionCandidates = new IdleCompactionCandidateRepository(() => this.database);
   readonly watcherLinks: WatcherLinkRepository;
   readonly turnLedgerRepository: TurnLedgerRepository;
+  readonly orchestration: OrchestratedTurnRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
   private readonly recoveryExportMaxBytes: number;
   readonly conversationWork = new ConversationWorkAuthority(storedConversationWorkspaceResolver(this));
@@ -151,6 +157,7 @@ export class RuntimeStore {
     databasePath: string,
     _defaultWorkspacePath: string,
     options: {
+      runtimeGenerationId?: string; systemBootId?: string;
       onDatabaseBackupCreated?: (result: DatabaseBackupResult) => void;
       canStartDatabaseBackup?: () => boolean;
       databaseBackupQuietGraceMs?: number; databaseBackupInitialDelayMs?: number;
@@ -165,6 +172,7 @@ export class RuntimeStore {
         options.recoveryExportMaxBytes ?? DATABASE_RECOVERY_EXPORT_MAX_BYTES,
       )),
     );
+    assertNotPreMergeOrchestratorV2Database(databasePath);
     this.recoveryReport = recoverDatabaseOnStartup(databasePath);
     this.database = new Database(databasePath);
     this.backupManager = new DatabaseBackupManager(
@@ -194,11 +202,15 @@ export class RuntimeStore {
       requireConversation: (conversationId) => this.requireConversation(conversationId),
     });
     this.agentThreadManagement = new AgentThreadManagementRepository(this.database);
-    this.providerMetadataRepository = new ProviderMetadataRepository(this.database); this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database);
+    this.observedChildren = new ObservedChildRepository(this.database);
+    this.providerMetadataRepository = new ProviderMetadataRepository(this.database);
+    this.providerRunOwnership = new ProviderRunOwnershipRepository(this.database,
+      (identity, cleanup) => this.orchestration.cleanup(identity, cleanup));
     this.pairedLaunchRepository = new PairedLaunchRepository(this.database);
     this.recoveryRepository = new RecoveryRepository(this.database);
     this.limitResets = new LimitResetRepository(this.database);
     this.queuedMessages = new QueuedMessageRepository(this.database);
+    this.scheduledTasks = new ScheduledTaskRepository(this.database);
     this.htmlRenders = new HtmlRenderRepository(this.database, this);
     this.sentToUser = new SentToUserRepository(this.database, this);
     this.projectRepository = new ProjectRepository({
@@ -261,6 +273,7 @@ export class RuntimeStore {
         this.contextPackets.materialize(conversationId, packetIds).deliveries,
     });
     this.systemSuspends = new SystemSuspendRepository(this.database);
+    this.orchestration = new OrchestratedTurnRepository(this.database, this, options.runtimeGenerationId, options.systemBootId);
     this.transcriptRepository = new TranscriptRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),
@@ -276,6 +289,7 @@ export class RuntimeStore {
     });
     try {
       openRuntimeConnection(this.database, migrateRuntimeDatabase);
+      this.orchestration.maintainProjections();
       this.agentThreadManagement.recoverInterrupted();
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();
@@ -486,26 +500,18 @@ export class RuntimeStore {
     return this.turnLedgerRepository.begin(input);
   }
 
+  beginOrchestratedAgentTurn(input: BeginAgentTurnInput, source?: CommandSource): { message: ChatMessage; turn: AgentTurn } {
+    return this.orchestration.admit(input, () => this.turnLedgerRepository.begin(input), source);
+  }
+
   beginPairedAgentTurns(
     launchId: string,
     inputs: readonly [BeginAgentTurnInput, BeginAgentTurnInput],
     now = new Date().toISOString(),
-  ): [
-    { message: ChatMessage; turn: AgentTurn },
-    { message: ChatMessage; turn: AgentTurn },
-  ] {
-    return this.database.transaction(() => {
-      const queued = inputs.map((input) => this.turnLedgerRepository.begin(input)) as [
-        { message: ChatMessage; turn: AgentTurn },
-        { message: ChatMessage; turn: AgentTurn },
-      ];
-      this.pairedLaunchRepository.attachTurns(
-        launchId,
-        [queued[0].turn.id, queued[1].turn.id],
-        now,
-      );
-      return queued;
-    })();
+  ): [{ message: ChatMessage; turn: AgentTurn }, { message: ChatMessage; turn: AgentTurn }] {
+    return this.orchestration.admitPair(() => [
+      this.beginOrchestratedAgentTurn(inputs[0]), this.beginOrchestratedAgentTurn(inputs[1]),
+    ], (queued) => this.pairedLaunchRepository.attachTurns(launchId, [queued[0].turn.id, queued[1].turn.id], now));
   }
 
   createPairedLaunch(
@@ -833,14 +839,60 @@ export class RuntimeStore {
   checkpointExpirationRevision(): string { return this.executionLedgerRepository.checkpointExpirationRevision(); }
 
   updateAgentTurnLifecycle(turnId: string, update: AgentTurnLifecycleUpdate): AgentTurn {
-    return this.turnLedgerRepository.updateLifecycle(turnId, update);
+    return this.orchestration.lifecycle(turnId, () => this.turnLedgerRepository.updateLifecycle(turnId, update));
+  }
+
+  updateAgentTurnLifecycleIfCurrent(turnId: string, observer: AttemptObserver, update: AgentTurnLifecycleUpdate) {
+    return this.orchestration.lifecycleIfCurrent(turnId, observer, () => this.turnLedgerRepository.updateLifecycle(turnId, update));
   }
 
   settleAgentTurn(
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update));
+    // Filled by the settlement below before coverage is computed in the same transaction: only a follow-up that
+    // a queue row now names stays out of the run's coverage, so one that could not be queued is never hidden.
+    const queuedUnread: string[] = [];
+    let providerStopNotice: AgentActivity | undefined;
+    const result = this.orchestration.lifecycle(turnId, () => {
+      const settled = settleProjectedAgentTurn(this.database, this, update.projection,
+        () => this.turnLedgerRepository.settle(turnId, update));
+      // Same transaction: a follow-up the provider never read is queued by reference, never lost.
+      if (settled.settled && update.unreadFollowUpMessageIds?.length) {
+        const turn = this.agentTurn(turnId);
+        queuedUnread.push(...this.queuedMessages.requeueUnreadFollowUps(this.conversation(turn.conversationId), turnId,
+          update.unreadFollowUpMessageIds));
+      }
+      return settled;
+    }, update.providerDelivery, update.providerFailureCode, queuedUnread, update.providerStopReason, (settled) => {
+      if (settled.settled && update.providerStopReason) providerStopNotice = this.writeProviderStopNotice(turnId);
+    });
+    // Orchestration settlement may drop the restored-history record of a turn its provider never accepted.
+    return result.settled ? { ...result, turn: this.agentTurn(turnId), ...(providerStopNotice ? { providerStopNotice } : {}) }
+      : result;
+  }
+
+  /**
+   * The "Stopped by the provider" notice of the reason the turn's run just recorded, written in the settlement's
+   * transaction after the run's projection accepted the reason, so a reason and its notice commit together. The
+   * insert runs in a savepoint: an ordinary statement failure loses only the notice, never the settlement. A failure
+   * that ended the whole transaction (a full disk, an I/O error, a trigger's rollback) is rethrown as it was, so
+   * the settlement fails with its real cause and nothing is written outside a transaction.
+   */
+  private writeProviderStopNotice(turnId: string): AgentActivity | undefined {
+    try {
+      const reason = this.orchestration.recordedProviderStopReason(turnId);
+      if (!reason) return undefined;
+      const turn = this.agentTurn(turnId);
+      return this.database.transaction(() => this.executionLedgerRepository.addActivity({
+        conversationId: turn.conversationId, runId: turn.runId, turnId, kind: "status",
+        title: PROVIDER_STOP_NOTICE_TITLE, detail: reason, status: "completed",
+      }))();
+    } catch (error) {
+      if (!this.database.inTransaction) throw error;
+      console.warn("The provider stop notice could not be written.", error instanceof Error ? error.name : "unknown error");
+      return undefined;
+    }
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {
@@ -876,19 +928,12 @@ export class RuntimeStore {
   }
 
   createAcknowledgedFollowUpMessage(
-    conversationId: string,
-    turnId: string,
-    content: string,
-    createdAt?: string,
+    conversationId: string, turnId: string, content: string, createdAt?: string,
     acknowledgedAt?: string, attachments: readonly ChatAttachment[] = [],
-    queuedMessageId?: string, options: { watcherNote?: CreateMessageOptions["watcherNote"] } = {},
+    queuedMessageId?: string, options: Pick<CreateMessageOptions, "watcherNote" | "delegatedCompletion"> = {},
   ): ChatMessage {
     return this.transcriptRepository.createAcknowledgedFollowUpMessage(
-      conversationId,
-      turnId,
-      content,
-      createdAt,
-      acknowledgedAt, attachments, queuedMessageId, options,
+      conversationId, turnId, content, createdAt, acknowledgedAt, attachments, queuedMessageId, options,
     );
   }
 
@@ -1057,148 +1102,52 @@ export class RuntimeStore {
     );
   }
 
-  upsertReviewSummary(summary: DiffReviewSummary): DiffReviewSummary {
-    return this.reviewRepository.upsertSummary(summary);
+  upsertReviewSummary(summary: DiffReviewSummary): DiffReviewSummary { return this.reviewRepository.upsertSummary(summary); }
+  setReviewState(input: Omit<DiffReviewState, "stale" | "updatedAt">): DiffReviewState { return this.reviewRepository.setState(input); }
+  createReviewNote(input: Omit<DiffReviewNote, "id" | "stale" | "createdAt" | "updatedAt">): DiffReviewNote { return this.reviewRepository.createNote(input); }
+  updateReviewNote(conversationId: string, noteId: string, body: string): DiffReviewNote { return this.reviewRepository.updateNote(conversationId, noteId, body); }
+  deleteReviewNote(conversationId: string, noteId: string): void { this.reviewRepository.deleteNote(conversationId, noteId); }
+  reviewNotesFor(conversationId: string, repositoryPath?: string, targetPath?: string): DiffReviewNote[] {
+    return this.reviewRepository.notesFor(conversationId, repositoryPath, targetPath);
   }
-
-  setReviewState(input: Omit<DiffReviewState, "stale" | "updatedAt">): DiffReviewState {
-    return this.reviewRepository.setState(input);
-  }
-
-  createReviewNote(input: Omit<DiffReviewNote, "id" | "stale" | "createdAt" | "updatedAt">): DiffReviewNote {
-    return this.reviewRepository.createNote(input);
-  }
-
-  updateReviewNote(conversationId: string, noteId: string, body: string): DiffReviewNote {
-    return this.reviewRepository.updateNote(conversationId, noteId, body);
-  }
-
-  deleteReviewNote(conversationId: string, noteId: string): void {
-    this.reviewRepository.deleteNote(conversationId, noteId);
-  }
-
-  reviewNotesFor(
-    conversationId: string,
-    repositoryPath?: string,
-    targetPath?: string,
-  ): DiffReviewNote[] {
-    return this.reviewRepository.notesFor(
-      conversationId,
-      repositoryPath,
-      targetPath,
-    );
-  }
-
   reconcileReviewTargets(
     conversationId: string,
     repositoryPath: string,
     targetPath: string | undefined,
-    targets: {
-      files: Readonly<Record<string, string>>;
-      hunks: Readonly<Record<string, string>>;
-      notes: Readonly<Record<string, string | null>>;
-    },
+    targets: { files: Readonly<Record<string, string>>; hunks: Readonly<Record<string, string>>; notes: Readonly<Record<string, string | null>> },
   ): boolean {
-    return this.reviewRepository.reconcileTargets(
-      conversationId,
-      repositoryPath,
-      targetPath,
-      targets,
-    );
+    return this.reviewRepository.reconcileTargets(conversationId, repositoryPath, targetPath, targets);
   }
-
   readIssueReport(): unknown {
     const row = this.database.prepare("SELECT report_json FROM issue_report_draft WHERE singleton = 1").get() as { report_json: string } | undefined;
     return row ? JSON.parse(row.report_json) : null;
   }
   saveIssueReport(report: import("../shared/issue-report").IssueReport): void { this.database.prepare("INSERT INTO issue_report_draft (singleton, report_json) VALUES (1, ?) ON CONFLICT(singleton) DO UPDATE SET report_json = excluded.report_json").run(JSON.stringify(report)); }
-  createWorkspaceRun(input: Parameters<WorkspaceRunRepository["create"]>[0]): WorkspaceRun {
-    return this.workspaceRunRepository.create(input);
-  }
-
-  updateWorkspaceRun(id: string, update: Partial<Pick<WorkspaceRun, "label" | "detail" | "status" | "port" | "finishedAt">>): WorkspaceRun {
-    return this.workspaceRunRepository.update(id, update);
-  }
-
-  workspaceRun(id: string): WorkspaceRun {
-    return this.workspaceRunRepository.get(id);
-  }
-
-  workspaceRunsForConversation(conversationId: string): WorkspaceRun[] {
-    return this.workspaceRunRepository.forConversation(conversationId);
-  }
-
+  createWorkspaceRun(input: Parameters<WorkspaceRunRepository["create"]>[0]): WorkspaceRun { return this.workspaceRunRepository.create(input); }
+  updateWorkspaceRun(id: string, update: Partial<Pick<WorkspaceRun, "label" | "detail" | "status" | "port" | "finishedAt">>): WorkspaceRun { return this.workspaceRunRepository.update(id, update); }
+  workspaceRun(id: string): WorkspaceRun { return this.workspaceRunRepository.get(id); }
+  workspaceRunsForConversation(conversationId: string): WorkspaceRun[] { return this.workspaceRunRepository.forConversation(conversationId); }
   findWorkspaceRun(id: string): WorkspaceRun | null { return this.workspaceRunRepository.find(id); }
   hasRecordedActiveWorkspaceRun(excludeAgentRuns = false): boolean { return this.workspaceRunRepository.hasActive(excludeAgentRuns); }
   hasRecordedActiveWorkspaceRunForProject(projectId: string): boolean { return this.workspaceRunRepository.hasActiveForProject(projectId); }
   hasRecordedActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.workspaceRunRepository.hasActiveForConversation(conversationId); }
   hasActiveWorkspaceRunForConversation(conversationId: string): boolean { return this.conversationWork.hasConversation(conversationId) || this.hasRecordedActiveWorkspaceRunForConversation(conversationId); }
-
-  markWorkspaceRunSeen(id: string): WorkspaceRun {
-    return this.workspaceRunRepository.markSeen(id);
-  }
-
-  acknowledgeWorkspaceRun(id: string): WorkspaceRun {
-    return this.workspaceRunRepository.acknowledge(id);
-  }
-
-  dismissWorkspaceRun(id: string): void {
-    this.workspaceRunRepository.dismiss(id);
-  }
-
-  checkpoint(checkpointId: string): CheckpointSummary {
-    return this.executionLedgerRepository.checkpoint(checkpointId);
-  }
-
-  listModelBackendProfiles(): StoredModelBackendProfile[] {
-    return this.backendProfileRepository.listProfiles();
-  }
-
-  modelBackendProfile(profileId: string): StoredModelBackendProfile {
-    return this.backendProfileRepository.profile(profileId);
-  }
-
-  saveModelBackendProfile(
-    profileInput: PersistedModelBackendProfile,
-  ): StoredModelBackendProfile {
-    return this.backendProfileRepository.saveProfile(profileInput);
-  }
-
-  reconcileModelBackendCredentialGeneration(
-    profileId: string,
-    credentialGeneration: string | null,
-    renewalRequestedAt?: string,
-  ): StoredModelBackendProfile {
+  markWorkspaceRunSeen(id: string): WorkspaceRun { return this.workspaceRunRepository.markSeen(id); }
+  acknowledgeWorkspaceRun(id: string): WorkspaceRun { return this.workspaceRunRepository.acknowledge(id); }
+  dismissWorkspaceRun(id: string): void { this.workspaceRunRepository.dismiss(id); }
+  checkpoint(checkpointId: string): CheckpointSummary { return this.executionLedgerRepository.checkpoint(checkpointId); }
+  listModelBackendProfiles(): StoredModelBackendProfile[] { return this.backendProfileRepository.listProfiles(); }
+  modelBackendProfile(profileId: string): StoredModelBackendProfile { return this.backendProfileRepository.profile(profileId); }
+  saveModelBackendProfile(profileInput: PersistedModelBackendProfile): StoredModelBackendProfile { return this.backendProfileRepository.saveProfile(profileInput); }
+  reconcileModelBackendCredentialGeneration(profileId: string, credentialGeneration: string | null, renewalRequestedAt?: string): StoredModelBackendProfile {
     return this.backendProfileRepository.reconcileCredentialGeneration(profileId, credentialGeneration, renewalRequestedAt);
   }
-
-  recordModelBackendKeyCheck(profileId: string, keyCheck: BackendKeyCheck): StoredModelBackendProfile {
-    return this.backendProfileRepository.recordKeyCheck(profileId, keyCheck);
-  }
-
-  recordModelBackendProbe(
-    profileId: string,
-    resultInput: BackendCompatibilityProbeResult,
-  ): StoredModelBackendProfile {
-    return this.backendProfileRepository.recordProbe(profileId, resultInput);
-  }
-
-  deleteModelBackendProfile(profileId: string): void {
-    this.backendProfileRepository.deleteProfile(profileId);
-  }
-  listModelBackendDefaults(): ModelBackendDefault[] {
-    return this.backendProfileRepository.listDefaults();
-  }
-
-  saveModelBackendDefault(
-    projectId: string | null,
-    selectionInput: ModelSelection,
-  ): ModelBackendDefault {
-    return this.backendProfileRepository.saveDefault(projectId, selectionInput);
-  }
-  clearModelBackendDefault(projectId: string | null): void {
-    this.backendProfileRepository.clearDefault(projectId);
-  }
+  recordModelBackendKeyCheck(profileId: string, keyCheck: BackendKeyCheck): StoredModelBackendProfile { return this.backendProfileRepository.recordKeyCheck(profileId, keyCheck); }
+  recordModelBackendProbe(profileId: string, resultInput: BackendCompatibilityProbeResult): StoredModelBackendProfile { return this.backendProfileRepository.recordProbe(profileId, resultInput); }
+  deleteModelBackendProfile(profileId: string): void { this.backendProfileRepository.deleteProfile(profileId); }
+  listModelBackendDefaults(): ModelBackendDefault[] { return this.backendProfileRepository.listDefaults(); }
+  saveModelBackendDefault(projectId: string | null, selectionInput: ModelSelection): ModelBackendDefault { return this.backendProfileRepository.saveDefault(projectId, selectionInput); }
+  clearModelBackendDefault(projectId: string | null): void { this.backendProfileRepository.clearDefault(projectId); }
   updateSettingsClearingGlobalDefault(update: AppSettingsUpdate): void {
     this.database.transaction(() => {
       this.settingsRepository.update(update);
@@ -1206,33 +1155,14 @@ export class RuntimeStore {
     })();
   }
   settings(): AppSettings { return this.settingsRepository.settings(); }
-  updateSettings(update: AppSettingsUpdate): void {
-    this.settingsRepository.update(update);
-  }
-
-  project(projectId: string): Project {
-    return this.projectRepository.get(projectId);
-  }
-
-  conversation(conversationId: string): Conversation {
-    return this.conversationRepository.get(conversationId);
-  }
-
-  projectPath(projectId: string): string {
-    return this.projectRepository.path(projectId);
-  }
-
-  conversationPath(conversationId: string): string {
-    return this.conversationRepository.path(conversationId);
-  }
-
+  updateSettings(update: AppSettingsUpdate): void { this.settingsRepository.update(update); }
+  appSettings(): AppSettings { return this.settingsRepository.settings(); }
+  project(projectId: string): Project { return this.projectRepository.get(projectId); }
+  conversation(conversationId: string): Conversation { return this.conversationRepository.get(conversationId); }
+  projectPath(projectId: string): string { return this.projectRepository.path(projectId); }
+  conversationPath(conversationId: string): string { return this.conversationRepository.path(conversationId); }
   private requireProject(projectId: string): ProjectRow { return requireRow(this.database, "projects", projectId, "Project not found."); }
-
   private requireConversation(conversationId: string): ConversationRow { return requireRow(this.database, "conversations", conversationId, "Conversation not found."); }
-
   private requireAgentTurn(turnId: string): AgentTurnRow { return requireRow(this.database, "agent_turns", turnId, "Agent turn not found."); }
-
-  recoverInterruptedRuns(): void {
-    this.recoveryRepository.recoverInterruptedRuns();
-  }
+  recoverInterruptedRuns(): void { this.orchestration.recover(() => this.recoveryRepository.recoverInterruptedRuns()); }
 }

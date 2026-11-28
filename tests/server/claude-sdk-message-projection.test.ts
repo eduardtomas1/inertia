@@ -106,7 +106,7 @@ describe("Claude Agent SDK message projection", () => {
   afterEach(async () =>
     await Promise.all(roots.splice(0).map(removePortableFixture)));
 
-  async function run(messages: readonly SDKMessage[]): Promise<{
+  async function run(messages: readonly SDKMessage[], thrown?: Error): Promise<{
     events: AgentHarnessEvent[];
     result: Awaited<ReturnType<ReturnType<typeof createClaudeAgentSdkHarness>["start"]>["result"]>;
   }> {
@@ -117,6 +117,7 @@ describe("Claude Agent SDK message projection", () => {
       createQuery: () => fixtureClaudeQuery(
         (async function* (): AsyncGenerator<SDKMessage> {
           for (const message of messages) yield message;
+          if (thrown) throw thrown;
         })(),
       ),
     });
@@ -898,6 +899,62 @@ describe("Claude Agent SDK message projection", () => {
       },
     });
     expect(result.failure?.technicalDetail).not.toContain("/home/etomas");
+  });
+
+  // A lone surrogate on either side of a cut is how a code-unit slice breaks
+  // an astral character. Both parities put a cut inside a rocket at least once.
+  const LONE_SURROGATE = /[\uD800-\uDFFF]/u;
+  const rockets = (lead: string) => `${lead}${"\u{1F680}".repeat(20_000)}`;
+
+  it.each(["", "x"])("keeps a WebFetch result valid Unicode when its detail is cut (lead %j)", async (lead) => {
+    const { events, result } = await run([
+      assistantMessage({
+        uuid: "assistant-webfetch",
+        apiMessageId: "api-webfetch",
+        content: [{ type: "tool_use", id: "fetch-1", name: "WebFetch", input: { url: "https://acme.test/page", prompt: "Summarize" } }],
+      }),
+      sdkMessage({
+        type: "user",
+        uuid: "webfetch-result",
+        session_id: CLAUDE_PROTOCOL_SESSION_ID,
+        parent_tool_use_id: null,
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "fetch-1", content: rockets(lead) }] },
+      }),
+      claudeSuccessResult("Done", "completed"),
+    ]);
+
+    expect(result).toMatchObject({ status: "completed", text: "Done" });
+    const detail = events.flatMap((event) =>
+      event.type === "activity" && event.activityId === "fetch-1" && event.phase === "completed" && event.detail
+        ? [event.detail]
+        : []).at(-1);
+    expect(detail).toMatch(/^Output:\n/u);
+    expect(detail).toMatch(/or more characters omitted/u);
+    expect(detail!.length).toBeLessThanOrEqual(32 * 1024);
+    expect(LONE_SURROGATE.test(detail!)).toBe(false);
+  });
+
+  it.each(["", "x"])("keeps an API error valid Unicode when its technical detail is cut (lead %j)", async (lead) => {
+    const { result } = await run([{
+      ...claudeSuccessResult(`API Error: 400 ${rockets(lead)}`),
+      is_error: true,
+      terminal_reason: "api_error",
+    } satisfies SDKResultSuccess]);
+
+    expect(result).toMatchObject({ status: "failed", failure: { terminalEvent: "result/api_error" } });
+    const detail = result.failure?.technicalDetail ?? "";
+    expect(detail).toMatch(/^API Error: 400 /u);
+    expect(detail).toMatch(/or more characters omitted/u);
+    expect(detail.length).toBeLessThanOrEqual(16 * 1024);
+    expect(LONE_SURROGATE.test(detail)).toBe(false);
+  });
+
+  it("keeps an oversized SDK exception valid Unicode when it is cut", async () => {
+    const { result } = await run([], new Error(`${"x".repeat(1024 * 1024 - 1)}\u{1F680} after`));
+
+    expect(result).toMatchObject({ status: "failed", failure: { terminalEvent: "sdk/exception" } });
+    expect(LONE_SURROGATE.test(result.error ?? "")).toBe(false);
+    expect(LONE_SURROGATE.test(result.failure?.message ?? "")).toBe(false);
   });
 
   it("fails the turn when a successful result reports an API error", async () => {

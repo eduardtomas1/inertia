@@ -9,7 +9,7 @@ import {
   watcherMutationEvent,
   watcherWakeSummariesCoherent,
 } from "../../src/shared/contracts/watcher-schema";
-import { STEERABLE_HARNESS_IDS, supportsActiveParentFollowUp } from "../../src/shared/follow-up-steer";
+import { supportsActiveParentFollowUp } from "../../src/shared/follow-up-steer";
 import { MAX_WATCHER_AGENT_LABEL_CHARS } from "../../src/shared/watcher-agent-label";
 import { activityExecutionCategory } from "../../src/shared/activity-display";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
@@ -104,7 +104,7 @@ const note = {
 describe("watcher shared contracts", () => {
   it("lets every current provider's harness watch and gives each a read-only tier", () => {
     expect(WATCHER_HARNESS_IDS).toEqual([
-      "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-acp", "grok-acp",
+      "claude-agent-sdk", "codex-app-server", "opencode-sdk", "cursor-acp", "kimi-acp", "antigravity-acp", "grok-acp", "pi-rpc",
     ]);
     for (const harnessId of WATCHER_HARNESS_IDS) {
       expect(watcherHarnessAllowed(harnessId)).toBe(true);
@@ -118,6 +118,7 @@ describe("watcher shared contracts", () => {
       "kimi-acp": "approvals",
       "grok-acp": "approvals",
       "antigravity-acp": "approvals",
+      "pi-rpc": "inertia",
     });
     for (const harnessId of ["codex-cli", "kimi-cli", "claude-cli", "antigravity-cli", "", "CODEX-APP-SERVER", "toString", "__proto__"]) {
       expect(watcherHarnessAllowed(harnessId)).toBe(false);
@@ -484,9 +485,12 @@ describe("watcher shared contracts", () => {
     expect(clientCommandSchema.safeParse({ requestId, type: "watcher.note.dismiss", payload: { linkId: link.id, wakeId: feedItem.wakeId } }).success).toBe(true);
   });
 
-  it("shares the steerable harness list and activity categories across processes", () => {
-    expect(STEERABLE_HARNESS_IDS).toEqual(["codex-app-server", "claude-agent-sdk", "opencode-sdk"]);
+  it("shares manifest-backed steerability and activity categories across processes", () => {
+    expect(supportsActiveParentFollowUp("codex-app-server")).toBe(true);
+    expect(supportsActiveParentFollowUp("claude-agent-sdk")).toBe(true);
     expect(supportsActiveParentFollowUp("opencode-sdk")).toBe(true);
+    expect(supportsActiveParentFollowUp("pi-rpc")).toBe(true);
+    expect(supportsActiveParentFollowUp("cursor-sdk")).toBe(true);
     expect(supportsActiveParentFollowUp("cursor-acp")).toBe(false);
     expect(supportsActiveParentFollowUp(null)).toBe(false);
     expect(activityExecutionCategory({ kind: "file", title: "src/a.ts", status: "running" })).toBe("coding");

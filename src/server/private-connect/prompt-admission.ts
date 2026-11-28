@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { RuntimeStore } from "../database";
 import type { BackendProfileController } from "../runtime/backends/backend-profile-controller";
 import { isUntitledConversationTitle, quickConversationTitle } from "../runtime/conversation-title";
@@ -16,7 +17,8 @@ interface PrivateConnectIsolatedRuns {
 }
 
 export interface PrivateConnectPromptAdmissionDependencies {
-  store: Pick<RuntimeStore, "conversation" | "hasConversationMessages" | "updateConversation">;
+  store: Pick<RuntimeStore, "conversation" | "hasConversationMessages" | "updateConversation">
+    & Partial<Pick<RuntimeStore, "orchestration">>;
   authority: PrivateConnectPromptAuthority;
   turns: Pick<
     TurnController,
@@ -27,14 +29,89 @@ export interface PrivateConnectPromptAdmissionDependencies {
   onQueued(conversationId: string): void;
 }
 
+export interface PrivateConnectPromptAdmissionResult {
+  turnId: string | null;
+  queuedMessageId?: string;
+}
+
+export function normalizePrivateConnectText(content: string): string {
+  return content.replace(/\r\n?/gu, "\n").trim();
+}
+
+export function privateConnectDeviceActorId(deviceId: string): string {
+  return `device:${deviceId}`;
+}
+
+export function privateConnectPromptCommandId(deliveryId: string): string {
+  return `private-connect:${deliveryId}`;
+}
+
+export function enqueueBusyPrivateConnectPrompt(
+  store: Pick<RuntimeStore, "orchestration">,
+  conversationId: string,
+  content: string,
+  deviceId: string,
+  deliveryId: string = randomUUID(),
+): { turnId: null; queuedMessageId: string } {
+  if (!isMessageOriginDeviceId(deviceId)) throw new Error("The remote prompt has no valid device origin.");
+  if (isHeld()) throw new Error(UPDATE_HOLD_MESSAGE);
+  const normalized = normalizePrivateConnectText(content);
+  if (!normalized) throw new Error("The remote prompt is empty.");
+  const actorId = privateConnectDeviceActorId(deviceId);
+  const queue = store.orchestration.queue;
+  const active = queue.listActive(conversationId);
+  const hasHeld = active.some((item) => item.queueHeld);
+  if (hasHeld) {
+    queue.release({
+      conversationId,
+      cause: "R1-user-send",
+      source: {
+        actorId,
+        commandId: `${privateConnectPromptCommandId(deliveryId)}:release`,
+        command: { type: "queue.release", conversationId, cause: "R1-user-send", deliveryId },
+      },
+      commandType: "queue.release",
+    });
+  }
+  const result = queue.enqueue({
+    conversationId,
+    itemId: deliveryId,
+    content: normalized,
+    attachments: [],
+    kind: "message",
+    createdBy: "user",
+    creationSource: "mobile",
+    deviceId,
+    queueHeld: false,
+    skipHoldInheritance: true,
+    origin: "command",
+    source: {
+      actorId,
+      commandId: privateConnectPromptCommandId(deliveryId),
+      command: {
+        type: "message.queue.enqueue",
+        conversationId,
+        id: deliveryId,
+        content: normalized,
+        attachments: [],
+      },
+    },
+    commandType: "message.queue.enqueue",
+  });
+  return { turnId: null, queuedMessageId: result.value.id };
+}
+
 export function queuePrivateConnectPrompt(
   dependencies: PrivateConnectPromptAdmissionDependencies,
   conversationId: string,
   content: string,
   deviceId: string,
-): { turnId: string } {
+  options?: { deliveryId?: string },
+): PrivateConnectPromptAdmissionResult {
   if (!isMessageOriginDeviceId(deviceId)) throw new Error("The remote prompt has no valid device origin.");
   if (isHeld()) throw new Error(UPDATE_HOLD_MESSAGE);
+  const normalized = normalizePrivateConnectText(content);
+  if (!normalized) throw new Error("The remote prompt is empty.");
   let queued: ReturnType<TurnController["queue"]> | null = null;
   let reserved = false;
   try {
@@ -48,21 +125,46 @@ export function queuePrivateConnectPrompt(
       dependencies.turns.isActive(conversationId)
       || dependencies.isolatedRuns.has(conversationId)
     ) {
-      throw new Error("This conversation already has an active agent task.");
+      if (!dependencies.store.orchestration?.queue) {
+        throw new Error("This conversation already has an active agent task.");
+      }
+      const enqueued = enqueueBusyPrivateConnectPrompt(
+        { orchestration: dependencies.store.orchestration },
+        conversationId,
+        normalized,
+        deviceId,
+        options?.deliveryId,
+      );
+      dependencies.onQueued(conversationId);
+      return enqueued;
+    }
+    const queue = dependencies.store.orchestration?.queue;
+    if (queue && queue.listActive(conversationId).some((item) => item.queueHeld)) {
+      const releaseId = options?.deliveryId ?? randomUUID();
+      queue.release({
+        conversationId,
+        cause: "R1-user-send",
+        source: {
+          actorId: privateConnectDeviceActorId(deviceId),
+          commandId: `${privateConnectPromptCommandId(releaseId)}:release`,
+          command: { type: "queue.release", conversationId, cause: "R1-user-send", deliveryId: releaseId },
+        },
+        commandType: "queue.release",
+      });
     }
     const deriveInitialTitle = isUntitledConversationTitle(
       dependencies.store.conversation(conversationId).title,
     ) && !dependencies.store.hasConversationMessages(conversationId);
     queued = dependencies.turns.queue({
       conversationId,
-      content,
+      content: normalized,
       privateConnectDeviceId: deviceId,
       attachments: [],
       activateConversation: false,
       skills: [],
       rendererOwnerId: null,
     });
-    const title = deriveInitialTitle ? quickConversationTitle(content) : "";
+    const title = deriveInitialTitle ? quickConversationTitle(normalized) : "";
     if (
       title
       && isUntitledConversationTitle(dependencies.store.conversation(conversationId).title)

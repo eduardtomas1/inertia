@@ -29,6 +29,12 @@ import {
 
 const MAX_PROMPT_CHARS = 256 * 1024;
 const MAX_SKILL_COUNT = 8;
+const CODEX_REASONING_SUMMARIES = ["auto", "concise", "detailed", "none"] as const;
+
+function isCodexReasoningSummary(value: unknown): boolean {
+  return typeof value === "string"
+    && (CODEX_REASONING_SUMMARIES as readonly string[]).includes(value);
+}
 
 function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
@@ -84,7 +90,16 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError("invalid_input", "The continuation identity is invalid.");
   }
   const providerOptionKeys = Object.keys(input.modelSelection.providerOptions);
+  const hasFastModeKey = Object.prototype.hasOwnProperty.call(
+    input.modelSelection.providerOptions,
+    "fastMode",
+  );
+  const hasReasoningSummaryKey = Object.prototype.hasOwnProperty.call(
+    input.modelSelection.providerOptions,
+    "reasoningSummary",
+  );
   const fastMode = input.modelSelection.providerOptions.fastMode;
+  const reasoningSummary = input.modelSelection.providerOptions.reasoningSummary;
   const expectedFastMode = input.providerId === "codex"
     ? "priority"
     : input.providerId === "claude"
@@ -95,10 +110,12 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     && input.harnessId === (input.providerId === "codex"
       ? "codex-app-server"
       : "claude-agent-sdk");
+  const nativeCodexRoute = input.providerId === "codex"
+    && input.harnessId === "codex-app-server"
+    && input.backendProfile.id === providerNativeBackendProfile("codex").id;
   if (
-    providerOptionKeys.length > 1
-    || (providerOptionKeys.length === 1 && providerOptionKeys[0] !== "fastMode")
-    || (providerOptionKeys.length === 1 && typeof fastMode !== "string")
+    providerOptionKeys.some((key) => key !== "fastMode" && key !== "reasoningSummary")
+    || (hasFastModeKey && typeof fastMode !== "string")
     || (
       fastMode !== undefined
       && (
@@ -120,6 +137,15 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     throw new ProviderRuntimeError(
       "invalid_input",
       "The provider-native Fast mode route is invalid.",
+    );
+  }
+  if (
+    hasReasoningSummaryKey
+    && (!nativeCodexRoute || !isCodexReasoningSummary(reasoningSummary))
+  ) {
+    throw new ProviderRuntimeError(
+      "invalid_input",
+      "The Codex reasoning summary option is invalid.",
     );
   }
   if (
@@ -299,6 +325,10 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
     }
   }
+  if (input.sessionOriginCwd !== undefined && (input.sessionId === undefined || !isAbsolute(input.sessionOriginCwd)
+    || input.sessionOriginCwd.length > 4096 || input.sessionOriginCwd.includes("\0"))) {
+    throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
+  }
   const imagePaths = input.imagePaths ?? [];
   if (imagePaths.length > MAX_PROVIDER_REQUEST_IMAGE_COUNT) {
     throw new ProviderRuntimeError("invalid_input", "Too many images were attached.");
@@ -321,6 +351,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     skills.length > 0
     && input.harnessId !== "codex-app-server"
     && input.harnessId !== "claude-agent-sdk"
+    && input.harnessId !== "pi-rpc"
   ) {
     throw new ProviderRuntimeError(
       "invalid_input",
@@ -345,6 +376,8 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       input.harnessId === "claude-agent-sdk"
       && skill.source !== "claude-native"
     )
+    || (input.harnessId === "pi-rpc" && (skill.source !== "pi-native" || !isAbsolute(skill.path)
+      || skill.path.length > 4096 || skill.path.includes("\0")))
   )) {
     throw new ProviderRuntimeError("invalid_input", "A skill reference is invalid.");
   }

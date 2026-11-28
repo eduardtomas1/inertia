@@ -16,6 +16,7 @@ import {
 import { useConversationProjection } from "../../src/renderer/src/hooks/useConversationProjection";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import { buildResponseTimeline } from "../../src/renderer/src/utils/response-timeline/model";
+import { setRuntimeQueuedFollowUps } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const turnId = "33333333-3333-4333-8333-333333333333";
@@ -125,6 +126,27 @@ function emptyDetail(): ServerEvent {
 }
 
 describe("useConversationProjection new turn", () => {
+  it("hides a follow-up the agent never read while a queue row names it, and shows it again once sent", async () => {
+    const listeners = new Set<(event: ServerEvent) => void>();
+    const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> =>
+      command.type === "conversation.detail.load"
+        ? emptyDetail()
+        : { type: "request.ok", requestId: crypto.randomUUID() });
+    const hook = renderHook(() => useConversationProjection({
+      snapshot: snapshot(latestTurn), status: "online", request,
+      subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+      enabled: true, autoOpenPlan: false, onOpenPlan: vi.fn(), onTerminal: vi.fn(),
+    }));
+    await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
+    act(() => { for (const listener of listeners) listener({ type: "conversation.message.persisted", message: userMessage }); });
+    expect(hook.result.current.messages.map(({ id }) => id)).toEqual([userMessage.id]);
+    act(() => setRuntimeQueuedFollowUps(conversationId, [userMessage.id]));
+    expect(hook.result.current.messages).toEqual([]);
+    act(() => setRuntimeQueuedFollowUps(conversationId, []));
+    expect(hook.result.current.messages.map(({ id }) => id)).toEqual([userMessage.id]);
+    hook.unmount();
+  });
+
   it("shows a persisted new-turn message as that turn's request before detail reloads", async () => {
     const listeners = new Set<(event: ServerEvent) => void>();
     const request = vi.fn(async (command: CommandWithoutId): Promise<ServerEvent> =>

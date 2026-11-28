@@ -1,0 +1,232 @@
+import { withCodexControlClient, type CodexControlClient } from "../codex/control-client";
+import { objectValue, type JsonObject } from "../codex/protocol";
+import { validateCodexModelProvider } from "../codex/app-server-config";
+import {
+  isCodexArchivedThreadError,
+  isCodexClosingThreadError,
+} from "../codex/app-server-run";
+import { codexModelProviderThreadConfig } from "../codex/model-provider-config";
+import { controlNativeConversation } from "./native-conversation-control";
+import {
+  nativeId, NativeConversationRejection, retainedNativeHead,
+  type NativeConversationBacking, type NativeConversationOperations,
+} from "./native-conversation-operations";
+
+const MAX_HISTORY_TURNS = 10_000;
+const TERMINAL = new Set(["completed", "interrupted", "failed"]);
+const CODEX_NATIVE_CLOSING_RETRY_DELAY_MS = 200;
+
+async function waitAbortable(ms: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason instanceof Error ? signal.reason : new Error("Aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    timer.unref();
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function requestWithUnarchiveRetry(
+  client: CodexControlClient,
+  threadId: string,
+  signal: AbortSignal,
+  execute: () => Promise<JsonObject>,
+): Promise<JsonObject> {
+  try {
+    return await execute();
+  } catch (error) {
+    signal.throwIfAborted();
+    if (isCodexArchivedThreadError(error)) {
+      await client.request("thread/unarchive", { threadId });
+      signal.throwIfAborted();
+      return await execute();
+    }
+    if (isCodexClosingThreadError(error)) {
+      await waitAbortable(CODEX_NATIVE_CLOSING_RETRY_DELAY_MS, signal);
+      signal.throwIfAborted();
+      try {
+        return await execute();
+      } catch (retryError) {
+        signal.throwIfAborted();
+        if (isCodexArchivedThreadError(retryError)) {
+          await client.request("thread/unarchive", { threadId });
+          signal.throwIfAborted();
+          return await execute();
+        }
+        throw retryError;
+      }
+    }
+    throw error;
+  }
+}
+
+function threadMetadata(response: JsonObject, expectedId: string): JsonObject {
+  const thread = objectValue(response.thread);
+  if (!thread || thread.id !== expectedId
+    || (thread.sessionId !== undefined && !nativeId(thread.sessionId))) {
+    throw new Error("Invalid native thread identity.");
+  }
+  const status = objectValue(thread.status)?.type;
+  if (status !== "idle" && status !== "notLoaded") {
+    throw new NativeConversationRejection("rejected", "native-thread-not-idle");
+  }
+  return thread;
+}
+
+interface NativeTurn { id: string; finished: boolean }
+
+async function history(client: CodexControlClient, threadId: string, signal: AbortSignal): Promise<NativeTurn[]> {
+  const turns: NativeTurn[] = [];
+  const seenIds = new Set<string>();
+  const cursors = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    signal.throwIfAborted();
+    const page = await client.request("thread/turns/list", {
+      threadId, limit: 100, sortDirection: "desc", itemsView: "summary", ...(cursor ? { cursor } : {}),
+    });
+    if (!Array.isArray(page.data) || page.data.length > 100) throw new Error("Invalid native history page.");
+    for (const value of page.data) {
+      const turn = objectValue(value);
+      if (!turn || !nativeId(turn.id) || seenIds.has(turn.id)) throw new Error("Invalid native history turn.");
+      seenIds.add(turn.id);
+      turns.push({ id: turn.id, finished: typeof turn.status === "string" && TERMINAL.has(turn.status) });
+    }
+    if (page.nextCursor !== null && page.nextCursor !== undefined && !nativeId(page.nextCursor)) {
+      throw new Error("Invalid native history cursor.");
+    }
+    cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
+    if (cursor && (cursors.has(cursor) || page.data.length === 0)) throw new Error("Native history pagination did not advance.");
+    if (cursor) cursors.add(cursor);
+    if (turns.length > MAX_HISTORY_TURNS || (cursor && turns.length === MAX_HISTORY_TURNS)) {
+      throw new NativeConversationRejection("unsupported", "native-history-limit");
+    }
+  } while (cursor);
+  return turns;
+}
+
+/** Newest first. Every turn must have finished. */
+function stableHistory(turns: readonly NativeTurn[]): string[] {
+  if (turns.some(({ finished }) => !finished)) throw new NativeConversationRejection("rejected", "native-turn-not-stable");
+  return turns.map(({ id }) => id);
+}
+
+/**
+ * A running source's history up to its last settled head, newest first. Only turns after that head may still
+ * run; the head itself and everything before it must have finished. `thread/fork` with an inclusive
+ * `lastTurnId` at or before that head omits the later turns atomically (T3 `CodexAdapterV2.ts:1123`).
+ */
+function settledHistory(turns: readonly NativeTurn[], settledHeadId: string | null): string[] {
+  const index = turns.findIndex(({ id }) => id === settledHeadId);
+  if (index < 0) throw new NativeConversationRejection("rejected", "native-head-changed");
+  return stableHistory(turns.slice(index));
+}
+
+export function createCodexNativeConversationOperations(
+  active: ReadonlySet<string>,
+  control: typeof withCodexControlClient = withCodexControlClient,
+): NativeConversationOperations {
+  return {
+    capabilities: { fork: "native", rollback: "native-revert" },
+    execute: async (request, launch) => await controlNativeConversation(request, launch, active, true, async (signal, progress) => {
+      if (launch.harnessConfiguration && launch.harnessConfiguration.kind !== "codex-responses") {
+        throw new NativeConversationRejection("rejected", "incompatible-harness-configuration");
+      }
+      const modelProvider = validateCodexModelProvider({ environment: launch.environment, modelProvider: launch.harnessConfiguration });
+      return await control({ ...launch, signal, processLabel: "Codex native conversation control" }, async (client) => {
+        const sourceId = request.source.nativeConversationId;
+        const thread = threadMetadata(
+          await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+            client.request("thread/read", { threadId: sourceId, includeTurns: false })),
+          sourceId,
+        );
+        if (request.source.nativeSessionId !== undefined && thread.sessionId !== request.source.nativeSessionId) {
+          throw new NativeConversationRejection("rejected", "native-session-mismatch");
+        }
+        if (thread.historyMode !== "paginated" && request.kind === "rollback") {
+          throw new NativeConversationRejection("unsupported", "paginated-native-history-required");
+        }
+        if (thread.historyMode !== "paginated" && thread.historyMode !== "legacy") {
+          throw new NativeConversationRejection("unsupported", "known-native-history-required");
+        }
+        const listed = await history(client, sourceId, signal);
+        const turns = request.kind === "fork" && request.source.live === true
+          ? settledHistory(listed, request.source.expectedHeadId) : stableHistory(listed);
+        const headId = turns[0] ?? null;
+        if (headId !== request.source.expectedHeadId) throw new NativeConversationRejection("rejected", "native-head-changed");
+        const kept = retainedNativeHead(request.boundary);
+        if (kept !== null && !turns.includes(kept)) throw new NativeConversationRejection("rejected", "native-boundary-not-found");
+        const backing: NativeConversationBacking = {
+          nativeConversationId: sourceId,
+          ...(typeof thread.sessionId === "string" ? { nativeSessionId: thread.sessionId } : {}),
+          headId: kept,
+          persistedHeadId: kept,
+        };
+        if (request.kind === "rollback" && kept === headId) return { status: "completed", effect: "unchanged", backing };
+        if (request.kind === "fork" && kept === null) throw new NativeConversationRejection("unsupported", "empty-native-fork-boundary");
+        signal.throwIfAborted();
+        // Control requests never authorize tools or execute a prompt. A normal
+        // subsequent run supplies its own current route and permission policy.
+        const config: JsonObject = { cwd: launch.cwd, approvalPolicy: "never", sandbox: "read-only", excludeTurns: true };
+        if (modelProvider) {
+          const effective = modelProvider.credentialEnvironmentKey
+            ? await client.request("config/read", { includeLayers: false, cwd: launch.cwd }) : null;
+          config.modelProvider = modelProvider.providerId;
+          config.config = codexModelProviderThreadConfig(modelProvider, effective);
+        }
+        signal.throwIfAborted();
+        if (request.kind === "fork") {
+          progress.mutationMayHaveOccurred = true;
+          const result = await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+            client.request("thread/fork", { ...config, threadId: sourceId, lastTurnId: kept }));
+          const fork = objectValue(result.thread);
+          if (nativeId(fork?.id) && fork.id !== sourceId) progress.createdNativeConversationId = fork.id;
+          if (!fork || !nativeId(fork.id) || fork.id === sourceId
+            || (fork.forkedFromId !== undefined && fork.forkedFromId !== sourceId)
+            || (thread.sessionId !== undefined && fork.sessionId !== thread.sessionId)) {
+            throw new Error("Invalid native fork identity.");
+          }
+          const checked = threadMetadata(await client.request("thread/read", { threadId: fork.id, includeTurns: false }), fork.id);
+          if ((checked.historyMode !== "paginated" && checked.historyMode !== thread.historyMode)
+            || checked.sessionId !== fork.sessionId
+            || stableHistory(await history(client, fork.id, signal))[0] !== kept) {
+            throw new Error("Native fork boundary was not confirmed.");
+          }
+          return { status: "completed", effect: "native-fork", backing: {
+            nativeConversationId: fork.id,
+            ...(typeof fork.sessionId === "string" ? { nativeSessionId: fork.sessionId } : {}), headId: kept, persistedHeadId: kept,
+          } };
+        }
+        if (objectValue(thread.status)?.type === "notLoaded") {
+          const resumed = threadMetadata(
+            await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+              client.request("thread/resume", { ...config, threadId: sourceId })),
+            sourceId,
+          );
+          if (resumed.historyMode !== "paginated" || resumed.sessionId !== thread.sessionId) throw new Error("Native history changed while resuming.");
+          if (stableHistory(await history(client, sourceId, signal))[0] !== headId) throw new NativeConversationRejection("rejected", "native-head-changed");
+        }
+        const beforeTurnId = kept === null ? turns.at(-1) : turns[turns.indexOf(kept) - 1];
+        if (!beforeTurnId) throw new Error("Native revert boundary is missing.");
+        signal.throwIfAborted();
+        progress.mutationMayHaveOccurred = true;
+        const reverted = threadMetadata(
+          await requestWithUnarchiveRetry(client, sourceId, signal, () =>
+            client.request("thread/revert", { threadId: sourceId, beforeTurnId })),
+          sourceId,
+        );
+        if (reverted.historyMode !== "paginated" || reverted.sessionId !== thread.sessionId
+          || (stableHistory(await history(client, sourceId, signal))[0] ?? null) !== kept) {
+          throw new Error("Native revert boundary was not confirmed.");
+        }
+        return { status: "completed", effect: "native-revert", backing };
+      });
+    }, { forksLiveSource: true }),
+  };
+}

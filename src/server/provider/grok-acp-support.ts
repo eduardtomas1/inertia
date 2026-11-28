@@ -11,6 +11,7 @@ import {
 import type { ProviderRunFailure } from "./contracts";
 import type { ProviderRunEventBudget } from "./io";
 import { acpResumeStep, acpSessionUnavailable } from "./session-unavailable";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_ERROR_DETAIL_CHARS = 1024 * 1024;
 const MAX_TECHNICAL_DETAIL_CHARS = 16 * 1024;
@@ -129,7 +130,7 @@ export function grokSpawnFailure(
 }
 
 export function grokStopFailure(stopReason: string): ProviderRunFailure {
-  const safeStopReason = stopReason.slice(0, MAX_STOP_REASON_CHARS);
+  const safeStopReason = clipCodeUnits(stopReason, MAX_STOP_REASON_CHARS);
   return {
     reason: "provider-error",
     message: acpStopReasonMessage("Grok", safeStopReason),
@@ -264,7 +265,7 @@ export function grokErrorDetail(error: unknown, fallback: string): string {
     }
     current = record.cause;
   }
-  return (parts.join("\n") || fallback).slice(0, MAX_ERROR_DETAIL_CHARS);
+  return clipCodeUnits(parts.join("\n") || fallback, MAX_ERROR_DETAIL_CHARS);
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

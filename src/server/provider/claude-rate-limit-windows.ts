@@ -1,4 +1,5 @@
 import type { ProviderRateLimit } from "../../shared/contracts";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const WEEK_MINUTES = 10_080;
 const MODEL_WEEKLY_PREFIX = "Weekly · ";
@@ -22,7 +23,7 @@ const WINDOWS: Readonly<Record<string, { label: string; minutes: number | null }
 
 function modelName(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const clean = value.replaceAll("\0", "").trim().slice(0, 80);
+  const clean = clipCodeUnits(value.replaceAll("\0", "").trim(), 80);
   return clean || null;
 }
 

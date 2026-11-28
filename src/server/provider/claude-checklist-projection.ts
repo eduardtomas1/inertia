@@ -1,4 +1,5 @@
 import { MAX_AGENT_PLAN_STEPS } from "../../shared/agent-plan";
+import { clipCodeUnits } from "../../shared/code-units";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import {
   boundedClaudeIdentifier as boundedIdentifier,
@@ -30,7 +31,7 @@ function checklistStatus(value: unknown): ClaudeChecklistStatus | null {
 function checklistText(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.trim();
-  return text ? text.slice(0, MAX_CLAUDE_CHECKLIST_STEP_CHARS) : null;
+  return text ? clipCodeUnits(text, MAX_CLAUDE_CHECKLIST_STEP_CHARS) : null;
 }
 
 function checklistTask(value: unknown): { id: string; step: AgentPlanStep } | null {

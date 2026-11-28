@@ -132,6 +132,7 @@ const SEARCH_PROVIDER_IDS: readonly ProviderId[] = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ];
 
 function queryProviderId(queryTokens: readonly string[]): ProviderId | null {

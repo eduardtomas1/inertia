@@ -76,6 +76,7 @@ export interface ProviderInstallSourceInput {
   providerId: ProviderMaintenanceProviderId;
   executable: string;
   environment: ProviderEnvironment;
+  installedVersion?: string | null;
 }
 
 interface FileInfo {
@@ -160,6 +161,10 @@ const DEFINITIONS: Readonly<
     allowScripts: ["opencode-ai"],
     uvTool: null,
   },
+  pi: {
+    label: "Pi", packageName: "@earendil-works/pi-coding-agent", packageRange: "1",
+    commands: ["pi"], homebrew: [], allowScripts: [], uvTool: null,
+  },
   antigravity: {
     label: "Antigravity",
     packageName: null,
@@ -205,13 +210,17 @@ const SYSTEM_PACKAGE_ROOTS = [
 
 export function providerInstallPackageName(
   providerId: ProviderMaintenanceProviderId,
+  installedVersion?: string | null,
 ): string | null {
+  if (providerId === "opencode" && installedVersion?.startsWith("2.")) return "@opencode/cli";
   return DEFINITIONS[providerId].packageName;
 }
 
 export function providerInstallPackageRange(
   providerId: ProviderMaintenanceProviderId,
+  installedVersion?: string | null,
 ): string {
+  if (providerId === "opencode" && installedVersion?.startsWith("2.")) return "2";
   return DEFINITIONS[providerId].packageRange;
 }
 
@@ -261,7 +270,9 @@ class InstallSourceContext {
     this.platform = dependencies.platform ?? process.platform;
     this.path = this.platform === "win32" ? win32 : posix;
     this.home = dependencies.home ?? homedir();
-    this.definition = DEFINITIONS[input.providerId];
+    this.definition = input.providerId === "opencode" && input.installedVersion?.startsWith("2.")
+      ? { ...DEFINITIONS.opencode, packageName: "@opencode/cli", packageRange: "2", allowScripts: ["@opencode/cli"] }
+      : DEFINITIONS[input.providerId];
     this.realpath = dependencies.realpath ?? realpath;
     this.lstat = dependencies.lstat ?? lstat;
     this.access = dependencies.access ?? access;
@@ -450,7 +461,7 @@ function nativeSource(context: InstallSourceContext): ProviderInstallSource | nu
     const binary = context.join(home, ".opencode", "bin", platform === "win32" ? "opencode.exe" : "opencode");
     if (!context.same(real, binary)) return null;
     return native(["upgrade", "--method", "curl"], null, {
-      versionPin: { major: 1, argumentIndex: 1, command: "opencode" },
+      versionPin: { major: context.input.installedVersion?.startsWith("2.") ? 2 : 1, argumentIndex: 1, command: "opencode" },
     });
   }
   if (providerId === "antigravity") {
@@ -834,7 +845,7 @@ async function homebrewSource(context: InstallSourceContext): Promise<ProviderIn
       args,
       lockKey: `homebrew:${prefix}`,
       ...(context.input.providerId === "opencode"
-        ? { versionPin: { major: 1, argumentIndex: null, command: null } }
+        ? { versionPin: { major: context.input.installedVersion?.startsWith("2.") ? 2 : 1, argumentIndex: null, command: null } }
         : {}),
     }, "Homebrew", manualCommand),
     homebrew,

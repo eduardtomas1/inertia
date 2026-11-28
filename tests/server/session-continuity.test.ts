@@ -6,9 +6,11 @@ import { RuntimeStore } from "../../src/server/database";
 import { RESTORED_CHAT_HISTORY_LABEL } from "../../src/server/persistence/conversation-context-transport";
 import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { MAX_CONVERSATION_CONTEXT_BLOCK_BYTES, MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_TURN_BYTES } from "../../src/shared/conversation-context";
-import { NATIVE_RESTORED_HISTORY_BYTES, NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL, resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { resolveTurnRequest } from "../../src/server/runtime/turns/turn-request-preparation";
+import { reportsReplacedSession } from "../../src/server/runtime/turns/turn-fresh-session-fallback";
 import type { QueueTurnRequest, TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import type { ProviderInfo } from "../../src/shared/contracts";
+import { DEFAULT_PORTABLE_HISTORY_BUDGET } from "../../src/server/orchestration-v2/portable-history";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const providers = ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"] as const;
@@ -134,7 +136,11 @@ describe("provider session continuity", () => {
     expect(input.prompt).toContain("The export must preserve accented names.");
     expect(input.prompt).toContain("I will use UTF-8 and verify café.");
     expect(input.prompt).toContain("Continue the export.");
-    expect(input.prompt).toContain("restored because this provider session does not have them");
+    expect(input.prompt).toContain("3 intact historical items included; 0 omitted.");
+    expect(input.prompt).toContain("Omitted history cannot be retrieved in this session");
+    expect(input.prompt).not.toContain("inertia_request_context");
+    expect(input.prompt.indexOf("The export must preserve accented names.")).toBeLessThan(input.prompt.indexOf("I will use UTF-8 and verify café."));
+    expect(input.prompt.indexOf("I will use UTF-8 and verify café.")).toBeLessThan(input.prompt.indexOf("Continue the export."));
     expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: "missing-continuation-identity",
@@ -178,13 +184,18 @@ describe("provider session continuity", () => {
     const input = resolved.adopt(queued).active.providerInput;
     expect(input.sessionId).toBeUndefined();
     expect(input.prompt).not.toContain("The export must preserve accented names.");
-    expect(input.prompt).not.toContain("restored because this provider session does not have them");
+    expect(input.prompt).not.toContain("I will use UTF-8 and verify café.");
+    expect(input.prompt).not.toContain("OTHER_CHAT_PRIVATE_SENTINEL");
+    expect(input.prompt).toContain("0 intact historical items included; 0 omitted.");
     expect(input.prompt).toContain("Continue the export.");
     expect(queued.turn).toMatchObject({
       continuationReasonCode: reason,
       sessionRecovery: { restoredMessageCount: 0, omittedMessageCount: 0, withheldMessageCount: 2 },
     });
-    expect(f.restoredReferences(queued.turn.id)).toEqual([]);
+    expect(f.restoredReferences(queued.turn.id)).toEqual([expect.objectContaining({
+      label: `${RESTORED_CHAT_HISTORY_LABEL} · 0 messages`,
+      truncated: false,
+    })]);
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
   });
 
@@ -487,7 +498,7 @@ describe("a saved session that keeps failing to open", () => {
     count: number,
     outcome: {
       terminalReason?: string;
-      activityKind?: "status" | "error";
+      activityKind?: "status" | "error" | "command";
       answered?: boolean;
       rejected?: boolean;
       checkpointNotice?: boolean;
@@ -554,16 +565,35 @@ describe("a saved session that keeps failing to open", () => {
     expect(f.store.conversation(f.conversation.id).providerSessionId).toBeNull();
   });
 
+  it("never adopts the failing session if the fresh start comes back under it (T3 d32df2d34)", async () => {
+    const f = await failedResumes(2);
+    const resolved = f.resolve(f.store, { content: "Third attempt." });
+    const { active } = resolved.adopt(f.store.beginAgentTurn(resolved.input));
+    expect(active.providerInput.sessionId).toBeUndefined();
+    expect(active.replacedSessionIds).toEqual(["before-update"]);
+    expect(reportsReplacedSession(active, "before-update")).toBe(true);
+    expect(reportsReplacedSession(active, "fresh-session")).toBe(false);
+  });
+
   it("starts fresh after two failed resumes that each recorded a missing checkpoint", async () => {
     const f = await failedResumes(2, { checkpointNotice: true });
     expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
     const latest = f.store.latestAgentTurnForConversation(f.conversation.id)!;
-    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id)).toBe(false);
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id, latest.harnessId)).toBe(false);
+  });
+
+  it("counts a Codex resume that recorded only a status notice as failing (no turn existed yet)", async () => {
+    const f = await failedResumes(2, { activityKind: "status" });
+    expect(f.store.turnLedgerRepository.savedSessionKeepsFailing(f.conversation.id, "before-update")).toBe(true);
+    const latest = f.store.latestAgentTurnForConversation(f.conversation.id)!;
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id, latest.harnessId)).toBe(false);
+    // A harness that reports no turn acceptance keeps counting any activity.
+    expect(f.store.turnLedgerRepository.turnHasProviderActivity(f.conversation.id, latest.id, "claude-agent-sdk")).toBe(true);
   });
 
   it.each([
     ["only one resume has failed", 1, {}],
-    ["the provider made progress before failing", 2, { activityKind: "status" }],
+    ["the provider made progress before failing", 2, { activityKind: "command" }],
     ["the provider had started answering", 2, { answered: true }],
     ["the turn never reached the provider", 2, { terminalReason: "turn-start-failed" }],
     ["the provider did not reject the resume", 2, { rejected: false }],
@@ -592,12 +622,7 @@ describe("restored history on a custom backend", () => {
       providerSessionId: "before-update",
       continuationIdentity: { ...f.previous, backendConfigurationRevision: f.previous.backendConfigurationRevision + 1 },
     });
-    const bridged = [{
-      id: f.route.providerId,
-      models: [],
-      capabilityContract: { installationVerified: true, hostToolBridgeAvailable: true, harnessId: f.route.harnessId },
-    }] as unknown as ProviderInfo[];
-    const restoredBytes = (custom: boolean, providerInfo: ProviderInfo[] = bridged) => {
+    const restoredBytes = (custom: boolean, providerInfo: ProviderInfo[] = []) => {
       const resolved = resolveTurnRequest({
         store: f.store,
         providers: {
@@ -616,23 +641,47 @@ describe("restored history on a custom backend", () => {
           .filter(({ label }) => label.startsWith(RESTORED_CHAT_HISTORY_LABEL))
           .reduce((total, { byteSize }) => total + byteSize, 0),
         recovery: resolved.input.sessionRecovery,
+        prompt: resolved.input.executionContext!.blobs.map(({ content }) => content).join("\n"),
       };
     };
     const native = restoredBytes(false);
     const custom = restoredBytes(true);
-    expect(native.bytes).toBeGreaterThan(48 * 1_024);
-    expect(native.bytes).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES);
-    expect(native.recovery!.restoredMessageCount).toBeGreaterThan(custom.recovery!.restoredMessageCount);
-    expect(native.recovery!.restoredMessageCount + native.recovery!.omittedMessageCount).toBe(42);
-    expect(native.recovery!.omittedMessageCount).toBeGreaterThan(0);
-    expect(custom.bytes).toBeGreaterThan(0);
-    expect(custom.bytes).toBeLessThanOrEqual(48 * 1_024);
-    expect(custom.recovery!.restoredMessageCount).toBeGreaterThan(0);
-    expect(custom.recovery!.restoredMessageCount + custom.recovery!.omittedMessageCount).toBe(42);
-    const toolless = restoredBytes(false, []);
-    expect(toolless.bytes).toBeGreaterThan(NATIVE_RESTORED_HISTORY_BYTES);
-    expect(toolless.bytes).toBeLessThanOrEqual(NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL);
-    expect(toolless.recovery!.restoredMessageCount).toBeGreaterThan(native.recovery!.restoredMessageCount);
+    for (const result of [native, custom]) {
+      expect(result.bytes).toBeGreaterThan(0);
+      expect(result.bytes).toBeLessThanOrEqual(16_000);
+      expect(result.recovery!.restoredMessageCount).toBeGreaterThan(0);
+      expect(result.recovery!.omittedMessageCount).toBeGreaterThan(0);
+      expect(result.recovery!.restoredMessageCount + result.recovery!.omittedMessageCount).toBe(42);
+      expect(result.prompt).toContain("Omitted history cannot be retrieved in this session");
+      expect(result.prompt).not.toContain("inertia_request_context");
+      expect(result.prompt).not.toContain("Omitted item IDs");
+      expect(result.prompt).toContain("The export must preserve accented names.");
+      expect(result.prompt).toContain(`message-38: ${"x".repeat(4_000)}`);
+      expect(result.prompt).toContain(`message-39: ${"x".repeat(4_000)}`);
+      let previousPosition = -1;
+      for (let i = 0; i < 40; i += 1) {
+        const position = result.prompt.indexOf(`message-${i}: `);
+        if (position < 0) continue;
+        expect(result.prompt).toContain(`message-${i}: ${"x".repeat(4_000)}`);
+        expect(position).toBeGreaterThan(previousPosition);
+        previousPosition = position;
+      }
+    }
+    const bridged = [{
+      id: f.route.providerId,
+      models: [],
+      capabilityContract: { installationVerified: true, hostToolBridgeAvailable: true, harnessId: f.route.harnessId },
+    }] as unknown as ProviderInfo[];
+    // A built-in route with an attested host-tool bridge can page older turns,
+    // and still gets the same 16,000-byte portable history budget as T3 Code.
+    const hostTools = restoredBytes(false, bridged);
+    expect(DEFAULT_PORTABLE_HISTORY_BUDGET).toBe(16_000);
+    expect(hostTools.bytes).toBeGreaterThan(0);
+    expect(hostTools.bytes).toBeLessThanOrEqual(DEFAULT_PORTABLE_HISTORY_BUDGET);
+    expect(hostTools.recovery!.omittedMessageCount).toBeGreaterThan(0);
+    expect(hostTools.prompt).toContain(`Recover an omitted item only when the request needs it, with inertia_request_context({conversationId:${JSON.stringify(f.conversation.id)},itemId:"<omitted item ID>"})`);
+    expect(hostTools.prompt).toMatch(/omitted\. Omitted item IDs, newest last: [^\n]+\./u);
+    expect(hostTools.prompt).not.toContain("Omitted history cannot be retrieved in this session");
   });
 });
 

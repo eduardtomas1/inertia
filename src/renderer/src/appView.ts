@@ -1,1 +1,1 @@
-export type AppView = "home" | "workspace" | "tasks" | "library" | "settings";
+export type AppView = "home" | "workspace" | "tasks" | "schedules" | "library" | "settings";

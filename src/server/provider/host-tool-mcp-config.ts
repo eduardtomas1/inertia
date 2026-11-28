@@ -4,6 +4,7 @@ import type { McpRemoteConfig } from "@opencode-ai/sdk/v2";
 import { chatInstruction, withoutInternalProviderInstructions } from "../runtime/turns/request-context";
 import type { ProviderHostToolBridge } from "./contracts";
 import { SECRET_REQUEST_WAIT_MS_BY_PROVIDER } from "../../node/agent-secrets";
+import { HOST_TOOL_APPROVAL_TIMEOUT_MS } from "./host-tool-runtime";
 import {
   MAX_PROVIDER_HOST_TOOL_MCP_BODY_BYTES,
   PROVIDER_HOST_TOOL_MCP_BODY_LIMIT_MESSAGE,
@@ -17,11 +18,39 @@ import {
 
 export const INERTIA_HOST_MCP_NAME = "inertia-chat-manager";
 export const INERTIA_SECRET_MCP_NAME = "inertia-chat-secrets";
+export const INERTIA_WAIT_MCP_NAME = "inertia-chat-waits";
 export const INERTIA_HOST_MCP_URL_ENV = "INERTIA_HOST_MCP_URL";
 export const INERTIA_HOST_MCP_TOKEN_ENV = "INERTIA_HOST_MCP_TOKEN";
 const MAX_STDIO_PROXY_RESPONSE_BYTES = 6 * 1024 * 1024;
 const OPENCODE_HOST_MCP_TIMEOUT_MS = 30_000;
 export const OPENCODE_SECRET_MCP_TIMEOUT_MS = SECRET_REQUEST_WAIT_MS_BY_PROVIDER.opencode + 60_000;
+/**
+ * The longest work a waiting chat tool does after its approval: creating an
+ * isolated worktree (a few Git commands, each bounded at 30 s), the 5 min
+ * context chooser, or a delegated wait (at most 45 s).
+ */
+export const OPENCODE_WAIT_TOOL_WORK_MS = 10 * 60_000;
+/**
+ * OpenCode cuts a call to an MCP server at that server's `timeout` and sends
+ * `notifications/cancelled`, which cancels the host call. Tools that wait for
+ * the user's approval or for another chat are served from their own server,
+ * whose timeout covers an approval followed by the longest such work, plus
+ * 60 s: 16 min. It does not follow the delegated wait's maximum, which a call
+ * on OpenCode keeps under its own budget (`DELEGATED_WAIT_CALL_BUDGET_MS`).
+ */
+export const OPENCODE_WAIT_MCP_TIMEOUT_MS = HOST_TOOL_APPROVAL_TIMEOUT_MS + OPENCODE_WAIT_TOOL_WORK_MS + 60_000;
+/** Host tools that ask the user or wait on another chat; they need more than the main server's timeout. */
+export const OPENCODE_WAIT_HOST_TOOLS: ReadonlySet<string> = new Set([
+  "inertia_create_conversation",
+  "inertia_send_message",
+  "inertia_stop_conversation",
+  "inertia_archive_conversation",
+  "inertia_answer_question",
+  "inertia_delegate_task",
+  "inertia_wait_for_task",
+  "inertia_cancel_task",
+  "inertia_request_context",
+]);
 
 const STDIO_PROXY_SOURCE = String.raw`
 const http=require("node:http");

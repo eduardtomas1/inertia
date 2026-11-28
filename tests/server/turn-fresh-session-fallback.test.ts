@@ -73,7 +73,7 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
       expect(runtime.provider.input?.prompt).not.toContain("Keep the public API unchanged.");
       expect(runtime.provider.callbacks?.freshSessionFallback).toBeTypeOf("function");
 
-      const replacement = runtime.provider.callbacks!.freshSessionFallback!();
+      const replacement = runtime.provider.freshSession();
       expect(replacement?.prompt).toContain("Keep the public API unchanged.");
       expect(replacement?.prompt).toContain("Understood, the API stays as it is.");
       expect(replacement?.prompt.split("Continue.").length).toBe(2);
@@ -90,7 +90,7 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
         type: "conversation.detail.invalidated",
         conversationId: runtime.conversationId,
       });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
 
       const identity = turnControllerTestIdentity(runtime);
       runtime.provider.emit({ ...identity, type: "session", sessionId: "fresh-session" });
@@ -153,7 +153,7 @@ describe.each(providers)("%s session continuity across the turn controller", (pr
       runtime.controller.start(retry.turn.id);
       expect(runtime.provider.input?.sessionId).toBeUndefined();
       expect(runtime.provider.input?.prompt).toContain("Keep the public API unchanged.");
-      expect(runtime.provider.callbacks?.freshSessionFallback?.()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();
@@ -175,7 +175,7 @@ describe("fresh session fallback guards", () => {
         .filter(({ turnId }) => turnId === queued.turn.id)
         .map(({ title }) => title)).toEqual(["No checkpoint for this turn"]);
 
-      const replacement = runtime.provider.callbacks!.freshSessionFallback!();
+      const replacement = runtime.provider.freshSession();
 
       expect(replacement?.prompt).toContain("Keep the public API unchanged.");
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
@@ -195,14 +195,14 @@ describe("fresh session fallback guards", () => {
       runtime.controller.start(queued.turn.id);
       const fallback = runtime.provider.callbacks!.freshSessionFallback!;
       runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "text", text: "Partial answer" });
-      expect(fallback()).toBeNull();
+      expect(fallback({ priorCleanup: "confirmed" })).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         providerSessionBefore: "saved-session",
         continuationReasonCode: "same-continuation",
       });
       runtime.provider.resolve({ status: "completed", sessionId: "saved-session", text: "Partial answer" });
       await flushTurnControllerTestPromises();
-      expect(fallback()).toBeNull();
+      expect(fallback({ priorCleanup: "confirmed" })).toBeNull();
       expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBe("saved-session");
     } finally {
       await runtime.controller.dispose();
@@ -223,7 +223,7 @@ describe("fresh session fallback guards", () => {
       });
       admission.release();
       expect(followUp).toMatchObject({ kind: "accepted", message: { role: "user", turnId: queued.turn.id } });
-      expect(runtime.provider.callbacks!.freshSessionFallback!()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
         providerSessionBefore: "saved-session",
         continuationReasonCode: "same-continuation",
@@ -253,8 +253,80 @@ describe("fresh session fallback guards", () => {
       const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Start." });
       expect(queued.turn.continuationReasonCode).toBe("first-turn");
       runtime.controller.start(queued.turn.id);
-      expect(runtime.provider.callbacks?.freshSessionFallback?.()).toBeNull();
+      expect(runtime.provider.freshSession()).toBeNull();
       expect(runtime.store.agentTurn(queued.turn.id).continuationReasonCode).toBe("first-turn");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+});
+
+// T3 d32df2d34 (#27517): a replacement that comes back under the rejected session's id.
+const REUSED = "The provider returned its existing session when asked for a fresh one, so the conversation context could not be moved to a new session.";
+
+describe.each(providers)("%s replacement session that reports the rejected id", (providerId) => {
+  const savedBacking = (runtime: TurnControllerTestRuntime, turnId: string) => runtime.store.orchestration.backings.find({
+    threadId: runtime.conversationId, providerId, workspaceKey: runtime.workspace,
+    identity: runtime.store.agentTurn(turnId).continuationIdentity, nativeSessionId: "saved-session" });
+
+  it("fails honestly, keeps the rejected session retired and never retries; the next turn fails the same way", async () => {
+    const { runtime } = await establishedChat(providerId);
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      expect(runtime.provider.freshSession()?.prompt).toContain("Keep the public API unchanged.");
+      expect(savedBacking(runtime, queued.turn.id)?.status).toBe("retired");
+      const cancelsBefore = runtime.provider.cancelCount;
+
+      const identity = turnControllerTestIdentity(runtime);
+      runtime.provider.emit({ ...identity, type: "session", sessionId: "saved-session" });
+      runtime.provider.emit({ ...identity, type: "text", text: "Answer on the old session." });
+      runtime.provider.resolve({ status: "completed", sessionId: "saved-session", text: "Answer on the old session." });
+      await flushTurnControllerTestPromises();
+
+      expect(runtime.provider.cancelCount).toBe(cancelsBefore + 1);
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "failed", providerSessionBefore: null,
+        providerSessionAfter: null });
+      expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.failed", turnId: queued.turn.id,
+        message: REUSED }));
+      expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({ providerSessionId: null,
+        continuationIdentity: null });
+      expect(savedBacking(runtime, queued.turn.id)?.status).toBe("retired");
+      expect(runtime.provider.freshSession()).toBeNull();
+      expect(runtime.provider.runCount).toBe(2);
+
+      const next = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Try again." });
+      expect(next.turn.providerSessionBefore).toBeNull();
+      runtime.controller.start(next.turn.id);
+      expect(runtime.provider.input?.sessionId).toBeUndefined();
+      expect(runtime.provider.input?.prompt).toContain("Keep the public API unchanged.");
+      runtime.provider.emit({ ...turnControllerTestIdentity(runtime), type: "session", sessionId: "saved-session" });
+      await flushTurnControllerTestPromises();
+      expect(runtime.store.agentTurn(next.turn.id).status).toBe("failed");
+      expect(runtime.events.filter((event) => event.type === "agent.failed" && event.message === REUSED)).toHaveLength(2);
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+      expect(savedBacking(runtime, next.turn.id)?.status).toBe("retired");
+    } finally {
+      await runtime.controller.dispose();
+      runtime.store.close();
+    }
+  });
+
+  it("fails honestly when the rejected id arrives only on the result", async () => {
+    const { runtime } = await establishedChat(providerId);
+    try {
+      const queued = runtime.controller.queue({ conversationId: runtime.conversationId, content: "Continue." });
+      runtime.controller.start(queued.turn.id);
+      runtime.provider.freshSession();
+      runtime.provider.resolve({ status: "completed", sessionId: "saved-session", text: "Answer on the old session." });
+      await flushTurnControllerTestPromises();
+
+      expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "failed", providerSessionAfter: null });
+      expect(runtime.events).toContainEqual(expect.objectContaining({ type: "agent.failed", turnId: queued.turn.id,
+        message: REUSED }));
+      expect(runtime.store.conversation(runtime.conversationId).providerSessionId).toBeNull();
+      expect(savedBacking(runtime, queued.turn.id)?.status).toBe("retired");
     } finally {
       await runtime.controller.dispose();
       runtime.store.close();

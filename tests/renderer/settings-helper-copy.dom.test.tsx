@@ -39,7 +39,7 @@ const removed: Record<string, { section: SettingsSection; anchor: string; gone: 
     ],
     kept: [
       "Ask before deleting chats or restoring checkpoints.",
-      "Full access lets the agent act without asking. Choose it only for a workspace and task you trust.",
+      "Full access runs commands and edits without approval prompts, though Claude Code still asks about a few actions its safety checks protect. Choose it only for a workspace and task you trust.",
     ],
   },
   notifications: {

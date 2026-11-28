@@ -1,4 +1,5 @@
 import { MAX_AGENT_PLAN_STEPS } from "../../shared/agent-plan";
+import { clipCodeUnits } from "../../shared/code-units";
 
 export function markdownPlanSteps(
   markdown: string,
@@ -22,7 +23,7 @@ export function markdownPlanSteps(
   return steps
     .slice(0, MAX_AGENT_PLAN_STEPS)
     .map((step) => ({
-      step: step.slice(0, maxStepChars),
+      step: clipCodeUnits(step, maxStepChars),
       status: "pending",
     }));
 }

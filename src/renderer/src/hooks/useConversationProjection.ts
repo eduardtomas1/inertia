@@ -24,11 +24,17 @@ import {
 import type { ConnectionStatus } from "./useInertiaConnection";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { markTestStreamingStage } from "../utils/testStreamingTrace";
-import { announceRuntimeQueueChanged } from "../components/composer/runtimeQueueEvents";
+import {
+  announceRuntimeQueueChanged,
+  announceRuntimeQueueReconnected,
+  useRuntimeQueuedFollowUps,
+} from "../components/composer/runtimeQueueEvents";
 import type { StreamingAgentChannel } from "../utils/responseTimeline";
 import {
   appendStreamingReasoning,
+  replaceStreamingReasoning,
   appendStreamingText,
+  replaceStreamingText,
   applyTerminalTurnProjections,
   closeStreamingChannelState,
   closeTextStreamState,
@@ -649,6 +655,18 @@ export function useConversationProjection({
             || hydration.hydratedInputs.has(key);
         }));
       }
+      if (projectionEnabled && activeConversation?.id) {
+        announceRuntimeQueueReconnected(activeConversation.id);
+      }
+      return;
+    }
+    if (event.type === "conversation.queue.changed") {
+      if (
+        projectionEnabled
+        && event.conversationId === activeConversation?.id
+      ) {
+        announceRuntimeQueueChanged(event.conversationId, event.revision);
+      }
       return;
     }
     if (event.type === "conversation.detail.invalidated") {
@@ -883,10 +901,10 @@ export function useConversationProjection({
       const hydration = freshHydrationRef.current;
       if (hydration) {
         hydration.text = `${
-          hydration.text ?? ""
+          event.replace ? "" : hydration.text ?? ""
         }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
       }
-      setStreaming((current) => appendStreamingText(
+      setStreaming((current) => (event.replace ? replaceStreamingText : appendStreamingText)(
         current,
         event.text,
         MAX_STREAMING_CHARACTERS,
@@ -953,10 +971,10 @@ export function useConversationProjection({
       const hydration = freshHydrationRef.current;
       if (hydration) {
         hydration.reasoning = `${
-          hydration.reasoning ?? ""
+          event.replace ? "" : hydration.reasoning ?? ""
         }${event.text}`.slice(-MAX_STREAMING_CHARACTERS);
       }
-      setStreaming((current) => appendStreamingReasoning(
+      setStreaming((current) => (event.replace ? replaceStreamingReasoning : appendStreamingReasoning)(
         current,
         event.text,
         MAX_STREAMING_CHARACTERS,
@@ -1043,14 +1061,16 @@ export function useConversationProjection({
     () => withProvisionalLatestTurn(projectedTurns, conversation, activeLiveMessages),
     [activeLiveMessages, conversation, projectedTurns],
   );
-  const messages = useMemo(
-    () => mergeProjectionRecords(
+  // A follow-up the agent never read waits in the queue as its own turn's prompt; the timeline shows it there.
+  const queuedFollowUps = useRuntimeQueuedFollowUps(activeConversationId);
+  const messages = useMemo(() => {
+    const merged = mergeProjectionRecords(
       detail?.messages ?? [],
       activeLiveMessages,
       compareCreatedRecords,
-    ),
-    [activeLiveMessages, detail?.messages],
-  );
+    );
+    return queuedFollowUps.length === 0 ? merged : merged.filter(({ id }) => !queuedFollowUps.includes(id));
+  }, [activeLiveMessages, detail?.messages, queuedFollowUps]);
   const activities = useMemo(() => mergeProjectionRecords(
     detail?.activities ?? [],
     activeConversationId ? liveActivities[activeConversationId] ?? [] : [],

@@ -5,7 +5,7 @@ import type { Conversation } from "./contracts/app";
 export const ARCHIVED_CONVERSATIONS_PAGE_SIZE = 20;
 export const MAX_ARCHIVED_CONVERSATIONS_QUERY_CHARS = 200;
 
-const providerIdSchema = z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"]);
+const providerIdSchema = z.enum(["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"]);
 
 export const archivedConversationsCursorSchema = z.strictObject({
   archivedAt: z.string().min(1).max(64),

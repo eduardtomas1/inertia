@@ -10,6 +10,7 @@ import type {
   ProviderReasoningEvent,
   ProviderRunResult,
   ProviderTextEvent,
+  ProviderTextSnapshotEvent,
 } from "../../provider/contracts";
 import { StreamingTerminalControlStripper } from "./streaming-terminal-control-stripper";
 
@@ -191,6 +192,7 @@ export class SecretOutputRedactor {
     if (!turn && !this.active()) return [event];
     if (event.type === "text") return this.streamText(event);
     if (event.type === "reasoning-summary") return this.streamReasoning(event);
+    if (event.type === "text-snapshot" && event.scope === "segment") return this.replaceTextSegment(event);
     const closed = ASSISTANT_SEGMENT_CLOSERS.has(event.type) ? this.closeText(event.turnId) : [];
     if (event.type === "activity") return [...closed, ...this.activity(event)];
     return [...closed, this.payload(event, true)];
@@ -241,13 +243,32 @@ export class SecretOutputRedactor {
     return text ? [{ ...event, text }] : [];
   }
 
+  /**
+   * Like a reasoning replacement: the open segment's stream restarts with the snapshot, so a held-back secret
+   * prefix of the abandoned text is dropped and the snapshot's own possible prefix is held for the next text.
+   */
+  private replaceTextSegment(event: ProviderTextSnapshotEvent): readonly ProviderEvent[] {
+    const turn = this.turnStreams(event.turnId);
+    turn.text?.boundary.discard();
+    const { providerId, conversationId, runId, turnId } = event;
+    const stream = turn.text = this.open<ProviderTextEvent>({ providerId, conversationId, runId, turnId, type: "text", text: "" });
+    return [{ ...event, text: stream.boundary.push(event.text) }];
+  }
+
   private streamReasoning(event: ProviderReasoningEvent): readonly ProviderEvent[] {
     const turn = this.turnStreams(event.turnId);
-    const stream = turn.reasoning ??= this.open(event);
-    stream.template = event;
+    const { replace, ...appended } = event;
+    // A replacement abandons what the stream held back; it restarts the stream, and a held-back tail of its own
+    // follows as an append. An empty replacement still clears what was shown.
+    if (replace) {
+      turn.reasoning?.stripper.discard();
+      turn.reasoning?.boundary.discard();
+    }
+    const stream = replace ? turn.reasoning = this.open(appended) : turn.reasoning ??= this.open(appended);
+    stream.template = appended;
     const cleaned = stream.stripper.push(event.text);
     const text = cleaned ? stream.boundary.push(cleaned) : "";
-    return text ? [{ ...event, text }] : [];
+    return text || replace ? [{ ...event, text }] : [];
   }
 
   private activity(event: ProviderActivityEvent): readonly ProviderEvent[] {

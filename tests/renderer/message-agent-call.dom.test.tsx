@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import { MessageAgentCall } from "../../src/renderer/src/components/response-timeline/MessageAgentCall";
+import { DelegationSurfaceProvider } from "../../src/renderer/src/components/orchestration/delegation-surface";
+import type { DelegationCommandRunner } from "../../src/renderer/src/components/orchestration/delegation-model";
 import type { AgentTurn, ChatMessage, SubagentTrace } from "../../src/shared/contracts";
 import type { CustomAgentCallAttribution } from "../../src/shared/custom-agents";
 import { taskTrace } from "./background-task-fixtures";
@@ -86,8 +88,8 @@ function userMessage(index: number, content: string): ChatMessage {
   };
 }
 
-function renderTimeline(messages: ChatMessage[], turns: AgentTurn[], subagents: SubagentTrace[] = []): void {
-  render(
+function renderTimeline(messages: ChatMessage[], turns: AgentTurn[], subagents: SubagentTrace[] = [], run?: DelegationCommandRunner): void {
+  const timeline = (
     <ResponseTimeline
       turns={turns}
       messages={messages}
@@ -117,8 +119,12 @@ function renderTimeline(messages: ChatMessage[], turns: AgentTurn[], subagents: 
       onCompareTurnArtifacts={() => undefined}
       onOpenTurnFile={() => undefined}
       onStop={() => undefined}
-    />,
+    />
   );
+  render(run
+    ? <DelegationSurfaceProvider conversationId={conversationId} delegation={undefined} conversations={undefined} run={run}
+      openConversation={undefined}>{timeline}</DelegationSurfaceProvider>
+    : timeline);
 }
 
 describe("called agent badge", () => {
@@ -174,5 +180,59 @@ describe("called agent badge", () => {
     expect(badge.compareDocumentPosition(requestRow.querySelector(".message-body")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("region", { name: "Called agent Code reviewer" })).toBeInTheDocument();
     expect(screen.queryByText(/1 agent finished/u)).toBeNull();
+  });
+
+  it("keeps Agent details on a turn whose only subagents are custom agent calls", async () => {
+    const turn = { ...agentTurn(1), terminalAssistantMessageId: "assistant-1" };
+    const request = { ...userMessage(1, "Review the staged diff"), customAgentCall: attribution };
+    const answer: ChatMessage = {
+      id: "assistant-1", conversationId, turnId: "turn-1", role: "assistant",
+      content: "The reviewer found nothing to fix.", attachments: [], createdAt: "2026-07-29T10:00:05.000Z",
+    };
+    const trace = taskTrace({
+      id: "call-1", conversationId, turnId: "turn-1", customAgentId: AGENT_ID, status: "completed", isLive: false,
+      result: "No regressions.", createdAt: "2026-07-29T10:00:02.000Z", updatedAt: "2026-07-29T10:00:04.000Z",
+    });
+    renderTimeline([request, answer], [turn], [trace], vi.fn<DelegationCommandRunner>());
+    await screen.findByRole("region", { name: "Called agent Code reviewer" });
+    const fold = document.querySelector<HTMLButtonElement>(".turn-fold-toggle");
+    if (fold?.getAttribute("aria-expanded") === "false") fireEvent.click(fold);
+    expect(await screen.findByRole("button", { name: "Agent details" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^\d+ subagents?, /u })).toBeNull();
+  });
+});
+
+describe("observed agent details in a settled fold", () => {
+  it("sits in the region the fold toggle controls and keeps its open state while the fold is closed", async () => {
+    const turn = { ...agentTurn(1), terminalAssistantMessageId: "assistant-1" };
+    const answer: ChatMessage = {
+      id: "assistant-1", conversationId, turnId: "turn-1", role: "assistant",
+      content: "The subagent found the cause.", attachments: [], createdAt: "2026-07-29T10:00:05.000Z",
+    };
+    const trace = taskTrace({
+      id: "task-1", conversationId, turnId: "turn-1", status: "completed", isLive: false,
+      result: "Cause found.", createdAt: "2026-07-29T10:00:02.000Z", updatedAt: "2026-07-29T10:00:04.000Z",
+    });
+    renderTimeline([userMessage(1, "Find the cause"), answer], [turn], [trace], vi.fn<DelegationCommandRunner>());
+    await screen.findByText("The subagent found the cause.");
+    const toggle = document.querySelector<HTMLButtonElement>(".turn-fold-toggle")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const region = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(region).not.toBeNull();
+    expect(region.hidden).toBe(true);
+    // Mounted inside the fold's region while it is closed, so the toggle hides and shows it.
+    expect(region.querySelector(".subagent-group-inspect")?.textContent).toBe("Agent details");
+
+    fireEvent.click(toggle);
+    expect(region.hidden).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Agent details" }));
+    expect(screen.getByRole("button", { name: "Hide agent details" })).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(region.hidden).toBe(true);
+    expect(region.querySelector(".subagent-group-inspect")?.textContent).toBe("Hide agent details");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Hide agent details" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".subagent-group-inspect")).toHaveLength(1);
   });
 });

@@ -856,7 +856,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-4", title: "Run command", kind: "execute", status: "completed", rawOutput: "passed" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-5", title: "Already complete", kind: "execute", status: "completed", rawInput: { command: "npm run check" }, rawOutput: "green" } } });
-    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-6", title: "T".repeat(5000), kind: "execute", status: "pending", rawInput: { command: "c".repeat(5000), ignored: "x".repeat(500000) } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-6", title: "T".repeat(5000), kind: "execute", status: "pending", rawInput: { command: "c".repeat(3999) + "\u{1F680}" + "c".repeat(1000), ignored: "x".repeat(500000) } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-6", status: "completed", rawOutput: "clean" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_summary_chunk", compactionId: "compact-1", content: { type: "text", text: "Retained summary, not assistant output" } } } });
@@ -1014,7 +1014,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const boundedTool = activities.find((activity) =>
       activity.activityId === "tool-6" && activity.phase === "completed");
     expect(boundedTool?.label).toBe("T".repeat(240));
-    expect(boundedTool?.detail).toBe(`Command:\n${"c".repeat(4_000)}\n\nOutput:\nclean`);
+    // The 4,000-unit tool-state cut lands inside the rocket; the high half is dropped.
+    expect(boundedTool?.detail).toBe(`Command:\n${"c".repeat(3_999)}\n\nOutput:\nclean`);
     expect(activities).toEqual(expect.arrayContaining([
       expect.objectContaining({
         phase: "info",

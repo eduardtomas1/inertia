@@ -85,6 +85,60 @@ export const privateConnectRequestSchema = z.discriminatedUnion("type", [
   }).strict(),
   z.object({
     protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("queue.send"),
+    requestId: uuid,
+    conversationId: uuid,
+    id: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("queue.edit"),
+    requestId: uuid,
+    conversationId: uuid,
+    id: uuid,
+    expectedRevision: z.number().int().min(0),
+    content: z.string().trim().min(1).max(PRIVATE_CONNECT_LIMITS.promptCharacters),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("queue.remove"),
+    requestId: uuid,
+    conversationId: uuid,
+    id: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("queue.resume"),
+    requestId: uuid,
+    conversationId: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-tasks.list"),
+    requestId: uuid,
+    projectId: entityId.optional(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-task.toggle"),
+    requestId: uuid,
+    taskId: uuid,
+    enabled: z.boolean(),
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-task.run-now"),
+    requestId: uuid,
+    taskId: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
+    type: z.literal("scheduled-task.delete"),
+    requestId: uuid,
+    taskId: uuid,
+  }).strict(),
+  z.object({
+    protocolVersion: z.literal(PRIVATE_CONNECT_PROTOCOL_VERSION),
     type: z.literal("session.logout"),
     requestId: uuid,
   }).strict(),
@@ -153,6 +207,42 @@ export const privateConnectStateSchema = z.object({
 }).strict();
 export type PrivateConnectState = z.infer<typeof privateConnectStateSchema>;
 
+export const privateConnectQueueHoldReasonSchema = z.enum([
+  "stopped", "failed", "restart", "usage-limit", "workspace-setup", "busy-session",
+]);
+export type PrivateConnectQueueHoldReason = z.infer<
+  typeof privateConnectQueueHoldReasonSchema
+>;
+
+export const privateConnectQueueItemSchema = z.object({
+  id: uuid,
+  content: z.string().max(20_000),
+  attachmentCount: z.number().int().min(0).max(20),
+  state: z.enum(["waiting", "dispatching", "blocked"]),
+  queueHeld: z.boolean(),
+  editRevision: z.number().int().min(0),
+  editable: z.boolean(),
+  sendLabel: z.enum(["send-now", "stop-and-send", "queue", "none"]),
+  attribution: z.enum(["user", "watcher", "delegated", "device", "agent"]),
+  modelLabel: z.string().max(120).nullable(),
+  steerWaiting: z.boolean().optional(),
+  error: z.string().max(300).nullable(),
+}).strict();
+export type PrivateConnectQueueItem = z.infer<
+  typeof privateConnectQueueItemSchema
+>;
+
+export const privateConnectQueueProjectionSchema = z.object({
+  revision: z.number().int().min(0),
+  held: z.boolean(),
+  holdReason: privateConnectQueueHoldReasonSchema.nullable(),
+  canResume: z.boolean(),
+  items: z.array(privateConnectQueueItemSchema).max(30),
+}).strict();
+export type PrivateConnectQueueProjection = z.infer<
+  typeof privateConnectQueueProjectionSchema
+>;
+
 export const privateConnectConversationDetailSchema = z.object({
   generatedAt: timestamp,
   conversation: privateConnectSafeConversationSchema,
@@ -168,6 +258,7 @@ export const privateConnectConversationDetailSchema = z.object({
   questions: privateConnectSafeQuestionsSchema,
   inputRequestId: uuid.nullable().optional(),
   waitingForLocalAction: z.boolean(),
+  queue: privateConnectQueueProjectionSchema.optional(),
 }).strict();
 export type PrivateConnectConversationDetail = z.infer<
   typeof privateConnectConversationDetailSchema

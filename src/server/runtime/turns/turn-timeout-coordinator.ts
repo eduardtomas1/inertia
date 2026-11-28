@@ -9,10 +9,15 @@ const HUMAN_WAIT_STATUSES = new Set<AgentTurnStatus>([
   "waiting-for-input",
 ]);
 
+export const DEFAULT_SILENT_RETRY_WATCHDOG_MS = 15 * 60 * 1_000;
+export const SILENT_RETRY_WATCHDOG_FAILURE_MESSAGE =
+  "The agent stopped after retrying without making progress.";
+
 interface TurnTimeoutCoordinatorOptions {
   readonly scheduler: TurnTimerScheduler;
   readonly inactivityMs: number;
   readonly maxLifetimeMs: number;
+  readonly retryWatchdogMs?: number;
   readonly status: (active: ActiveTurn) => AgentTurnStatus;
   readonly cancel: (active: ActiveTurn) => void;
   readonly fail: (active: ActiveTurn, message: string) => void;
@@ -23,16 +28,18 @@ interface TurnTimeoutCoordinatorOptions {
   readonly onProviderActivity?: (active: ActiveTurn) => void;
 }
 
-/** Owns the silence watchdog and the independent process-lifetime fail-safe. */
+/** Owns the silence watchdog, silent-retry watchdog, and the independent process-lifetime fail-safe. */
 export class TurnTimeoutCoordinator {
   private readonly observations = new WeakMap<ActiveTurn, { startedAt: number }>();
   private readonly providerActivity = new WeakMap<ActiveTurn, number>();
+  private readonly retryWatchdogTimers = new WeakMap<ActiveTurn, unknown>();
   constructor(private readonly options: TurnTimeoutCoordinatorOptions) {}
 
   start(active: ActiveTurn): void {
     active.lifetimeTimer = this.options.scheduler.setTimeout(() => {
       active.lifetimeTimer = null;
       if (active.runState.isTerminal()) return;
+      this.clearRetryWatchdog(active);
       active.diagnosticFailureCode = "turn.lifetime-timeout";
       this.options.cancel(active);
       this.options.fail(
@@ -46,14 +53,21 @@ export class TurnTimeoutCoordinator {
   /** Human approval/input time does not count as provider inactivity. */
   activity(active: ActiveTurn): void {
     this.publishProviderActivity(active);
-    const ended = active.runState.isTerminal() || HUMAN_WAIT_STATUSES.has(this.options.status(active));
+    const currentStatus = active.runState.isTerminal() ? null : this.options.status(active);
+    const ended = currentStatus === null || HUMAN_WAIT_STATUSES.has(currentStatus);
     this.stopObservation(active, ended ? "ended" : "recovered");
     if (active.timeoutTimer !== null) {
       this.options.scheduler.clearTimeout(active.timeoutTimer);
       active.timeoutTimer = null;
     }
     if (ended) {
+      this.clearRetryWatchdog(active);
       return;
+    }
+    if (this.isRetrying(active)) {
+      this.armRetryWatchdog(active);
+    } else {
+      this.clearRetryWatchdog(active);
     }
     if (this.options.reportIncident) this.observations.set(active, { startedAt: this.now() });
     active.timeoutTimer = this.options.scheduler.setTimeout(() => {
@@ -62,6 +76,7 @@ export class TurnTimeoutCoordinator {
         active.runState.isTerminal()
         || HUMAN_WAIT_STATUSES.has(this.options.status(active))
       ) return;
+      this.clearRetryWatchdog(active);
       active.diagnosticFailureCode = "turn.inactivity-timeout";
       this.options.cancel(active);
       this.options.fail(
@@ -72,8 +87,49 @@ export class TurnTimeoutCoordinator {
   }
 
   stop(active: ActiveTurn): void {
+    this.clearRetryWatchdog(active);
     this.stopObservation(active, "ended");
     this.providerActivity.delete(active);
+  }
+
+  private retryWatchdogMs(): number {
+    const configured = this.options.retryWatchdogMs;
+    if (typeof configured !== "number" || !Number.isFinite(configured) || configured < 1) {
+      return DEFAULT_SILENT_RETRY_WATCHDOG_MS;
+    }
+    return Math.min(Math.floor(configured), DEFAULT_SILENT_RETRY_WATCHDOG_MS);
+  }
+
+  private isRetrying(active: ActiveTurn): boolean {
+    return active.runState.snapshot().state === "retrying";
+  }
+
+  private armRetryWatchdog(active: ActiveTurn): void {
+    // Keep the original deadline across consecutive retrying ticks until
+    // substantive progress moves the turn out of retrying.
+    if (this.retryWatchdogTimers.has(active)) return;
+    const timer = this.options.scheduler.setTimeout(() => {
+      this.retryWatchdogTimers.delete(active);
+      if (
+        active.runState.isTerminal()
+        || !this.isRetrying(active)
+      ) return;
+      if (active.timeoutTimer !== null) {
+        this.options.scheduler.clearTimeout(active.timeoutTimer);
+        active.timeoutTimer = null;
+      }
+      active.diagnosticFailureCode = "turn.inactivity-timeout";
+      this.options.cancel(active);
+      this.options.fail(active, SILENT_RETRY_WATCHDOG_FAILURE_MESSAGE);
+    }, this.retryWatchdogMs());
+    this.retryWatchdogTimers.set(active, timer);
+  }
+
+  private clearRetryWatchdog(active: ActiveTurn): void {
+    const timer = this.retryWatchdogTimers.get(active);
+    if (timer === undefined) return;
+    this.retryWatchdogTimers.delete(active);
+    this.options.scheduler.clearTimeout(timer);
   }
 
   restampProviderActivity(active: ActiveTurn): void {

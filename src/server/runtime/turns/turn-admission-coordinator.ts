@@ -34,6 +34,10 @@ export class TurnAdmissionCoordinator {
     return this.admissions.has(conversationId);
   }
 
+  conversationIds(): string[] {
+    return [...this.admissions.keys()];
+  }
+
   assertQueueAuthority(
     conversationId: string,
     admission?: TurnAdmissionLease,

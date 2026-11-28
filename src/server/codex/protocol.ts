@@ -1,3 +1,5 @@
+import { clipCodeUnits } from "../../shared/code-units";
+
 export type JsonObject = Record<string, unknown>;
 export type RpcId = string | number;
 
@@ -14,7 +16,7 @@ export function stringValue(value: unknown): string | undefined {
 export function boundedText(value: unknown, maxChars: number): string | undefined {
   const text = stringValue(value)?.replaceAll("\0", "").trim();
   if (!text) return undefined;
-  return text.slice(0, maxChars);
+  return clipCodeUnits(text, maxChars);
 }
 
 export function rpcId(value: unknown): RpcId | undefined {

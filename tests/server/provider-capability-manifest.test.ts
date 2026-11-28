@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   attestProviderCapabilities,
   attestedProviderCapability,
+  harnessDeclaresCapability,
   productionProviderCapabilityManifests,
   PROVIDER_CAPABILITY_IDS,
   providerCapabilityManifest,
@@ -24,10 +25,12 @@ const productionMappings = [
   ["codex", "codex-app-server"],
   ["claude", "claude-agent-sdk"],
   ["cursor", "cursor-acp"],
+  ["cursor", "cursor-sdk"],
   ["kimi", "kimi-acp"],
   ["opencode", "opencode-sdk"],
   ["antigravity", "antigravity-acp"],
   ["grok", "grok-acp"],
+  ["pi", "pi-rpc"],
 ] as const;
 
 function manifest(harnessId: (typeof productionMappings)[number][1]) {
@@ -90,12 +93,12 @@ describe("provider capability manifests", () => {
     }
   });
 
-  it("publishes exactly seven complete canonical provider-harness mappings", () => {
+  it("publishes nine complete canonical harness mappings for eight providers", () => {
     const manifests = productionProviderCapabilityManifests();
     expect(manifests.map(({ providerId, harnessId }) =>
       [providerId, harnessId])).toEqual(productionMappings);
-    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(7);
-    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(7);
+    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(8);
+    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(9);
 
     for (const value of manifests) {
       expect(value.schemaVersion).toBe(1);
@@ -169,6 +172,22 @@ describe("provider capability manifests", () => {
       .toBe("unavailable");
     expect(capability(codex, "custom-backend").support).toBe("negotiated");
     expect(capability(codex, "endpoint-selection").support).toBe("negotiated");
+    // Native history injection is negotiated per run on Codex App Server and offered nowhere else; only Codex
+    // reports turn acceptance (its turn/start turn id and turn/started).
+    expect(capability(codex, "history-injection").support).toBe("negotiated");
+    expect(capability(codex, "turn-acceptance").support).toBe("native");
+    for (const other of productionProviderCapabilityManifests().filter(({ harnessId }) => harnessId !== "codex-app-server")) {
+      expect(capability(other, "history-injection").support).toBe("unavailable");
+      expect(capability(other, "turn-acceptance").support).toBe("unavailable");
+    }
+    // Only Codex and Claude fork natively while a later source turn runs, as in T3 (`canForkWhileSourceRunning`).
+    for (const value of productionProviderCapabilityManifests()) {
+      expect(capability(value, "fork-while-source-running").support)
+        .toBe(["codex-app-server", "claude-agent-sdk"].includes(value.harnessId) ? "native" : "unavailable");
+    }
+    expect(harnessDeclaresCapability("codex-app-server", "fork-while-source-running")).toBe(true);
+    expect(harnessDeclaresCapability("claude-agent-sdk", "fork-while-source-running")).toBe(true);
+    expect(harnessDeclaresCapability("codex-cli", "fork-while-source-running")).toBe(false);
 
     const claude = manifest("claude-agent-sdk");
     expect(capability(claude, "images").support).toBe("native");

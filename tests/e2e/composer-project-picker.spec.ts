@@ -40,6 +40,15 @@ for (const { projectName, truncated } of [
       await expect(picker).toBeEnabled();
 
       await expect(picker.locator("span")).toHaveText(projectName);
+      const checkout = composer.getByRole("group", { name: "Chat checkout context" });
+      // The chip waits for Git status and then names the real branch. A long
+      // project name can leave it folded into More, so accept either
+      // placement, as the width checks below do.
+      const branchControl = checkout.locator(".composer-branch-control");
+      await expect.poll(async () => await branchControl.isVisible()
+        || await branchControl.getAttribute("data-folded") === "true").toBe(true);
+      await expect(branchControl.locator(".composer-checkout-branch")).toHaveAttribute("title", /\S/u);
+      await expect(checkout).not.toContainText("Detached HEAD");
       for (const width of [760, 480, 360]) {
         // Constrain the real new-chat composer to the space a split pane gets.
         await composer.evaluate((element, maxWidth) => {

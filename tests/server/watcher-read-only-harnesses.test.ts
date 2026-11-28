@@ -25,7 +25,7 @@ import {
 } from "../../src/server/provider/claude-watcher-permissions";
 import { readOnlyCommandReminder } from "../../src/server/runtime/watcher/read-only-commands";
 import type { ProviderRunInput } from "../../src/server/provider/contracts";
-import { INERTIA_HOST_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
+import { INERTIA_HOST_MCP_NAME, INERTIA_WAIT_MCP_NAME } from "../../src/server/provider/host-tool-mcp-config";
 import { openCodePermissions, openCodeWatcherCommandAllowed } from "../../src/server/provider/opencode-host-tools";
 import { createOpenCodeSdkHarness } from "../../src/server/provider/opencode-sdk-harness";
 import { ACP_WATCHER_PLAN_DECLINED, ACP_WATCHER_QUESTION_DECLINED } from "../../src/server/provider/acp-watcher";
@@ -672,7 +672,8 @@ describe("watcher turns on the Codex app-server harness", () => {
     });
     expect((threadStart.config as Record<string, unknown>)["tools.experimental_request_user_input.enabled"]).toBe(false);
     expect(CODEX_WATCHER_DISABLED_CONFIG_KEYS).toEqual(expect.arrayContaining([
-      "features.apps", "features.plugins", "features.hooks", "features.multi_agent", "features.standalone_web_search",
+      "features.apps", "features.connectors", "features.plugins", "features.hooks", "features.multi_agent",
+      "features.standalone_web_search",
       "tools.experimental_request_user_input.enabled",
     ]));
     expect(String((turnStart.input as Array<{ text: string }>)[0]!.text)).not.toContain(WATCHER_ROLE);
@@ -737,7 +738,7 @@ describe("watcher turns on the Codex app-server harness", () => {
       .toBe(false);
   });
 
-  it("disables the user's MCP servers, apps, plugins, hooks and web search on a resumed watcher thread too", async () => {
+  it("disables the user's MCP servers, apps (and the legacy connectors key), plugins, hooks and web search on a resumed watcher thread too", async () => {
     const root = portableFixtureRoot("watcher codex resume");
     roots.push(root);
     const repo = repository(root, ["app-server"]);
@@ -756,6 +757,7 @@ describe("watcher turns on the Codex app-server harness", () => {
       approvalPolicy: "untrusted",
       config: {
         "features.apps": false,
+        "features.connectors": false,
         "features.plugins": false,
         "features.hooks": false,
         web_search: "disabled",
@@ -1006,6 +1008,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
       { permission: "read", pattern: "*.env", action: "deny" },
       { permission: "read", pattern: "*.env.*", action: "deny" },
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
+      { permission: `${INERTIA_WAIT_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ]);
     expect(capture.offeredTools).toEqual(["bash", "read", "glob", "grep", "list"]);
     expect(capture.prompt).toEqual({ agent: null, system: `[inertia-watcher]\n${WATCHER_ROLE}` });
@@ -1119,7 +1122,7 @@ describe("watcher turns on the OpenCode SDK harness", () => {
     }
     expect(evaluate(merged, "bash", "git diff > out.txt")).toBe("ask");
     expect(evaluate(merged, "external_directory", "/etc/*")).toBe("deny");
-    for (const tool of ["read", "glob", "grep", "list", `${INERTIA_HOST_MCP_NAME}_inertia_request_context`]) {
+    for (const tool of ["read", "glob", "grep", "list", `${INERTIA_WAIT_MCP_NAME}_inertia_request_context`]) {
       expect(evaluate(merged, tool, "src/parser.ts")).toBe("allow");
     }
     const openCodeDefaultReads: PermissionRuleset = [

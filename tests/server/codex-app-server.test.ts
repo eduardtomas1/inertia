@@ -346,6 +346,9 @@ describe("Codex App Server runtime", { concurrent: false }, () => {
 
     expect(result).toMatchObject({ status: "completed", text: "Done" });
     expect(result).not.toHaveProperty("failure");
+    // A stopped hook without stop entries is no provider stop (T3 c02b98bb3): the completion stays ordinary.
+    expect(result).not.toHaveProperty("providerStopReason");
+    expect(activities.some(({ label }) => label === "Stopped by the provider")).toBe(false);
     expect(statuses).toContainEqual(expect.objectContaining({
       status: "retrying",
       providerState: "error/willRetry",

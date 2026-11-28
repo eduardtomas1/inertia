@@ -1,0 +1,106 @@
+import type Database from "better-sqlite3";
+
+import type { InheritedCoverage } from "../../shared/orchestration-backings";
+import { forkHistoryPartSchema, type ForkHistoryPart } from "../../shared/orchestration-forks";
+import { scrubCommandSecrets } from "../provider/command-secrets";
+import { boundedSubagentText } from "../provider/subagent-trace";
+import { neutralizeUntrustedAgentText } from "../runtime/untrusted-agent-text";
+import { MAX_PORTABLE_HISTORY_BUDGET, MAX_PORTABLE_HISTORY_CANDIDATES, type PortableHistoryItem } from "./portable-history";
+
+/** Parts of one inherited item; more means the snapshot is not one an intact fork writes. */
+export const MAX_FORK_ITEM_PARTS = 4_096;
+
+export interface ForkHistoryCoverageFilter {
+  readonly coveredItemIds?: readonly string[];
+  readonly uncoveredItemIds?: readonly string[];
+  readonly inheritedCoverage?: InheritedCoverage;
+}
+
+/**
+ * Inherited text as an agent may read it: a command or error line is redacted
+ * like the chat's own commands (`portableCommandText`), then every kind is
+ * scrubbed and neutralized like other historical agent text.
+ */
+export function forkItemText(kind: ForkHistoryPart["kind"], text: string): string {
+  const redacted = kind === "command" || kind === "error" ? scrubCommandSecrets(text.replace(/\0/gu, "")) : text;
+  return neutralizeUntrustedAgentText(boundedSubagentText(redacted, redacted.length) ?? "");
+}
+
+/** The fork itself authorizes access to its immutable inherited context. */
+export function portableForkHistory(
+  database: Database.Database,
+  threadId: string,
+  excludedOrCoverage: readonly string[] | ForkHistoryCoverageFilter,
+) {
+  const coverage: ForkHistoryCoverageFilter = Array.isArray(excludedOrCoverage)
+    ? { coveredItemIds: excludedOrCoverage }
+    : (excludedOrCoverage as ForkHistoryCoverageFilter);
+  const coveredItemIds = coverage.coveredItemIds ?? [];
+  const uncoveredItemIds = coverage.uncoveredItemIds ?? [];
+  const inheritedCoverage = coverage.inheritedCoverage;
+  if (inheritedCoverage === "complete" && uncoveredItemIds.length === 0) {
+    return { items: [] as PortableHistoryItem[], omittedCount: 0 };
+  }
+  const baseWhere = `kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.part') = 0
+    AND json_extract(payload_json, '$.kind') IN ('user-message','assistant-message','command','file','plan','error')`;
+  let where: string;
+  let args: (string | number)[];
+  if (inheritedCoverage === "complete") {
+    where = `${baseWhere} AND id IN (SELECT value FROM json_each(?))`;
+    args = [threadId, JSON.stringify(uncoveredItemIds)];
+  } else if (inheritedCoverage !== undefined && inheritedCoverage.forkId === threadId) {
+    where = `${baseWhere} AND (
+      id IN (SELECT value FROM json_each(?))
+      OR (json_extract(payload_json, '$.ordinal') > ? AND id NOT IN (SELECT value FROM json_each(?)))
+    )`;
+    args = [threadId, JSON.stringify(uncoveredItemIds), inheritedCoverage.throughOrdinal, JSON.stringify(coveredItemIds)];
+  } else {
+    where = `${baseWhere} AND (
+      id IN (SELECT value FROM json_each(?))
+      OR id NOT IN (SELECT value FROM json_each(?))
+    )`;
+    args = [threadId, JSON.stringify(uncoveredItemIds), JSON.stringify(coveredItemIds)];
+  }
+  const count = (database.prepare(`SELECT COUNT(*) AS count FROM orchestration_v2_entities WHERE ${where}`)
+    .get(...args) as { count: number }).count;
+  const select = `SELECT id, payload_json FROM orchestration_v2_entities WHERE ${where}`;
+  const rows = database.prepare(`${select} ORDER BY revision DESC LIMIT ?`)
+    .all(...args, MAX_PORTABLE_HISTORY_CANDIDATES - 3) as { id: string; payload_json: string }[];
+  for (const [kind, direction] of [["user-message", "ASC"], ["user-message", "DESC"], ["assistant-message", "DESC"]] as const) {
+    const row = database.prepare(`${select} AND json_extract(payload_json, '$.kind') = ? ORDER BY revision ${direction} LIMIT 1`)
+      .get(...args, kind) as typeof rows[number] | undefined;
+    if (row && !rows.some(({ id }) => id === row.id)) rows.push(row);
+  }
+  const candidates = rows.map(({ payload_json }) => forkHistoryPartSchema.parse(JSON.parse(payload_json)))
+    .sort((a, b) => a.ordinal - b.ordinal);
+  const items: PortableHistoryItem[] = [];
+  for (const first of candidates) {
+    const size = database.prepare(`SELECT SUM(length(CAST(json_extract(payload_json, '$.text') AS BLOB))) AS bytes,
+      COUNT(*) AS parts FROM orchestration_v2_entities WHERE kind = 'fork-history' AND thread_id = ?
+      AND json_extract(payload_json, '$.ordinal') = ?`).get(threadId, first.ordinal) as { bytes: number; parts: number };
+    if (size.bytes > MAX_PORTABLE_HISTORY_BUDGET || size.parts > MAX_FORK_ITEM_PARTS || size.parts !== first.parts) continue;
+    const parts = database.prepare(`SELECT json_extract(payload_json, '$.text') AS text FROM orchestration_v2_entities
+      WHERE kind = 'fork-history' AND thread_id = ? AND json_extract(payload_json, '$.ordinal') = ?
+      ORDER BY json_extract(payload_json, '$.part')`).all(threadId, first.ordinal) as { text: string }[];
+    const text = forkItemText(first.kind, parts.map(({ text: part }) => part).join(""));
+    if (Buffer.byteLength(text) > MAX_PORTABLE_HISTORY_BUDGET) continue;
+    items.push({ id: first.id, threadId, sourceThreadId: first.sourceThreadId,
+      runId: first.sourceRunId, turnId: first.sourceTurnId, providerBackingId: null,
+      role: first.kind === "user-message" ? "user" : "assistant",
+      kind: first.kind === "file" ? "file-change" : first.kind as PortableHistoryItem["kind"],
+      status: first.status, text, origin: "Inherited fork history; retrieve full inherited items with inertia_fork_history." });
+  }
+  return { items, omittedCount: count - items.length };
+}
+
+/** Preserve opening/latest intent and bounded recent context across local and inherited history. */
+export function boundedHistoryCandidates(items: PortableHistoryItem[]) {
+  if (items.length <= MAX_PORTABLE_HISTORY_CANDIDATES) return items;
+  const kept = new Set(items.slice(-(MAX_PORTABLE_HISTORY_CANDIDATES - 3)));
+  const first = items.find(({ kind }) => kind === "user-message");
+  const recent = [...items].reverse();
+  const user = recent.find(({ kind }) => kind === "user-message");
+  const assistant = recent.find(({ kind }) => kind === "assistant-message");
+  for (const item of [first, user, assistant]) if (item) kept.add(item);
+  return items.filter((item) => kept.has(item));
+}

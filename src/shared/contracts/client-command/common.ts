@@ -39,6 +39,7 @@ export const providerIdSchema = z.enum([
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ]);
 export const accessModeSchema = z.enum(["supervised", "auto-edit", "full"]);
 export const interactionModeSchema = z.enum(["build", "plan"]);

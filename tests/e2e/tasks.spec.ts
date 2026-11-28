@@ -131,15 +131,17 @@ async function expectTasksAndLibraryRowsBetweenNewChatAndSearch(tasks: Locator):
   const sidebar = app.page.locator(".sidebar");
   const newChat = await sidebar.locator(".sidebar-primary-row").getByRole("button", { name: "New chat", exact: true }).boundingBox();
   const row = await tasks.boundingBox();
+  const schedules = await sidebar.getByRole("button", { name: "Schedules", exact: true }).boundingBox();
   const library = await sidebar.getByRole("button", { name: "Library", exact: true }).boundingBox();
   const search = await sidebar.locator(".sidebar-search-wrap").boundingBox();
-  for (const box of [row!, library!]) {
+  for (const box of [row!, schedules!, library!]) {
     expectWithinPixel(box.height, newChat!.height);
     expectWithinPixel(box.x, newChat!.x);
     expectWithinPixel(box.x + box.width, search!.x + search!.width);
   }
   expectWithinPixel(row!.y, newChat!.y + newChat!.height + 2);
-  expectWithinPixel(library!.y, row!.y + row!.height + 2);
+  expectWithinPixel(schedules!.y, row!.y + row!.height + 2);
+  expectWithinPixel(library!.y, schedules!.y + schedules!.height + 2);
   expectWithinPixel(search!.y, library!.y + library!.height + 2);
 }
 

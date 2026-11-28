@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,7 +60,7 @@ function fixture() {
   } as unknown as ConversationCommandDependencies;
   const update = (providerId: ProviderId, legacy = false) => createConversationCommandHandler(commandDependencies)({} as never, {
     type: "conversation.update",
-    requestId: "11111111-1111-4111-8111-111111111111",
+    requestId: randomUUID(),
     payload: {
       conversationId: conversation.id,
       ...(legacy ? { providerId } : { modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({ providerId })) }),
@@ -291,11 +292,18 @@ describe("chat provider handoff", () => {
     store.conversationWork.release(conversation.id);
   });
 
-  it("keeps the in-flight configuration guard for provider changes", async () => {
-    const { store, update, turnInput } = fixture();
+  it("allows provider changes during an active turn while keeping the exclusive conversation-work guard (Decision 4.8)", async () => {
+    const { store, conversation, update, turnInput } = fixture();
     store.beginAgentTurn(turnInput("codex"));
-    vi.spyOn(store, "hasRecordedActiveWorkspaceRunForConversation").mockReturnValue(true);
-    await expect(update("claude")).rejects.toThrow("Stop the active run or review");
+    await expect(update("claude")).resolves.toBe("mutation");
+    expect(store.conversation(conversation.id)).toMatchObject({ providerId: "claude", providerSessionId: null });
+
+    expect(store.conversationWork.reserve(conversation.id)).toBe(true);
+    try {
+      await expect(update("codex")).rejects.toThrow("Stop the active run or review");
+    } finally {
+      store.conversationWork.release(conversation.id);
+    }
   });
 
   it("allows model and reasoning changes with the same provider", async () => {

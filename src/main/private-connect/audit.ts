@@ -35,12 +35,96 @@ interface MutationAudit {
   dispatch(): Promise<PrivateConnectResponse>;
 }
 
+export type PrivateConnectAuditedMutationRequest = Extract<
+  PrivateConnectRequest,
+  {
+    type:
+      | "input.respond"
+      | "run.stop"
+      | "queue.send"
+      | "queue.edit"
+      | "queue.remove"
+      | "queue.resume"
+      | "scheduled-task.toggle"
+      | "scheduled-task.run-now"
+      | "scheduled-task.delete";
+  }
+>;
+
+const MUTATION_META: Readonly<Record<PrivateConnectAuditedMutationRequest["type"], {
+  started: string;
+  expectedKind:
+    | "input.accepted"
+    | "run.stopped"
+    | "queue.updated"
+    | "scheduled-task.updated"
+    | "scheduled-task.ran"
+    | "scheduled-task.deleted";
+  acceptedType: PrivateConnectAuditEvent["type"];
+  acceptedDetail: string;
+}>> = {
+  "input.respond": {
+    started: "A remote answer was requested.",
+    expectedKind: "input.accepted",
+    acceptedType: "input.accepted",
+    acceptedDetail: "A remote answer was accepted.",
+  },
+  "run.stop": {
+    started: "A remote stop was requested.",
+    expectedKind: "run.stopped",
+    acceptedType: "run.stop-accepted",
+    acceptedDetail: "A remote stop request was accepted.",
+  },
+  "queue.send": {
+    started: "A remote queued-message send was requested.",
+    expectedKind: "queue.updated",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote queued-message send was accepted.",
+  },
+  "queue.edit": {
+    started: "A remote queued-message edit was requested.",
+    expectedKind: "queue.updated",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote queued-message edit was accepted.",
+  },
+  "queue.remove": {
+    started: "A remote queued-message removal was requested.",
+    expectedKind: "queue.updated",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote queued-message removal was accepted.",
+  },
+  "queue.resume": {
+    started: "A remote queue resume was requested.",
+    expectedKind: "queue.updated",
+    acceptedType: "prompt.accepted",
+    acceptedDetail: "A remote queue resume was accepted.",
+  },
+  "scheduled-task.toggle": {
+    started: "A remote scheduled-task update was requested.",
+    expectedKind: "scheduled-task.updated",
+    acceptedType: "scheduled-task.accepted",
+    acceptedDetail: "A remote scheduled-task update was accepted.",
+  },
+  "scheduled-task.run-now": {
+    started: "A remote scheduled-task run was requested.",
+    expectedKind: "scheduled-task.ran",
+    acceptedType: "scheduled-task.accepted",
+    acceptedDetail: "A remote scheduled-task run was accepted.",
+  },
+  "scheduled-task.delete": {
+    started: "A remote scheduled-task deletion was requested.",
+    expectedKind: "scheduled-task.deleted",
+    acceptedType: "scheduled-task.deleted",
+    acceptedDetail: "A remote scheduled-task deletion was accepted.",
+  },
+};
+
 export async function runAuditedPrivateConnectMutation(
-  request: Extract<PrivateConnectRequest, { type: "input.respond" | "run.stop" }>,
+  request: PrivateConnectAuditedMutationRequest,
   audit: MutationAudit,
 ): Promise<PrivateConnectResponse> {
-  const answering = request.type === "input.respond";
-  audit.record("request.started", answering ? "A remote answer was requested." : "A remote stop was requested.");
+  const meta = MUTATION_META[request.type];
+  audit.record("request.started", meta.started);
   try {
     await audit.persist();
   } catch {
@@ -62,13 +146,12 @@ export async function runAuditedPrivateConnectMutation(
   if (response.ok) {
     const kind = response.result && typeof response.result === "object" && "kind" in response.result
       ? response.result.kind : null;
-    if (kind !== (answering ? "input.accepted" : "run.stopped")) {
+    if (kind !== meta.expectedKind) {
       audit.record("request.uncertain", "A remote action returned an unexpected acknowledgement.");
       await audit.persist().catch(() => undefined);
       return uncertain();
     }
-    audit.record(answering ? "input.accepted" : "run.stop-accepted",
-      answering ? "A remote answer was accepted." : "A remote stop request was accepted.");
+    audit.record(meta.acceptedType, meta.acceptedDetail);
   } else {
     audit.record("request.rejected", "A remote action was rejected by the runtime.");
   }

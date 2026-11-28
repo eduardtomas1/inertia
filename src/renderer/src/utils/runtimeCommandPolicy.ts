@@ -1,4 +1,6 @@
+import type { z } from "zod";
 import type { ClientCommand } from "@shared/contracts";
+import type { phase5QueueCommandSchemas } from "@shared/contracts/client-command/agent";
 import {
   AGENT_WORKFLOW_REQUEST_TIMEOUT_MS,
   BACKEND_PROFILE_DISCOVERY_REQUEST_TIMEOUT_MS,
@@ -73,10 +75,23 @@ const duoCancellation = {
   timeoutDelivery: "ambiguous",
 } as const satisfies RuntimeCommandPolicy;
 
+type Phase5QueueCommandType = z.infer<(typeof phase5QueueCommandSchemas)[number]>["type"];
+type SupportedClientCommandType = ClientCommand["type"] | Phase5QueueCommandType;
+
 // Keep this total over ClientCommand["type"]. A new protocol command must
 // choose its timeout and timeout-delivery semantics before TypeScript accepts
 // it; it must never inherit a silent renderer default.
 export const RUNTIME_COMMAND_POLICIES = {
+  "conversation.fork": longMutation,
+  "conversation.fork.history": shortRetrySafe,
+  "conversation.rollback": longMutation,
+  "conversation.merge-back": shortMutation,
+  "delegation.task.cancel": shortMutation,
+  "delegation.task.read": shortRetrySafe,
+  "delegation.delivery.dismiss": shortMutation,
+  "delegation.delivery.send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
+  "delegation.wake.set": shortMutation,
+  "observed-child.read": shortRetrySafe,
   "conversation.cli.scan": shortRetrySafe,
   "conversation.cli.preview": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
   "conversation.cli.import": { timeoutMs: CLI_TRANSCRIPT_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
@@ -90,6 +105,8 @@ export const RUNTIME_COMMAND_POLICIES = {
   "message.queue.remove": shortMutation,
   "message.queue.send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "message.queue.edit": shortMutation,
+  "message.queue.resume": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
+  "message.queue.reorder": shortMutation,
   "message.queue.reconfirm": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "message.queue.stop-and-send": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "activity.acknowledge": shortMutation,
@@ -236,6 +253,10 @@ export const RUNTIME_COMMAND_POLICIES = {
   "prompt-preset.reorder": shortMutation,
   "prompt-preset.update": shortMutation,
   "provider.auth.start": shortMutation,
+  "provider.cursor-sdk.status": { timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "provider.cursor-sdk.models": { timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS, timeoutDelivery: "rejected" },
+  "provider.cursor-sdk.login": shortMutation,
+  "provider.cursor-sdk.login.cancel": shortMutation,
   "provider.maintenance.cancel": shortMutation,
   "provider.maintenance.refresh": {
     timeoutMs: PROVIDER_MAINTENANCE_REFRESH_REQUEST_TIMEOUT_MS,
@@ -300,6 +321,11 @@ export const RUNTIME_COMMAND_POLICIES = {
   "todo.delete": shortMutation,
   "todo.start": gitMutation,
   "todo.update": shortMutation,
+  "scheduled-task.list": shortRetrySafe,
+  "scheduled-task.create": shortMutation,
+  "scheduled-task.update": shortMutation,
+  "scheduled-task.delete": shortMutation,
+  "scheduled-task.run-now": { timeoutMs: MESSAGE_SEND_REQUEST_TIMEOUT_MS, timeoutDelivery: "ambiguous" },
   "updates.finish": shortMutation,
   "updates.run": {
     timeoutMs: UPDATES_RUN_REQUEST_TIMEOUT_MS,
@@ -333,11 +359,11 @@ export const RUNTIME_COMMAND_POLICIES = {
   "worktree.remove": gitMutation,
   "worktree.prune": gitMutation,
 } as const satisfies Readonly<
-  Record<ClientCommand["type"], RuntimeCommandPolicy>
+  Record<SupportedClientCommandType, RuntimeCommandPolicy>
 >;
 
 export function runtimeCommandPolicy(
-  type: ClientCommand["type"],
+  type: SupportedClientCommandType,
 ): RuntimeCommandPolicy {
   return RUNTIME_COMMAND_POLICIES[type];
 }

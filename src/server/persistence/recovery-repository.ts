@@ -136,6 +136,14 @@ export class RecoveryRepository {
       ORDER BY requested_at DESC, id DESC
       LIMIT 1
     `);
+    // An open segment a provider replacement emptied keeps an empty message until it closes; a crash leaves it.
+    // Follow-up placements live only in the dead runtime (follow-ups are ordered by time), so none can point at it.
+    const deleteEmptyAssistantMessages = this.database.prepare(`
+      DELETE FROM messages
+      WHERE conversation_id = ? AND turn_id = ? AND role = 'assistant' AND content = ''
+        AND id NOT IN (SELECT terminal_assistant_message_id FROM agent_turns
+          WHERE id = ? AND terminal_assistant_message_id IS NOT NULL)
+    `);
     this.database.transaction(() => {
       markWorkspaceRuns.run(now);
       markSubagents.run(now, now);
@@ -160,12 +168,47 @@ export class RecoveryRepository {
           markTurnReasonings.run(id, turn.id);
           markInterruptedTurn.run(now, now, turn.id);
           compactMessageContentForTurn(this.database, turn.id, turn.conversation_id);
+          deleteEmptyAssistantMessages.run(turn.conversation_id, turn.id, turn.id);
           compactReasoningContentForTurn(this.database, turn.id, turn.conversation_id);
         } else {
           // Preserve recovery for databases that predate authoritative turn ownership.
           markLegacyActivities.run(id);
           markLegacyReasonings.run(id);
         }
+        // Guarantee no assistant message or reasoning remains with uncompacted streaming chunks after crash recovery.
+        this.database.prepare(`
+          UPDATE messages
+          SET content = content || COALESCE((
+            SELECT group_concat(ordered_chunks.content, '')
+            FROM (
+              SELECT content FROM message_content_chunks
+              WHERE message_id = messages.id ORDER BY sequence ASC
+            ) AS ordered_chunks
+          ), '')
+          WHERE conversation_id = ?
+            AND EXISTS (SELECT 1 FROM message_content_chunks WHERE message_id = messages.id)
+        `).run(id);
+        this.database.prepare(`
+          DELETE FROM message_content_chunks
+          WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)
+        `).run(id);
+        this.database.prepare(`
+          UPDATE agent_reasonings
+          SET content = content || COALESCE((
+            SELECT group_concat(ordered_chunks.content, '')
+            FROM (
+              SELECT content FROM reasoning_content_chunks
+              WHERE reasoning_id = agent_reasonings.id ORDER BY sequence ASC
+            ) AS ordered_chunks
+          ), ''),
+          status = CASE WHEN status = 'running' THEN 'failed' ELSE status END
+          WHERE conversation_id = ?
+            AND (status = 'running' OR EXISTS (SELECT 1 FROM reasoning_content_chunks WHERE reasoning_id = agent_reasonings.id))
+        `).run(id);
+        this.database.prepare(`
+          DELETE FROM reasoning_content_chunks
+          WHERE reasoning_id IN (SELECT id FROM agent_reasonings WHERE conversation_id = ?)
+        `).run(id);
         addRecoveryActivity.run(
           randomUUID(),
           id,

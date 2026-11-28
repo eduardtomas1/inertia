@@ -28,6 +28,7 @@ import type {
 import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
 import type { ProviderAccountKind } from "../../shared/provider";
 import type { TurnFailureKind } from "../../shared/turn-lifecycle";
+import type { OrchestrationRunFailureCode } from "../../shared/orchestration-v2";
 import type {
   AgentApprovalDecision,
   AgentApprovalPermissionRoot,
@@ -44,6 +45,7 @@ export const PROVIDER_IDS = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
@@ -118,6 +120,14 @@ interface ProviderRunRequest {
   access: ProviderAccessMode;
   sessionId?: string;
   /**
+   * The checkout `sessionId` was first recorded in, when it is not `cwd` (the
+   * chat moved there with its native session). A harness whose native store is
+   * keyed by checkout reads the session from that checkout's store and runs it
+   * in `cwd` (Cursor SDK; T3 `cursorStoreCwd`). Other harnesses ignore it.
+   */
+  sessionOriginCwd?: string;
+  nativeContinuation?: import("./native-conversation-operations").NativeConversationContinuation;
+  /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by
    * the provider. Omitted for older or unsupported routes.
@@ -181,6 +191,12 @@ export function isIsolatedProviderConversationId(conversationId: string): boolea
 export interface ProviderSteerInput {
   content: string;
   imagePaths: readonly string[];
+  /**
+   * Inertia's identity for this follow-up. A harness that learns the provider
+   * dropped an accepted follow-up unread names it in
+   * `ProviderRunResult.unreadFollowUps` by this id.
+   */
+  steerId?: string;
 }
 
 export class ProviderSteerDeliveryUnknownError extends Error {
@@ -224,13 +240,97 @@ export interface ProviderRunFailure {
   terminalEvent?: string;
   activityId?: string;
   sessionUnavailable?: true;
+  /**
+   * With `sessionUnavailable`: the provider could not find the session from this cwd, yet its stored copy is
+   * still in the provider's home under another folder (Claude Code older than its moved-cwd lookup). The
+   * session is not gone, only out of this provider's reach here.
+   */
+  sessionStoredElsewhere?: true;
   resumeRejected?: true;
+  /**
+   * Definite: the provider refused before the request reached the native
+   * session, so no prompt, handoff or rollback cursor was delivered.
+   */
+  notDelivered?: true;
   usageLimited?: true;
   failureKind?: TurnFailureKind;
+  /**
+   * A provider failure code the next turn acts on, classified from the provider's own error
+   * (T3 `OrchestrationV2ProviderFailure.code`). `message` is then the code's safe summary.
+   */
+  code?: OrchestrationRunFailureCode;
+}
+
+/**
+ * What the provider layer asserts about the rejected attempt when it asks for
+ * a fresh session: its process tree has ended (cleanup was confirmed).
+ */
+export interface ProviderFreshSessionPrior {
+  readonly priorCleanup: "confirmed";
+  /** Copied from the rejected attempt's failure (`ProviderRunFailure.sessionStoredElsewhere`). */
+  readonly sessionStoredElsewhere?: true;
 }
 
 export interface ProviderFreshSessionFallback {
   prompt: string;
+  /**
+   * Receives the replacement attempt's events. Without it they go to the
+   * run's `onEvent`, as the rejected attempt's did.
+   */
+  onEvent?: (event: ProviderEvent) => void;
+  /** Native delivery of the replacement's restored history, bound to the replacement attempt. */
+  historyInjection?: ProviderHistoryInjection;
+}
+
+/** The largest restored history a harness may inject, as JSON bytes: the portable history budget's cap. */
+export const MAX_HISTORY_INJECTION_BYTES = 64_000;
+
+/** One raw Responses API message item of restored history (T3 `historyResponseItems`). */
+export interface ProviderHistoryResponseItem {
+  type: "message";
+  role: "user" | "assistant";
+  content: [{ type: "input_text" | "output_text"; text: string }];
+}
+
+/**
+ * Process-local, exact-attempt authority to deliver a turn's restored history
+ * natively (capability `history-injection`; T3 `injectHistory`). The prompt the
+ * run carries keeps the history inline; a harness that injects sends `prompt`
+ * instead. Each step commits durably before it returns and returns false when
+ * nothing was recorded, so a harness never injects or starts a turn the record
+ * does not describe.
+ */
+export interface ProviderHistoryInjection {
+  /** The coverage context as a user item, then one labelled item per historical item; at most 64,000 JSON bytes. */
+  readonly items: readonly ProviderHistoryResponseItem[];
+  /** The turn's prompt without its restored-history block. */
+  readonly prompt: string;
+  /** Before the request. False: send nothing and keep the history inline. */
+  begin(): boolean;
+  /** The provider accepted the items; before the turn starts. False: start no turn. */
+  delivered(): boolean;
+  /** The provider does not know the method and changed nothing: the history goes inline in this turn. */
+  unsupported(): boolean;
+}
+
+export type ProviderBackgroundWork = "none" | "pending";
+
+export interface ProviderBackgroundWorkSession {
+  conversationId: string;
+  providerId: ProviderId;
+  harnessId: string;
+  nativeSessionId: string;
+}
+
+export interface ProviderBackgroundWorkProbe {
+  pendingBackgroundWork?(session: ProviderBackgroundWorkSession): ProviderBackgroundWork;
+}
+
+export function providerBackgroundWork(
+  probe: ProviderBackgroundWorkProbe,
+  session: ProviderBackgroundWorkSession,
+): ProviderBackgroundWork {
+  return probe.pendingBackgroundWork?.(session) ?? "none";
 }
 
 export interface ProviderEventBase {
@@ -259,6 +359,11 @@ export interface ProviderTextSnapshotEvent extends ProviderEventBase {
   type: "text-snapshot";
   itemId: string;
   text: string;
+  /**
+   * `segment`: `text` replaces only the open assistant segment (the provider message being streamed), as when
+   * Pi starts a text block again (T3 4ecbe5508). Earlier segments and their place in the turn stay as they are.
+   */
+  scope?: "segment";
 }
 
 export interface ProviderTextBoundaryEvent extends ProviderEventBase {
@@ -287,11 +392,34 @@ export interface ProviderStatusEvent extends ProviderEventBase {
   /** Bounded provider-native phase; never used as a cross-provider synonym. */
   providerState?: string;
   message?: string;
+  /**
+   * On a `failed` or `cancelled` status only: the provider dropped this turn's prompt before keeping it in its
+   * native history, whatever output it streamed (T3 `promptDropped`; Cursor SDK: the run saved no checkpoint).
+   * Settlement then treats the turn as not delivered. It travels on the terminal status event, which the harness
+   * emits before its result, so it arrives even when a Stop already asked for the turn's end.
+   */
+  promptDropped?: true;
 }
 
 export interface ProviderSessionEvent extends ProviderEventBase {
   type: "session";
   sessionId: string;
+  /**
+   * The run's resumed session, when the harness continues a copy of it made in the run's checkout instead
+   * (Pi keeps the checkout a session was created in). The copy holds the same history, so the runtime moves the
+   * resumed session's backing and coverage to it. Only the first session event of a run carries it.
+   */
+  forkedFrom?: string;
+}
+
+/** Provider-authored inclusive history anchor; null means unproved, never an inferred application ID. */
+export interface ProviderNativeBoundaryEvent extends ProviderEventBase {
+  type: "native-boundary";
+  nativeConversationId: string;
+  nativeSessionId: string | null;
+  nativeTurnId: string | null;
+  persistedHeadId: string | null;
+  phase: "started" | "settled";
 }
 
 export interface ProviderSessionTitleEvent extends ProviderEventBase {
@@ -360,6 +488,11 @@ export interface ProviderGoalClearedEvent extends ProviderEventBase {
 export interface ProviderReasoningEvent extends ProviderEventBase {
   type: "reasoning-summary";
   text: string;
+  /**
+   * `text` is the run's whole reasoning so far and replaces what streamed, as when Pi starts a thinking block
+   * again (T3 4ecbe5508). Without it, `text` is appended.
+   */
+  replace?: true;
 }
 
 export interface ProviderUsageEvent extends ProviderEventBase {
@@ -433,6 +566,7 @@ export type ProviderEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderApprovalEvent
   | ProviderApprovalResolvedEvent
@@ -449,7 +583,7 @@ export type ProviderEvent =
 export interface ProviderRunCallbacks {
   /** Fires only after the selected harness has synchronously accepted the run. */
   onStarted?: () => void;
-  freshSessionFallback?: () => ProviderFreshSessionFallback | null;
+  freshSessionFallback?: (prior: ProviderFreshSessionPrior) => ProviderFreshSessionFallback | null;
   onEvent?: (event: ProviderEvent) => void;
   onText?: (event: ProviderTextEvent) => void;
   onTextSnapshot?: (event: ProviderTextSnapshotEvent) => void;
@@ -469,6 +603,8 @@ export interface ProviderRunCallbacks {
   onSubagent?: (event: ProviderSubagentEvent) => void;
   /** Process-local, exact-turn authority for audited Inertia host tools. */
   hostTools?: ProviderHostToolBridge;
+  /** Offered to the harness only where `history-injection` can be negotiated for the run. */
+  historyInjection?: ProviderHistoryInjection;
 }
 
 export interface ProviderHostToolDefinition {
@@ -605,6 +741,20 @@ export interface ProviderRunResult extends ProviderRunIdentity {
   error?: string;
   failure?: ProviderRunFailure;
   sessionInstructionApplied?: false;
+  /**
+   * Steer outcome for accepted follow-ups the provider never read: it
+   * cancelled, discarded or refused them before reading, or its process ended
+   * first (T3 `e8c4824b7`). Each is a `ProviderSteerInput.steerId`. The
+   * runtime sends them as the next turn instead of crediting them to this one.
+   * Never reported for a run the user stopped: Stop drops them.
+   */
+  unreadFollowUps?: string[];
+  /**
+   * Why the provider itself stopped a run that did not fail (T3 `turn.terminal.reason`). Only Codex reports it: a
+   * hook that stopped the turn, which Codex ends completed or interrupted. Bounded, sanitized provider text; never
+   * set on a failed run or on one the user stopped.
+   */
+  providerStopReason?: string;
   /** True only after authoritative complete process-tree cleanup. */
   cleanupConfirmed: boolean;
   cleanupConfirmation?: Promise<boolean>;
@@ -757,6 +907,7 @@ export function isProviderRunRefusal(
 }
 
 export interface ProviderManagerOptions {
+  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   /** Durable maintenance recovery blocks every launch for this provider. */
   providerRecoveryPending?: (providerId: ProviderId) => boolean;
   commands?: Partial<Record<ProviderId, string>>;

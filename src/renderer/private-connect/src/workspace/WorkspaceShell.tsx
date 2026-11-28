@@ -1,10 +1,14 @@
-import type { Detail, Shell } from "../types";
-import { ConversationPane } from "./ConversationPane";
+import type { PrivateConnectScheduledTask } from "../../../../shared/private-connect/runtime-contract";
+import type { Shell } from "../types";
+import { ConversationPane, type ConversationDetailWithQueue } from "./ConversationPane";
 import { ProjectList } from "./ProjectList";
+import { ScheduledTasksSection } from "./ScheduledTasksSection";
 
 export function WorkspaceShell({
   shell,
   detail,
+  scheduledTasks = [],
+  scheduledTasksLoading = false,
   error,
   prompt,
   busy,
@@ -17,10 +21,20 @@ export function WorkspaceShell({
   onSendPrompt,
   onAnswer,
   onStopRun,
+  onSendQueueItem,
+  onEditQueueItem,
+  onRemoveQueueItem,
+  onResumeQueue,
+  onRefreshScheduledTasks,
+  onToggleScheduledTask,
+  onRunScheduledTaskNow,
+  onDeleteScheduledTask,
   onSignOut,
 }: {
   shell: Shell | null;
-  detail: Detail | null;
+  detail: ConversationDetailWithQueue | null;
+  scheduledTasks?: readonly PrivateConnectScheduledTask[];
+  scheduledTasksLoading?: boolean;
   error: string | null;
   prompt: string;
   busy: boolean;
@@ -33,8 +47,17 @@ export function WorkspaceShell({
   onSendPrompt: () => void;
   onAnswer: (answers: Record<string, string[]>) => void;
   onStopRun: () => void;
+  onSendQueueItem?: (id: string) => Promise<void> | void;
+  onEditQueueItem?: (id: string, expectedRevision: number, content: string) => Promise<boolean | void> | void;
+  onRemoveQueueItem?: (id: string) => Promise<void> | void;
+  onResumeQueue?: () => Promise<void> | void;
+  onRefreshScheduledTasks?: () => Promise<void> | void;
+  onToggleScheduledTask?: (taskId: string, enabled: boolean) => Promise<void> | void;
+  onRunScheduledTaskNow?: (taskId: string) => Promise<void> | void;
+  onDeleteScheduledTask?: (taskId: string) => Promise<void> | void;
   onSignOut: () => void;
 }): React.JSX.Element {
+  const canPrompt = Boolean(shell?.capabilities.scopes.includes("private:prompt"));
   return (
     <main className="shell">
       <header>
@@ -49,12 +72,22 @@ export function WorkspaceShell({
           Offline — showing only data already held in this tab. Conversations and API responses are not stored for offline use.
         </div>
       )}
-      {error && <div className="banner error">{error}</div>}
+      {error && <div className="banner error" role="alert">{error}</div>}
       <div className="layout">
         <ProjectList
           shell={shell}
           selectedConversation={selectedConversation}
           onSelect={onSelectConversation}
+        />
+        <ScheduledTasksSection
+          tasks={scheduledTasks}
+          canPrompt={canPrompt}
+          offline={offline}
+          loading={scheduledTasksLoading}
+          onRefresh={onRefreshScheduledTasks}
+          onToggle={onToggleScheduledTask}
+          onRunNow={onRunScheduledTaskNow}
+          onDelete={onDeleteScheduledTask}
         />
         <ConversationPane
           shell={shell}
@@ -68,6 +101,10 @@ export function WorkspaceShell({
           onSendPrompt={onSendPrompt}
           onAnswer={onAnswer}
           onStopRun={onStopRun}
+          onSendQueueItem={onSendQueueItem}
+          onEditQueueItem={onEditQueueItem}
+          onRemoveQueueItem={onRemoveQueueItem}
+          onResumeQueue={onResumeQueue}
         />
       </div>
     </main>

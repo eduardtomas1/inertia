@@ -23,6 +23,8 @@ import {
   ownedOpenCodeEnvironment,
 } from "./opencode-boundary";
 import { CappedProviderBuffer } from "./io";
+import { OpenCode2Client } from "./opencode2-client";
+import { openCode2Environment } from "./opencode2-server";
 import {
   OpenCodeServerCleanupUnconfirmedError,
   OpenCodeServerTimeoutError,
@@ -172,17 +174,22 @@ async function exerciseServer(
   signal: AbortSignal,
 ): Promise<void> {
   const credentials = ownedOpenCodeCredentials(environment);
+  const version2 = expectedVersion.replace(/^v/u, "").startsWith("2.");
+  const serverEnvironment = version2
+    ? pure ? openCode2Environment(environment, environment.OPENCODE_CONFIG_DIR!, credentials.password)
+      : { ...environment, OPENCODE_PASSWORD: credentials.password }
+    : ownedOpenCodeEnvironment(environment, credentials);
   let started: Awaited<ReturnType<typeof startOwnedOpenCodeServer>>;
   try {
     started = await startOwnedOpenCodeServer(
       executable,
       root,
-      ownedOpenCodeEnvironment(environment, credentials),
+      serverEnvironment,
       new CappedProviderBuffer(16 * 1024),
       terminateProcessTree,
       "OpenCode isolation-proof server process tree",
       signal,
-      pure,
+      pure && !version2,
     );
   } catch (error) {
     if (error instanceof OpenCodeServerCleanupUnconfirmedError) {
@@ -192,6 +199,16 @@ async function exerciseServer(
   }
   let operationError: unknown;
   try {
+    if (version2) {
+      const client = new OpenCode2Client(started.url, credentials.password, { signal, timeoutMs: requestTimeoutMs });
+      const info = await client.request("GET", "/api/info");
+      if (!info || typeof info !== "object" || !("version" in info) || info.version !== expectedVersion.replace(/^v/u, "")) {
+        throw new OpenCodePureIsolationIncompatibleError("OpenCode isolation proof observed a different executable version.");
+      }
+      await client.request("GET", `/api/model?directory=${encodeURIComponent(root)}`);
+      await waitForSentinel(sentinel, !pure, observationMs, signal);
+      await waitForSentinel(`${sentinel}-global`, !pure, observationMs, signal);
+    } else {
     const client = createOwnedOpenCodeClient(started.url, root, credentials);
     await waitForOpenCodeHealth(
       client,
@@ -224,6 +241,7 @@ async function exerciseServer(
       signal,
     );
     await waitForSentinel(sentinel, !pure, observationMs, signal);
+    }
   } catch (error) {
     operationError = error;
   }
@@ -247,7 +265,7 @@ async function runProof(
   requestTimeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> {
-  const root = await mkdtemp(join(tmpdir(), "inertia-opencode-isolation-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-opencode-isolation-")));
   let preserveForCleanupFailure = false;
   try {
     if (process.platform !== "win32") await chmod(root, 0o700);
@@ -255,10 +273,12 @@ async function runProof(
     const sentinel = join(root, `plugin-${randomUUID()}`);
     await mkdir(pluginDirectory, { recursive: true, mode: 0o700 });
     const plugin = join(pluginDirectory, "inertia-isolation-proof.js");
+    const version2 = version.replace(/^v/u, "").startsWith("2.");
     await writeFile(plugin, [
       'import { writeFileSync } from "node:fs";',
       `writeFileSync(${JSON.stringify(sentinel)}, "executed", "utf8");`,
       "export const InertiaIsolationProof = async () => ({});",
+      ...(version2 ? ['export default { id: "inertia-isolation-proof", setup: async () => {} };'] : []),
       "",
     ].join("\n"), { encoding: "utf8", mode: 0o600 });
     const proofEnvironment = isolatedEnvironment(root, environment.env);
@@ -274,6 +294,17 @@ async function runProof(
     ]) {
       if (path) await mkdir(path, { recursive: true, mode: 0o700 });
     }
+    if (version2) {
+      proofEnvironment.OPENCODE_DISABLE_MODELS_FETCH = "1";
+      proofEnvironment.OPENCODE_DB = join(root, "proof.db");
+      const globalPlugins = join(proofEnvironment.OPENCODE_CONFIG_DIR!, "plugins");
+      await mkdir(globalPlugins, { recursive: true, mode: 0o700 });
+      await writeFile(join(globalPlugins, "inertia-global-proof.js"), [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(${JSON.stringify(`${sentinel}-global`)}, "executed", "utf8");`,
+        'export default { id: "inertia-global-isolation-proof", setup: async () => {} };',
+      ].join("\n"), { mode: 0o600 });
+    }
     await exerciseServer(
       executable,
       root,
@@ -287,6 +318,7 @@ async function runProof(
       signal,
     );
     await unlink(sentinel);
+    if (version2) await unlink(`${sentinel}-global`);
     await exerciseServer(
       executable,
       root,

@@ -77,6 +77,7 @@ import type {
   WorkspaceFilePreview,
 } from "./workspace";
 import type { Todo } from "../todos";
+import type { ScheduledTask, ScheduledTaskRun, ScheduledTaskSummary } from "../scheduled-tasks";
 import type { LibraryCategory, LibraryPage, LibrarySnapshot, SavedAnswer } from "../library";
 import type { UsageDashboard } from "./usage-dashboard";
 import type { DailyWorkDashboard } from "./daily-work";
@@ -111,13 +112,16 @@ export type RuntimeMutationEvent =
       conversationId: string | null;
     }
   | { type: "conversation.detail.invalidated"; conversationId: string }
+  | { type: "conversation.queue.changed"; conversationId: string; revision: number }
   | { type: "todos.updated"; todos: Todo[] }
+  | { type: "scheduled-tasks.changed"; projectId?: string }
   | { type: "library.updated"; library: LibrarySnapshot }
   | { type: "conversation.message.persisted"; message: ChatMessage }
   | { type: "provider.maintenance.updated"; providers: ProviderMaintenanceStatus[] }
   | { type: "provider.maintenance.operation"; operation: ProviderMaintenanceOperation }
   | { type: "agent.started"; conversationId: string; runId: string; turnId: string }
-  | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string }
+  /** `replace`: `text` is the open assistant segment's whole text and replaces what streamed in it. */
+  | { type: "agent.text"; conversationId: string; runId: string; turnId: string; text: string; replace?: true }
   | {
       type: "agent.text.replaced";
       conversationId: string;
@@ -127,7 +131,8 @@ export type RuntimeMutationEvent =
       message: ChatMessage | null;
       after?: string;
     }
-  | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string }
+  /** `replace` on reasoning: `text` is the turn's whole reasoning so far and replaces what streamed. */
+  | { type: "agent.reasoning"; conversationId: string; runId: string; turnId: string; text: string; replace?: true }
   | { type: "agent.commentary.persisted"; message: ChatMessage }
   | { type: "agent.usage"; usage: ThreadUsageSnapshot }
   | { type: "agent.activity"; activity: AgentActivity; detailPatch?: ActivityDetailPatch }
@@ -194,6 +199,7 @@ export type RuntimeSequencedFrame =
     };
 
 export type ServerEvent =
+  | import("../cursor-sdk-auth").CursorSdkLoginEvent
   | { type: "conversation.message.focus"; target: MessageSearchTarget }
   | {
       type: "server.welcome";
@@ -214,6 +220,8 @@ export type ServerEvent =
       type: "request.result";
       requestId: string;
       result:
+        | import("../cursor-sdk-auth").CursorSdkStatusResult
+        | import("../cursor-sdk-auth").CursorSdkModelsResult
         | { kind: "attachment.storage"; storage: import("../attachment-storage").AttachmentStorageStatus; removed?: { records: number; bytes: number } }
         | { kind: "database.storage"; storage: import("../database-storage").DatabaseStorageStatus; compaction?: import("../database-storage").DatabaseCompactionSummary }
         | { kind: "support.report"; report: import("../issue-report").IssueReport | null; github?: import("../issue-report").IssueGitHubState }
@@ -241,7 +249,17 @@ export type ServerEvent =
         | { kind: "project.actions"; actions: ProjectAction[] }
         | { kind: "project.created"; projectId: string }
         | { kind: "conversation.created"; conversationId: string }
+        | import("../orchestration-forks").ForkHistoryResult
+        | import("../orchestration-history").ConversationRollbackResult
+        | import("../orchestration-merge-back").MergeBackResult
+        | import("./client-command/delegation").DelegationTaskResult
+        | import("./client-command/delegation").DelegationCancelResult
+        | import("./client-command/delegation").DelegationDeliveryResult
+        | import("../observed-child-thread").ObservedChildReadResult
         | { kind: "todo.started"; conversationId: string }
+        | { kind: "scheduled-tasks.list"; tasks: ScheduledTaskSummary[] }
+        | { kind: "scheduled-task"; task: ScheduledTask; recentRuns?: ScheduledTaskRun[] }
+        | { kind: "scheduled-task.ran"; task: ScheduledTask; run: ScheduledTaskRun | null; conversationId: string | null }
         | { kind: "library.category"; category: LibraryCategory }
         | { kind: "library.answer"; savedAnswer: SavedAnswer }
         | { kind: "library.pages"; pages: LibraryPage[] }

@@ -1,4 +1,9 @@
-import { supportsActiveParentFollowUp } from "@shared/follow-up-steer";
+import type { ProviderCapabilityContractView } from "@shared/contracts";
+import {
+  supportsActiveParentFollowUp,
+  supportsSteerAttachments,
+  supportsSteerDuringCompaction,
+} from "@shared/follow-up-steer";
 
 export type ComposerPrimaryActionState =
   | "send-disabled"
@@ -6,7 +11,9 @@ export type ComposerPrimaryActionState =
   | "submitting"
   | "stop-ready"
   | "stop-and-send"
-  | "stop-pending";
+  | "stop-pending"
+  | "resume-ready"
+  | "resume-pending";
 
 export type ComposerFollowUpState =
   | "hidden"
@@ -15,7 +22,51 @@ export type ComposerFollowUpState =
   | "ready"
   | "pending";
 
+export interface ResolvedSteeringCapabilities {
+  readonly canSteer: boolean;
+  readonly canInterrupt: boolean;
+  readonly steerAcceptsAttachments: boolean;
+  readonly steerDuringCompaction: boolean;
+}
+
 export { supportsActiveParentFollowUp };
+
+function contractCapabilityState(
+  contract: ProviderCapabilityContractView | undefined,
+  harnessId: string | null,
+  capabilityId: string,
+): "available" | "other" | null {
+  if (!contract?.capabilities) return null;
+  if (harnessId && contract.harnessId !== harnessId) return null;
+  const match = contract.capabilities.find(({ id }) => id === capabilityId);
+  if (!match) return null;
+  return match.state === "available" ? "available" : "other";
+}
+
+export function resolveHarnessSteeringCapabilities(
+  harnessId: string | null,
+  capabilityContract?: ProviderCapabilityContractView,
+  overrides?: Partial<ResolvedSteeringCapabilities>,
+): ResolvedSteeringCapabilities {
+  const steerContract = contractCapabilityState(capabilityContract, harnessId, "follow-up-steer");
+  const interruptContract = contractCapabilityState(capabilityContract, harnessId, "cancellation");
+  const attachContract = contractCapabilityState(capabilityContract, harnessId, "steer-accepts-attachments");
+  const compactContract = contractCapabilityState(capabilityContract, harnessId, "steer-during-compaction");
+  return {
+    canSteer: overrides?.canSteer ?? (
+      steerContract !== null ? steerContract === "available" : supportsActiveParentFollowUp(harnessId)
+    ),
+    canInterrupt: overrides?.canInterrupt ?? (
+      interruptContract !== null ? interruptContract === "available" : true
+    ),
+    steerAcceptsAttachments: overrides?.steerAcceptsAttachments ?? (
+      attachContract !== null ? attachContract === "available" : supportsSteerAttachments(harnessId)
+    ),
+    steerDuringCompaction: overrides?.steerDuringCompaction ?? (
+      compactContract !== null ? compactContract === "available" : supportsSteerDuringCompaction(harnessId)
+    ),
+  };
+}
 
 export function composerFollowUpState({
   running,
@@ -25,6 +76,10 @@ export function composerFollowUpState({
   textOnly,
   submitting,
   sending,
+  capabilityContract,
+  capabilities,
+  hasAttachments = false,
+  compacting = false,
 }: {
   running: boolean;
   stopping: boolean;
@@ -33,11 +88,19 @@ export function composerFollowUpState({
   textOnly: boolean;
   submitting: boolean;
   sending: boolean;
+  capabilityContract?: ProviderCapabilityContractView;
+  capabilities?: Partial<ResolvedSteeringCapabilities>;
+  hasAttachments?: boolean;
+  compacting?: boolean;
 }): ComposerFollowUpState {
   if (!running || !hasDraft) return "hidden";
   if (stopping || !textOnly) return "unavailable";
-  if (!supportsActiveParentFollowUp(harnessId)) {
-    return submitting || sending ? "unavailable" : "stop-and-send";
+  const resolved = resolveHarnessSteeringCapabilities(harnessId, capabilityContract, capabilities);
+  const steerSupportedNow = resolved.canSteer
+    && (!hasAttachments || resolved.steerAcceptsAttachments)
+    && (!compacting || resolved.steerDuringCompaction);
+  if (!steerSupportedNow) {
+    return !resolved.canInterrupt || submitting || sending ? "unavailable" : "stop-and-send";
   }
   return submitting || sending ? "pending" : "ready";
 }
@@ -54,14 +117,21 @@ export function composerPrimaryActionState({
   sending,
   running,
   stopping,
+  resuming = false,
+  resumeEligible = false,
 }: {
   sendEligible: boolean;
   submitting: boolean;
   sending: boolean;
   running: boolean;
   stopping: boolean;
+  resuming?: boolean;
+  resumeEligible?: boolean;
 }): ComposerPrimaryActionState {
   if (running) return stopping ? "stop-pending" : "stop-ready";
+  if (resuming) return "resume-pending";
   if (submitting || sending) return "submitting";
-  return sendEligible ? "send-ready" : "send-disabled";
+  if (sendEligible) return "send-ready";
+  if (resumeEligible) return "resume-ready";
+  return "send-disabled";
 }

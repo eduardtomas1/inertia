@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { RESTART_CONTINUATION_PROMPT } from "../../src/server/runtime/restart-continuation-runtime";
 import { removeWatcherLinksFromLegacyFixture } from "../support/legacy-project-settings-schema";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from "../../src/server/persistence/migrations/runtime-catalog";
@@ -204,7 +205,7 @@ describe("restart continuation plan repository", () => {
     const run = store.createWorkspaceRun({ kind: "agent", projectId, conversationId: chat.conversationId,
       label: "Task", detail: null, status: "running", port: null });
     const continuation = () => store.beginAgentTurn({ conversationId: chat.conversationId, runId: run.id,
-      content: "Continue from where you stopped.", providerId: conversation.providerId, modelSelection: conversation.modelSelection,
+      content: RESTART_CONTINUATION_PROMPT, providerId: conversation.providerId, modelSelection: conversation.modelSelection,
       model: "gpt-test", reasoningEffort: conversation.reasoningEffort, interactionMode: conversation.interactionMode,
       accessMode: conversation.accessMode, configurationRevision: 0, association: "authoritative",
       restartContinuationPlanId: plan!.id }).turn;

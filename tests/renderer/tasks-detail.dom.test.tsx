@@ -161,6 +161,15 @@ describe("Task card wells", () => {
     expect(view.onOpenConversation).not.toHaveBeenCalled();
   });
 
+  it("names the running turn it stops so a newer run is never stopped by a stale press", async () => {
+    const user = userEvent.setup();
+    const running = turn({ status: "running", completedAt: null });
+    const view = harness(snapshot([linked()], { conversations: [conversation({ latestTurn: running })] }));
+    await user.click(within(openCard()).getByRole("button", { name: "Stop" }));
+    expect(sent(view.request, "agent.stop")).toEqual([{ type: "agent.stop",
+      payload: { conversationId, expectedTurnId: running.id } }]);
+  });
+
   it("marks a ready task done from the card and with Cmd/Ctrl+Enter", async () => {
     const user = userEvent.setup();
     const chat = conversation({ status: "completed", latestTurn: turn() });

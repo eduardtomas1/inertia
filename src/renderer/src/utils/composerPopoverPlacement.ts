@@ -98,8 +98,12 @@ export function calculateComposerPopoverPlacement({
     left = clamp(preferEnd ? endLeft : startLeft, safe.left, safe.right - width);
   }
 
+  // A popover below starts on the whole pixel nearest the gap. Measure the
+  // space below from that edge: measured from a fractional trigger edge, a
+  // popover filling it would be clamped back up over the gap.
+  const belowTop = Math.round(trigger.bottom + gap);
   const above = Math.max(0, trigger.top - gap - safe.top);
-  const below = Math.max(0, safe.bottom - trigger.bottom - gap);
+  const below = Math.max(0, safe.bottom - belowTop);
   const preferredSpace = preferredVertical === "above" ? above : below;
   const alternateSpace = preferredVertical === "above" ? below : above;
   const naturalHeight = Math.max(1, popover.height);
@@ -118,7 +122,7 @@ export function calculateComposerPopoverPlacement({
   const height = Math.min(naturalHeight, maxHeight);
   const top = vertical === "above"
     ? trigger.top - gap - height
-    : trigger.bottom + gap;
+    : belowTop;
 
   return {
     top: clamp(Math.round(top), safe.top, Math.floor(safe.bottom - height)),

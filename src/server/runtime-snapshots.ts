@@ -50,6 +50,7 @@ function agentThreadManagement(
     opencode: "OpenCode's scoped MCP session",
     antigravity: "Antigravity's scoped MCP session",
     grok: "Grok's scoped MCP session",
+    pi: "Pi",
   }[providerId];
   return capabilityContract?.installationVerified
     && capabilityContract.hostToolBridgeAvailable

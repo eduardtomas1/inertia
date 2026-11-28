@@ -34,6 +34,9 @@ import {
 import {
   composerQueueKey,
 } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
+import type { QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
+import { announceRuntimeQueueChanged } from "../../src/renderer/src/components/composer/runtimeQueueEvents";
+import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import type { PromptPresetCommandRunner } from "../../src/renderer/src/components/composer/types";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
@@ -163,87 +166,73 @@ describe("composer asynchronous ownership", () => {
 
 
 
-  it("queues with Tab and admits one queued prompt after the active turn completes", async () => {
-    const current = conversation("conversation-queued-prompt");
+  function createQueueStub(conversationId: string) {
+    let entries: QueuedMessage[] = [];
+    let revision = 0;
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.enqueue") {
+        revision += 1;
+        const created: QueuedMessage = {
+          id: command.payload.id, conversationId, content: command.payload.content,
+          attachments: command.payload.attachments, state: "waiting",
+          createdAt: "2026-11-26T00:00:00.000Z", error: null, turnId: null, userMessageId: null,
+        };
+        entries = [...entries, created];
+        return { kind: "message.queue", conversationId, entries, receipt: created, revision };
+      }
+      return { kind: "message.queue", conversationId, entries, receipt: null, revision };
+    });
+    return { onQueueCommand, drain: () => { entries = []; revision += 1; return revision; } };
+  }
+
+  it("queues with Tab via the runtime queue and clears the row when push invalidation drains it", async () => {
+    const current = conversation("11111111-1111-4111-8111-111111111181");
     const onSend = vi.fn(async () => undefined);
+    const { onQueueCommand, drain } = createQueueStub(current.id);
     const runningTurn = {
       ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
-      id: "turn-before-queue",
-      status: "running" as const,
-      harnessId: "codex-app-server" as const,
+      id: "turn-before-queue", status: "running" as const, harnessId: "codex-app-server" as const,
     };
-    const view = render(<Composer {...composerProps(current, {
-      running: true,
-      latestTurn: runningTurn,
-      onSend,
-    })} />);
+    const view = render(<Composer {...composerProps(current, { running: true, latestTurn: runningTurn, onQueueCommand, onSend })} />);
     const textbox = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(textbox, { target: { value: "Run the release checks next" } });
     fireEvent.keyDown(textbox, { key: "Tab" });
 
     await waitFor(() => expect(textbox).toHaveValue(""));
-    expect(await screen.findByText("Run the release checks next"))
-      .toBeInTheDocument();
+    const queue = await screen.findByRole("list", { name: "Queued messages" });
+    expect(within(queue).getByText("Run the release checks next")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem(
-      composerQueueKey(current.id),
-    )).toContain("Run the release checks next");
+    expect(window.localStorage.getItem(composerQueueKey(current.id))).toBeNull();
 
-    view.rerender(<Composer {...composerProps(current, {
-      latestTurn: { ...runningTurn, status: "completed" },
-      queuedTurnAuthoritative: false,
-      onSend,
-    })} />);
+    // Server drains the entry after the turn completes and pushes queue invalidation.
+    const nextRevision = drain();
+    view.rerender(<Composer {...composerProps(current, { latestTurn: { ...runningTurn, status: "completed" }, onQueueCommand, onSend })} />);
+    await act(async () => { announceRuntimeQueueChanged(current.id, nextRevision); });
 
-    await act(async () => Promise.resolve());
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Queued messages" })).not.toBeInTheDocument());
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByText("Run the release checks next")).toBeInTheDocument();
-
-    view.rerender(<Composer {...composerProps(current, {
-      latestTurn: { ...runningTurn, status: "completed" },
-      queuedTurnAuthoritative: true,
-      onSend,
-    })} />);
-
-    await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith(
-      "Run the release checks next",
-      [],
-      undefined,
-    ));
-    await waitFor(() => expect(screen.queryByText("Run the release checks next"))
-      .not.toBeInTheDocument());
-    expect(window.localStorage.getItem(
-      composerQueueKey(current.id),
-    )).toBeNull();
   });
 
   it("keeps queued prompts after a failed turn", async () => {
-    const current = conversation("conversation-queued-after-failure");
+    const current = conversation("11111111-1111-4111-8111-111111111182");
     const onSend = vi.fn(async () => undefined);
+    const { onQueueCommand } = createQueueStub(current.id);
     const runningTurn = {
       ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
-      id: "turn-before-failure",
-      status: "running" as const,
-      harnessId: "codex-app-server" as const,
+      id: "turn-before-failure", status: "running" as const, harnessId: "codex-app-server" as const,
     };
-    const view = render(<Composer {...composerProps(current, {
-      running: true,
-      latestTurn: runningTurn,
-      onSend,
-    })} />);
+    const view = render(<Composer {...composerProps(current, { running: true, latestTurn: runningTurn, onQueueCommand, onSend })} />);
     const textbox = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(textbox, { target: { value: "Keep this for retry" } });
     fireEvent.keyDown(textbox, { key: "Tab" });
-    expect(await screen.findByText("Keep this for retry")).toBeInTheDocument();
+    const queue = await screen.findByRole("list", { name: "Queued messages" });
+    expect(within(queue).getByText("Keep this for retry")).toBeInTheDocument();
 
-    view.rerender(<Composer {...composerProps(current, {
-      latestTurn: { ...runningTurn, status: "failed" },
-      onSend,
-    })} />);
+    view.rerender(<Composer {...composerProps(current, { latestTurn: { ...runningTurn, status: "failed" }, onQueueCommand, onSend })} />);
     await act(async () => Promise.resolve());
 
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByText("Keep this for retry")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Queued messages" })).getByText("Keep this for retry")).toBeInTheDocument();
   });
 
   it("autocompletes a discovered skill invocation and sends transcript-faithful text", async () => {
@@ -1072,9 +1061,15 @@ describe("composer asynchronous ownership", () => {
     expect(commands).toHaveTextContent("/resume");
     expect(screen.getByRole("option", { name: /\/goal/u }))
       .toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("option", { name: /\/plan/u })).toBeDisabled();
-    expect(screen.getByRole("option", { name: /\/build/u })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /\/plan/u })).toBeEnabled();
+    expect(screen.getByRole("option", { name: /\/build/u })).toBeEnabled();
 
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /\/plan/u }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: /\/build/u }))
+      .toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(screen.getByRole("option", { name: /\/calling/u }))
       .toHaveAttribute("aria-selected", "true");

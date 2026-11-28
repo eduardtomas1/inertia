@@ -50,6 +50,7 @@ export interface ResponseTurn {
   approvals: AgentApprovalRequest[];
   inputRequests: AgentInputRequest[];
   checkpoint: CheckpointSummary | null;
+  extraCheckpoints: CheckpointSummary[];
   checkpointUnavailableReason: string | null;
   gitArtifact: TurnGitArtifactSummary | null;
   requestedAt: string;
@@ -252,8 +253,9 @@ function buildTurn(
   const terminalAssistantMessage = agentTurn.terminalAssistantMessageId === null
     ? null
     : assistantMessages.find(({ id }) => id === agentTurn.terminalAssistantMessageId) ?? null;
-  const commentaryMessages = assistantMessages.filter(({ id }) =>
-    id !== terminalAssistantMessage?.id);
+  // An open segment the provider emptied keeps an empty message until more text arrives; it is not an update.
+  const commentaryMessages = assistantMessages.filter(({ id, content, attachments }) =>
+    id !== terminalAssistantMessage?.id && (content !== "" || attachments.length > 0));
   // Visual replies are split out first so they never read as system notices
   // or keep clean settled work from consolidating into Run details.
   const htmlRenders = scopedMessages.filter(({ role, htmlRender }) =>
@@ -284,6 +286,12 @@ function buildTurn(
       })()
     : (indexes.checkpointsByTurn.get(agentTurn.id) ?? [])
       .find((item) => item.conversationId === agentTurn.conversationId) ?? null;
+  const extraCheckpoints = (indexes.checkpointsByTurn.get(agentTurn.id) ?? [])
+    .filter((item) =>
+      item.conversationId === agentTurn.conversationId
+      && item.id !== agentTurn.checkpointId
+      && item.id !== checkpoint?.id)
+    .sort(compareTimestamped);
   const importantActivities: AgentActivity[] = [];
   const foldableActivities: AgentActivity[] = [];
   for (const activity of activities) {
@@ -314,6 +322,7 @@ function buildTurn(
     inputRequests: (indexes.inputRequestsByTurn.get(agentTurn.id) ?? [])
       .filter((request) => request.conversationId === agentTurn.conversationId),
     checkpoint,
+    extraCheckpoints,
     checkpointUnavailableReason: checkpointUnavailableReason(
       checkpoint,
       turnActivities,
@@ -391,6 +400,7 @@ export function buildResponseTimeline(rawInput: BuildResponseTimelineInput): Res
     turn.secretRequests.forEach(({ id }) => claimedMessageIds.add(id));
     turn.sentMessages.forEach(({ id }) => claimedMessageIds.add(id));
     if (turn.checkpoint) claimedCheckpointIds.add(turn.checkpoint.id);
+    turn.extraCheckpoints.forEach(({ id }) => claimedCheckpointIds.add(id));
   }
 
   const compatibility: ResponseTimelineCompatibility = {
@@ -671,6 +681,7 @@ function sameResponseTurn(left: ResponseTurn, right: ResponseTurn): boolean {
     && sameReferences(left.commentaryMessages, right.commentaryMessages)
     && sameReferences(left.systemMessages, right.systemMessages)
     && sameReferences(left.htmlRenders, right.htmlRenders)
+    && sameReferences(left.extraCheckpoints, right.extraCheckpoints)
     && sameReferences(left.secretRequests, right.secretRequests)
     && sameReferences(left.sentMessages, right.sentMessages)
     && sameReferences(left.activities, right.activities)

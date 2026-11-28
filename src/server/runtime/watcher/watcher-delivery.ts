@@ -3,7 +3,12 @@ import type WebSocket from "ws";
 import type { ChatMessage, ServerEvent } from "../../../shared/contracts";
 import { supportsActiveParentFollowUp } from "../../../shared/follow-up-steer";
 import { clipCodeUnits } from "../../../shared/code-units";
-import type { MessageQueueResult } from "../../../shared/queued-messages";
+import {
+  MAX_QUEUED_WATCHER_NOTES,
+  queuedItemsInDeliveryOrder,
+  type QueueItemProjection,
+} from "../../../shared/orchestration-queue";
+import type { MessageQueueResult, QueuedMessage } from "../../../shared/queued-messages";
 import { watcherAgentLabel } from "../../../shared/watcher-agent-label";
 import {
   MAX_WATCHER_NOTE_CHARS,
@@ -13,6 +18,7 @@ import {
   type WatcherNoteAttribution,
 } from "../../../shared/watcher";
 import type { RuntimeStore } from "../../database";
+import { OrchestrationConflict } from "../../orchestration-v2/types";
 import type { WatcherLinkRecord, WatcherWakeRecord } from "../../persistence/watcher-link-repository";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { publicRuntimeError, RuntimeRequestError } from "../../runtime-errors";
@@ -32,7 +38,12 @@ export const WATCHER_DELIVERY_DETAIL = Object.freeze({
   dispatchedLater: "after the turn ended",
   steeredFromQueue: "into the running turn",
   removed: WATCHER_NOTE_REMOVED_REASON,
+  superseded: "a newer note from this watcher replaced it",
+  stale: "the finding was no longer current",
 });
+
+export const WATCHER_QUEUE_FULL_MESSAGE =
+  "The main chat already has five queued watcher notes. Send or remove one, then try again.";
 
 type QueueReason = "queue" | "steer-idle" | "turn-ended" | "refused";
 
@@ -56,13 +67,14 @@ export interface WatcherDeliveryResult {
 }
 
 export interface WatcherNoteQueue {
-  enqueueWatcherNote(input: {
+  enqueueWatcherNote?(input: {
     conversationId: string;
     id: string;
     content: string;
     watcherNote: WatcherNoteAttribution;
   }): MessageQueueResult;
-  withdrawWatcherNote(conversationId: string, id: string): boolean;
+  withdrawWatcherNote?(conversationId: string, id: string): boolean;
+  schedule?(conversationId: string): Promise<void> | void;
 }
 
 interface WatcherDeliveryDependencies {
@@ -92,6 +104,73 @@ export function watcherLabel(
 export function watcherNoteText(finding: string): string {
   const normalized = watcherNormalizeLineBreaks(finding).trim();
   return clipCodeUnits(neutralizeUntrustedAgentText(normalized), MAX_WATCHER_NOTE_CHARS).trimEnd();
+}
+
+export function watcherNoteStaleReason(
+  store: RuntimeStore,
+  conversationId: string,
+  attribution: WatcherNoteAttribution,
+): string | null {
+  const link = store.watcherLinks.get(attribution.linkId);
+  if (!link || link.status === "detached" || link.watchedConversationId !== conversationId) {
+    return "the watcher is no longer watching this chat";
+  }
+  const wake = store.watcherLinks.getWake(attribution.wakeId);
+  if (!wake || wake.linkId !== attribution.linkId) {
+    return "the finding no longer exists";
+  }
+  if (wake.delivery?.state === "dismissed") {
+    return "the finding was dismissed";
+  }
+  if (wake.delivery?.state === "sent") {
+    return "the finding was already sent";
+  }
+  if (
+    wake.watchedTurnId !== null
+    && store.orchestration.events.projection("rolled-back-turn", wake.watchedTurnId) !== null
+  ) {
+    return "the reviewed turn was rolled back";
+  }
+  const recent = store.watcherLinks.feed(link.id, 10)?.items ?? [];
+  const newerDelivered = recent.some(
+    (other) => other.wakeId !== wake.wakeId
+      && other.outcome === "finding"
+      && other.createdAt > wake.createdAt
+      && (other.delivery?.state === "sent" || other.delivery?.state === "queued"),
+  );
+  if (newerDelivered) {
+    return WATCHER_DELIVERY_DETAIL.superseded;
+  }
+  return null;
+}
+
+export function cancelStaleWatcherNote(
+  store: RuntimeStore,
+  conversationId: string,
+  itemId: string,
+  onUndelivered?: (attribution: WatcherNoteAttribution, reason: string) => void,
+): boolean {
+  const item = store.orchestration.queue.getItem(itemId);
+  if (
+    !item
+    || item.threadId !== conversationId
+    || item.kind !== "watcher-note"
+    || (item.state !== "waiting" && item.state !== "blocked")
+    || !item.attribution
+    || !("watcherNote" in item.attribution)
+  ) {
+    return false;
+  }
+  const reason = watcherNoteStaleReason(store, conversationId, item.attribution.watcherNote);
+  if (reason === null) return false;
+  store.orchestration.queue.cancel({
+    conversationId,
+    itemId,
+    reason: "stale",
+    detail: reason,
+  });
+  onUndelivered?.(item.attribution.watcherNote, reason);
+  return true;
 }
 
 export class WatcherDeliveryService {
@@ -134,10 +213,23 @@ export class WatcherDeliveryService {
     const dismissed = this.#deps.store.watcherLinks.setDelivery(wakeId, { mode: null, state: "dismissed", automatic: false }, this.#deps.now());
     if (!dismissed) throw new RuntimeRequestError("This finding can no longer be dismissed.");
     if (wake.queuedMessageId !== null && found.link.watchedConversationId !== null) {
-      this.#deps.queue()?.withdrawWatcherNote(found.link.watchedConversationId, wake.queuedMessageId);
+      this.#withdrawQueuedNote(found.link.watchedConversationId, wake.queuedMessageId, "stale", "the finding was dismissed");
     }
     this.#deps.changed(linkId);
     return this.#result(linkId, dismissed);
+  }
+
+  cancelIfStale(conversationId: string, itemId: string): boolean {
+    const cancelled = cancelStaleWatcherNote(
+      this.#deps.store,
+      conversationId,
+      itemId,
+      (attribution, reason) => this.noteUndelivered(attribution, reason),
+    );
+    if (cancelled) {
+      this.#deps.interaction()?.broadcast({ type: "conversation.detail.invalidated", conversationId });
+    }
+    return cancelled;
   }
 
   noteDelivered(attribution: WatcherNoteAttribution, message: Pick<ChatMessage, "id" | "turnId">): void {
@@ -175,19 +267,66 @@ export class WatcherDeliveryService {
     }
   }
 
+  #withdrawQueuedNote(conversationId: string, itemId: string, reason: "stale" | "withdrawn", detail?: string): boolean {
+    const v2 = this.#deps.store.orchestration.queue.getItem(itemId);
+    if (v2 && v2.threadId === conversationId && v2.kind === "watcher-note" && (v2.state === "waiting" || v2.state === "blocked")) {
+      this.#deps.store.orchestration.queue.cancel({
+        conversationId,
+        itemId,
+        reason,
+        ...(detail !== undefined ? { detail } : {}),
+      });
+      this.#deps.interaction()?.broadcast({ type: "conversation.detail.invalidated", conversationId });
+      return true;
+    }
+    return this.#deps.queue()?.withdrawWatcherNote?.(conversationId, itemId) ?? false;
+  }
+
   #reconcileQueued(link: WatcherLinkRecord, wake: WatcherWakeRecord): WatcherWakeRecord {
     if (wake.delivery?.state !== "queued" || wake.queuedMessageId === null || link.watchedConversationId === null) return wake;
+    const v2 = this.#deps.store.orchestration.queue.getItem(wake.queuedMessageId);
     const entry = this.#deps.store.queuedMessages.get(link.watchedConversationId, wake.queuedMessageId);
     let update: Parameters<RuntimeStore["watcherLinks"]["setDelivery"]>[1] | null = null;
-    if (!entry || entry.state === "cancelled") {
-      update = { mode: "queue", state: "failed", detail: WATCHER_DELIVERY_DETAIL.removed };
-    } else if (entry.state === "blocked") {
-      update = { mode: "queue", state: "failed", detail: entry.error ?? WATCHER_DELIVERY_DETAIL.removed };
-    } else if (entry.state === "accepted") {
-      update = {
-        mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.dispatchedLater,
-        ...(entry.userMessageId ? { deliveredMessageId: entry.userMessageId } : {}),
-      };
+    if (v2 && v2.threadId === link.watchedConversationId) {
+      if (v2.state === "cancelled") {
+        const detail = v2.cancelReason === "superseded"
+          ? WATCHER_DELIVERY_DETAIL.superseded
+          : v2.cancelReason === "stale"
+            ? v2.detail ?? WATCHER_DELIVERY_DETAIL.stale
+            : v2.detail ?? WATCHER_DELIVERY_DETAIL.removed;
+        update = { mode: "queue", state: "failed", detail };
+      } else if (v2.state === "blocked") {
+        update = { mode: "queue", state: "failed", detail: v2.detail ?? entry?.error ?? WATCHER_DELIVERY_DETAIL.removed };
+      } else if (v2.state === "delivered") {
+        update = {
+          mode: "queue",
+          state: "sent",
+          detail: v2.delivery?.mode === "steer"
+            ? WATCHER_DELIVERY_DETAIL.steeredFromQueue
+            : WATCHER_DELIVERY_DETAIL.dispatchedLater,
+          ...(v2.delivery?.messageId ? { deliveredMessageId: v2.delivery.messageId } : {}),
+        };
+      }
+    }
+    if (!update) {
+      if (!entry || entry.state === "cancelled") {
+        if (v2 && (v2.state === "waiting" || v2.state === "blocked")) {
+          this.#deps.store.orchestration.queue.cancel({
+            conversationId: link.watchedConversationId,
+            itemId: wake.queuedMessageId,
+            reason: "stale",
+            detail: WATCHER_DELIVERY_DETAIL.removed,
+          });
+        }
+        update = { mode: "queue", state: "failed", detail: WATCHER_DELIVERY_DETAIL.removed };
+      } else if (entry.state === "blocked") {
+        update = { mode: "queue", state: "failed", detail: entry.error ?? WATCHER_DELIVERY_DETAIL.removed };
+      } else if (entry.state === "accepted") {
+        update = {
+          mode: "queue", state: "sent", detail: WATCHER_DELIVERY_DETAIL.dispatchedLater,
+          ...(entry.userMessageId ? { deliveredMessageId: entry.userMessageId } : {}),
+        };
+      }
     }
     if (!update) return wake;
     const updated = this.#deps.store.watcherLinks.setDelivery(wake.wakeId, update, this.#deps.now());
@@ -244,7 +383,7 @@ export class WatcherDeliveryService {
     const note = watcherNoteText(wake.finding!);
     if (note.length === 0) throw new RuntimeRequestError("This finding has no text to send.");
     if (wake.delivery?.state === "failed" && wake.queuedMessageId !== null && wake.queuedMessageId !== deliveryId) {
-      this.#deps.queue()?.withdrawWatcherNote(watchedId, wake.queuedMessageId);
+      this.#withdrawQueuedNote(watchedId, wake.queuedMessageId, "withdrawn");
     }
     const label = watcherLabel(this.#deps.store, link.watcherConversationId, this.#deps.providerLabels());
     const { providerId } = this.#deps.store.conversation(link.watcherConversationId);
@@ -262,7 +401,8 @@ export class WatcherDeliveryService {
     if (mode === "steer") {
       const latest = this.#deps.store.latestAgentTurnForConversation(watchedId);
       const running = this.#deps.turns.isActive(watchedId);
-      if (running && !supportsActiveParentFollowUp(latest?.harnessId ?? null)) {
+      const activeHarnessId = latest?.harnessId ?? watched.modelSelection.harnessId ?? null;
+      if (running && !supportsActiveParentFollowUp(activeHarnessId)) {
         throw new RuntimeRequestError("Steer now is not available for this agent. Send the note to queue it instead.");
       }
       if (!running) return await this.#queue(linkId, wakeId, watchedId, note, attribution("queue"), deliveryId, "steer-idle");
@@ -323,22 +463,66 @@ export class WatcherDeliveryService {
     reason: QueueReason,
   ): Promise<WatcherDeliveryResult> {
     const detail = QUEUE_DETAILS[reason];
-    const queuedAhead = this.#deps.store.queuedMessages.list(watchedId).some(({ state }) => state !== "blocked");
+    const v2Active = this.#deps.store.orchestration.queue.listActive(watchedId);
+    const queuedAhead = v2Active.some(({ state }) => state !== "blocked")
+      || this.#deps.store.queuedMessages.list(watchedId).some(({ state }) => state !== "blocked");
     if (!this.#deps.turns.isActive(watchedId) && !queuedAhead) {
       const started = await this.#sendNow(linkId, wakeId, watchedId, note, attribution, deliveryId, detail);
       if (started) return started;
     }
     const queue = this.#deps.queue();
     if (!queue) throw new RuntimeRequestError("The main chat's queue is unavailable.");
-    let result: MessageQueueResult;
-    try {
-      result = queue.enqueueWatcherNote({ conversationId: watchedId, id: deliveryId, content: note, watcherNote: attribution });
-    } catch (error) {
+    const interaction = this.#deps.interaction();
+    if (interaction && !interaction.enableProviders) {
+      throw new RuntimeRequestError("Message queues require an available provider runtime.");
+    }
+    const priorWaiting = v2Active.find(
+      (item) => item.kind === "watcher-note"
+        && item.state === "waiting"
+        && item.attribution !== undefined
+        && "watcherNote" in item.attribution
+        && item.attribution.watcherNote.linkId === linkId,
+    );
+    const activeWatcherCount = v2Active.filter(
+      (item) => item.kind === "watcher-note" && item.id !== priorWaiting?.id,
+    ).length;
+    if (activeWatcherCount >= MAX_QUEUED_WATCHER_NOTES) {
+      const error = new RuntimeRequestError(WATCHER_QUEUE_FULL_MESSAGE);
       this.#record(linkId, wakeId, {
-        mode: "queue", state: "failed", detail: publicRuntimeError(error), deliveryId, automatic: attribution.automatic === true,
+        mode: "queue", state: "failed", detail: error.message, deliveryId, automatic: attribution.automatic === true,
       });
       throw error;
     }
+    try {
+      this.#deps.store.orchestration.queue.enqueue({
+        conversationId: watchedId,
+        itemId: deliveryId,
+        content: note,
+        attachments: [],
+        kind: "watcher-note",
+        createdBy: "system",
+        creationSource: "server",
+        followsThreadSelection: true,
+        requestedAt: this.#deps.now(),
+        attribution: { watcherNote: attribution },
+        origin: "automatic",
+        commandType: "message.queue.enqueue",
+      });
+    } catch (error) {
+      const surfaced = error instanceof OrchestrationConflict
+        ? new RuntimeRequestError(WATCHER_QUEUE_FULL_MESSAGE)
+        : error;
+      this.#record(linkId, wakeId, {
+        mode: "queue", state: "failed", detail: publicRuntimeError(surfaced), deliveryId, automatic: attribution.automatic === true,
+      });
+      throw surfaced;
+    }
+    if (priorWaiting?.attribution && "watcherNote" in priorWaiting.attribution) {
+      this.noteUndelivered(priorWaiting.attribution.watcherNote, WATCHER_DELIVERY_DETAIL.superseded);
+    }
+    interaction?.broadcast({ type: "conversation.detail.invalidated", conversationId: watchedId });
+    void queue.schedule?.(watchedId);
+    const result = this.#queueResult(watchedId, deliveryId);
     const current = this.#deps.store.watcherLinks.getWake(wakeId);
     const recorded = current?.delivery?.state === "sent"
       ? this.#result(linkId, current)
@@ -346,6 +530,53 @@ export class WatcherDeliveryService {
           mode: "queue", state: "queued", detail, deliveryId, queuedMessageId: deliveryId, automatic: attribution.automatic === true,
         });
     return { ...recorded, queue: result };
+  }
+
+  #queueResult(conversationId: string, receiptId: string): MessageQueueResult {
+    const v2Active = this.#deps.store.orchestration.queue.listActive(conversationId);
+    const rowsById = new Map(this.#deps.store.queuedMessages.list(conversationId).map((row) => [row.id, row]));
+    const orderables: Array<{
+      id: string;
+      kind: QueueItemProjection["kind"];
+      queuePosition: number | null;
+      requestedAt: string;
+      entry: QueuedMessage;
+    }> = [];
+    const seen = new Set<string>();
+    for (const item of v2Active) {
+      const row = rowsById.get(item.id) ?? this.#deps.store.queuedMessages.get(conversationId, item.id);
+      if (!row) continue;
+      seen.add(item.id);
+      orderables.push({
+        id: item.id,
+        kind: item.kind,
+        queuePosition: item.queuePosition,
+        requestedAt: item.requestedAt,
+        entry: row,
+      });
+    }
+    for (const row of rowsById.values()) {
+      if (seen.has(row.id)) continue;
+      const kind: QueueItemProjection["kind"] = row.delegatedCompletion
+        ? "delegated-results"
+        : row.watcherNote
+          ? "watcher-note"
+          : row.kind ?? "message";
+      orderables.push({
+        id: row.id,
+        kind,
+        queuePosition: row.queuePosition ?? null,
+        requestedAt: row.createdAt,
+        entry: row,
+      });
+    }
+    const entries = queuedItemsInDeliveryOrder(orderables).map(({ entry }) => entry);
+    return {
+      kind: "message.queue",
+      conversationId,
+      entries,
+      receipt: this.#deps.store.queuedMessages.get(conversationId, receiptId),
+    };
   }
 
   async #sendNow(

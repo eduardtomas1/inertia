@@ -108,6 +108,7 @@ export function ProviderAuthDialog({
   const providerId = provider?.id ?? null;
   const providerLabel = provider?.label ?? "provider";
   const isAntigravity = providerId === "antigravity";
+  const isPi = providerId === "pi";
   useNativePreviewSuspension(provider !== null);
 
   const openBrowser = useCallback(async (url: string): Promise<void> => {
@@ -484,11 +485,13 @@ export function ProviderAuthDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="provider-auth-title"
-        aria-describedby={isAntigravity || method === "console" ? "provider-auth-description" : undefined}
+        aria-describedby={isAntigravity || isPi || method === "console" ? "provider-auth-description" : undefined}
       >
         <header className="provider-auth-header">
           <span><h2 id="provider-auth-title">{method === "console" ? `Sign in to ${provider.label} for API billing` : `Connect ${provider.label}`}</h2>{isAntigravity && <p id="provider-auth-description">
             Sign in with Antigravity&apos;s own prompt below. Inertia only shows this terminal and doesn&apos;t read or store your sign-in. Close this window once Antigravity is ready.
+          </p>}{isPi && <p id="provider-auth-description">
+            Use Pi’s /login command below, then close this window. Pi keeps its own account configuration; your next request verifies the selected model.
           </p>}{method === "console" && <p id="provider-auth-description">
             Uses your Anthropic Console credits through Claude Code&apos;s own login.
           </p>}</span>

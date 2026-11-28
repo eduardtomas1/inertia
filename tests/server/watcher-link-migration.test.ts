@@ -44,7 +44,8 @@ function cloneRow(database: Database.Database, table: string, sourceId: string, 
 }
 
 const rows = (database: Database.Database, sql: string): Row[] => database.prepare(sql).all() as Row[];
-const withoutNote = (entries: Row[]): Row[] => entries.map(({ watcher_note_json: _note, duo_comparison_json: _duo, custom_agent_call_json: _call, secret_request_json: _secret, sent_to_user: _sent, ...row }) => row);
+const withoutNote = (entries: Row[]): Row[] => entries.map(({ watcher_note_json: _note, duo_comparison_json: _duo,
+  delegated_completion_json: _delegated, custom_agent_call_json: _call, secret_request_json: _secret, sent_to_user: _sent, ...row }) => row);
 
 async function schema98Database() {
   const directory = await mkdtemp(join(tmpdir(), "inertia-watcher-migration-"));
@@ -102,12 +103,31 @@ describe("watcher link migration", () => {
       const messages = rows(migrated, "SELECT * FROM messages ORDER BY id");
       expect(withoutNote(messages)).toEqual(before.messages);
       expect(messages.every((row) => row.watcher_note_json === null)).toBe(true);
-      expect(messages.every((row) => row.duo_comparison_json === null)).toBe(true);
+      expect(messages.every((row) => row.duo_comparison_json === null && row.delegated_completion_json === null)).toBe(true);
       expect(messages.every((row) => row.custom_agent_call_json === null)).toBe(true);
       expect(messages.every((row) => row.secret_request_json === null)).toBe(true);
       expect(messages.every((row) => row.sent_to_user === 0)).toBe(true);
       const queued = rows(migrated, "SELECT * FROM queued_messages ORDER BY sequence");
-      expect(withoutNote(queued)).toEqual(before.queued);
+      expect(queued.every((row) => row.watcher_note_json === null && row.delegated_completion_json === null)).toBe(true);
+      expect(withoutNote(queued)).toEqual(before.queued.map((row) => ({
+        ...row,
+        queue_position: 1,
+        queue_held: 0,
+        kind: "message",
+        created_by: "user",
+        creation_source: "web",
+        device_id: null,
+        steer_follow_up_of_run_id: null,
+        edit_revision: 0,
+        edited_at: null,
+        creation_digest: row.intent_digest,
+        dispatch_ordinal: 0,
+        run_id: null,
+        delivery_mode: null,
+        steer_when_ready_run_id: null,
+        selection_json: null,
+        follows_thread_selection: 0,
+      })));
       expect(rows(migrated, "SELECT * FROM agent_context_reads ORDER BY id")).toEqual(before.reads);
       expect(rows(migrated, `
         SELECT name FROM sqlite_master

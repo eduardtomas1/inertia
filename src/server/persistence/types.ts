@@ -143,16 +143,37 @@ export interface AgentTurnLifecycleUpdate {
 
 export interface BeginAgentTurnInput
   extends Omit<CreateAgentTurnInput, "userMessageId" | "requestedAt"> {
+  contextHandoff?: import("../../shared/orchestration-backings").PreparedContextHandoff;
+  backingRelocation?: import("../../shared/orchestration-backings").PreparedBackingRelocation;
+  /** The checkout preparation resolved; admission refuses if the chat moved since. */
+  preparedWorkspaceKey?: string;
+  nativeContinuation?: {
+    rollbackId: string;
+    continuation: import("../../shared/orchestration-history").HistoryCursor["continuation"] & object;
+  };
   queuedMessageId?: string;
+  /**
+   * Start on this persisted follow-up message, which its provider accepted but
+   * never read, instead of creating one. It moves only out of the ended,
+   * retained turn that still owns it.
+   */
+  adoptedFollowUp?: { messageId: string };
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
   content: string;
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
+  /**
+   * True when this turn was admitted with an explicit pinned `modelSelectionOverride`
+   * (e.g. a queued item or cross-provider Resume continuation) whose provider may
+   * legitimately differ from the live composer's current provider.
+   */
+  allowProviderSelectionOverride?: boolean;
   /**
    * Exact stale provider session that must be cleared atomically with this
    * fresh turn. A mismatched persisted session aborts the whole transaction.
@@ -171,6 +192,7 @@ export interface BeginAgentTurnInput
 export interface CreateMessageOptions {
   privateConnectDeviceId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   duoComparison?: DuoComparisonBrief;
   customAgentCall?: import("../../shared/custom-agents").CustomAgentCallAttribution;
   compaction?: import("../../shared/context-compaction").ContextCompaction;
@@ -186,6 +208,33 @@ export interface CreateMessageOptions {
 export interface AgentTurnSettlementUpdate
   extends Omit<AgentTurnLifecycleUpdate, "status"> {
   status: AgentTurnTerminalStatus;
+  /**
+   * The provider definitely received nothing for this turn. Settlement then
+   * returns the handoff, backing and continuation cursors to their state
+   * before dispatch instead of treating the delivery as uncertain, and the
+   * turn's restored-history notice is dropped (except for a provider-switch
+   * restore, which also marks the route handoff).
+   *
+   * `prompt-dropped`: the provider took the request but dropped the prompt before keeping it in its native
+   * history (T3 `promptDropped`; Cursor SDK), so its output delivered nothing either: the turn settles as not
+   * delivered (handoff abandoned, backing restored, nothing credited) on a failed, cancelled or interrupted turn,
+   * and its run is marked so that a cancelled one still counts as missed. A rollback cursor the harness applied when
+   * it opened the session stays applied.
+   */
+  providerDelivery?: "not-delivered" | "prompt-dropped";
+  /** A failed turn's provider failure code, recorded on its V2 run for the next turn's preparation. */
+  providerFailureCode?: import("../../shared/orchestration-v2").OrchestrationRunFailureCode;
+  /**
+   * Why the provider itself stopped a turn that did not fail (a Codex hook), recorded on its V2 run for the
+   * delegated result. Bounded and sanitized provider text.
+   */
+  providerStopReason?: string;
+  /**
+   * Accepted follow-ups the provider never read. Their messages never count
+   * toward this turn's provider coverage, and settlement queues each one by
+   * reference to be sent as its own turn.
+   */
+  unreadFollowUpMessageIds?: readonly string[];
   /** Controller-owned stored projections belong to the same terminal commit. */
   projection?: {
     workspaceRunCreated: boolean;
@@ -198,6 +247,8 @@ export interface AgentTurnSettlementUpdate
 export interface AgentTurnSettlementResult {
   settled: boolean;
   turn: AgentTurn;
+  /** The "Stopped by the provider" activity written with the settlement, when the run records a provider stop reason. */
+  providerStopNotice?: AgentActivity;
 }
 
 export interface StoredTurnGitArtifact extends TurnGitArtifact {

@@ -48,6 +48,7 @@ export const SECRET_REQUEST_ROUTES: Readonly<Record<ProviderId, SecretRequestRou
   opencode: "remote-mcp",
   antigravity: "acp-mcp",
   grok: "acp-mcp",
+  pi: "remote-mcp",
 });
 
 export const SECRET_REQUEST_WAIT_MS_BY_PROVIDER: Readonly<Record<ProviderId, number>> = Object.freeze({
@@ -58,6 +59,7 @@ export const SECRET_REQUEST_WAIT_MS_BY_PROVIDER: Readonly<Record<ProviderId, num
   opencode: SECRET_REQUEST_DEFAULT_WAIT_MS,
   antigravity: 270_000,
   grok: SECRET_REQUEST_DEFAULT_WAIT_MS,
+  pi: 270_000,
 });
 
 export function secretRequestWaitMs(providerId: ProviderId): number {

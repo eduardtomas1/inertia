@@ -270,7 +270,9 @@ export function WorkspaceHeader({
       ? "Settings"
       : view === "tasks"
         ? "Tasks"
-        : view === "library"
+        : view === "schedules"
+          ? "Schedules"
+          : view === "library"
           ? "Library"
           : conversation?.title ?? project?.name ?? "Workspace";
   const showProjectCrumb = view === "workspace" && project !== null && conversation !== null;

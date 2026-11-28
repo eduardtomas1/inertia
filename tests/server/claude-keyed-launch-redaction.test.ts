@@ -334,9 +334,12 @@ describe("keyed Claude launch redaction", () => {
       },
     };
     expect(hookOutputs).toEqual([refusal, refusal, refusal, {}, {}, {}]);
-    expect(decisions.map((decision) => decision.behavior)).toEqual(["deny", "deny", "allow"]);
+    expect(decisions.map((decision) => decision.behavior)).toEqual(["deny", "deny", "deny"]);
     expect(decisions[0]).toMatchObject({ message: CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL });
     expect(decisions[1]).toMatchObject({ message: CLAUDE_KEYED_LAUNCH_COMMAND_REFUSAL });
+    // Claude Code forwards a command under full access only when it needs a
+    // person, so the ordinary command reaches the user, who declines it here.
+    expect(decisions[2]).toMatchObject({ message: "User declined tool execution." });
     expectNoSecret(events);
   });
 

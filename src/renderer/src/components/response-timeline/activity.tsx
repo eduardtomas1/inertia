@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import "./ActivityGroup.css";
 import { PlanDetail } from "./PlanDetail";
+import { DelegatedCompletionCard } from "../orchestration/delegated-completion-card";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
 import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import { usePhaseLockedAnimations } from "../../hooks/usePhaseLockedAnimations";
@@ -82,6 +83,7 @@ import { useTaskCreator } from "../tasks/taskCreation";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import { MessageOrigin } from "./MessageOrigin";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
+import { isProviderStopNotice } from "@shared/activity-display";
 import { ContextCompactionActivityMarker } from "./ContextCompactionRow";
 import { stabilizeTurnExecutionStream } from "./execution-stream";
 import { HtmlRenderFrame } from "./html-render";
@@ -258,7 +260,7 @@ export const ActivityRow = memo(function ActivityRow({
     && !activityTitleConveysSeverity(visibleTitle, attentionSeverity)
     ? spokenState
     : null;
-  const disclosureLabel = activity.kind === "error" || interrupted
+  const disclosureLabel = activity.kind === "error" || interrupted || isProviderStopNotice(activity)
     ? "Details"
     : "Output";
   return (
@@ -429,6 +431,7 @@ export function FollowUpRow({
   entry: Extract<TurnExecutionStreamEntry, { kind: "follow-up" }>;
 }): React.JSX.Element {
   const taskCreator = useTaskCreator();
+  if (entry.message.delegatedCompletion) return <DelegatedCompletionCard message={entry.message} followUp />;
   return (
     <article
       className="turn-follow-up-row"
@@ -857,6 +860,7 @@ export function WorkLog({
   onBeforeToggle,
   onAfterToggle,
   fold = null,
+  foldedDetails = null,
 }: MarkdownRoutingProps & {
   turn: ResponseTurn;
   autoCollapse: boolean;
@@ -871,6 +875,8 @@ export function WorkLog({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
   fold?: TurnFoldControl | null;
+  /** Kept mounted inside the fold's region, so it keeps its state, and hidden with it while the fold is closed. */
+  foldedDetails?: React.ReactNode;
 }): React.JSX.Element | null {
   const markdown: MarkdownRoutingProps = { projectRoot, projectBaseRoot, projectId, conversationId, defaultCodeWrap, onOpenProjectFile, onPreviewMedia };
   const [expanded, setExpanded] = useState(!autoCollapse);
@@ -1082,6 +1088,7 @@ export function WorkLog({
                 {traceDetails}
               </>
             )}
+            {foldedDetails}
           </div>
         )}
         {failureTitle && (

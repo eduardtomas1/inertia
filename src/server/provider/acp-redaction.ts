@@ -65,6 +65,11 @@ export class AcpSecretRedactor {
     return this.reasoning.push(value);
   }
 
+  /** A separate boundary redactor over the same secrets, for a harness that streams several blocks at once. */
+  streamRedactor(): BoundarySecretRedactor {
+    return new BoundarySecretRedactor(() => this.matcher);
+  }
+
   stderrChunk(value: string): string {
     return this.stderr.push(value);
   }

@@ -7,6 +7,7 @@ import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { projectFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
 import { releaseProviderRecoveryRecords } from "./provider-run-ownership-repository";
+import { assertNativeProjectIdle } from "../orchestration-v2/native-control-fence";
 import { cachedStatement } from "./statement-cache";
 
 const PROJECT_COLORS = ["#6f76d9", "#5b8ca8", "#8a73ba", "#a76c79", "#9a814f", "#687f91"] as const;
@@ -84,6 +85,9 @@ export class ProjectRepository {
     const current = projectFromRow(this.context.requireProject(projectId));
     const unchanged = Object.entries(update).every(([key, value]) => current[key as keyof Project] === value);
     if (unchanged) return current;
+    if (["normalizedPath", "repositoryIdentity", "repositoryRoot", "repositoryRelativePath"].some((key) => Object.hasOwn(update, key))) {
+      assertNativeProjectIdle(this.context.database, projectId);
+    }
     const next = { ...current, ...update, updatedAt: new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString() };
     const preferencesJson = JSON.stringify(projectPreferencesSchema.parse(next.preferences));
     this.context.database.transaction(() => {
@@ -146,10 +150,12 @@ export class ProjectRepository {
     projectId: string,
     recoveryRecords: readonly { turnId: string; runId: string }[] = [],
   ): void {
+    assertNativeProjectIdle(this.context.database, projectId);
     this.context.requireProject(projectId);
     const state = cachedStatement(this.context.database, "SELECT active_project_id FROM app_state WHERE id = 1").get() as { active_project_id: string | null } | undefined;
     this.context.database.transaction(() => {
       releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
+      cachedStatement(this.context.database, "DELETE FROM orchestration_v2_receipts WHERE project_id = ?").run(projectId);
       cachedStatement(this.context.database, "DELETE FROM projects WHERE id = ?").run(projectId);
     })();
     const activeProjectId = state?.active_project_id ?? null;

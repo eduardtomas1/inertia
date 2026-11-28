@@ -74,7 +74,7 @@ import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import "./sidebar/thread-actions.css";
 import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
-import { loadDailyWorkDialog, loadLibraryView, loadMultiSpawnDialog, loadSettingsView, loadTasksView } from "./lazySurfaceLoaders";
+import { loadDailyWorkDialog, loadLibraryView, loadMultiSpawnDialog, loadScheduledTasksView, loadSettingsView, loadTasksView } from "./lazySurfaceLoaders";
 import { sidebarTasksLabel, tasksNeedingYou } from "./sidebar/sidebarTaskCount";
 import type { AppView } from "../appView";
 import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
@@ -1065,6 +1065,10 @@ function SidebarView({
           <ListTodo size={16} aria-hidden="true" />
           <span>Tasks</span>
           {tasksNeedYou > 0 && <span className="sidebar-tasks-count" aria-hidden="true">{tasksNeedYou}</span>}
+        </button>
+        <button type="button" className={clsx("sidebar-primary-action sidebar-schedules-action", view === "schedules" && "is-active")} aria-current={view === "schedules" ? "page" : undefined} onFocus={() => void loadScheduledTasksView()} onPointerDown={() => void loadScheduledTasksView()} onPointerEnter={() => void loadScheduledTasksView()} onClick={() => navigate("schedules")}>
+          <Clock size={16} aria-hidden="true" />
+          <span>Schedules</span>
         </button>
         <button type="button" className={clsx("sidebar-primary-action sidebar-library-action", view === "library" && "is-active")} aria-current={view === "library" ? "page" : undefined} onFocus={() => void loadLibraryView()} onPointerDown={() => void loadLibraryView()} onPointerEnter={() => void loadLibraryView()} onClick={() => navigate("library")}>
           <Bookmark size={16} aria-hidden="true" />

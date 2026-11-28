@@ -23,8 +23,9 @@ import {
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
   composerMediaQueueKey,
-  enqueueComposerPrompt,
 } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
+import type { QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
+import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 import {
   prepareComposerDetachment,
   registerComposerOwnership,
@@ -204,7 +205,7 @@ describe("composer detachment ownership", () => {
     const onUpdateConversation = vi.fn<React.ComponentProps<typeof Composer>["onUpdateConversation"]>(async () => undefined);
     render(<Composer {...composerProps(current, { providers: [available], onUpdateConversation })} />);
     fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
-    fireEvent.click(screen.getByTitle("Saved Agent").closest("button")!);
+    fireEvent.click((await screen.findByTitle("Saved Agent")).closest("button")!);
     await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
     expect(onUpdateConversation.mock.calls[0]![0]).toMatchObject({
       modelSelection: { reasoningEffort: "high", providerOptions: explicit ? { fastMode: "priority" } : {} },
@@ -637,11 +638,15 @@ describe("composer detachment ownership", () => {
       mimeType: "image/png",
       size: 128,
     };
-    expect(enqueueComposerPrompt(
-      current.id,
-      "Move only after this sends",
-      [queuedAttachment],
-    )).toBe(true);
+    window.sessionStorage.setItem(
+      composerMediaQueueKey(current.id),
+      JSON.stringify([{
+        id: "legacy-queued-media",
+        content: "Move only after this sends",
+        createdAt: "2026-08-21T10:00:00.000Z",
+        attachments: [queuedAttachment],
+      }]),
+    );
 
     expect(prepareComposerDetachment(current.id)).toEqual({
       status: "blocked",
@@ -651,8 +656,8 @@ describe("composer detachment ownership", () => {
     });
   });
 
-  it("queues three provider-wide media turns and admits one per completion", async () => {
-    const current = conversation("conversation-three-media-prompts");
+  it("queues three provider-wide media turns via the runtime queue without writing sessionStorage", async () => {
+    const current = conversation("11111111-1111-4111-8111-111111111171");
     const attachments = [
       {
         id: "11111111-1111-4111-8111-111111111111",
@@ -682,6 +687,26 @@ describe("composer detachment ownership", () => {
       .mockResolvedValueOnce(attachmentLease([attachments[2]]));
     const onSend = vi.fn(async () => undefined);
     const onReleaseAttachment = vi.fn(async () => undefined);
+    const entries: QueuedMessage[] = [];
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.enqueue") {
+        if (entries.length >= 3) throw new Error("Queue is full.");
+        const created: QueuedMessage = {
+          id: command.payload.id,
+          conversationId: current.id,
+          content: command.payload.content,
+          attachments: command.payload.attachments,
+          state: "waiting",
+          createdAt: "2026-11-26T00:00:00.000Z",
+          error: null,
+          turnId: null,
+          userMessageId: null,
+        };
+        entries.push(created);
+        return { kind: "message.queue", conversationId: current.id, entries: [...entries], receipt: created };
+      }
+      return { kind: "message.queue", conversationId: current.id, entries: [...entries], receipt: null };
+    });
     const runningTurn = {
       ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
       id: "turn-before-media-queue",
@@ -693,63 +718,45 @@ describe("composer detachment ownership", () => {
       latestTurn: runningTurn,
       onChooseAttachments,
       onReleaseAttachment,
+      onQueueCommand,
       onSend,
     };
-    const view = render(<Composer {...composerProps(current, runningProps)} />);
+    render(<Composer {...composerProps(current, runningProps)} />);
     const textbox = screen.getByRole("textbox", { name: "Message" });
 
     for (const [index, content] of ["A", "B", "C"].entries()) {
-      fireEvent.click(screen.getByRole("button", { name: "Attach queued images" }));
+      fireEvent.click(screen.getByRole("button", { name: "Attach images or documents to queue" }));
       await screen.findByText(attachments[index].name);
       fireEvent.change(textbox, { target: { value: content } });
       fireEvent.keyDown(textbox, { key: "Tab" });
       await waitFor(() => expect(textbox).toHaveValue(""));
     }
 
-    // The queue is persisted synchronously, while its deferred UI chunk can
-    // finish loading on a later render under a busy full-shard worker.
     expect(await screen.findByText("1 of 3")).toBeInTheDocument();
-    expect(JSON.parse(window.sessionStorage.getItem(
-      composerMediaQueueKey(current.id),
-    ) ?? "[]")).toHaveLength(3);
+    expect(window.sessionStorage.getItem(composerMediaQueueKey(current.id))).toBeNull();
     fireEvent.change(textbox, { target: { value: "D stays in the composer" } });
     fireEvent.keyDown(textbox, { key: "Tab" });
-    await waitFor(() => expect(textbox).toHaveValue("D stays in the composer"));
-    await act(async () => Promise.resolve());
-
-    const completeTurn = async (id: string, callCount: number): Promise<void> => {
-      view.rerender(<Composer {...composerProps(current, {
-        latestTurn: { ...runningTurn, id, status: "completed" },
-        onChooseAttachments,
-        onReleaseAttachment,
-        onSend,
-      })} />);
-      await waitFor(() => expect(onSend).toHaveBeenCalledTimes(callCount));
-      if (callCount < 3) {
-        view.rerender(<Composer {...composerProps(current, {
-          ...runningProps,
-          latestTurn: { ...runningTurn, id: `${id}-active` },
-        })} />);
-      }
-    };
-
-    await completeTurn("turn-completed-a", 1);
-    await completeTurn("turn-completed-b", 2);
-    await completeTurn("turn-completed-c", 3);
-    expect(onSend.mock.calls).toEqual([
-      ["A", [attachments[0]], undefined],
-      ["B", [attachments[1]], undefined],
-      ["C", [attachments[2]], undefined],
-    ]);
-    expect(onReleaseAttachment).not.toHaveBeenCalled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Queue is full.");
     expect(textbox).toHaveValue("D stays in the composer");
-    expect(window.sessionStorage.getItem(
-      composerMediaQueueKey(current.id),
-    )).toBeNull();
+
+    const enqueued = onQueueCommand.mock.calls
+      .filter(([cmd]) => cmd.type === "message.queue.enqueue")
+      .slice(0, 3)
+      .map(([cmd]) => {
+        const payload = cmd.payload as { content: string; attachments: ChatAttachment[] };
+        return [payload.content, payload.attachments];
+      });
+    expect(enqueued).toEqual([
+      ["A", [attachments[0]]],
+      ["B", [attachments[1]]],
+      ["C", [attachments[2]]],
+    ]);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
   });
 
   it("queues an attachment-only image with safe fallback content", async () => {
-    const current = conversation("conversation-media-only-queue");
+    const current = conversation("11111111-1111-4111-8111-111111111172");
     const queuedImage: ChatAttachment = {
       id: "44444444-4444-4444-8444-444444444444",
       name: "inspect.png",
@@ -758,36 +765,55 @@ describe("composer detachment ownership", () => {
       size: 128,
     };
     const onSend = vi.fn(async () => undefined);
+    const entries: QueuedMessage[] = [];
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.enqueue") {
+        const created: QueuedMessage = {
+          id: command.payload.id,
+          conversationId: current.id,
+          content: command.payload.content,
+          attachments: command.payload.attachments,
+          state: "waiting",
+          createdAt: "2026-11-26T00:00:00.000Z",
+          error: null,
+          turnId: null,
+          userMessageId: null,
+        };
+        entries.push(created);
+        return { kind: "message.queue", conversationId: current.id, entries: [...entries], receipt: created };
+      }
+      return { kind: "message.queue", conversationId: current.id, entries: [...entries], receipt: null };
+    });
     const runningTurn = {
       ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
       id: "turn-before-media-only",
       status: "running" as const,
       harnessId: "cursor-acp" as const,
     };
-    const view = render(<Composer {...composerProps(current, {
+    render(<Composer {...composerProps(current, {
       running: true,
       latestTurn: runningTurn,
       onChooseAttachments: async () => attachmentLease([queuedImage]),
+      onQueueCommand,
       onSend,
     })} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Attach queued images" }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach images or documents to queue" }));
     await screen.findByText(queuedImage.name);
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Message" }), {
       key: "Tab",
     });
     expect(await screen.findByText("Please inspect the attached image."))
       .toBeInTheDocument();
-
-    view.rerender(<Composer {...composerProps(current, {
-      latestTurn: { ...runningTurn, status: "completed" },
-      onSend,
-    })} />);
-    await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith(
-      "Please inspect the attached image.",
-      [queuedImage],
-      undefined,
-    ));
+    expect(onQueueCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: "message.queue.enqueue",
+      payload: expect.objectContaining({
+        conversationId: current.id,
+        content: "Please inspect the attached image.",
+        attachments: [queuedImage],
+      }),
+    }));
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("blocks while a composer mutation is in flight", async () => {

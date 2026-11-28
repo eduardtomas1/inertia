@@ -1,3 +1,4 @@
+import { CursorSdkContext } from "./components/cursor-sdk/CursorSdkContext";
 import { layoutStorage } from "./utils/layoutStorage";
 import { UsageLimitsProvider } from "./components/usage-limits-context";
 import { WorkingIndicatorProvider } from "./components/working-indicator/WorkingIndicatorContext";
@@ -1184,6 +1185,7 @@ export default function App(): React.JSX.Element {
   }
 
   return (
+    <CursorSdkContext.Provider value={layoutProviderAuth}>
     <UsageLimitsProvider request={request} status={connection.status}>
     <WorkingIndicatorProvider settings={settings.workingIndicator}>
     <TimelineRuntimeProviders status={connection.status} request={request}>
@@ -1195,28 +1197,15 @@ export default function App(): React.JSX.Element {
       onClose={watchers.attach.close} onAttached={watchers.attach.attached}
       onOpenProviderSetup={openProviderSetup} onOpenBackendSetup={openBackendSetup} />
     <AppLayout
-      platform={platform}
-      documentActive={documentActive}
-      documentVisible={documentVisible}
-      settings={settings}
-      connection={connection}
-      appUpdate={appUpdate}
-      updateEverything={updateEverything}
-      providerQuotaNotices={providerQuotaNotices}
-      workspaceLayout={workspaceLayout}
-      view={view}
-      setView={layoutCallbacks.setView}
-      busyAction={busyAction}
-      visibleError={visibleError}
-      setActionError={setActionError}
-      commitDialogOpen={commitDialogOpen}
-      setCommitDialogOpen={setCommitDialogOpen}
-      dailyWorkOpen={dailyWorkOpen}
-      setDailyWorkOpen={setDailyWorkOpen}
-      paletteOpen={paletteOpen}
-      setPaletteOpen={setPaletteOpen}
-      tasksFocusAddRequest={tasksFocusAddRequest}
-      setTasksFocusAddRequest={setTasksFocusAddRequest}
+      platform={platform} documentActive={documentActive} documentVisible={documentVisible}
+      settings={settings} connection={connection} appUpdate={appUpdate} updateEverything={updateEverything}
+      providerQuotaNotices={providerQuotaNotices} workspaceLayout={workspaceLayout}
+      view={view} setView={layoutCallbacks.setView}
+      busyAction={busyAction} visibleError={visibleError} setActionError={setActionError}
+      commitDialogOpen={commitDialogOpen} setCommitDialogOpen={setCommitDialogOpen}
+      dailyWorkOpen={dailyWorkOpen} setDailyWorkOpen={setDailyWorkOpen}
+      paletteOpen={paletteOpen} setPaletteOpen={setPaletteOpen}
+      tasksFocusAddRequest={tasksFocusAddRequest} setTasksFocusAddRequest={setTasksFocusAddRequest}
       project={composerProject}
       conversation={conversation}
       headerConversation={draftConversation.conversation ?? conversation}
@@ -1244,5 +1233,6 @@ export default function App(): React.JSX.Element {
     </TimelineRuntimeProviders>
     </WorkingIndicatorProvider>
     </UsageLimitsProvider>
+    </CursorSdkContext.Provider>
   );
 }

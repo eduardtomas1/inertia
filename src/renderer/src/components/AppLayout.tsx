@@ -79,6 +79,7 @@ import {
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
   loadLibraryView,
+  loadScheduledTasksView,
   loadTasksView,
 } from "./lazySurfaceLoaders";
 
@@ -357,6 +358,7 @@ export const AppLayout = memo(function AppLayout({
   });
   const openUsage = useUsagePopupOpener();
   const TasksView = useLoadedSurface(loadTasksView, view === "tasks");
+  const ScheduledTasksView = useLoadedSurface(loadScheduledTasksView, view === "schedules");
   const LibraryView = useLoadedSurface(loadLibraryView, view === "library");
   const DailyWorkDialog = useLoadedSurface(loadDailyWorkDialog, dailyWorkOpen);
   const [cornerControlsWidth, setCornerControlsWidth] = useState(0);
@@ -980,6 +982,22 @@ export const AppLayout = memo(function AppLayout({
               ) : (
                 <div className="workspace-tool-loading tasks-view-loading">
                   <LoadingMark label="Loading tasks" />
+                </div>
+              )
+            ) : view === "schedules" ? (
+              ScheduledTasksView ? (
+                <ScheduledTasksView
+                  snapshot={connection.snapshot}
+                  status={connection.status}
+                  projectScopeId={projectScopeId}
+                  refreshNonce={connection.scheduledTasksRevision}
+                  request={tasksActions.request}
+                  onOpenConversation={tasksActions.openConversation}
+                  onError={setActionError}
+                />
+              ) : (
+                <div className="workspace-tool-loading schedules-view-loading">
+                  <LoadingMark label="Loading schedules" />
                 </div>
               )
             ) : view === "library" ? (

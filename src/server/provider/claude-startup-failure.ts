@@ -1,5 +1,7 @@
 import type { SDKMessage, SDKStartupFailureReason } from "@anthropic-ai/claude-agent-sdk";
 
+import { providerProcessExitGuidance } from "./process-exit-guidance";
+
 export const CLAUDE_STARTUP_FAILURE_RESULTS = {
   CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1",
 } as const;
@@ -37,9 +39,18 @@ const STARTUP_FAILURE_MESSAGES: Record<SDKStartupFailureReason, string> = {
 
 export function claudeSessionUnavailable(message: SDKMessage): boolean {
   if (message.type !== "result" || message.subtype === "success") return false;
-  return message.startup_failure_reason === "worktree_resume_refused"
-    || (message.num_turns === 0 && message.errors.some((error) =>
-      typeof error === "string" && error.startsWith("No conversation found with session ID")));
+  return message.startup_failure_reason === "worktree_resume_refused" || claudeSessionNotFound(message);
+}
+
+/**
+ * Claude Code did not find the session to resume ("No conversation found with session ID"), as opposed to a
+ * deliberate refusal such as `worktree_resume_refused`. Only this answer can come from a Claude Code that
+ * looks for transcripts in the cwd's project folder alone.
+ */
+export function claudeSessionNotFound(message: SDKMessage): boolean {
+  if (message.type !== "result" || message.subtype === "success" || message.startup_failure_reason !== undefined) return false;
+  return message.num_turns === 0 && message.errors.some((error) =>
+    typeof error === "string" && error.startsWith("No conversation found with session ID"));
 }
 
 export function claudeStartupFailure(
@@ -48,4 +59,36 @@ export function claudeStartupFailure(
   if (result.subtype === "success" || !result.startup_failure_reason) return undefined;
   const message = STARTUP_FAILURE_MESSAGES[result.startup_failure_reason];
   return message ? { reason: result.startup_failure_reason, message } : undefined;
+}
+
+const CLAUDE_PROCESS_EXIT_ERROR_CLASSES: ReadonlySet<unknown> = new Set([
+  "process_killed_by_signal",
+  "process_exited_nonzero",
+]);
+
+/**
+ * The exit status of a Claude Code process that ended before it answered,
+ * such as "Claude Code process exited with code 1". The SDK's exit Error can
+ * append Claude's stderr tail to `message`; `telemetryMessage` omits it.
+ */
+function claudeProcessExitStatus(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const { errorClass, telemetryMessage } = error as Record<string, unknown>;
+  return typeof errorClass === "string"
+    && CLAUDE_PROCESS_EXIT_ERROR_CLASSES.has(errorClass)
+    && typeof telemetryMessage === "string"
+    ? telemetryMessage
+    : undefined;
+}
+
+/**
+ * The failure message for a Claude Code process that exited before its first
+ * message. The stderr tail only selects the guidance; it never enters the
+ * message, which is always visible.
+ */
+export function claudeStartupExitMessage(error: unknown, stderrTail: string): string | undefined {
+  const status = claudeProcessExitStatus(error);
+  return status === undefined
+    ? undefined
+    : `${status} before it started. ${providerProcessExitGuidance(stderrTail)}`;
 }

@@ -1879,6 +1879,14 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, questions: [{ ...input.questions[0], options: [input.questions[0].options[0], { ...input.questions[0].options[0] }] }] } })).toThrow("Malformed server event");
     expect(() => parseServerEvent({ type: "agent.goal.cleared", conversationId: conversation.id, source: "provider-native" })).toThrow("Malformed server event");
   });
+  it.each(["agent.text", "agent.reasoning"])("accepts a %s replacement flag only as true", (type) => {
+    const streamed = { type, conversationId: conversation.id, runId: "run-1", turnId: "turn-1", text: "Again" };
+    expect(parseServerEvent(streamed)).toEqual(streamed);
+    expect(parseServerEvent({ ...streamed, replace: true })).toEqual({ ...streamed, replace: true });
+    for (const replace of [false, "true", 1, null]) {
+      expect(() => parseServerEvent({ ...streamed, replace })).toThrow("Malformed server event");
+    }
+  });
   it("requires sequenced scope and shell run identities to match their payload", () => {
     const textEvent = {
       type: "agent.text",

@@ -128,7 +128,7 @@ describe("Usage popup", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Providers: All providers" }));
     const menu = within(dialog).getByRole("menu", { name: "Providers" });
     expect(within(menu).getAllByRole("menuitemcheckbox").map((item) => item.textContent)).toEqual([
-      "All providers", "Codex", "Claude", "Cursor", "Kimi Code", "OpenCode", "Antigravity", "Grok",
+      "All providers", "Codex", "Claude", "Cursor", "Kimi Code", "OpenCode", "Antigravity", "Grok", "Pi",
     ]);
     expect(menu.querySelector('[data-provider-id="claude"]')).not.toBeNull();
     fireEvent.click(within(menu).getByRole("menuitemcheckbox", { name: "Claude" }));
@@ -136,23 +136,23 @@ describe("Usage popup", () => {
     expect(within(menu).getByRole("menuitemcheckbox", { name: "All providers" })).toHaveAttribute("aria-checked", "false");
     expect(within(dialog).queryByRole("region", { name: "Claude limits" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("region", { name: "Codex limits" })).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Providers: 6 providers" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Providers: 7 providers" })).toBeVisible();
 
     await key(within(menu).getByRole("menuitemcheckbox", { name: "Claude" }), "Escape");
     expect(within(dialog).queryByRole("menu")).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Usage" })).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: "Providers: 6 providers" })).toHaveFocus();
+    expect(within(dialog).getByRole("button", { name: "Providers: 7 providers" })).toHaveFocus();
 
     await press("Cost");
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-hidden", "claude");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Providers: 6 providers" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Providers: 7 providers" }));
     fireEvent.click(within(dialog).getByRole("menuitemcheckbox", { name: "All providers" }));
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-hidden", "");
     fireEvent.click(within(dialog).getByRole("menuitemcheckbox", { name: "All providers" }));
     expect(within(dialog).getByRole("button", { name: "Providers: All providers" })).toBeVisible();
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-hidden", "");
     fireEvent.click(within(dialog).getByRole("menuitemcheckbox", { name: "Codex" }));
-    expect(within(dialog).getByRole("button", { name: "Providers: 6 providers" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Providers: 7 providers" })).toBeVisible();
   });
 
   it("offers the sources crumb on Limits only when a hub exists", async () => {
@@ -220,7 +220,7 @@ describe("Usage popup preferences", () => {
     expect(pressedTab()).toBe("Cost");
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-days", "7");
     expect(within(dialog).getByRole("region", { name: "Cost" })).toHaveAttribute("data-hidden", "cursor");
-    expect(within(dialog).getByRole("button", { name: "Providers: 6 providers" })).toBeVisible();
+    expect(within(dialog).getByRole("button", { name: "Providers: 7 providers" })).toBeVisible();
   });
 
   it("falls back to Limits and 30 days for missing, damaged or blocked storage", () => {

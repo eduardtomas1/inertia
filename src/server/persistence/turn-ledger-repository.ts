@@ -33,13 +33,17 @@ import {
   RUNTIME_INTERRUPTION_REASONS,
   type RuntimeInterruption,
 } from "../runtime/turns/turn-runtime-interruption-note";
-import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { CONTEXT_COMPACTION_ACTIVITY_TITLES } from "../provider/context-compaction-activity";
 import { assertConversationProvider } from "./conversation-provider-policy";
+import { assertNativeControlIdle } from "../orchestration-v2/native-control-fence";
+import { dropRestoredHistoryRecord } from "./turn-restored-history-record";
+import { harnessDeclaresCapability } from "../provider/capability-manifest";
+import { TURN_CHECKPOINT_UNAVAILABLE_TITLE } from "../../shared/turn-checkpoint";
 import { pruneTerminalQueuedMessages } from "./queued-message-repository";
 import { completeRestartContinuationPlan } from "./restart-continuation-repository";
 import {
   agentTurnFromRow,
+  messageFromRow,
   normalizeAgentTurnUsage,
   optionalTurnString,
   providerModelSelectionFromLegacyFields,
@@ -68,6 +72,7 @@ import type { DailyWorkRange } from "../daily-work";
 import {
   compactMessageContentForTurn,
   compactReasoningContentForTurn,
+  MESSAGE_PROJECTION_COLUMNS,
 } from "./stream-text-storage";
 import { claimConversationContextPackets } from "./conversation-context-packet-repository";
 import type { ConversationContextDelivery } from "./conversation-context-transport";
@@ -83,6 +88,14 @@ type TurnLedgerPersistenceContext = Pick<
   ): ConversationContextDelivery[];
 };
 
+/** Activity kinds only a running provider turn produces (status notices are not). */
+const TURN_SCOPED_ACTIVITY_KINDS = "'command', 'tool', 'file', 'reasoning'";
+
+/** A harness that reports turn acceptance proves progress with turn-scoped activity only. */
+function providerTurnProgress(harnessId: string): "turn-scoped" | "any" {
+  return harnessDeclaresCapability(harnessId, "turn-acceptance") ? "turn-scoped" : "any";
+}
+
 export class TurnLedgerRepository {
   constructor(private readonly context: TurnLedgerPersistenceContext) {}
 
@@ -95,6 +108,10 @@ export class TurnLedgerRepository {
   }
 
   create(input: CreateAgentTurnInput): AgentTurn {
+    return this.createTurn(input, false);
+  }
+
+  private createTurn(input: CreateAgentTurnInput, skipProviderCheck: boolean): AgentTurn {
     this.context.requireConversation(input.conversationId);
     if (!Number.isSafeInteger(input.configurationRevision) || input.configurationRevision < 0) {
       throw new Error("Turn configuration revision must be a non-negative integer.");
@@ -168,7 +185,7 @@ export class TurnLedgerRepository {
     const reasoningEffort = (modelSelection.reasoningEffort ?? "").trim();
     if (reasoningEffort.length > 80) throw new Error("Turn reasoning effort cannot exceed 80 characters.");
 
-    assertConversationProvider(this.context, input.conversationId, input.providerId);
+    if (!skipProviderCheck) assertConversationProvider(this.context, input.conversationId, input.providerId);
 
     const turn: AgentTurn = {
       id: requiredTurnString(input.id ?? randomUUID(), "Turn ID", 200),
@@ -263,7 +280,14 @@ export class TurnLedgerRepository {
    */
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
-      assertConversationProvider(this.context, input.conversationId, input.providerId);
+      assertNativeControlIdle(this.context.database, input.conversationId);
+      const allowOverrideProvider = input.allowProviderSelectionOverride === true
+        || (input.queuedMessageId
+          ? this.queuedItemHasExplicitSelection(input.conversationId, input.queuedMessageId)
+          : false);
+      if (!allowOverrideProvider) {
+        assertConversationProvider(this.context, input.conversationId, input.providerId);
+      }
       if (input.providerSessionInvalidation) {
         if ((input.providerSessionBefore ?? null) !== null) {
           throw new Error(
@@ -286,20 +310,31 @@ export class TurnLedgerRepository {
           );
         }
       }
-      const message = this.context.createMessage(
-        input.conversationId,
-        input.content,
-        "user",
-        input.attachments ?? [],
-        null,
-        input.requestedAt,
-        { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
-      );
-      const turn = this.create({
+      const requeuedFromTurnId = input.adoptedFollowUp && input.queuedMessageId
+        ? this.requeuedFromTurnId(input.conversationId, input.queuedMessageId)
+        : null;
+      const message = input.adoptedFollowUp
+        ? requeuedFromTurnId
+          ? this.adoptUndeliveredPrompt(
+              input.conversationId,
+              { messageId: input.adoptedFollowUp.messageId, fromTurnId: requeuedFromTurnId },
+              input.requestedAt,
+            )
+          : this.adoptUnreadFollowUp(input.conversationId, input.adoptedFollowUp, input.requestedAt)
+        : this.context.createMessage(
+          input.conversationId,
+          input.content,
+          "user",
+          input.attachments ?? [],
+          null,
+          input.requestedAt,
+          { activateConversation: input.activateConversation, privateConnectDeviceId: input.privateConnectDeviceId, watcherNote: input.watcherNote, delegatedCompletion: input.delegatedCompletion, duoComparison: input.duoComparison, customAgentCall: input.customAgentCall },
+        );
+      const turn = this.createTurn({
         ...input,
         userMessageId: message.id,
         requestedAt: message.createdAt,
-      });
+      }, allowOverrideProvider);
       if (input.limitResetPlanId) {
         const accepted = cachedStatement(this.context.database, `
           UPDATE usage_limit_resume_plans SET state='completed', turn_id=?, error=NULL
@@ -310,12 +345,15 @@ export class TurnLedgerRepository {
       if (input.restartContinuationPlanId) {
         completeRestartContinuationPlan(this.context.database, input.restartContinuationPlanId, input.conversationId, turn.id);
       }
+      if (input.adoptedFollowUp && !input.queuedMessageId) throw new Error("An unread follow-up starts only from its queue row.");
       if (input.queuedMessageId) {
+        // A row that names an unread follow-up (an active row with a message) accepts only with that message.
         const accepted = cachedStatement(this.context.database, `
           UPDATE queued_messages SET state = 'accepted', turn_id = ?, user_message_id = ?, error = NULL,
             content = '', attachments_json = '[]', route_identity = ''
           WHERE id = ? AND conversation_id = ? AND state = 'dispatching'
-        `).run(turn.id, message.id, input.queuedMessageId, input.conversationId);
+            AND (user_message_id IS NULL OR user_message_id = ?) AND (user_message_id IS NOT NULL) = ?
+        `).run(turn.id, message.id, input.queuedMessageId, input.conversationId, message.id, input.adoptedFollowUp ? 1 : 0);
         if (accepted.changes !== 1) throw new Error("The queued message no longer owns this dispatch.");
         pruneTerminalQueuedMessages(this.context.database, input.conversationId);
       }
@@ -341,6 +379,77 @@ export class TurnLedgerRepository {
       }
       return { message: { ...message, turnId: turn.id }, turn };
     })();
+  }
+
+  /**
+   * Moves a follow-up its provider accepted but never read out of the ended
+   * turn that still owns it, to be the next turn's prompt. The owner is read
+   * here, in the admission transaction that also accepts the queue row naming
+   * the message, so a second adoption finds nothing and refuses (exactly
+   * once). A rolled-back owner, a running owner, or the owner's own prompt is
+   * refused. The message keeps its id, content and attachments; its time moves
+   * to the new request so it reads after the ended turn's answer.
+   */
+  /**
+   * Moves an undelivered prompt out of a terminal turn that never reached its provider
+   * (`delivery = 'not-delivered'`, zero native-boundary records, zero nativeTurnId on any attempt)
+   * so a requeued resend adopts the exact message without duplicating it.
+   */
+  adoptUndeliveredPrompt(conversationId: string, adoption: { messageId: string; fromTurnId: string }, requestedAt?: string): ChatMessage {
+    const adoptedAt = requestedAt ?? new Date().toISOString();
+    const moved = this.context.database.prepare(`
+      UPDATE messages SET turn_id = NULL, created_at = ?
+      WHERE id = ? AND conversation_id = ? AND role = 'user' AND turn_id = ?
+        AND EXISTS (
+          SELECT 1 FROM agent_turns AS turn
+          JOIN orchestration_v2_entities AS run ON run.kind = 'run' AND run.thread_id = turn.conversation_id AND run.id = turn.run_id
+          WHERE turn.id = ? AND turn.conversation_id = ? AND turn.user_message_id = ?
+            AND turn.status IN ('completed','failed','cancelled','interrupted')
+            AND json_extract(run.payload_json, '$.delivery') = 'not-delivered'
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS rb WHERE rb.kind = 'rolled-back-turn' AND rb.thread_id = turn.conversation_id AND rb.id = turn.id)
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS b WHERE b.kind = 'native-boundary' AND b.thread_id = turn.conversation_id AND json_extract(b.payload_json, '$.runId') = turn.run_id)
+            AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS a WHERE a.kind = 'attempt' AND a.thread_id = turn.conversation_id AND json_extract(a.payload_json, '$.runId') = turn.run_id AND json_extract(a.payload_json, '$.nativeTurnId') IS NOT NULL)
+        )`).run(adoptedAt, adoption.messageId, conversationId, adoption.fromTurnId, adoption.fromTurnId, conversationId, adoption.messageId);
+    if (moved.changes !== 1) throw new Error("The undelivered prompt was already sent or cannot be adopted from its turn.");
+    this.context.database.prepare("UPDATE conversations SET updated_at = MAX(updated_at, ?) WHERE id = ?").run(adoptedAt, conversationId);
+    return messageFromRow(this.context.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?`).get(adoption.messageId) as MessageRow);
+  }
+
+  private requeuedFromTurnId(conversationId: string, queuedMessageId: string): string | null {
+    const row = this.context.database.prepare(
+      "SELECT json_extract(payload_json, '$.requeuedFromTurnId') AS id FROM orchestration_v2_entities WHERE kind = 'queue-item' AND thread_id = ? AND id = ?",
+    ).get(conversationId, queuedMessageId) as { id: string | null } | undefined;
+    return typeof row?.id === "string" && row.id.length > 0 ? row.id : null;
+  }
+
+  private queuedItemHasExplicitSelection(conversationId: string, queuedMessageId: string): boolean {
+    const row = this.context.database.prepare("SELECT selection_json FROM queued_messages WHERE id = ? AND conversation_id = ?")
+      .get(queuedMessageId, conversationId) as { selection_json: string | null } | undefined;
+    if (row?.selection_json) return true;
+    const entity = this.context.database.prepare(
+      "SELECT json_extract(payload_json, '$.modelSelection') AS selection FROM orchestration_v2_entities WHERE kind = 'queue-item' AND thread_id = ? AND id = ?",
+    ).get(conversationId, queuedMessageId) as { selection: unknown } | undefined;
+    return entity?.selection !== undefined && entity.selection !== null;
+  }
+
+  private adoptUnreadFollowUp(
+    conversationId: string,
+    adoption: { messageId: string },
+    requestedAt: string | undefined,
+  ): ChatMessage {
+    const adoptedAt = requestedAt ?? new Date().toISOString();
+    const moved = this.context.database.prepare(`
+      UPDATE messages SET turn_id = NULL, created_at = ?
+      WHERE id = ? AND conversation_id = ? AND role = 'user'
+        AND turn_id IN (SELECT id FROM agent_turns WHERE conversation_id = ? AND user_message_id <> ?
+          AND status IN ('completed','failed','cancelled','interrupted'))
+        AND turn_id NOT IN (SELECT id FROM orchestration_v2_entities WHERE kind = 'rolled-back-turn' AND thread_id = ?)
+    `).run(adoptedAt, adoption.messageId, conversationId, conversationId, adoption.messageId, conversationId);
+    if (moved.changes !== 1) throw new Error("The unread follow-up was already sent or is no longer in its turn.");
+    this.context.database.prepare("UPDATE conversations SET updated_at = MAX(updated_at, ?) WHERE id = ?")
+      .run(adoptedAt, conversationId);
+    return messageFromRow(this.context.database.prepare(`SELECT ${MESSAGE_PROJECTION_COLUMNS} FROM messages WHERE messages.id = ?`)
+      .get(adoption.messageId) as MessageRow);
   }
 
   runtimeInterruptionSource(conversationId: string): string | null {
@@ -390,7 +499,7 @@ export class TurnLedgerRepository {
   savedSessionKeepsFailing(conversationId: string, sessionId: string): boolean {
     const attempts = cachedStatement(this.context.database, `
       SELECT turn.status, turn.terminal_reason, turn.provider_session_before,
-        turn.terminal_assistant_message_id,
+        turn.terminal_assistant_message_id, turn.harness_id,
         CASE WHEN json_valid(turn.session_recovery_json)
           THEN json_extract(turn.session_recovery_json, '$.resumeRejected')
         END AS resume_rejected,
@@ -400,7 +509,13 @@ export class TurnLedgerRepository {
             AND activities.turn_id = turn.id
             AND activities.kind <> 'error'
             AND NOT (activities.kind = 'status' AND activities.title = ?)
-        ) AS progressed
+        ) AS progressed,
+        EXISTS(
+          SELECT 1 FROM activities
+          WHERE activities.conversation_id = turn.conversation_id
+            AND activities.turn_id = turn.id
+            AND activities.kind IN (${TURN_SCOPED_ACTIVITY_KINDS})
+        ) AS worked
       FROM agent_turns AS turn
       WHERE turn.conversation_id = ?
       ORDER BY turn.requested_at DESC, turn.id DESC
@@ -411,14 +526,16 @@ export class TurnLedgerRepository {
       provider_session_before: string | null;
       terminal_assistant_message_id: string | null;
       resume_rejected: number | null;
+      harness_id: string;
       progressed: 0 | 1;
+      worked: 0 | 1;
     }>;
     const rejectedTwice = attempts.length === 2 && attempts.every((attempt) =>
       attempt.status === "failed"
       && attempt.provider_session_before === sessionId
       && attempt.resume_rejected === 1
       && attempt.terminal_assistant_message_id === null
-      && attempt.progressed === 0
+      && (providerTurnProgress(attempt.harness_id) === "turn-scoped" ? attempt.worked : attempt.progressed) === 0
       && (attempt.terminal_reason === "provider-error"
         || attempt.terminal_reason === "provider-process-exit"
         || attempt.terminal_reason === "provider-process-crash"));
@@ -580,9 +697,13 @@ export class TurnLedgerRepository {
 
   /**
    * The most recent provider handoff that restored at least one earlier
-   * message onto this route.
-   * A genuine handoff directly follows a turn on another provider; later
-   * same-provider harness changes never count.
+   * message onto this route: a turn that directly follows a turn on another
+   * provider and restored history, whether onto a new session or as a delta
+   * into one it resumed (a switch back resumes with `same-continuation`).
+   * Same-provider harness changes never count, and neither does a turn
+   * settled as not delivered, whose history never reached the provider
+   * (`prompt-not-delivered` still counts: its history was injected). A turn
+   * whose provider dropped the prompt carrying its history is `not-delivered`.
    */
   latestProviderHandoffOnRoute(
     conversationId: string,
@@ -592,7 +713,8 @@ export class TurnLedgerRepository {
     const row = cachedStatement(this.context.database, `
       SELECT handoff.requested_at FROM agent_turns AS handoff
       WHERE handoff.conversation_id = @conversationId
-        AND handoff.continuation_reason_code = 'harness-changed'
+        AND NOT EXISTS (SELECT 1 FROM orchestration_v2_entities AS run WHERE run.kind = 'run' AND run.id = handoff.run_id
+          AND json_extract(run.payload_json, '$.delivery') = 'not-delivered')
         AND (CASE WHEN json_valid(handoff.session_recovery_json)
           THEN json_extract(handoff.session_recovery_json, '$.restoredMessageCount')
         END) > 0
@@ -617,26 +739,39 @@ export class TurnLedgerRepository {
     return row ? { requestedAt: row.requested_at } : null;
   }
 
+  /**
+   * Marks a rejected resume for the two-strike rule (`savedSessionKeepsFailing`).
+   * A turn that resent missed history already has a restored-history record;
+   * the marker joins it instead of being dropped, so a retry that carries the
+   * prompt of a turn the provider never accepted still counts.
+   */
   recordRejectedResume(turnId: string, sessionId: string): void {
     cachedStatement(this.context.database, `
       UPDATE agent_turns
-      SET session_recovery_json = '{"resumeRejected":true}'
-      WHERE id = ? AND provider_session_before = ? AND session_recovery_json IS NULL
+      SET session_recovery_json = CASE WHEN session_recovery_json IS NULL THEN '{"resumeRejected":true}'
+        ELSE json_set(session_recovery_json, '$.resumeRejected', json('true')) END
+      WHERE id = ? AND provider_session_before = ?
+        AND (session_recovery_json IS NULL OR json_valid(session_recovery_json))
     `).run(turnId, sessionId);
   }
 
-  turnHasProviderActivity(conversationId: string, turnId: string): boolean {
+  /**
+   * Whether the provider worked on this turn. On a harness that reports turn
+   * acceptance only a command, tool, file change or reasoning counts: Codex
+   * records configuration, deprecation, MCP startup and thread notices as
+   * status activities while it opens a thread, before any turn exists. Other
+   * harnesses count any activity but errors and the checkpoint notice.
+   */
+  turnHasProviderActivity(conversationId: string, turnId: string, harnessId: string): boolean {
+    const turnScoped = providerTurnProgress(harnessId) === "turn-scoped";
     const row = cachedStatement(this.context.database, `
       SELECT EXISTS(
         SELECT 1 FROM activities
-        WHERE conversation_id = ? AND turn_id = ? AND kind <> 'error'
-          AND NOT (kind = 'status' AND title = ?)
+        WHERE conversation_id = ? AND turn_id = ? AND ${turnScoped
+          ? `kind IN (${TURN_SCOPED_ACTIVITY_KINDS})`
+          : "kind <> 'error' AND NOT (kind = 'status' AND title = ?)"}
       ) AS progressed
-    `).get(
-      conversationId,
-      turnId,
-      TURN_CHECKPOINT_UNAVAILABLE_TITLE,
-    ) as { progressed: 0 | 1 };
+    `).get(conversationId, turnId, ...(turnScoped ? [] : [TURN_CHECKPOINT_UNAVAILABLE_TITLE])) as { progressed: 0 | 1 };
     return row.progressed === 1;
   }
 
@@ -657,13 +792,16 @@ export class TurnLedgerRepository {
       ) {
         throw new Error("The turn can no longer restart on a fresh provider session.");
       }
-      const cleared = cachedStatement(this.context.database, `
-        UPDATE conversations
-        SET provider_session_id = NULL, continuation_identity_json = NULL
-        WHERE id = ? AND provider_session_id = ?
-      `).run(current.conversationId, input.expectedSessionId);
-      if (cleared.changes !== 1) {
-        throw new Error("The provider session changed before the turn could restart.");
+      const conversation = this.context.requireConversation(current.conversationId);
+      if (conversation.provider_id === current.providerId) {
+        const cleared = cachedStatement(this.context.database, `
+          UPDATE conversations
+          SET provider_session_id = NULL, continuation_identity_json = NULL
+          WHERE id = ? AND provider_session_id = ?
+        `).run(current.conversationId, input.expectedSessionId);
+        if (cleared.changes !== 1) {
+          throw new Error("The provider session changed before the turn could restart.");
+        }
       }
       const restarted = cachedStatement(this.context.database, `
         UPDATE agent_turns
@@ -1023,6 +1161,7 @@ export class TurnLedgerRepository {
     const current = this.get(turnId);
     if (isAgentTurnTerminalStatus(current.status)) return { settled: false, turn: current };
     try {
+      if (update.providerDelivery === "not-delivered") dropRestoredHistoryRecord(this.context.database, turnId);
       return {
         settled: true,
         turn: this.updateLifecycle(turnId, update),

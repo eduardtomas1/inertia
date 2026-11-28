@@ -73,7 +73,7 @@ const ORCHESTRATION_INSTRUCTION: HiddenProviderInstruction = {
     "A started chat is not finished work; read its status and latest result before relying on it.",
     "Wait for a chat with inertia_wait_for_conversation, calling it again after each timeout; timed-out waits don't use the turn's allowance.",
     "On needs-input, answer pendingQuestions with inertia_answer_question or ask the user; approvals and secrets stay the user's.",
-    "Inertia asks the user before every call that changes a chat, whatever the access mode.",
+    "Supervised and auto-edit chats ask the user before changing a chat; Full Access runs create, send, stop, and queue changes without a confirmation card within the chat's ceilings and budgets. Manage a child chat's queue with inertia_queue.",
   ].join(" "),
 };
 
@@ -139,7 +139,9 @@ export function createInertiaHarnessCapabilities(
 ): HarnessCapabilityRegistry {
   const packs: HarnessCapabilityPack[] = [{
     id: "inertia.orchestration",
-    revision: 6,
+    // Main's revision 6 plus Orchestrator V2's fork-history and delegated-task
+    // tools and its send, stop and queue handler changes.
+    revision: 7,
     title: "Inertia orchestration",
     summary: "Bounded, approval-owned coordination of independent top-level Inertia chats.",
     instructions: [ORCHESTRATION_INSTRUCTION],
@@ -154,6 +156,7 @@ export function createInertiaHarnessCapabilities(
         "delegation-bounds",
         "exact-turn-authority",
         "terminal-result-observation",
+        "delegated-result-wake",
       ],
     },
   }];

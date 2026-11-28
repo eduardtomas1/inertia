@@ -539,12 +539,20 @@ describe("streamed agent text", () => {
     vi.useRealTimers();
   });
 
-  it("polls the queue of a saved running chat but never reads one for an unsaved new chat", async () => {
+  it("reads the queue of a saved running chat on mount and push invalidation without 10s polling, and never reads one for an unsaved new chat", async () => {
     vi.useFakeTimers({ toFake: [...STREAMING_TIMERS] });
     const { view } = await mountQuietApp();
+    expect(harness.queueReads.filter((id) => id === conversationId).length).toBeGreaterThanOrEqual(1);
+
     harness.queueReads.length = 0;
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-    expect(harness.queueReads.filter((id) => id === conversationId).length).toBeGreaterThanOrEqual(6);
+    expect(harness.queueReads.filter((id) => id === conversationId)).toEqual([]);
+
+    await act(async () => {
+      emit({ type: "conversation.queue.changed", conversationId, revision: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(harness.queueReads.filter((id) => id === conversationId)).toHaveLength(1);
 
     harness.queueReads.length = 0;
     act(() => { fireEvent.click(screen.getByRole("button", { name: "Start a new chat" })); });

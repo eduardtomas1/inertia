@@ -1047,6 +1047,11 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     emitText("Provider resumed after approval.");
     expect(hook.result.current.streaming.getSnapshot()[2]).toBe("text");
+    // A provider that started a text block again replaces the open segment's live text (T3 4ecbe5508).
+    source.emit({ type: "agent.text", ...owner, text: "Replacement text.", replace: true });
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe("Replacement text.");
+    emitText(" More.");
+    expect(hook.result.current.streaming.getSnapshot()[0]).toBe("Replacement text. More.");
 
     source.emit({
       type: "agent.input.requested",
@@ -1061,6 +1066,13 @@ describe("useConversationProjection pending interactions", () => {
     expect(hook.result.current.streaming.getSnapshot()[2]).toBeNull();
     emitReasoning("Provider resumed after input.");
     expect(hook.result.current.streaming.getSnapshot()[2]).toBe("reasoning");
+
+    // A provider that started a thinking block again replaces the turn's reasoning (T3 4ecbe5508).
+    source.emit({ type: "agent.reasoning", ...owner, text: "Replacement reasoning.", replace: true });
+    expect(hook.result.current.streaming.getSnapshot()[1]).toBe("Replacement reasoning.");
+    expect(hook.result.current.streaming.getSnapshot()[2]).toBe("reasoning");
+    emitReasoning(" Continued.");
+    expect(hook.result.current.streaming.getSnapshot()[1]).toBe("Replacement reasoning. Continued.");
 
     source.emit({
       type: "agent.completed",

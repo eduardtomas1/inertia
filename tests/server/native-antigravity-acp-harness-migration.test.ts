@@ -265,12 +265,12 @@ describe("native Antigravity ACP harness migration", () => {
         )
       `).run()).toThrow(/CHECK constraint failed/u);
 
-      migrateRuntimeDatabase(database);
+      migrateRuntimeDatabase(database, NATIVE_ANTIGRAVITY_ACP_HARNESS_SCHEMA_VERSION);
 
       expect(database.prepare("SELECT * FROM schema_migrations WHERE version <= ? ORDER BY version").all(PREVIOUS_SCHEMA_VERSION))
         .toEqual(history);
       expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get())
-        .toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+        .toBe(NATIVE_ANTIGRAVITY_ACP_HARNESS_SCHEMA_VERSION);
       expect(schemaObjects(database, "index")).toEqual(beforeIndexes);
       expect(schemaObjects(database, "trigger")).toEqual(beforeTriggers);
       expect(Object.fromEntries(
@@ -355,7 +355,7 @@ describe("native Antigravity ACP harness migration", () => {
       expect(database.pragma("quick_check", { simple: true })).toBe("ok");
 
       const schemaVersion = database.pragma("schema_version", { simple: true });
-      migrateRuntimeDatabase(database);
+      migrateRuntimeDatabase(database, NATIVE_ANTIGRAVITY_ACP_HARNESS_SCHEMA_VERSION);
       expect(database.pragma("schema_version", { simple: true })).toBe(schemaVersion);
       runMigrationAgain(database);
       expect(database.pragma("schema_version", { simple: true })).toBe(schemaVersion);

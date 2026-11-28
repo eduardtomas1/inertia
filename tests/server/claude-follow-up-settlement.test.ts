@@ -83,16 +83,21 @@ describe("Claude accepted follow-up settlement", () => {
       try {
         await initialConsumed;
         if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
-        await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+        await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
           .resolves.toBe(true);
         expect(await Promise.race([run.result.then(() => "settled"), unexpectedRead]))
           .toBe("settled");
-        await expect(run.result).resolves.toMatchObject({
-          status: "failed", cleanupConfirmed: true,
-          ...(owner === "follow-up" ? {
-            error: `Claude ${state} an accepted follow-up before returning an answer.`,
-          } : { failure: { terminalEvent: `lifecycle/prompt-${state}` } }),
-        });
+        const result = await run.result;
+        if (owner === "follow-up") {
+          // T3 `e8c4824b7`: Claude dropped the follow-up unread, so the held
+          // result completes the turn and the follow-up is handed back.
+          expect(result).toMatchObject({ status: "completed", cleanupConfirmed: true,
+            text: "Initial request complete", unreadFollowUps: ["steer-1"] });
+          expect(result.error).toBeUndefined();
+        } else {
+          expect(result).toMatchObject({ status: "failed", cleanupConfirmed: true,
+            failure: { terminalEvent: `lifecycle/prompt-${state}` } });
+        }
         expect(close).toHaveBeenCalledOnce();
       } finally {
         run.cancel(true);
@@ -199,15 +204,21 @@ describe("Claude accepted follow-up settlement", () => {
       });
       await initialConsumed;
       if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
-      await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+      await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
         .resolves.toBe(true);
       if (ending === "settled-refusal") {
         await expect(run.extension.steer?.({ content: "Handle a second follow-up", imagePaths: [] }))
           .resolves.toBe(true);
       }
-      await expect(run.result).resolves.toMatchObject(ending === "eof"
-        ? { status: "failed", error: "Claude Agent SDK exited before correlating every accepted follow-up." }
-        : { status: "completed", text: "Follow-up complete" });
+      const result = await run.result;
+      if (ending === "eof") {
+        // The process ended before Claude read the follow-up: the turn keeps
+        // its answer and the follow-up is handed back (T3 `e8c4824b7`).
+        expect(result).toMatchObject({ status: "completed", text: "Initial request complete", unreadFollowUps: ["steer-1"] });
+      } else {
+        expect(result).toMatchObject({ status: "completed", text: "Follow-up complete" });
+        expect(result.unreadFollowUps).toBeUndefined();
+      }
       expect(close).toHaveBeenCalledOnce();
     },
   );
@@ -288,11 +299,11 @@ describe("Claude accepted follow-up settlement", () => {
     });
     await initialConsumed;
     if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
-    await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+    await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
       .resolves.toBe(true);
+    // The acknowledgement answers no follow-up; Claude exits without reading it.
     await expect(run.result).resolves.toMatchObject({
-      status: "failed",
-      error: "Claude Agent SDK exited before correlating every accepted follow-up.",
+      status: "completed", text: "Initial request complete", unreadFollowUps: ["steer-1"],
     });
     expect(followUpMessage?.origin).toEqual({ kind: "human" });
   });
@@ -324,11 +335,14 @@ describe("Claude accepted follow-up settlement", () => {
     });
     await initialConsumed;
     if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
-    await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [] }))
+    await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
       .resolves.toBe(true);
     run.cancel(false);
     release();
-    await expect(run.result).resolves.toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    const result = await run.result;
+    expect(result).toMatchObject({ status: "cancelled", cleanupConfirmed: true });
+    // Stop drops an unread follow-up instead of handing it back (T3 `requeueUnreadSteers`).
+    expect(result.unreadFollowUps).toBeUndefined();
   });
 
   it.each(["success-error", "error_max_turns"] as const)(
@@ -465,5 +479,147 @@ describe("Claude accepted follow-up settlement", () => {
       release();
       await run.result;
     }
+  });
+  describe("accepted follow-ups Claude never read (T3 e8c4824b7)", () => {
+    const assistant = (uuid: string, text: string) => ({
+      type: "assistant", uuid, session_id: CLAUDE_PROTOCOL_SESSION_ID, parent_tool_use_id: null,
+      message: { id: `api-${uuid}`, type: "message", role: "assistant", model: "claude-test",
+        content: [{ type: "text", text }], stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 } },
+    }) as unknown as SDKMessage;
+    const lifecycle = (commandUuid: string, state: string) => ({
+      type: "command_lifecycle", command_uuid: commandUuid, state,
+      uuid: `follow-up-${state}`, session_id: CLAUDE_PROTOCOL_SESSION_ID,
+    }) as unknown as SDKMessage;
+    const textEvents = (events: AgentHarnessEvent[]) => events.flatMap((event) => event.type === "text" ? [`text:${event.text}`]
+      : event.type === "text-boundary" ? ["boundary"]
+        : event.type === "text-snapshot" ? [`snapshot:${event.text}`] : []);
+
+    it("holds a completed result while the follow-up is unread and settles it, answer intact, once Claude discards it", async () => {
+      const root = portableFixtureRoot("Claude held result with unread follow-up");
+      roots.push(root);
+      let ready!: () => void;
+      const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+      let held!: () => void;
+      const resultYielded = new Promise<void>((resolve) => { held = resolve; });
+      let discard!: () => void;
+      const discarded = new Promise<void>((resolve) => { discard = resolve; });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      const events: AgentHarnessEvent[] = [];
+      const harness = createClaudeAgentSdkHarness({
+        createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+          const initial = (await iterator.next()).value!;
+          ready();
+          const followUp = (await iterator.next()).value!;
+          yield assistant("earlier", "Earlier answer.");
+          yield { ...claudeSuccessResult("Earlier answer.", "completed"), user_message_uuid: initial.uuid } as SDKMessage;
+          held();
+          await discarded;
+          yield lifecycle(followUp.uuid, "discarded");
+          await released;
+        })()),
+      });
+      const run = harness.start({
+        input: nativeProviderRunInput({ providerId: "claude", conversationId: "follow-up-held-result",
+          cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+        executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+        callbacks: { onEvent: (event) => events.push(event) },
+      });
+      try {
+        await initialConsumed;
+        if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+        await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
+          .resolves.toBe(true);
+        await resultYielded;
+        expect(await Promise.race([run.result.then(() => "settled"),
+          new Promise((resolve) => setTimeout(() => resolve("held"), 50))])).toBe("held");
+        discard();
+        const result = await run.result;
+        expect(result).toMatchObject({ status: "completed", text: "Earlier answer.", unreadFollowUps: ["steer-1"] });
+        // The held answer streamed once; settling on it does not repeat it.
+        expect(textEvents(events)).toEqual(["text:Earlier answer.", "boundary"]);
+      } finally {
+        run.cancel(true);
+        release();
+        await run.result;
+      }
+    });
+
+    it("completes the turn and hands back a follow-up Claude refuses before its first result", async () => {
+      const root = portableFixtureRoot("Claude follow-up refused before result");
+      roots.push(root);
+      let ready!: () => void;
+      const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+      const harness = createClaudeAgentSdkHarness({
+        createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+          const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+          const initial = (await iterator.next()).value!;
+          ready();
+          const followUp = (await iterator.next()).value!;
+          yield lifecycle(followUp.uuid, "refused");
+          yield { ...claudeSuccessResult("Initial request complete", "completed"), user_message_uuid: initial.uuid } as SDKMessage;
+        })()),
+      });
+      const run = harness.start({
+        input: nativeProviderRunInput({ providerId: "claude", conversationId: "follow-up-refused-early",
+          cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+        executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+      });
+      await initialConsumed;
+      if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+      await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
+        .resolves.toBe(true);
+      await expect(run.result).resolves.toMatchObject({
+        status: "completed", text: "Initial request complete", unreadFollowUps: ["steer-1"],
+      });
+    });
+
+    it.each(["answered", "started-then-cancelled", "started-then-exit"] as const)(
+      "offers the follow-up at priority next and keeps a follow-up Claude started as read when it is %s",
+      async (ending) => {
+        const root = portableFixtureRoot("Claude read follow-up");
+        roots.push(root);
+        let ready!: () => void;
+        const initialConsumed = new Promise<void>((resolve) => { ready = resolve; });
+        let offered: SDKUserMessage | undefined;
+        const harness = createClaudeAgentSdkHarness({
+          createQuery: ({ prompt }) => fixtureClaudeQuery((async function* (): AsyncGenerator<SDKMessage> {
+            const iterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+            const initial = (await iterator.next()).value!;
+            ready();
+            const followUp = (await iterator.next()).value!;
+            offered = followUp;
+            yield { ...claudeSuccessResult("Initial request complete", "completed"), user_message_uuid: initial.uuid } as SDKMessage;
+            yield lifecycle(followUp.uuid, "started");
+            if (ending === "started-then-exit") return;
+            if (ending === "started-then-cancelled") {
+              yield lifecycle(followUp.uuid, "cancelled");
+              return;
+            }
+            yield { ...claudeSuccessResult("Follow-up complete", "completed"), user_message_uuid: followUp.uuid } as SDKMessage;
+          })()),
+        });
+        const run = harness.start({
+          input: nativeProviderRunInput({ providerId: "claude", conversationId: `follow-up-read-${ending}`,
+            cwd: root, prompt: "Start the request", interactionMode: "build", access: "supervised" }),
+          executable: process.execPath, environment: {}, providerNativeToolsAvailable: true,
+        });
+        await initialConsumed;
+        if (!run.extension || !("steer" in run.extension)) throw new Error("Missing follow-up control.");
+        await expect(run.extension.steer?.({ content: "Handle this follow-up", imagePaths: [], steerId: "steer-1" }))
+          .resolves.toBe(true);
+        const result = await run.result;
+        // "now" would make Claude Code cancel the tool calls in flight.
+        expect(offered?.priority).toBe("next");
+        expect(result.unreadFollowUps).toBeUndefined();
+        expect(result).toMatchObject(ending === "answered"
+          ? { status: "completed", text: "Follow-up complete" }
+          : { status: "failed", error: ending === "started-then-cancelled"
+            ? "Claude cancelled an accepted follow-up before returning an answer."
+            : "Claude Agent SDK exited before correlating every accepted follow-up." });
+      },
+    );
   });
 });

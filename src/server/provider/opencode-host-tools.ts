@@ -8,7 +8,10 @@ import { SECRET_REQUEST_TOOL_NAME } from "../../node/agent-secrets";
 import {
   INERTIA_HOST_MCP_NAME,
   INERTIA_SECRET_MCP_NAME,
+  INERTIA_WAIT_MCP_NAME,
   OPENCODE_SECRET_MCP_TIMEOUT_MS,
+  OPENCODE_WAIT_HOST_TOOLS,
+  OPENCODE_WAIT_MCP_TIMEOUT_MS,
   openCodeHostMcpConfig,
 } from "./host-tool-mcp-config";
 import {
@@ -79,6 +82,7 @@ export function openCodePermissions(
       ...OPENCODE_WATCHER_READ_TOOLS.map((permission) => ({ permission, pattern: "*", action: "allow" } as const)),
       ...OPENCODE_WATCHER_DENIED_READS.map((pattern) => ({ permission: "read", pattern, action: "deny" } as const)),
       { permission: `${INERTIA_HOST_MCP_NAME}_*`, pattern: "*", action: "allow" },
+      { permission: `${INERTIA_WAIT_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ];
   }
   const planEdits = interactionMode === "plan"
@@ -99,6 +103,7 @@ export function openCodePermissions(
       pattern: "*",
       action: "allow",
     },
+    { permission: `${INERTIA_WAIT_MCP_NAME}_*`, pattern: "*", action: "allow" },
     { permission: `${INERTIA_SECRET_MCP_NAME}_*`, pattern: "*", action: "allow" },
     ...planEdits,
   ];
@@ -180,14 +185,25 @@ export function createOpenCodeHostTools(input: {
     onApprovalResolved: input.onApprovalResolved,
   });
   const servesSecrets = sourceBridge.definitions.some(({ name }) => name === SECRET_REQUEST_TOOL_NAME);
+  const servesWaits = sourceBridge.definitions.some(({ name }) => OPENCODE_WAIT_HOST_TOOLS.has(name));
   const servers: OpenCodeHostMcpServer[] = [
     {
       name: INERTIA_HOST_MCP_NAME,
       session: createProviderHostToolMcpSession(runtime, {}, {
         destructiveHints: true,
-        includes: (tool) => tool !== SECRET_REQUEST_TOOL_NAME,
+        includes: (tool) => tool !== SECRET_REQUEST_TOOL_NAME && !OPENCODE_WAIT_HOST_TOOLS.has(tool),
       }),
     },
+    ...(servesWaits
+      ? [{
+        name: INERTIA_WAIT_MCP_NAME,
+        timeout: OPENCODE_WAIT_MCP_TIMEOUT_MS,
+        session: createProviderHostToolMcpSession(runtime, {}, {
+          destructiveHints: true,
+          includes: (tool: string) => OPENCODE_WAIT_HOST_TOOLS.has(tool),
+        }),
+      }]
+      : []),
     ...(servesSecrets
       ? [{
         name: INERTIA_SECRET_MCP_NAME,

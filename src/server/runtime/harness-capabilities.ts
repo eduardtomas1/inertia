@@ -14,7 +14,7 @@ import type { HiddenProviderInstruction } from "./turns/request-context";
 import type { ThreadToolRegistrations } from "./thread-tool-registrations";
 
 const MAX_CAPABILITY_PACKS = 16;
-const MAX_CAPABILITY_TOOLS = 64;
+const MAX_CAPABILITY_TOOLS = 72;
 const MAX_CAPABILITY_INSTRUCTIONS = 24;
 const MAX_CAPABILITY_INSTRUCTION_BYTES = 24 * 1024;
 const MAX_CAPABILITY_SCHEMA_BYTES = 64 * 1024;

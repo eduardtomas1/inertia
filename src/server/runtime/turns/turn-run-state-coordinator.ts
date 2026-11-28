@@ -1,3 +1,4 @@
+import type { AttemptObserver } from "../../orchestration-v2/attempt-fence";
 import {
   agentTurnStatusForRunState,
   isAgentTurnTerminalStatus,
@@ -80,10 +81,16 @@ export class TurnRunStateCoordinator {
     broadcastConversationShellFor(this.options.hooks, identity.conversationId);
   }
 
+  /**
+   * `observer` marks a transition the provider reported for that attempt: it
+   * commits only while the attempt is current. The controller's own
+   * transitions pass none and always commit.
+   */
   transition(
     active: ActiveTurn,
     state: Exclude<AgentRunState, AgentTurnTerminalStatus>,
     providerState?: string | null,
+    observer?: AttemptObserver,
   ): boolean {
     if (active.runState.isTerminal()) return false;
     const current = this.options.store.agentTurn(active.turn.id);
@@ -117,7 +124,7 @@ export class TurnRunStateCoordinator {
         : state === "waiting-for-input" ? "input" : undefined,
     ) || changed;
     if (!changed) return false;
-    this.persist(active);
+    if (!this.persist(active, observer)) return false;
     this.options.activity(active);
     return true;
   }
@@ -168,14 +175,23 @@ export class TurnRunStateCoordinator {
     return firstRequest && settled;
   }
 
-  private persist(active: ActiveTurn): void {
+  private persist(active: ActiveTurn, observer?: AttemptObserver): boolean {
     const runState = active.runState.snapshot();
-    active.turn = this.options.store.updateAgentTurnLifecycle(active.turn.id, {
+    const update = {
       status: agentTurnStatusForRunState(runState.state),
       runState,
       updatedAt: this.options.now(),
-    });
+    };
+    if (observer) {
+      const written = this.options.store.updateAgentTurnLifecycleIfCurrent(active.turn.id, observer, update);
+      // The next controller-owned write persists the whole run state again.
+      if (!written.committed) return false;
+      active.turn = written.result;
+    } else {
+      active.turn = this.options.store.updateAgentTurnLifecycle(active.turn.id, update);
+    }
     this.projectLive(active, runState.state);
+    return true;
   }
 
   escalateStop(active: ActiveTurn): boolean {
@@ -197,6 +213,7 @@ export class TurnRunStateCoordinator {
     const stopUnconfirmed = this.providerStopNotes.has(active);
     const settled = this.options.settlement.retryTerminalPersistence(active, stopUnconfirmed);
     if (settled && stopUnconfirmed && active.turn.status === "completed") this.noteUnconfirmedStop(active);
+    if (settled) this.settleInterrupt(active, "settled");
     return settled;
   }
 
@@ -245,7 +262,10 @@ export class TurnRunStateCoordinator {
     );
     if (stopUnconfirmed) this.providerStopNotes.add(active);
     if (settled && stopUnconfirmed && pending.status === "completed") this.noteUnconfirmedStop(active);
-    if (settled) active.deferredSettlement = null;
+    if (settled) {
+      active.deferredSettlement = null;
+      this.settleInterrupt(active, "settled");
+    }
     if (releaseMode === "tracked") {
       this.options.track(this.options.release(active));
     }
@@ -321,6 +341,46 @@ export class TurnRunStateCoordinator {
     );
   }
 
+  private releaseUnconfirmedCleanup(
+    active: ActiveTurn,
+    stopOutcome: Exclude<OwnedProviderStopResult, "settled"> | "expired" | "failed",
+  ): void {
+    const { store } = this.options;
+    const identity = { turnId: active.turn.id, runId: active.turn.runId };
+    try {
+      const owner = store.providerRunOwnership.forTurn(identity.turnId);
+      if (owner?.runId !== identity.runId || owner.conversationId !== active.conversation.id) {
+        store.orchestration.cleanup(identity, "unconfirmed");
+        return;
+      }
+      store.orchestration.releaseCleanup(identity, {
+        stopOutcome,
+        runtimeGenerationId: owner.runtimeGenerationId,
+        systemBootId: owner.systemBootId,
+        stopBudgetMs: ownedProviderStopBudgetMs(),
+        releasedAt: this.options.now(),
+      });
+    } catch {
+      return;
+    }
+  }
+
+  private recordUnresponsive(active: ActiveTurn): void {
+    try {
+      this.options.store.orchestration.runControl.escalateAfterGrace(active.turn.runId);
+    } catch {
+      return;
+    }
+  }
+
+  private settleInterrupt(active: ActiveTurn, outcome: OwnedProviderStopResult | "expired" | "failed"): void {
+    try {
+      this.options.store.orchestration.runControl.settleInterrupt(active.turn.runId, outcome);
+    } catch {
+      return;
+    }
+  }
+
   private stopOwnedProviderAndRelease(active: ActiveTurn): void {
     if (active.providerStopStarted) return;
     active.providerStopStarted = true;
@@ -340,7 +400,7 @@ export class TurnRunStateCoordinator {
           this.options.providers.stopOwned(conversationId, {
             runId: active.turn.runId,
             turnId: active.turn.id,
-          }),
+          }, undefined, { escalated: () => this.recordUnresponsive(active) }),
           expired,
         ]);
       } catch {
@@ -352,7 +412,9 @@ export class TurnRunStateCoordinator {
         this.options.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
       } else {
         this.unconfirmedProviderStops.add(active);
+        this.releaseUnconfirmedCleanup(active, outcome);
       }
+      this.settleInterrupt(active, outcome);
       this.finalizeDeferredSettlement(
         active,
         "joined",

@@ -56,6 +56,7 @@ const recoveryConversationFields = {
     "opencode",
     "antigravity",
     "grok",
+    "pi",
     "gemini",
   ]),
   model: z.string().max(300),

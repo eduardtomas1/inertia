@@ -1,9 +1,15 @@
 import { USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE } from "../node/backend-secret-reference.js";
+import { CURSOR_SDK_CREDENTIAL_PROFILE_ID } from "../node/runtime-credential-protocol.js";
 import type { CredentialVault } from "./credential-vault.js";
 import type { RuntimeCredentialBroker } from "./runtime-supervisor-types.js";
 
 export function runtimeCredentialBroker(vault: () => CredentialVault): RuntimeCredentialBroker {
   return {
+    saveCursorSdk: async (secret, signal) => {
+      signal?.throwIfAborted();
+      const state = await vault().setForProfile(CURSOR_SDK_CREDENTIAL_PROFILE_ID, secret);
+      return { hasSecret: state.hasSecret, credentialGeneration: state.credentialGeneration };
+    },
     resolve: (secretReference) => secretReference === USAGE_ACCOUNT_IDENTITY_SECRET_REFERENCE
       ? vault().resolveOrCreate(secretReference)
       : vault().resolve(secretReference),

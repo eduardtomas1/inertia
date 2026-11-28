@@ -2,11 +2,7 @@ import type { PosixCleanupFailureReason } from "../posix-cleanup-diagnostics";
 import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun, SubagentBackgroundResult, SubagentStopOutcome } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
-import {
-  PROVIDER_CAPABILITY_IDS,
-  providerCapabilityManifest,
-  type ProviderCapabilityId,
-} from "./capability-manifest";
+import { PROVIDER_CAPABILITY_IDS, providerCapabilityManifest, type ProviderCapabilityId } from "./capability-manifest";
 import { validateProviderRunInput } from "./adapters";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -33,11 +29,8 @@ import {
   ProviderSteerDeliveryUnknownError,
   type ProviderSteerInput,
 } from "./contracts";
-import {
-  createProviderEmitter,
-  providerCallbacksFromHarness,
-} from "./emitter";
-import { startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
+import { createProviderEmitter, providerCallbacksFromHarness, type ProviderEmitter } from "./emitter";
+import { routedFreshSessionFallback, startHarnessWithFreshSessionFallback } from "./fresh-session-fallback";
 import type { ProviderMetadataCache } from "./metadata";
 import { ProviderInstallationAdmissionError } from "./installation-lease";
 import {
@@ -97,6 +90,7 @@ interface ActiveRun {
 }
 
 export interface ProviderRunCoordinatorOptions {
+  cursorSdk?: ProviderManagerOptions["cursorSdk"];
   cancelGraceMs: number;
   harnessRegistry: AgentHarnessRegistry;
   metadataCache: ProviderMetadataCache;
@@ -104,6 +98,7 @@ export interface ProviderRunCoordinatorOptions {
     | ProviderManagerOptions["resolveBackendLaunchOptions"];
   conversationProviderGate?: ProviderManagerOptions["conversationProviderGate"];
   commandFor(providerId: ProviderId): string;
+  commandForRun?(input: ProviderRunInput): string;
   resolvedCommandFor(providerId: ProviderId): string | undefined;
   rememberResolvedCommand(providerId: ProviderId, executable: string): void;
   learnSessionCommands?(identity: import("./provider-command-catalog").ProviderCommandRunIdentity, commands: readonly import("../../shared/contracts").ProviderSlashCommand[]): void;
@@ -175,6 +170,7 @@ function capabilitiesForEvent(
     case "subagent":
       return ["subagent-create"];
     case "session":
+    case "native-boundary":
       return ["native-session-id"];
     case "metadata":
       return [
@@ -295,30 +291,21 @@ export class ProviderRunCoordinator {
     const providerId = input.providerId;
     const runId = input.runId;
     const turnId = input.turnId;
-    const requiredCapabilities: ProviderCapabilityId[] = [
-      ...(
-        input.backendProfile.source === "custom"
-        && input.harnessId === "codex-app-server"
-          ? ["provider-native-tools" as const]
-          : []
-      ),
-      ...(providerCapabilityManifest(input.harnessId)
-        ? ["text-streaming" as const]
-        : []),
-      ...(input.interactionMode === "plan" ? ["plans" as const] : []),
-      ...(input.reasoningEffort || input.modelSelection.reasoningEffort
-        ? ["reasoning" as const]
-        : []),
-      ...(input.sessionId ? ["session-resume" as const] : []),
-      ...(input.imagePaths?.length ? ["images" as const] : []),
-      ...(input.goalStart ? ["goals" as const] : []),
-      ...(input.supportedFastMode !== undefined
-        ? ["performance-modes" as const]
-        : []),
-      ...(input.operation?.kind === "compact" ? ["compaction" as const] : []),
-      ...(input.skills?.length ? ["provider-native-tools" as const] : []),
+    const requiredCapabilitiesFor = (runInput: ProviderRunInput): ProviderCapabilityId[] => [
+      ...(runInput.backendProfile.source === "custom" && runInput.harnessId === "codex-app-server"
+        ? ["provider-native-tools" as const] : []),
+      ...(providerCapabilityManifest(runInput.harnessId) ? ["text-streaming" as const] : []),
+      ...(runInput.interactionMode === "plan" ? ["plans" as const] : []),
+      ...(runInput.reasoningEffort || runInput.modelSelection.reasoningEffort ? ["reasoning" as const] : []),
+      ...(runInput.sessionId ? ["session-resume" as const] : []),
+      ...(runInput.imagePaths?.length ? ["images" as const] : []),
+      ...(runInput.goalStart ? ["goals" as const] : []),
+      ...(runInput.supportedFastMode !== undefined ? ["performance-modes" as const] : []),
+      ...(runInput.operation?.kind === "compact" ? ["compaction" as const] : []),
+      ...(runInput.skills?.length ? ["provider-native-tools" as const] : []),
       ...(callbacks.hostTools ? ["host-tool-bridge" as const] : []),
     ];
+    let requiredCapabilities = requiredCapabilitiesFor(input);
     const unavailable = requiredCapabilities.find((capabilityId) =>
       !this.options.capabilityAdmissible(
         input,
@@ -378,35 +365,40 @@ export class ProviderRunCoordinator {
           negotiated,
         );
     };
-    const executable = this.options.commandFor(providerId);
+    const executable = this.options.commandForRun?.(input) ?? this.options.commandFor(providerId);
     const nativeProfile = providerNativeBackendProfile(providerId);
-    const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
+    const ownsLegacyProviderMetadata = input.harnessId !== "cursor-sdk" && input.backendProfile.id === nativeProfile.id
       && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
     const runMetadataScope = this.options.metadataCache.scopeForSelection(
       input.modelSelection,
       input.backendProfile,
       executable,
     );
+    const learnMetadataFromEvent = (event: ProviderEvent): void => {
+      if (event.type !== "metadata") return;
+      if (event.metadata.commands && !isIsolatedProviderConversationId(conversationId)) {
+        this.options.learnSessionCommands?.({ conversationId, providerId, cwd: input.cwd }, event.metadata.commands);
+      }
+      if (event.metadata.models || event.metadata.rateLimits) {
+        this.options.metadataCache.learnScoped(runMetadataScope, event.metadata, event.source, { merge: !event.complete });
+        if (ownsLegacyProviderMetadata) {
+          this.options.metadataCache.learn(
+            event.providerId,
+            this.options.resolvedCommandFor(event.providerId) ?? this.options.commandFor(event.providerId),
+            event.metadata,
+            event.source,
+            { merge: !event.complete },
+          );
+        }
+      }
+    };
+    const wrapOnEvent = (forward?: (event: ProviderEvent) => void) => (event: ProviderEvent): void => {
+      learnMetadataFromEvent(event);
+      forward?.(event);
+    };
     const managerCallbacks: ProviderRunCallbacks = {
       ...callbacks,
-      onEvent: (event) => {
-        if (event.type === "metadata") {
-          if (event.metadata.commands && !isIsolatedProviderConversationId(conversationId)) this.options.learnSessionCommands?.({ conversationId, providerId, cwd: input.cwd }, event.metadata.commands);
-          if (event.metadata.models || event.metadata.rateLimits) {
-            this.options.metadataCache.learnScoped(runMetadataScope, event.metadata, event.source, { merge: !event.complete });
-            if (ownsLegacyProviderMetadata) {
-              this.options.metadataCache.learn(
-                event.providerId,
-                this.options.resolvedCommandFor(event.providerId) ?? this.options.commandFor(event.providerId),
-                event.metadata,
-                event.source,
-                { merge: !event.complete },
-              );
-            }
-          }
-        }
-        callbacks.onEvent?.(event);
-      },
+      onEvent: wrapOnEvent(callbacks.onEvent),
     };
     let active!: ActiveRun;
     let protocolViolation: ProviderRuntimeError | null = null;
@@ -442,6 +434,7 @@ export class ProviderRunCoordinator {
         },
       },
     );
+    let currentEmitter: ProviderEmitter = compatibilityEmitter;
     const harness = this.options.harnessRegistry.resolve(input);
     const baseEnvironment = providerChildEnvironment(
       providerId,
@@ -568,6 +561,29 @@ export class ProviderRunCoordinator {
         disposeLaunch();
         return Promise.resolve(cancelledBeforeStart());
       }
+      const observeCapability: NonNullable<Parameters<typeof providerCallbacksFromHarness>[1]> = (observation) => {
+        if (active.settled || active.cancelRequested) return;
+        if (!observation.available) {
+          active.negotiatedCapabilities.delete(observation.capabilityId);
+          return;
+        }
+        const candidate = new Set(active.negotiatedCapabilities);
+        candidate.add(observation.capabilityId);
+        if (!runCapabilityAvailable(
+          observation.capabilityId,
+          [...candidate],
+        )) {
+          protocolViolation ??= new ProviderRuntimeError(
+            "invalid_input",
+            `Provider protocol violation: '${observation.capabilityId}' cannot be negotiated for this installation.`,
+          );
+          active.cancelRequested = true;
+          compatibilityEmitter.close();
+          this.cancelStartedHarness(active);
+          return;
+        }
+        active.negotiatedCapabilities.add(observation.capabilityId);
+      };
       let harnessRun: AgentHarnessRun;
       try {
         if (input.backendProfile.source === "custom") {
@@ -609,8 +625,12 @@ export class ProviderRunCoordinator {
               model: launchOptions.modelArgument ?? undefined,
             };
         active.harnessStartInvoked = true;
+        // Offered only where a successful negotiation would make `history-injection` available to this run.
+        const historyInjectionAdmitted = () => runCapabilityAvailable("history-injection", ["history-injection"]);
         harnessRun = startHarnessWithFreshSessionFallback(harness, {
           input: launchInput,
+          cursorSdk: this.options.cursorSdk,
+          ...(input.nativeContinuation ? { nativeContinuation: input.nativeContinuation } : {}),
           executable,
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.
@@ -624,36 +644,18 @@ export class ProviderRunCoordinator {
           ...(launchOptions.harnessConfiguration
             ? { harnessConfiguration: launchOptions.harnessConfiguration }
             : {}),
-          callbacks: providerCallbacksFromHarness(
-            compatibilityEmitter,
-            (observation) => {
-              if (active.settled || active.cancelRequested) return;
-              if (!observation.available) {
-                active.negotiatedCapabilities.delete(
-                  observation.capabilityId,
-                );
-                return;
-              }
-              const candidate = new Set(active.negotiatedCapabilities);
-              candidate.add(observation.capabilityId);
-              if (!runCapabilityAvailable(
-                observation.capabilityId,
-                [...candidate],
-              )) {
-                protocolViolation ??= new ProviderRuntimeError(
-                  "invalid_input",
-                  `Provider protocol violation: '${observation.capabilityId}' cannot be negotiated for this installation.`,
-                );
-                active.cancelRequested = true;
-                compatibilityEmitter.close();
-                this.cancelStartedHarness(active);
-                return;
-              }
-              active.negotiatedCapabilities.add(observation.capabilityId);
-            },
-          ),
+          callbacks: providerCallbacksFromHarness(compatibilityEmitter, observeCapability),
           ...(callbacks.hostTools ? { hostTools: callbacks.hostTools } : {}),
-        }, callbacks.freshSessionFallback);
+          ...(callbacks.historyInjection && historyInjectionAdmitted() ? { historyInjection: callbacks.historyInjection } : {}),
+        }, routedFreshSessionFallback(callbacks.freshSessionFallback, (onEvent) => {
+          // Capability evidence belongs to one harness process; the replacement observes its own and,
+          // opening a fresh session, owes no session-resume evidence.
+          active.negotiatedCapabilities.clear();
+          const { sessionId: _resumedSession, ...replacementInput } = input;
+          requiredCapabilities = requiredCapabilitiesFor(replacementInput);
+          currentEmitter = compatibilityEmitter.rebind(wrapOnEvent(onEvent));
+          return providerCallbacksFromHarness(currentEmitter, observeCapability);
+        }, historyInjectionAdmitted));
       } finally {
         releaseLaunch();
       }
@@ -702,7 +704,7 @@ export class ProviderRunCoordinator {
       harnessStartInvoked: false,
       startFailed: false,
       launchAbort,
-      markPendingCancellation: () => compatibilityEmitter.status("cancelling"),
+      markPendingCancellation: () => currentEmitter.status("cancelling"),
       runId,
       turnId,
       input,
@@ -1031,6 +1033,7 @@ export class ProviderRunCoordinator {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs = this.options.cancelGraceMs,
+    hooks?: { escalated?(): void },
   ): Promise<OwnedProviderStopResult> {
     const active = this.activeRuns.get(conversationId);
     if (!active || active.settled) {
@@ -1058,6 +1061,7 @@ export class ProviderRunCoordinator {
       forceStopBudgetMs: this.options.forceStopBudgetMs,
       cancel: () => { this.cancel(conversationId); },
       settledResult: () => this.settledStopResult(conversationId, active),
+      hooks,
     });
     return await active.stopLadder;
   }

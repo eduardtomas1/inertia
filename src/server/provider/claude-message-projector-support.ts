@@ -1,5 +1,6 @@
 import type { SDKAssistantMessageError } from "@anthropic-ai/claude-agent-sdk";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { parseClaudeRateLimitEvents } from "./claude-usage";
 import { markdownPlanSteps } from "./markdown-plan-steps";
@@ -167,7 +168,7 @@ export class ClaudeProjectedTextLedger {
       0,
       MAX_CLAUDE_STREAM_CORRELATION_CHARS - this.totalChars,
     );
-    const accepted = value.slice(0, available);
+    const accepted = clipCodeUnits(value, available);
     if (!accepted) return "";
     this.values.set(itemId, `${this.values.get(itemId) ?? ""}${accepted}`);
     this.totalChars += accepted.length;
@@ -190,7 +191,7 @@ export class ClaudeProjectedTextLedger {
       0,
       MAX_CLAUDE_STREAM_CORRELATION_CHARS - this.totalChars,
     );
-    const accepted = value.slice(0, available);
+    const accepted = clipCodeUnits(value, available);
     this.values.set(itemId, accepted);
     this.totalChars += accepted.length;
   }
@@ -210,7 +211,7 @@ export class ClaudeProjectedTextLedger {
     for (const itemId of this.order) {
       values.push(this.values.get(itemId) ?? "");
     }
-    return values.join("").slice(0, MAX_CLAUDE_STREAM_CORRELATION_CHARS);
+    return clipCodeUnits(values.join(""), MAX_CLAUDE_STREAM_CORRELATION_CHARS);
   }
 
   seal(): void {
@@ -275,7 +276,7 @@ export function claudeAssistantFailure(
 }
 
 export function boundedClaudeEventText(value: string): string {
-  return value.slice(0, MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS);
 }
 
 export function boundedClaudeIdentifier(value: unknown): string | undefined {
@@ -291,7 +292,7 @@ export function claudeTextItemId(kind: string, value: string): string {
 
 export function boundedClaudeLabel(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim()
-    ? value.trim().slice(0, 240)
+    ? clipCodeUnits(value.trim(), 240)
     : fallback;
 }
 
@@ -362,11 +363,13 @@ export function safeClaudeNonNegativeNumber(value: unknown): number {
 export function claudeDetailLines(
   values: readonly (string | null | undefined)[],
 ): string | undefined {
-  const detail = values
-    .filter((value): value is string =>
-      typeof value === "string" && value.length > 0)
-    .join("\n")
-    .slice(0, MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS);
+  const detail = clipCodeUnits(
+    values
+      .filter((value): value is string =>
+        typeof value === "string" && value.length > 0)
+      .join("\n"),
+    MAX_CLAUDE_PROJECTOR_EVENT_TEXT_CHARS,
+  );
   return detail || undefined;
 }
 

@@ -6,6 +6,7 @@ import type {
   SubagentTrace,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
+import type { AttemptObserver } from "../../orchestration-v2/attempt-fence";
 import type {
   ProviderEvent,
   ProviderSubagentEvent,
@@ -33,6 +34,8 @@ import type { TurnStreamProjection } from "./turn-stream-projection";
 import { TurnSubagentTelemetry } from "./turn-subagent-telemetry";
 import { CustomAgentTraceAttribution } from "./turn-custom-agent-traces";
 import { isReadOnlyWriteActivity } from "./turn-read-only-watcher";
+import { reportsReplacedSession } from "./turn-fresh-session-fallback";
+import { persistActiveTurnConversationSession } from "./turn-session-persistence";
 
 export interface TurnProviderEventProjectorOptions {
   store: RuntimeStore;
@@ -47,11 +50,14 @@ export interface TurnProviderEventProjectorOptions {
     active: ActiveTurn,
     status: Exclude<AgentRunState, AgentTurnTerminalStatus>,
     providerState?: string | null,
+    observer?: AttemptObserver,
   ): boolean;
   observeSubagent(
     active: ActiveTurn,
     trace: SubagentTrace,
   ): boolean;
+  /** Ends the turn because its fresh start came back on a session it replaced (`reportsReplacedSession`). */
+  failReusedSession(active: ActiveTurn): void;
 }
 
 function projectedNativeGoalMatches(
@@ -82,12 +88,32 @@ export class TurnProviderEventProjector {
     broadcastTurnSnapshot(this.options.hooks);
   }
 
-  project(active: ActiveTurn, event: ProviderEvent): void {
+  /**
+   * `observer` names the attempt the event came from, already checked against
+   * the turn's current attempt. The rare state-changing V2 writes (native
+   * boundary, session, provider status) re-check it in their transaction; the
+   * per-output acknowledgement does not, to keep streaming cheap.
+   */
+  project(active: ActiveTurn, event: ProviderEvent, observer?: AttemptObserver): void {
+    if (event.type === "text" || event.type === "text-snapshot" || event.type === "approval"
+      || event.type === "input" || event.type === "plan") {
+      this.options.store.orchestration.acknowledge(active.turn.runId);
+    }
     switch (event.type) {
+      case "native-boundary":
+        this.options.store.orchestration.nativeBoundaries.observe(active.turn, {
+          nativeConversationId: event.nativeConversationId, nativeSessionId: event.nativeSessionId,
+          nativeTurnId: event.nativeTurnId, persistedHeadId: event.persistedHeadId, phase: event.phase,
+        }, observer);
+        break;
       case "text":
         this.options.streams.appendAssistant(active, event.text);
         break;
       case "text-snapshot": {
+        if (event.scope === "segment") {
+          this.options.streams.replaceAssistantSegment(active, event.text);
+          break;
+        }
         const message = this.options.streams.replaceAssistantSnapshot(
           active,
           event.text,
@@ -111,7 +137,8 @@ export class TurnProviderEventProjector {
         this.options.streams.closeAssistantSegment(active);
         break;
       case "reasoning-summary":
-        this.options.streams.appendReasoning(active, event.text);
+        if (event.replace) this.options.streams.replaceReasoning(active, event.text);
+        else this.options.streams.appendReasoning(active, event.text);
         break;
       case "usage": {
         const usage = this.options.store.upsertUsage({
@@ -128,11 +155,17 @@ export class TurnProviderEventProjector {
         break;
       }
       case "session":
+        if (reportsReplacedSession(active, event.sessionId)) {
+          this.options.failReusedSession(active);
+          break;
+        }
+        // A stale attempt's session must not become the turn's or the chat's. A session the harness forked from the
+        // resumed one into this checkout takes over the resumed session's backing first.
+        if (event.forkedFrom !== undefined
+          && this.options.store.orchestration.backings.forkSession(active.turn, event.forkedFrom, event.sessionId, observer)) break;
+        if (this.options.store.orchestration.backings.observeSession(active.turn, event.sessionId, observer, event.forkedFrom)) break;
         updateActiveTurnProviderSession(active, event.sessionId);
-        this.options.store.updateConversation(active.conversation.id, {
-          providerSessionId: event.sessionId,
-          continuationIdentity: active.turn.continuationIdentity,
-        });
+        persistActiveTurnConversationSession(this.options.store, active, event.sessionId);
         break;
       case "session-title":
         active.providerSessionTitle = event.title;
@@ -163,7 +196,7 @@ export class TurnProviderEventProjector {
       case "status":
         if (
           (event.status === "starting"
-            && this.options.transition(active, "starting", event.providerState))
+            && this.options.transition(active, "starting", event.providerState, observer))
           || ((event.status === "running"
             || event.status === "delegated"
             || event.status === "retrying"
@@ -172,6 +205,7 @@ export class TurnProviderEventProjector {
               active,
               event.status,
               event.providerState,
+              observer,
             ))
         ) {
           this.broadcastConversationShell(active);

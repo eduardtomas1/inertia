@@ -3,6 +3,7 @@ import {
   type ConversationContextExcerpt,
   type ConversationContextPacket,
 } from "../../shared/conversation-context";
+import { conversationContextCheckpointLine, conversationContextHandoffLine } from "../../shared/conversation-context-supplement";
 
 export type ContextEntry =
   | [string, string]
@@ -80,6 +81,12 @@ export function contextEnvelope(
     ...(supplement.files ? { filesChanged: supplement.files } : {}),
     ...(supplement.omittedFiles ? { filesOmitted: supplement.omittedFiles } : {}),
     ...(supplement.commands?.length ? { lastCommands: supplement.commands } : {}),
+    ...(supplement.omittedCommands ? { commandsOmitted: supplement.omittedCommands } : {}),
+    ...(supplement.checkpoints?.length
+      ? { checkpoints: supplement.checkpoints.map(conversationContextCheckpointLine) } : {}),
+    ...(supplement.omittedCheckpoints ? { checkpointsOmitted: supplement.omittedCheckpoints } : {}),
+    ...(supplement.handoffs?.length ? { handoffs: supplement.handoffs.map(conversationContextHandoffLine) } : {}),
+    ...(supplement.omittedHandoffs ? { handoffsOmitted: supplement.omittedHandoffs } : {}),
     ...(packet.sourceState === "deleted" ? {} : {
       more: `If the ${CONTEXT_TOOL} tool is available, call it with the source conversationId to read older turns of ${own ? "this chat" : "the referenced chat"} and their attached images.`,
     }),

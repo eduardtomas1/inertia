@@ -62,6 +62,8 @@ describe("Codex thread title generation", () => {
     });
     expect(threadStart.config).toMatchObject({
       "features.apps": false,
+      "features.connectors": false,
+      "features.plugins": false,
       "features.shell_tool": false,
       "features.unified_exec": false,
       "features.multi_agent": false,

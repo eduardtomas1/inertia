@@ -9,6 +9,8 @@ export const CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS = {
   "thread/status/changed": "projected",
   "thread/archived": "ignored",
   "thread/deleted": "projected",
+  // Codex emits `thread/unarchived` after `thread/unarchive` (T3 9c8942480, ba962f2d2);
+  // keep state clean without unknown-notification noise.
   "thread/unarchived": "ignored",
   "thread/closed": "projected",
   "thread/reverted": "projected",

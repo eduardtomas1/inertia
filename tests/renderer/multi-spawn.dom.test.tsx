@@ -450,18 +450,18 @@ describe("multi-spawn", () => {
       target: { value: "Compare model behavior." },
     });
 
-    const choose = (current: RegExp, index: number, modelKey: string) => {
+    const choose = async (current: RegExp, index: number, modelKey: string) => {
       fireEvent.click(screen.getAllByRole("button", { name: current })[index]!);
-      expect(screen.getByRole("dialog", { name: "Choose model" })).toBeVisible();
+      expect(await screen.findByRole("dialog", { name: "Choose model" })).toBeVisible();
       const result = screen.getByRole("grid", { name: "Model results" })
         .querySelector<HTMLElement>(`.model-chooser-row-option[data-model-route-key*='${modelKey}']`);
       if (!result) throw new Error(`Expected the ${modelKey} result action.`);
       fireEvent.click(result);
     };
-    choose(/Choose model\..*GPT-5\.5/u, 0, "gpt-5.6-sol");
+    await choose(/Choose model\..*GPT-5\.5/u, 0, "gpt-5.6-sol");
     expect(screen.getAllByText("GPT-5.6-Sol")).toHaveLength(2);
     expect(screen.queryByText("GPT-5.5")).not.toBeInTheDocument();
-    choose(/Choose model\..*GPT-5\.6-Sol/u, 0, "gpt-5.5");
+    await choose(/Choose model\..*GPT-5\.6-Sol/u, 0, "gpt-5.5");
 
     fireEvent.click(screen.getByRole("button", { name: "Start duo" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -493,7 +493,7 @@ describe("multi-spawn", () => {
       name: /Choose model\..*GPT-5\.5/u,
     });
     fireEvent.click(trigger);
-    const chooser = screen.getByRole("dialog", { name: "Choose model" });
+    const chooser = await screen.findByRole("dialog", { name: "Choose model" });
     const search = within(chooser).getByRole("combobox", { name: "Search models" });
 
     fireEvent.keyDown(search, { key: "Escape" });

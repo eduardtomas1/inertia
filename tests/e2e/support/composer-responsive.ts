@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../../src/server/database";
@@ -297,20 +298,18 @@ export async function exerciseComposerQueue({
     store.close();
     throw new Error("Composer queue fixture has no active conversation.");
   }
+  const itemId = randomUUID();
   const originalStatus = store.conversation(conversationId).status;
-  store.updateConversation(conversationId, { status: "running" });
-  store.close();
-  await page.evaluate(({ targetId }) => {
-    window.localStorage.setItem(
-      `inertia:queued-prompts:v2:${targetId}`,
-      JSON.stringify([{
-        id: "queued-responsive-proof",
-        content: "After this pass, update the release notes and run the full gate",
-        createdAt: "2026-08-21T10:00:00.000Z",
-        attachments: [],
-      }]),
-    );
-  }, { targetId: conversationId });
+  try {
+    store.updateConversation(conversationId, { status: "running" });
+    store.orchestration.queue.enqueue({
+      conversationId,
+      itemId,
+      content: "After this pass, update the release notes and run the full gate",
+    });
+  } finally {
+    store.close();
+  }
   await page.reload();
   try {
     const dock = page.getByRole("region", { name: "Message composer" });
@@ -334,11 +333,18 @@ export async function exerciseComposerQueue({
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,
     });
-    cleanup.updateConversation(conversationId, { status: originalStatus });
-    cleanup.close();
-    await page.evaluate(({ targetId }) => {
-      window.localStorage.removeItem(`inertia:queued-prompts:v2:${targetId}`);
-    }, { targetId: conversationId });
+    try {
+      try {
+        cleanup.orchestration.queue.cancel({
+          conversationId,
+          itemId,
+          reason: "user",
+        });
+      } catch {}
+      cleanup.updateConversation(conversationId, { status: originalStatus });
+    } finally {
+      cleanup.close();
+    }
     await page.reload();
   }
   await expect(page.getByRole("button", { name: "Send message" })).toBeVisible();
@@ -636,6 +642,9 @@ export async function expectLongestChipsFoldAtLarge(
   expect(await dock.evaluate((element) => element.getBoundingClientRect().width)).toBeGreaterThan(900);
   const longest = ["Extra high", "Standard", "Auto-accept edits", "Build"];
   const screenshotControl = await dock.locator(".composer-attach-actions button").count() > 1;
+  // After the reload the branch chip joins the row only once Git status is
+  // known, so judge folding against the complete row, not the one before it.
+  await expect(dock.locator(".composer-checkout-context .composer-branch-control")).toBeAttached();
   await expect.poll(async () => JSON.stringify((await inspectComposerChipRow(dock)).folded))
     .toMatch(screenshotControl ? /^\[(?:"branch")?\]$/u : /^\[\]$/u);
   const fullWidth = await inspectComposerChipRow(dock);

@@ -91,6 +91,8 @@ const privateConnectAuditSchema = z.object({
     "prompt.uncertain",
     "input.accepted",
     "run.stop-accepted",
+    "scheduled-task.accepted",
+    "scheduled-task.deleted",
     "request.started",
     "request.uncertain",
     "request.rejected",

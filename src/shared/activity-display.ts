@@ -6,12 +6,23 @@ const LEADING_CD_PATTERN = /^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*&&\s*/u;
 const SETUP_LINE_PATTERN =
   /^(?:#|export\s+[A-Za-z_][A-Za-z0-9_]*=|set\s+[-+][a-zA-Z]+|cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*$|source\s+\S+\s*$|\.\s+\S+\s*$)/u;
 const HOST_TOOL_TITLE =
-  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-(?:manager|secrets)(?:_{1,2}|\s*:\s*))?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
+  /^(?:Tool\s*·\s*)?(?:mcp_{1,2})?(?:inertia-chat-(?:manager|secrets|waits)(?:_{1,2}|\s*:\s*)|inertia__)?(inertia_[a-z0-9_]+)(?:\s*:.*)?$/u;
 const HOST_TOOL_LABELS: Readonly<Record<string, readonly [running: string, done: string, failed: string]>> = {
   inertia_render_html: ["Rendering a page", "Rendered a page", "Could not render a page"],
   inertia_request_secret: ["Asking for a secret", "Secret saved", "No secret saved"],
   inertia_send_to_user: ["Showing a message", "Showed a message", "Could not show a message"],
 };
+
+/** T3's title for the notice that shows why the provider stopped a run (a Codex hook stop). */
+export const PROVIDER_STOP_NOTICE_TITLE = "Stopped by the provider";
+
+/**
+ * The runtime's provider stop notice, written with the run's settlement. T3 shows it as a visible warning, so it is
+ * classified by kind and title, never by its detail (the provider's reason).
+ */
+export function isProviderStopNotice(activity: Pick<AgentActivity, "kind" | "title">): boolean {
+  return activity.kind === "status" && activity.title === PROVIDER_STOP_NOTICE_TITLE;
+}
 
 export function unwrapShellCommand(command: string): string {
   const trimmed = command.trim();

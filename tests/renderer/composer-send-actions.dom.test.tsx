@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerSendActions } from "../../src/renderer/src/components/composer/ComposerSendActions";
 import { ComposerSendActionsFallback } from "../../src/renderer/src/components/composer/ComposerSendActionsFallback";
 import {
-  enqueueComposerPrompt,
+  composerMediaQueueKey,
   readComposerQueue,
 } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
+import type { QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
 import type { ChatAttachment } from "../../src/shared/contracts";
+import type { MessageQueueResult, QueuedMessage } from "../../src/shared/queued-messages";
 
 const idle = {
   conversationId: "composer-actions",
@@ -147,19 +149,40 @@ describe("composer morphing send actions", () => {
   });
 
   it("shows the head of the queue with immediate-send and remove actions", async () => {
-    const onSendQueued = vi.fn(async () => undefined);
-    window.localStorage.setItem(
-      "inertia:queued-prompts:composer-actions",
-      JSON.stringify([
-        { id: "queued-1", content: "Run the release checks", createdAt: "2026-08-21T10:00:00.000Z" },
-        { id: "queued-2", content: "Update the changelog", createdAt: "2026-08-21T10:01:00.000Z" },
-      ]),
-    );
+    const first: QueuedMessage = {
+      id: "11111111-1111-4111-8111-111111111101",
+      conversationId: idle.conversationId,
+      content: "Run the release checks",
+      createdAt: "2026-08-21T10:00:00.000Z",
+      attachments: [],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    const second: QueuedMessage = {
+      id: "11111111-1111-4111-8111-111111111102",
+      conversationId: idle.conversationId,
+      content: "Update the changelog",
+      createdAt: "2026-08-21T10:01:00.000Z",
+      attachments: [],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    let entries: QueuedMessage[] = [first, second];
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.send" || command.type === "message.queue.remove") {
+        entries = entries.filter(({ id }) => id !== command.payload.id);
+      }
+      return { kind: "message.queue", conversationId: idle.conversationId, entries, receipt: null };
+    });
     render(
       <ComposerSendActions
         {...idle}
         primaryAction="stop-ready"
-        onSendQueued={onSendQueued}
+        onQueueCommand={onQueueCommand}
       />,
     );
 
@@ -170,18 +193,19 @@ describe("composer morphing send actions", () => {
     )).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledWith(
-      "Run the release checks",
-      [],
-    ));
+    await waitFor(() => expect(onQueueCommand).toHaveBeenCalledWith({
+      type: "message.queue.send",
+      payload: { conversationId: idle.conversationId, id: first.id },
+    }));
     expect(await screen.findByText("Update the changelog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
     await waitFor(() => expect(screen.queryByRole("list", {
       name: "Queued messages",
     })).not.toBeInTheDocument());
-    expect(window.localStorage.getItem(
-      "inertia:queued-prompts:composer-actions",
-    )).toBeNull();
+    expect(onQueueCommand).toHaveBeenCalledWith({
+      type: "message.queue.remove",
+      payload: { conversationId: idle.conversationId, id: second.id },
+    });
   });
 
   it("sends queued media without releasing the transferred capability", async () => {
@@ -192,19 +216,29 @@ describe("composer morphing send actions", () => {
       mimeType: "image/png",
       size: 128,
     };
-    const onSendQueued = vi.fn(async () => undefined);
+    const entry: QueuedMessage = {
+      id: "11111111-1111-4111-8111-111111111103",
+      conversationId: idle.conversationId,
+      content: "Review the screenshot",
+      createdAt: "2026-08-21T10:00:00.000Z",
+      attachments: [attachment],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    let entries: QueuedMessage[] = [entry];
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.send") entries = [];
+      return { kind: "message.queue", conversationId: idle.conversationId, entries, receipt: null };
+    });
     const onReleaseAttachment = vi.fn(async () => undefined);
-    expect(enqueueComposerPrompt(
-      idle.conversationId,
-      "Review the screenshot",
-      [attachment],
-    )).toBe(true);
 
     render(
       <ComposerSendActions
         {...idle}
         primaryAction="stop-ready"
-        onSendQueued={onSendQueued}
+        onQueueCommand={onQueueCommand}
         onReleaseAttachment={onReleaseAttachment}
       />,
     );
@@ -213,15 +247,14 @@ describe("composer morphing send actions", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Send queued message now",
     }));
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledWith(
-      "Review the screenshot",
-      [attachment],
-    ));
+    await waitFor(() => expect(onQueueCommand).toHaveBeenCalledWith({
+      type: "message.queue.send",
+      payload: { conversationId: idle.conversationId, id: entry.id },
+    }));
     expect(onReleaseAttachment).not.toHaveBeenCalled();
-    expect(readComposerQueue(idle.conversationId)).toEqual([]);
   });
 
-  it("releases queued media once when the user removes the entry", async () => {
+  it("releases legacy queued media once when the user discards the entry", async () => {
     const attachment: ChatAttachment = {
       id: "22222222-2222-4222-8222-222222222222",
       name: "discard.png",
@@ -230,11 +263,15 @@ describe("composer morphing send actions", () => {
       size: 128,
     };
     const onReleaseAttachment = vi.fn(async () => undefined);
-    expect(enqueueComposerPrompt(
-      idle.conversationId,
-      "Discard the screenshot",
-      [attachment],
-    )).toBe(true);
+    window.sessionStorage.setItem(
+      composerMediaQueueKey(idle.conversationId),
+      JSON.stringify([{
+        id: "legacy-discard",
+        content: "Discard the screenshot",
+        createdAt: "2026-08-21T10:00:00.000Z",
+        attachments: [attachment],
+      }]),
+    );
 
     render(
       <ComposerSendActions
@@ -244,7 +281,7 @@ describe("composer morphing send actions", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", {
-      name: "Remove queued message",
+      name: "Discard saved draft",
     }));
 
     await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledTimes(1));
@@ -260,21 +297,28 @@ describe("composer morphing send actions", () => {
       mimeType: "image/png",
       size: 128,
     };
-    const onSendQueued = vi.fn(async () => {
-      throw new Error("send rejected");
+    const entry: QueuedMessage = {
+      id: "11111111-1111-4111-8111-111111111104",
+      conversationId: idle.conversationId,
+      content: "Retry the screenshot",
+      createdAt: "2026-08-21T10:00:00.000Z",
+      attachments: [attachment],
+      state: "waiting",
+      error: null,
+      turnId: null,
+      userMessageId: null,
+    };
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.send") throw new Error("send rejected");
+      return { kind: "message.queue", conversationId: idle.conversationId, entries: [entry], receipt: null };
     });
     const onReleaseAttachment = vi.fn(async () => undefined);
-    expect(enqueueComposerPrompt(
-      idle.conversationId,
-      "Retry the screenshot",
-      [attachment],
-    )).toBe(true);
 
     render(
       <ComposerSendActions
         {...idle}
         primaryAction="stop-ready"
-        onSendQueued={onSendQueued}
+        onQueueCommand={onQueueCommand}
         onReleaseAttachment={onReleaseAttachment}
       />,
     );
@@ -282,12 +326,9 @@ describe("composer morphing send actions", () => {
       name: "Send queued message now",
     }));
 
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
-    expect(await screen.findByText("Retry the screenshot")).toBeInTheDocument();
-    expect(readComposerQueue(idle.conversationId)).toMatchObject([{
-      content: "Retry the screenshot",
-      attachments: [attachment],
-    }]);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("send rejected"));
+    expect(screen.getByText("Retry the screenshot")).toBeInTheDocument();
+    expect(screen.getByText("1 image")).toBeInTheDocument();
     expect(onReleaseAttachment).not.toHaveBeenCalled();
   });
 

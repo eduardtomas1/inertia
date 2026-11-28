@@ -35,7 +35,7 @@ import {
   type CheckpointRetentionPolicy,
   type PruneCheckpointRefsOptions,
 } from "./checkpoint-retention";
-import { CheckpointError, createCheckpoint, deleteCheckpoint } from "./checkpoints";
+import { CheckpointError, createCheckpoint, deleteCheckpoint, pruneOrphanedCheckpointRefs } from "./checkpoints";
 import {
   captureGitArtifactState,
   compareGitSnapshots,
@@ -562,8 +562,21 @@ export class TurnGitArtifactManager {
     return task;
   }
 
-  reconcile(): Promise<boolean> {
-    return runDatabaseWrite(this.#databaseWrites, () => this.#reconcileArtifacts());
+  async reconcile(): Promise<boolean> {
+    let existingConversationIds: ReadonlySet<string> = new Set();
+    let projectPaths: string[] = [];
+    const changed = await runDatabaseWrite(this.#databaseWrites, async () => {
+      const result = await this.#reconcileArtifacts();
+      if (!this.#lifetime.signal.aborted) {
+        existingConversationIds = new Set(this.store.conversationIds());
+        projectPaths = this.store.projects().map((project) => project.path).filter(Boolean);
+      }
+      return result;
+    });
+    if (!this.#lifetime.signal.aborted && projectPaths.length > 0) {
+      await this.#pruneOrphanedCheckpointRefs(existingConversationIds, projectPaths);
+    }
+    return changed;
   }
 
   async #reconcileArtifacts(): Promise<boolean> {
@@ -977,6 +990,28 @@ export class TurnGitArtifactManager {
           outcome: "failed",
           context: { commandType: "checkpoint.prune" },
         });
+      }
+    }
+  }
+
+  async #pruneOrphanedCheckpointRefs(
+    existingConversationIds: ReadonlySet<string>,
+    projectPaths: readonly string[],
+  ): Promise<void> {
+    if (this.#lifetime.signal.aborted) return;
+    const operation = this.#operationOptions(this.#finalizationTimeoutMs);
+    const visited = new Set<string>();
+    for (const projectPath of projectPaths) {
+      if (this.#lifetime.signal.aborted || operation.signal.aborted) break;
+      if (!projectPath || visited.has(projectPath) || !(await mayBeInsideGitRepository(projectPath))) continue;
+      visited.add(projectPath);
+      try {
+        await pruneOrphanedCheckpointRefs(projectPath, existingConversationIds, {
+          deadlineAt: operation.deadlineAt,
+          signal: operation.signal,
+        });
+      } catch (error) {
+        this.#recordCleanupFailure(error);
       }
     }
   }

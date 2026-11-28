@@ -21,6 +21,9 @@ interface DetachedChatRuntimeSecurityStore {
   library: { savedAnswerConversationId(savedAnswerId: string): string | null };
   findPairedLaunch(launchId: string): Pick<DuoLaunchStatus, "sides" | "comparison"> | null;
   transcriptRepository: { secretRequests: { find(requestId: string): { conversationId: string } | null } };
+  readonly orchestration?: {
+    readonly delegation: { get(taskId: string): { parentConversationId: string; childConversationId: string } | null };
+  };
 }
 
 interface DetachedChatRuntimeSecurityOptions {
@@ -99,6 +102,10 @@ export function createDetachedChatRuntimeSecurity(
         ...launch.sides.map(({ conversationId }) => conversationId),
         launch.comparison?.conversationId ?? null,
       ].filter((conversationId) => conversationId !== null);
+    },
+    delegatedTaskConversationIds: (taskId) => {
+      const task = options.store.orchestration?.delegation.get(taskId) ?? null;
+      return task ? [task.parentConversationId, task.childConversationId] : null;
     },
     pendingApproval: (conversationId, requestId) =>
       pendingInteractionForConversation(

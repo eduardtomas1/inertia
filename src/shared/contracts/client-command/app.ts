@@ -445,6 +445,7 @@ export const configurationCommandSchemas = [
           compactBeforeCacheExpires: z.boolean().optional(),
           claudeAutoCompactWindow: z.number().int().min(AUTO_COMPACT_TOKENS_MIN).max(AUTO_COMPACT_TOKENS_MAX).nullable().optional(),
           codexAutoCompactTokenLimit: z.number().int().min(AUTO_COMPACT_TOKENS_MIN).max(AUTO_COMPACT_TOKENS_MAX).nullable().optional(),
+          delegationAutomaticWakes: z.boolean().optional(),
           quotaWarnings: z.object({
             enabled: z.boolean().optional(),
             firstThreshold: z.union(QUOTA_WARNING_THRESHOLDS.map((threshold) => z.literal(threshold))).optional(),

@@ -335,3 +335,58 @@ export function agentContextTurnPage(
   }
   return result;
 }
+
+const ITEM_CURSOR_PATTERN = /^\d{1,9}$/u;
+const CURSOR_NOT_FROM_ITEM = "cursor: not from this item; omit it to read the item from the start, or pass nextCursor from this item's previous result.";
+
+export interface AgentContextHistoryItem {
+  id: string;
+  kind: string;
+  role: "user" | "assistant";
+  status: string;
+  turnId: string | null;
+  runId: string | null;
+  at?: string;
+  sourceThreadId?: string;
+}
+
+/** One portable history item of the reader's own chat, its text paged by character offset. */
+export function agentContextItemPage(
+  reads: ConversationContextTurnReads,
+  input: {
+    conversationId: string;
+    item: AgentContextHistoryItem;
+    text: string;
+    truncated: boolean;
+    cursor?: string;
+  },
+): JsonEntry {
+  const offset = input.cursor === undefined ? 0 : ITEM_CURSOR_PATTERN.test(input.cursor) ? Number(input.cursor) : -1;
+  const text = cleanText(input.text);
+  if (offset < 0 || offset > text.length) throw new Error(CURSOR_NOT_FROM_ITEM);
+  const { item } = input;
+  const header: JsonEntry = {
+    itemId: item.id,
+    kind: item.kind,
+    role: item.role,
+    status: item.status,
+    turnId: item.turnId,
+    ...(item.at === undefined ? {} : { at: item.at }),
+    ...(item.sourceThreadId === undefined ? {} : { inheritedFrom: item.sourceThreadId }),
+    ...(offset > 0 ? { continued: true } : {}),
+  };
+  const result: JsonEntry = {
+    chat: chatHeader(reads, input.conversationId, "own"),
+    item: header,
+    nextCursor: null as string | null,
+  };
+  const rest = text.slice(offset);
+  const closing = input.truncated ? { truncated: true } : {};
+  const whole = { ...result, item: { ...header, text: neutralizeUntrustedAgentText(rest), ...closing } };
+  if (bytes(JSON.stringify(whole)) <= AGENT_CONTEXT_PAGE_BYTES) return whole;
+  const budget = AGENT_CONTEXT_PAGE_BYTES
+    - bytes(JSON.stringify({ ...result, item: { ...header, text: "", continues: true }, nextCursor: "0".repeat(10) }));
+  const slice = largestSlice(rest, Math.max(MIN_TEXT_SLICE_BYTES, budget));
+  return { ...result, item: { ...header, text: neutralizeUntrustedAgentText(slice), continues: true },
+    nextCursor: String(offset + slice.length) };
+}

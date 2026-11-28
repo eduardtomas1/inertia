@@ -189,6 +189,44 @@ describe("secret output redactor: active values never leave the turn controller 
     expect(text).toBe("Using [redacted] now.");
   });
 
+  it("restarts the reasoning stream on a replacement: the held prefix is dropped, the replacement redacted", () => {
+    const value = redactor();
+    const reasoning = (text: string, replace?: true): ProviderEvent => ({ ...BASE, type: "reasoning-summary", text,
+      ...(replace ? { replace } : {}) });
+    const emitted = [
+      ...value.events(reasoning("Abandoned fake-token-kQ9x")),
+      ...value.events(reasoning("", true)),
+      ...value.events(reasoning(`Replacement ${SECRET} and fake-token-kQ`, true)),
+      ...value.events(reasoning("9xZ2mB7vN4pL1sR8tW done.")),
+      ...value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events,
+    ];
+    expect(JSON.stringify(emitted)).not.toContain("kQ9x");
+    let shown = "";
+    for (const event of emitted) {
+      if (event.type === "reasoning-summary") shown = event.replace ? event.text : `${shown}${event.text}`;
+    }
+    expect(shown).toBe("Replacement [redacted] and [redacted] done.");
+    expect(emitted.filter((event) => event.type === "reasoning-summary" && event.replace)).toHaveLength(2);
+  });
+
+  it("restarts the text stream on a segment snapshot: the held prefix is dropped, the snapshot's own prefix held", () => {
+    const value = redactor();
+    const snapshot = (text: string): ProviderEvent => ({ ...BASE, type: "text-snapshot", itemId: "pi:1:text", text, scope: "segment" });
+    const emitted = [
+      ...value.events(text("Abandoned fake-token-kQ9x")),
+      ...value.events(snapshot("Replacement fake-token-kQ")),
+      ...value.events(text("9xZ2mB7vN4pL1sR8tW done.")),
+      ...value.result({ ...BASE, status: "completed", text: "" } as ProviderRunResult).events,
+    ];
+    expect(JSON.stringify(emitted)).not.toContain("fake-token-kQ");
+    let shown = "";
+    for (const event of emitted) {
+      if (event.type === "text-snapshot") shown = event.text;
+      else if (event.type === "text") shown += event.text;
+    }
+    expect(shown).toBe("Replacement [redacted] done.");
+  });
+
   it("does not release a held assistant prefix on events that leave the segment open", () => {
     const value = redactor();
     const emitted = [

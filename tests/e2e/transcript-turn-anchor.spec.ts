@@ -49,6 +49,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
     return;
   }
+  if (message.method === "thread/inject_items") {
+    send({ id: message.id, error: { code: -32601, message: "Method not found" } });
+    return;
+  }
   if (message.method === "turn/start") {
     send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
     send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });

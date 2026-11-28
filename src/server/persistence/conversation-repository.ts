@@ -21,6 +21,7 @@ import { releaseProviderRecoveryRecords } from "./provider-run-ownership-reposit
 import { cachedStatement } from "./statement-cache";
 import { WorkspacePathAuthority } from "../workspace-path-authority";
 import { QUICK_TITLE_SCANNED_CHARS, quickConversationTitle } from "../runtime/conversation-title";
+import { assertNativeControlIdle } from "../orchestration-v2/native-control-fence";
 
 type ConversationPersistenceContext = Pick<
   PersistenceContext,
@@ -212,6 +213,10 @@ export class ConversationRepository {
     update: Partial<Pick<Conversation, "title" | "providerId" | "modelSelection" | "continuationIdentity" | "model" | "reasoningEffort" | "interactionMode" | "accessMode" | "branch" | "worktreePath" | "providerSessionId" | "status" | "attentionKind" | "pinnedAt" | "snoozedUntil">>,
   ): Conversation {
     const current = conversationFromRow(this.context.requireConversation(conversationId));
+    if (["providerId", "modelSelection", "continuationIdentity", "model", "reasoningEffort", "interactionMode", "accessMode",
+      "branch", "worktreePath", "providerSessionId"].some((key) => Object.hasOwn(update, key))) {
+      assertNativeControlIdle(this.context.database, conversationId);
+    }
     const requestedProviderId = update.providerId ?? current.providerId;
     const legacySelectionChanged = update.providerId !== undefined
       || update.model !== undefined
@@ -340,6 +345,7 @@ export class ConversationRepository {
   }
 
   archive(conversationId: string, archived: boolean): void {
+    assertNativeControlIdle(this.context.database, conversationId);
     const conversation = this.context.requireConversation(conversationId);
     const archivedAt = archived ? new Date().toISOString() : null;
     cachedStatement(this.context.database, "UPDATE conversations SET archived_at = ?, updated_at = ? WHERE id = ?").run(archivedAt, new Date().toISOString(), conversationId);
@@ -353,9 +359,22 @@ export class ConversationRepository {
     conversationId: string,
     recoveryRecords: readonly { turnId: string; runId: string }[] = [],
   ): void {
+    assertNativeControlIdle(this.context.database, conversationId);
     const conversation = this.context.requireConversation(conversationId);
     this.context.database.transaction(() => {
       releaseProviderRecoveryRecords(this.context.database, recoveryRecords);
+      if (
+        cachedStatement(
+          this.context.database,
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scheduled_tasks'",
+        ).get()
+      ) {
+        cachedStatement(
+          this.context.database,
+          "DELETE FROM scheduled_tasks WHERE bound_conversation_id = ?",
+        ).run(conversationId);
+      }
+      cachedStatement(this.context.database, "DELETE FROM orchestration_v2_receipts WHERE thread_id = ?").run(conversationId);
       cachedStatement(this.context.database, "DELETE FROM html_renders WHERE conversation_id = ?").run(conversationId);
       cachedStatement(this.context.database, "DELETE FROM conversations WHERE id = ?").run(conversationId);
     })();
@@ -365,6 +384,7 @@ export class ConversationRepository {
   }
 
   bindScratchFolder(conversationId: string, path: string): Conversation {
+    assertNativeControlIdle(this.context.database, conversationId);
     const row = this.context.requireConversation(conversationId);
     if (this.context.requireProject(row.project_id).workspace_kind !== "scratch") {
       throw new Error("Only chats without a project have their own managed folder.");

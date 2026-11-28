@@ -298,6 +298,43 @@ function validateReceipt(path: string, receipt: WorkspacePathReceipt): string {
 
 export class WorkspacePathAuthorityError extends Error {}
 
+export class WorktreeSetupIncompleteError extends WorkspacePathAuthorityError {
+  constructor(
+    message = "Isolated worktree setup did not finish for this chat.",
+  ) {
+    super(message);
+    this.name = "WorktreeSetupIncompleteError";
+  }
+}
+
+/**
+ * Reports whether `conversationId` still has an incomplete isolated-worktree
+ * setup (e.g. `creation_state = 'creating'`, or `owns_worktree = 1` with no
+ * attached `worktree_path`). Callers must fail closed and never fall back to
+ * the project checkout while this returns true (N9).
+ */
+export function hasIncompleteWorktreeSetup(
+  database: Database.Database,
+  conversationId: string,
+): boolean {
+  const row = database.prepare(`
+    SELECT ownership.owns_worktree AS owns_worktree,
+      ownership.creation_state AS creation_state,
+      conversations.worktree_path AS worktree_path
+    FROM conversation_worktree_ownership AS ownership
+    LEFT JOIN conversations
+      ON conversations.id = ownership.conversation_id
+    WHERE ownership.conversation_id = ?
+  `).get(conversationId) as {
+    owns_worktree: number;
+    creation_state: string;
+    worktree_path: string | null;
+  } | undefined;
+  if (!row) return false;
+  return row.creation_state === "creating"
+    || (row.owns_worktree === 1 && row.worktree_path === null);
+}
+
 function authorityFailure(): WorkspacePathAuthorityError {
   return new WorkspacePathAuthorityError(
     "This workspace folder was replaced or cannot be verified, so its authorization expired. Re-add the project before running privileged operations.",
@@ -452,7 +489,14 @@ export class WorkspacePathAuthority {
     }
   }
 
+  hasIncompleteWorktreeSetup(conversationId: string): boolean {
+    return hasIncompleteWorktreeSetup(this.database, conversationId);
+  }
+
   private resolveAuthorizedConversation(row: ConversationRow, project: ProjectRow): string {
+    if (this.hasIncompleteWorktreeSetup(row.id)) {
+      throw new WorktreeSetupIncompleteError();
+    }
     const projectPath = this.resolveProject(project);
     if (row.worktree_path === null) return projectPath;
     try {

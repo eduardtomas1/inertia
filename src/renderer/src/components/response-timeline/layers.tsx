@@ -3,6 +3,9 @@ import { MessagesSquare, RotateCcw } from "lucide-react";
 import { isOwnConversationContext } from "@shared/conversation-context";
 import clsx from "clsx";
 import { agentRunStateForTurn } from "@shared/run-state";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
+import { useForkActionsAvailable, useTurnRolledBack } from "../orchestration/fork-surface";
+import { revertsRolledBackTurn } from "../workspace-scene/createWorkspaceTurnActions";
 import {
   CHECKPOINT_EXPIRED_DESCRIPTION,
   CHECKPOINT_EXPIRED_LABEL,
@@ -11,6 +14,7 @@ import {
 import type { ChatMessage, SubagentTrace } from "@shared/contracts";
 import { MessageOrigin } from "./MessageOrigin";
 import { WatcherWakeRequest } from "./WatcherWakeRequest";
+import { DelegatedCompletionCard } from "../orchestration/delegated-completion-card";
 import { DuoComparisonRequest } from "./DuoComparisonRequest";
 import { WATCHER_NOTE_TITLE } from "../../utils/watcherLinks";
 import { formatFullDateTime, formatMessageTime } from "../../lib/format";
@@ -51,6 +55,7 @@ import { SecretRequestList } from "./SecretRequestCard";
 import { customAgentsById, partitionSubagentCalls } from "../../utils/response-timeline/subagentCalls";
 import type { DelegatedWork } from "../../utils/response-timeline/subagentGroups";
 import { SubagentGroup } from "./SubagentGroup";
+import { ObservedAgentsDetails } from "../orchestration/observed-agents-details";
 import { UnlinkedSubagentRows } from "./SubagentActivityRow";
 import {
   createSubagentActivityStore,
@@ -134,6 +139,10 @@ export function UserRequestLayer({
   const [expanded, setExpanded] = useState(false);
   const [openPacketId, setOpenPacketId] = useState<string | null>(null);
   const fresh = useFreshRequest(turn.userMessage.conversationId, turn.userMessage.content);
+  const rolledBack = useTurnRolledBack(turn.agentTurn.id);
+  const turnCheckpoint = turn.checkpoint && !revertsRolledBackTurn(turn.checkpoint, turn.agentTurn, rolledBack)
+    ? turn.checkpoint
+    : null;
   const content = collapsible && !expanded
     ? collapsedUserRequestPreview(turn.userMessage.content)
     : turn.userMessage.content;
@@ -153,13 +162,16 @@ export function UserRequestLayer({
   ) ?? [];
   const sessionRecovery = turn.providerChanged ? null : sessionRecoveryDetail(turn.agentTurn);
   if (turn.watcherWake) return <WatcherWakeRequest turn={turn} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
+  if (turn.userMessage.delegatedCompletion) {
+    return <DelegatedCompletionCard message={turn.userMessage} turnId={turn.id} onBeforeToggle={onBeforeToggle} onAfterToggle={onAfterToggle} />;
+  }
   const watcherNote = turn.userMessage.role === "user" ? turn.userMessage.watcherNote : undefined;
-  const checkpointExpired = Boolean(turn.checkpoint?.expiredAt);
+  const checkpointExpired = Boolean(turnCheckpoint?.expiredAt);
   const revertDisabled = props.checkpointRestoreDisabled || checkpointExpired;
-  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turn.checkpoint || turn.checkpointUnavailableReason !== null) && (
+  const requestMeta = (turn.userMessage.privateConnectDeviceId || watcherNote || turnCheckpoint || turn.extraCheckpoints.length > 0 || turn.checkpointUnavailableReason !== null) && (
     <div className="message-meta">
       <MessageOrigin message={turn.userMessage} />
-      {turn.checkpoint && (
+      {turnCheckpoint && (
         <TooltipButton
           className="message-revert"
           data-checkpoint-expired={checkpointExpired ? "true" : undefined}
@@ -171,13 +183,36 @@ export function UserRequestLayer({
               : "Restore the project to before this turn"}
           disabled={revertDisabled}
           onClick={() => {
-            if (!checkpointExpired) props.onRevertCheckpoint(turn.checkpoint!);
+            if (!checkpointExpired) props.onRevertCheckpoint(turnCheckpoint);
           }}
         >
           <RotateCcw size={14} aria-hidden="true" />
           {checkpointExpired ? CHECKPOINT_EXPIRED_LABEL : "Revert"}
         </TooltipButton>
       )}
+      {turn.extraCheckpoints.map((checkpoint) => {
+        const extraExpired = Boolean(checkpoint.expiredAt);
+        return (
+          <TooltipButton
+            key={checkpoint.id}
+            className="message-revert"
+            data-checkpoint-expired={extraExpired ? "true" : undefined}
+            aria-label={extraExpired ? `${checkpoint.label} (${CHECKPOINT_EXPIRED_LABEL.toLowerCase()})` : `Restore checkpoint: ${checkpoint.label}`}
+            tooltip={extraExpired
+              ? CHECKPOINT_EXPIRED_DESCRIPTION
+              : props.checkpointRestoreDisabled
+                ? "Stop the active run before restoring a checkpoint"
+                : "Restore the project to this checkpoint"}
+            disabled={props.checkpointRestoreDisabled || extraExpired}
+            onClick={() => {
+              if (!extraExpired) props.onRevertCheckpoint(checkpoint);
+            }}
+          >
+            <RotateCcw size={14} aria-hidden="true" />
+            {extraExpired ? CHECKPOINT_EXPIRED_LABEL : checkpoint.label}
+          </TooltipButton>
+        );
+      })}
       {turn.checkpointUnavailableReason !== null && <TooltipText className="message-checkpoint-missing" tooltip={turn.checkpointUnavailableReason || TURN_CHECKPOINT_UNAVAILABLE_TITLE}>{TURN_CHECKPOINT_UNAVAILABLE_TITLE}{turn.checkpointUnavailableReason && <span className="visually-hidden">: {turn.checkpointUnavailableReason}</span>}</TooltipText>}
     </div>
   );
@@ -365,6 +400,21 @@ export function AgentExecutionLayer({
     compact: unlinkedSubagents,
     foldable: groupInFold,
   }), [groupInFold, subagentCalls, unlinkedSubagents]);
+  // Observed native children of the turn's subagents, once per turn: below the
+  // work log, inside a settled fold's region when the agents fold with the work
+  // (kept mounted there, so it keeps its state), or below a quiet settled turn.
+  const observedDetails = subagents.length > 0
+    ? (
+      <ObservedAgentsDetails
+        conversationId={props.conversationId}
+        turnId={turn.id}
+        turnIndex={turn.index}
+        onBeforeToggle={onBeforeToggle}
+        onAfterToggle={onAfterToggle}
+      />
+    )
+    : null;
+  const observedDetailsInFold = groupInFold && fold?.visible === true;
   const delegatedWork = (
     <>
       <UnlinkedSubagentRows
@@ -380,6 +430,7 @@ export function AgentExecutionLayer({
         onBeforeToggle={onBeforeToggle}
         onAfterToggle={onAfterToggle}
       />
+      {observedDetails}
     </>
   );
   return (
@@ -456,6 +507,7 @@ export function AgentExecutionLayer({
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
           />
+          {observedDetails}
         </div>
       ) : !consolidatesSettledWork ? (
         <div
@@ -482,7 +534,9 @@ export function AgentExecutionLayer({
             onBeforeToggle={onBeforeToggle}
             onAfterToggle={onAfterToggle}
             fold={fold}
+            foldedDetails={observedDetailsInFold ? observedDetails : null}
           />
+          {!observedDetailsInFold && observedDetails}
         </div>
       ) : null}
       {settledCompactions.map((entry) => (
@@ -614,6 +668,7 @@ export function SupportingLedgerLayer({
   onBeforeToggle?: () => void;
   onAfterToggle?: () => void;
 }): React.JSX.Element | null {
+  const canFork = useForkActionsAvailable();
   if (turn.isActive) {
     return props.showTimestamps
       ? (
@@ -630,8 +685,8 @@ export function SupportingLedgerLayer({
   const showChangedFiles = props.showChangedFileSummaries
     && turn.gitArtifact !== null
     && shouldShowChangedFilesSummary(turn.gitArtifact);
-  const showsFooter = turn.terminalAssistantMessage !== null
-    || turn.agentTurn.status !== "completed";
+  const showsFooter = turn.terminalAssistantMessage !== null || turn.agentTurn.status !== "completed"
+    || canFork && isAgentTurnTerminalStatus(turn.agentTurn.status);
   if (!showsFooter && !showChangedFiles) return null;
 
   return (

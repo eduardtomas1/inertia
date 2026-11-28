@@ -1,4 +1,5 @@
 import type { AgentActivity } from "@shared/contracts";
+import { isProviderStopNotice } from "@shared/activity-display";
 
 export type ActivityAttentionSeverity = "warning" | "failure";
 const ATTENTION_DETAIL_SCAN_CHARS = 4_096;
@@ -48,7 +49,7 @@ export function activityAttentionSeverity(
 ): ActivityAttentionSeverity | null {
   const cached = attentionCache.get(activity);
   if (cached !== undefined || attentionCache.has(activity)) return cached ?? null;
-  const severity = isInterruptedActivity(activity)
+  const severity = isInterruptedActivity(activity) || isProviderStopNotice(activity)
     ? "warning"
     : activity.status === "failed" || activity.kind === "error"
       ? "failure"

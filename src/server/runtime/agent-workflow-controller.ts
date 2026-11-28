@@ -71,6 +71,7 @@ interface RouteBoundSkillDiscoveryState {
 interface SkillDiscoveryFlight {
   forceReload: boolean;
   routeKey: string;
+  pinnedRoute: boolean;
   promise: Promise<AgentSkillSummary[]>;
 }
 
@@ -156,6 +157,10 @@ function isNativeClaudeConversation(
 ): boolean {
   return conversation.providerId === "claude"
     && conversation.modelSelection.harnessId === "claude-agent-sdk";
+}
+
+function isNativePiConversation(conversation: Conversation): boolean {
+  return conversation.providerId === "pi" && conversation.modelSelection.harnessId === "pi-rpc";
 }
 
 function assertRecoverableGoalBudget(
@@ -268,10 +273,9 @@ export class AgentWorkflowController {
         .filter(({ routeKey }) => routeKey === currentSkillRouteKey)
         .map(({ summary }) => summary)
         .sort(compareSkills),
-      skillsCapability: agentSkillsCapability(
-        conversation.providerId,
-        conversation.modelSelection.harnessId,
-      ),
+      skillsCapability: isNativePiConversation(conversation)
+        ? { kind: "pi-native", available: true, label: "Pi skills" }
+        : agentSkillsCapability(conversation.providerId, conversation.modelSelection.harnessId),
       goalRefreshWarning: native
         && nativeGoalRefreshWarning?.providerSessionId
           === conversation.providerSessionId
@@ -775,45 +779,37 @@ export class AgentWorkflowController {
   async listSkills(
     conversationId: string,
     forceReload: boolean,
+    effectiveConversation?: Conversation,
   ): Promise<AgentSkillSummary[]> {
-    const conversation = this.store.conversation(conversationId);
+    const conversation = effectiveConversation ?? this.store.conversation(conversationId);
     const cwd = this.store.conversationPath(conversationId);
     if (
       !isNativeCodexConversation(conversation)
       && !isNativeClaudeConversation(conversation)
+      && !isNativePiConversation(conversation)
     ) {
       throw new RuntimeRequestError(
         "This route does not expose safe structured skill invocation.",
       );
     }
+    const pinnedRoute = effectiveConversation !== undefined;
     const routeKey = this.skillRouteKey(conversation, cwd);
     const existing = this.skillDiscoveryFlights.get(conversationId);
     if (
       existing?.routeKey === routeKey
+      && existing.pinnedRoute === pinnedRoute
       && (existing.forceReload || !forceReload)
     ) return await existing.promise;
     const predecessor = existing?.promise ?? Promise.resolve([]);
     const promise = predecessor.catch(() => []).then(async () => {
-      const current = this.store.conversation(conversationId);
+      const current = effectiveConversation ?? this.store.conversation(conversationId);
       const currentCwd = this.store.conversationPath(conversationId);
       if (this.skillRouteKey(current, currentCwd) !== routeKey) {
-        throw new RuntimeRequestError(
-          "The provider route changed while skills were refreshing.",
-        );
+        throw new RuntimeRequestError("The provider route changed while skills were refreshing.");
       }
-      return await this.discoverSkills(
-        conversationId,
-        current,
-        currentCwd,
-        forceReload,
-        routeKey,
-      );
+      return await this.discoverSkills(conversationId, current, currentCwd, forceReload, routeKey, pinnedRoute);
     });
-    const flight: SkillDiscoveryFlight = {
-      forceReload,
-      routeKey,
-      promise,
-    };
+    const flight: SkillDiscoveryFlight = { forceReload, routeKey, pinnedRoute, promise };
     this.skillDiscoveryFlights.set(conversationId, flight);
     try {
       return await promise;
@@ -830,20 +826,25 @@ export class AgentWorkflowController {
     cwd: string,
     forceReload: boolean,
     routeKey: string,
+    pinnedRoute = false,
   ): Promise<AgentSkillSummary[]> {
-    if (isNativeClaudeConversation(conversation)) {
-      const rawSkills = await this.contact.claudeSkills(conversationId, forceReload);
-      this.requireCurrentSkillRoute(conversationId, routeKey);
+    if (isNativeClaudeConversation(conversation) || isNativePiConversation(conversation)) {
+      const pi = isNativePiConversation(conversation);
+      const source = pi ? "pi-native" as const : "claude-native" as const;
+      const rawSkills = pi
+        ? (pinnedRoute ? await this.contact.piSkillsAt(cwd) : await this.contact.piSkills(conversationId))
+        : (pinnedRoute ? await this.contact.claudeSkillsAt(cwd, forceReload) : await this.contact.claudeSkills(conversationId, forceReload));
+      this.requireCurrentSkillRoute(conversationId, routeKey, pinnedRoute ? conversation : undefined);
       return this.replaceSkills(
         conversationId,
         rawSkills,
         rawSkills.length > MAX_SKILLS,
         0,
-        (raw) => this.claudeSkillCandidate(conversationId, routeKey, raw),
+        (raw) => this.nativeSkillCandidate(conversationId, routeKey, raw, source),
         routeKey,
       );
     }
-    const context = await this.contact.codexControl(conversationId);
+    const context = pinnedRoute ? await this.contact.codexControlAt(cwd) : await this.contact.codexControl(conversationId);
     const { rawSkills, warningCount } = codexSkillListing(
       await withCodexControlClient(
         context,
@@ -854,7 +855,7 @@ export class AgentWorkflowController {
       ),
       cwd,
     );
-    this.requireCurrentSkillRoute(conversationId, routeKey);
+    this.requireCurrentSkillRoute(conversationId, routeKey, pinnedRoute ? conversation : undefined);
     return this.replaceSkills(
       conversationId,
       rawSkills,
@@ -918,7 +919,7 @@ export class AgentWorkflowController {
       return preview(
         await this.contact.claudeSkillsAt(cwd, input.forceReload),
         0,
-        (raw) => this.claudeSkillCandidate(owner, routeKey, raw),
+        (raw) => this.nativeSkillCandidate(owner, routeKey, raw, "claude-native"),
       );
     }
     const { rawSkills, warningCount } = codexSkillListing(
@@ -938,10 +939,12 @@ export class AgentWorkflowController {
     );
   }
 
-  private claudeSkillCandidate(
+  private nativeSkillCandidate(
     conversationId: string,
     routeKey: string,
-    raw: Awaited<ReturnType<ConversationProviderContact["claudeSkillsAt"]>>[number],
+    raw: Awaited<ReturnType<ConversationProviderContact["claudeSkillsAt"]>>[number]
+      | Awaited<ReturnType<ConversationProviderContact["piSkills"]>>[number],
+    source: "claude-native" | "pi-native",
   ): SkillCandidate | null {
     const name = boundedDisplayString(raw.name, 160);
     const description = boundedDisplayString(raw.description, 1_000);
@@ -949,7 +952,7 @@ export class AgentWorkflowController {
       return null;
     }
     const identityKey =
-      `${conversationId}\0${routeKey}\0claude\0${name}`;
+      `${conversationId}\0${routeKey}\0${source}\0${name}`;
     return {
       identityKey,
       summary: {
@@ -961,10 +964,10 @@ export class AgentWorkflowController {
           boundedDisplayString(raw.argumentHint, 240) ?? null,
         scope: raw.scope,
         enabled: true,
-        source: "claude-native",
+        source,
       },
       providerInput: {
-        source: "claude-native",
+        source,
         name,
         path: raw.path,
       },
@@ -1029,33 +1032,27 @@ export class AgentWorkflowController {
   private requireCurrentSkillRoute(
     conversationId: string,
     expectedRouteKey: string,
+    effectiveConversation?: Conversation,
   ): void {
-    const conversation = this.store.conversation(conversationId);
+    const conversation = effectiveConversation ?? this.store.conversation(conversationId);
     const cwd = this.store.conversationPath(conversationId);
     if (this.skillRouteKey(conversation, cwd) !== expectedRouteKey) {
-      throw new RuntimeRequestError(
-        "The provider route changed while skills were refreshing.",
-      );
+      throw new RuntimeRequestError("The provider route changed while skills were refreshing.");
     }
   }
 
-  async resolveSkills(
-    conversationId: string,
-    content: string,
-  ): Promise<ProviderSkillInput[]> {
+  async resolveSkills(conversationId: string, content: string): Promise<ProviderSkillInput[]> {
     return (await this.resolveTurnSkills(conversationId, content)).inputs;
   }
 
   async resolveTurnSkills(
     conversationId: string,
     content: string,
-  ): Promise<{
-    inputs: ProviderSkillInput[];
-    routeKey: string | null;
-  }> {
+    effectiveConversation?: Conversation,
+  ): Promise<{ inputs: ProviderSkillInput[]; routeKey: string | null }> {
     this.pruneSkills();
     if (!content.includes("$")) return { inputs: [], routeKey: null };
-    const conversation = this.store.conversation(conversationId);
+    const conversation = effectiveConversation ?? this.store.conversation(conversationId);
     const routeKey = this.skillRouteKey(conversation, this.store.conversationPath(conversationId));
     const cachedSummaries = [...this.skills.values()]
       .filter(({ summary, routeKey: capabilityRoute }) =>
@@ -1066,7 +1063,8 @@ export class AgentWorkflowController {
       cachedSummaries.map(({ name }) => name));
     if (cachedNames.length === 0) {
       const supportsSkills = isNativeCodexConversation(conversation)
-        || isNativeClaudeConversation(conversation);
+        || isNativeClaudeConversation(conversation)
+        || isNativePiConversation(conversation);
       const discovery = this.skillDiscovery.get(conversationId);
       if (
         !supportsSkills
@@ -1080,7 +1078,7 @@ export class AgentWorkflowController {
         )
       ) return { inputs: [], routeKey: null };
     }
-    await this.listSkills(conversationId, false);
+    await this.listSkills(conversationId, false, effectiveConversation);
     const names = mentionedSkillNames(content, [...this.skills.values()]
       .filter(({ summary, routeKey: capabilityRoute }) =>
         summary.conversationId === conversationId
@@ -1117,9 +1115,10 @@ export class AgentWorkflowController {
   assertTurnSkillsCurrent(
     conversationId: string,
     routeKey: string | null,
+    effectiveConversation?: Conversation,
   ): void {
     if (routeKey !== null) {
-      this.requireCurrentSkillRoute(conversationId, routeKey);
+      this.requireCurrentSkillRoute(conversationId, routeKey, effectiveConversation);
     }
   }
 

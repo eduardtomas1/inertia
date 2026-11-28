@@ -40,6 +40,11 @@ function safeCallback(callback: (() => void) | undefined): void {
 
 export interface ProviderEmitter {
   close: () => void;
+  /**
+   * The same run's emitter delivering `onEvent` elsewhere, for a replacement
+   * harness attempt. Closing either closes both.
+   */
+  rebind: (onEvent: (event: ProviderEvent) => void) => ProviderEmitter;
   matches: (identity: ProviderEventBase) => boolean;
   event: (event: ProviderEvent) => void;
   text: (text: string) => void;
@@ -63,7 +68,8 @@ export interface ProviderEmitter {
   input: (request: AgentInputRequest) => void;
   inputResolved: (requestId: string) => void;
   plan: (explanation: string | null, steps: AgentPlanStep[], handoff?: true) => void;
-  reasoning: (text: string) => void;
+  /** `replace`: `text` is the run's whole reasoning so far (see `ProviderReasoningEvent.replace`). */
+  reasoning: (text: string, replace?: true) => void;
   usage: (usage: ProviderUsageEvent["usage"]) => void;
   metadata: (metadata: ProviderMetadataEvent["metadata"], source: ProviderMetadataEvent["source"], complete: boolean) => void;
   subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type" | "activityId">) => void;
@@ -81,16 +87,16 @@ export function createProviderEmitter(
   runId: string,
   turnId: string,
   policy?: ProviderEmitterPolicy,
+  state: { accepting: boolean } = { accepting: true },
 ): ProviderEmitter {
   const base = { providerId, conversationId, runId, turnId };
-  let accepting = true;
   const matches = (identity: ProviderEventBase): boolean =>
     identity.providerId === providerId
     && identity.conversationId === conversationId
     && identity.runId === runId
     && identity.turnId === turnId;
   const event = (providerEvent: ProviderEvent): void => {
-    if (!accepting || !matches(providerEvent)) return;
+    if (!state.accepting || !matches(providerEvent)) return;
     if (policy && !policy.accept(providerEvent)) {
       policy.reject(providerEvent);
       return;
@@ -149,7 +155,10 @@ export function createProviderEmitter(
   };
 
   return {
-    close: () => { accepting = false; },
+    close: () => { state.accepting = false; },
+    rebind: (onEvent) => createProviderEmitter(
+      providerId, conversationId, { ...callbacks, onEvent }, runId, turnId, policy, state,
+    ),
     matches,
     event,
     text: (text) => event({ ...base, type: "text", text }),
@@ -196,7 +205,7 @@ export function createProviderEmitter(
     input: (request) => event({ ...base, type: "input", request }),
     inputResolved: (requestId) => event({ ...base, type: "input-resolved", requestId }),
     plan: (explanation, steps, handoff) => event({ ...base, type: "plan", explanation, steps, ...(handoff ? { handoff } : {}) }),
-    reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
+    reasoning: (text, replace) => event({ ...base, type: "reasoning-summary", text, ...(replace ? { replace } : {}) }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
     metadata: (metadata, source, complete) => event({ ...base, type: "metadata", metadata, source, complete }),
     subagent: (subagent) => event({ ...subagent, ...base, type: "subagent" }),
@@ -253,7 +262,7 @@ function emitInteractiveExtension(
       emitter.plan(event.explanation, event.steps, event.handoff);
       break;
     case "reasoning-summary":
-      emitter.reasoning(event.text);
+      emitter.reasoning(event.text, event.replace);
       break;
     case "usage":
       emitter.usage(event.usage);

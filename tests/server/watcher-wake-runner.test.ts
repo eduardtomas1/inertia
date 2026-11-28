@@ -732,22 +732,40 @@ describe("watcher wake runner", () => {
     }
   });
 
-  it("leaves an automatic finding for a manual send when the main chat's queue is full", async () => {
+  it("leaves an automatic finding for a manual send when five watcher notes are already queued", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach({ delivery: "auto" });
       await f.startWatchedTurn();
-      for (const content of ["One", "Two", "Three"]) {
-        await f.queue.handler(null as unknown as WebSocket, {
-          type: "message.queue.enqueue", requestId: randomUUID(),
-          payload: { conversationId: f.watched.id, id: randomUUID(), content, attachments: [] },
-        } as ClientCommand);
+      for (let index = 1; index <= 5; index += 1) {
+        f.store.orchestration.queue.enqueue({
+          conversationId: f.watched.id,
+          itemId: randomUUID(),
+          content: `Existing watcher note ${index}`,
+          attachments: [],
+          kind: "watcher-note",
+          createdBy: "system",
+          creationSource: "server",
+          followsThreadSelection: true,
+          attribution: {
+            watcherNote: {
+              linkId: randomUUID(),
+              wakeId: randomUUID(),
+              watcherConversationId: randomUUID(),
+              preset: "reviewer",
+              watcherLabel: `Watcher ${index}`,
+              delivery: "queue",
+              automatic: true,
+            },
+          },
+          origin: "automatic",
+        });
       }
       const watcherId = await wakeOnce(f, link.id);
       await f.finishTurn(watcherId, "- The parser drops the last token.");
       expect(feed(f, link.id)[0]).toMatchObject({
         outcome: "finding",
-        delivery: { mode: "queue", state: "failed", detail: expect.stringContaining("queue is full") },
+        delivery: { mode: "queue", state: "failed", detail: expect.stringContaining("five queued watcher notes") },
       });
       expect(f.store.watcherLinks.get(link.id)!.status).toBe("watching");
     } finally {
@@ -755,7 +773,7 @@ describe("watcher wake runner", () => {
     }
   });
 
-  it("leaves the last queue slot to the user when an automatic finding would take it", async () => {
+  it("queues an automatic finding independently of user queue messages without taking user queue slots", async () => {
     const f = await createWatcherFixture();
     try {
       const link = await f.attach({ delivery: "auto" });
@@ -764,18 +782,22 @@ describe("watcher wake runner", () => {
         type: "message.queue.enqueue", requestId: randomUUID(),
         payload: { conversationId: f.watched.id, id: randomUUID(), content, attachments: [] },
       } as ClientCommand);
-      for (const content of ["One", "Two"]) await enqueue(content);
+      for (const content of ["One", "Two", "Three"]) await enqueue(content);
       const watcherId = await wakeOnce(f, link.id);
       await f.finishTurn(watcherId, "- The parser drops the last token.");
       await vi.waitFor(() => {
         expect(feed(f, link.id)[0]).toMatchObject({
           outcome: "finding",
-          delivery: { mode: "queue", state: "failed", detail: expect.stringContaining("queue is full") },
+          delivery: { mode: "queue", state: "queued" },
         });
       });
-      expect(f.store.queuedMessages.list(f.watched.id).map(({ content }) => content)).toEqual(["One", "Two"]);
-      await enqueue("Three");
-      expect(f.store.queuedMessages.list(f.watched.id).map(({ content }) => content)).toEqual(["One", "Two", "Three"]);
+      await enqueue("Four");
+      const queued = f.store.queuedMessages.list(f.watched.id);
+      expect(queued).toHaveLength(5);
+      expect(queued.filter((entry) => !entry.watcherNote).map(({ content }) => content))
+        .toEqual(["One", "Two", "Three", "Four"]);
+      expect(queued.filter((entry) => entry.watcherNote).map(({ content }) => content))
+        .toEqual(["- The parser drops the last token."]);
     } finally {
       await f.close();
     }

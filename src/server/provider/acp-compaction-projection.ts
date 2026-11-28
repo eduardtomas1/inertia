@@ -8,6 +8,7 @@ import type {
 import type { AgentHarnessEmitter } from "./agent-harness";
 import type { ProviderRunFailure } from "./contracts";
 import { acpCompactedContextTitle } from "./context-compaction-activity";
+import { clipCodeUnits } from "../../shared/code-units";
 
 const MAX_TRACKED_COMPACTIONS = 256;
 const MAX_ACTIVITY_ID_CHARS = 1_000;
@@ -90,7 +91,7 @@ export class AcpCompactionProjection {
         `${this.providerName} reported a context compaction update`,
         // ACP deliberately leaves status open for future lifecycle states.
         // Keep the notice uncorrelated so it cannot settle a known activity.
-        { detail: `Status: ${status.trim().slice(0, 200)}` },
+        { detail: `Status: ${clipCodeUnits(status.trim(), 200)}` },
       );
       return "unknown";
     }

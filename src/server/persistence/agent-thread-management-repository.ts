@@ -12,7 +12,9 @@ export type AgentThreadMutationTool =
   | "inertia_send_message"
   | "inertia_stop_conversation"
   | "inertia_archive_conversation"
-  | "inertia_answer_question";
+  | "inertia_answer_question"
+  | "inertia_delegate_task"
+  | "inertia_cancel_task";
 
 export type AgentThreadOperationStatus =
   | "approval-pending"
@@ -86,6 +88,11 @@ interface AgentManagedConversationRow {
 
 export function agentThreadDigest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+export function agentThreadClientRequestKey(input: { sourceConversationId: string; providerBackingId: string;
+  toolName: AgentThreadMutationTool; clientRequestId: string }): string {
+  return agentThreadDigest([input.sourceConversationId, input.providerBackingId, input.toolName, input.clientRequestId].join("\u0000"));
 }
 
 function operationFromRow(row: AgentThreadOperationRow): AgentThreadOperation {
@@ -187,7 +194,7 @@ export class AgentThreadManagementRepository {
       SELECT DISTINCT child_conversation_id, target_turn_id, target_run_id
       FROM agent_thread_operations
       WHERE source_conversation_id = ? AND source_turn_id = ?
-        AND tool_name IN ('inertia_create_conversation', 'inertia_send_message')
+        AND tool_name IN ('inertia_create_conversation', 'inertia_send_message', 'inertia_delegate_task')
         AND child_conversation_id IS NOT NULL
         AND target_turn_id IS NOT NULL AND target_run_id IS NOT NULL
       LIMIT ?
@@ -196,6 +203,31 @@ export class AgentThreadManagementRepository {
       (row) => ({ conversationId: row.child_conversation_id,
         turnId: row.target_turn_id, runId: row.target_run_id }),
     );
+  }
+
+  providerBackingNamespace(conversationId: string, runId: string): string {
+    const row = this.database.prepare(`
+      SELECT backing.id FROM orchestration_v2_entities AS run
+      JOIN orchestration_v2_entities AS attempt
+        ON attempt.kind = 'attempt' AND attempt.id = json_extract(run.payload_json, '$.attemptId')
+      JOIN orchestration_v2_entities AS backing
+        ON backing.kind = 'provider-backing' AND backing.thread_id = run.thread_id
+        AND json_extract(backing.payload_json, '$.nativeSessionId') = json_extract(attempt.payload_json, '$.nativeSessionId')
+        AND json_extract(backing.payload_json, '$.status') <> 'retired'
+      WHERE run.kind = 'run' AND run.id = ? AND run.thread_id = ?
+      ORDER BY backing.revision DESC LIMIT 1
+    `).get(runId, conversationId) as { id: string } | undefined;
+    if (row) return `backing:${row.id}`;
+    const session = this.database.prepare("SELECT provider_session_id FROM conversations WHERE id = ?")
+      .get(conversationId) as { provider_session_id: string | null } | undefined;
+    return session?.provider_session_id ? `session:${session.provider_session_id}` : `run:${runId}`;
+  }
+
+  operationByClientRequestKey(sourceConversationId: string, clientRequestKey: string): AgentThreadOperation | null {
+    const row = this.database.prepare(`
+      SELECT * FROM agent_thread_operations WHERE source_conversation_id = ? AND client_request_key = ?
+    `).get(sourceConversationId, clientRequestKey) as AgentThreadOperationRow | undefined;
+    return row ? operationFromRow(row) : null;
   }
 
   operation(id: string): AgentThreadOperation | null {
@@ -214,6 +246,7 @@ export class AgentThreadManagementRepository {
     requestFingerprint: string;
     inputChars: number;
     now: string;
+    clientRequestKey?: string;
   }): { kind: "reserved"; operation: AgentThreadOperation }
     | { kind: "replay"; operation: AgentThreadOperation }
     | { kind: "conflict"; operation: AgentThreadOperation }
@@ -226,7 +259,10 @@ export class AgentThreadManagementRepository {
       toolCallIdHash,
     ].join("\0"));
     return this.database.transaction(() => {
-      const existing = this.operation(id);
+      const keyed = input.clientRequestKey === undefined ? undefined : this.database.prepare(`
+        SELECT id FROM agent_thread_operations WHERE source_conversation_id = ? AND client_request_key = ?
+      `).get(input.sourceConversationId, input.clientRequestKey) as { id: string } | undefined;
+      const existing = this.operation(keyed?.id ?? id);
       if (existing) {
         return existing.requestFingerprint === input.requestFingerprint
           && existing.toolName === input.toolName
@@ -235,7 +271,7 @@ export class AgentThreadManagementRepository {
       }
       const totals = this.database.prepare(`
         SELECT COUNT(*) AS mutations,
-          SUM(CASE WHEN tool_name = 'inertia_create_conversation' THEN 1 ELSE 0 END) AS creates,
+          SUM(CASE WHEN tool_name IN ('inertia_create_conversation', 'inertia_delegate_task') THEN 1 ELSE 0 END) AS creates,
           COALESCE(SUM(input_chars), 0) AS input_chars
         FROM agent_thread_operations
         WHERE source_turn_id = ?
@@ -248,7 +284,7 @@ export class AgentThreadManagementRepository {
         return { kind: "limit" as const, reason: "This turn reached its managed-chat action limit." };
       }
       if (
-        input.toolName === "inertia_create_conversation"
+        (input.toolName === "inertia_create_conversation" || input.toolName === "inertia_delegate_task")
         && totals.creates >= AGENT_THREAD_MAX_CREATES_PER_TURN
       ) {
         return { kind: "limit" as const, reason: "This turn reached its managed-chat creation limit." };
@@ -264,8 +300,8 @@ export class AgentThreadManagementRepository {
           id, source_conversation_id, source_turn_id, source_run_id,
           tool_call_id_hash, tool_name, request_fingerprint, status,
           child_conversation_id, input_chars, result_json, failure_message,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'approval-pending', NULL, ?, NULL, NULL, ?, ?)
+          created_at, updated_at, client_request_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'approval-pending', NULL, ?, NULL, NULL, ?, ?, ?)
       `).run(
         id,
         input.sourceConversationId,
@@ -277,6 +313,7 @@ export class AgentThreadManagementRepository {
         input.inputChars,
         input.now,
         input.now,
+        input.clientRequestKey ?? null,
       );
       return { kind: "reserved" as const, operation: this.operation(id)! };
     })();

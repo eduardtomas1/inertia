@@ -1,4 +1,5 @@
 import type { AgentActivity, Conversation, ProviderId, ProviderInfo } from "../../../shared/contracts";
+import { providerInstanceId } from "../../orchestration-v2/provider-instance";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
@@ -8,6 +9,7 @@ import {
 import {
   modelSelectionHasVerifiedProbeCapability,
   modelSelectionSchema,
+  providerIdForHarness,
   providerNativeBackendProfile,
   providerNativeHarnessId,
   providerNativeModelSelection,
@@ -17,22 +19,42 @@ import {
 } from "../../../shared/model-routing";
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import { officialPresetEndpoint } from "../backends/backend-profile-presets";
-import { importedFollowUpNote, importedResumeCwd, importedSession } from "../../cli-import/resume-cwd";
+import { importedFollowUpNote, importedResumeCwd, importedSession, sameCheckoutPath } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import { codexAutoCompactTokenLimit } from "../../../shared/compact-on-return";
 import type { BeginAgentTurnInput } from "../../persistence/types";
-import type {
-  ProviderActivityEvent,
+import type { ProviderBacking } from "../../../shared/orchestration-backings";
+import {
+  providerBackgroundWork,
+  type ProviderActivityEvent,
 } from "../../provider/contracts";
+import { PortableHistoryBudgetError, portableHistoryResponseItems } from "../../orchestration-v2/portable-history";
+import { isItemCovered } from "../../orchestration-v2/backing-repository";
+import { relocatedBackingId as relocatedProviderBackingId } from "../../orchestration-v2/backing-projector";
+import { sessionCwdMobility } from "../../provider/session-cwd-mobility";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import {
   assembleTurnRequest,
   isProviderCommandText,
   type AssembleTurnRequestInput,
   type ConversationContextMaterialization,
+  type RestoredChatHistory,
   type HiddenProviderInstruction,
 } from "./request-context";
+import {
+  CheckoutMoveBackgroundWorkError,
+  ContextHandoffBackgroundWorkError,
+  appendedContextHandoff,
+  exhaustedBackingSession,
+  portableHistoryBudgetInputs,
+  sameContextSelection,
+  type OfferedRestoredHistory,
+  type TurnContextProbes,
+} from "./turn-context-handoff";
+export { CheckoutMoveBackgroundWorkError, ContextHandoffBackgroundWorkError };
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { carriedMissedRunImages } from "./turn-missed-images";
+import { harnessDeclaresCapability } from "../../provider/capability-manifest";
 import { trackedGoalContextLine, trackedLocalGoal } from "./turn-goal-context";
 import { PROVIDER_INFO } from "../../provider/catalog";
 import { SLASH_COMMAND_PROVIDERS } from "../../provider/provider-slash-commands";
@@ -51,6 +73,7 @@ import {
   type PromptInstructionDeliveries,
 } from "./turn-instruction-delivery";
 import { watcherHarnessProfile } from "../../provider/watcher-harness-profile";
+import { withAgentSenderNote } from "../agent-sender-note";
 import { rejectGoalCustomAgentCall, resolveCustomAgentCall } from "./custom-agent-call";
 import { FULL_HARNESS_CAPABILITY_OFFER } from "../harness-capabilities";
 import {
@@ -70,8 +93,53 @@ import type {
 } from "./turn-controller-types";
 
 const CUSTOM_BACKEND_RESTORED_HISTORY_BYTES = 48 * 1_024;
-export const NATIVE_RESTORED_HISTORY_BYTES = 64 * 1_024;
-export const NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL = 192 * 1_024;
+
+/**
+ * Thrown when a queued item's explicit `modelSelectionOverride` switches away
+ * from a previous native session that still has background work running (H6).
+ * Extends `ContextHandoffBackgroundWorkError` so queue runtimes catching H6
+ * busy-session errors hold the queue cleanly without ending that work.
+ */
+export class ProviderSwitchBackgroundWorkError extends ContextHandoffBackgroundWorkError {
+  constructor(
+    message = "The previous provider session still has background work running. Wait for it to finish or stop it before switching.",
+  ) {
+    super("rejected-native-history");
+    this.name = "ProviderSwitchBackgroundWorkError";
+    this.message = message;
+  }
+}
+
+/**
+ * Thrown when a queued item's explicit `modelSelectionOverride` targets a provider
+ * or backend profile that is disabled or no longer available. The queue runtime
+ * catches this error to block the item cleanly with reason `"provider-disabled"`
+ * instead of failing a run.
+ */
+export class QueuedSelectionProviderUnavailableError extends RuntimeRequestError {
+  readonly blockedReason = "provider-disabled" as const;
+
+  constructor(
+    message: string,
+    readonly providerId?: ProviderId,
+    options?: { cause?: unknown },
+  ) {
+    super(message, undefined, undefined);
+    this.name = "QueuedSelectionProviderUnavailableError";
+    if (options?.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+function selectionsMatch(left: ModelSelection, right: ModelSelection): boolean {
+  return left.harnessId === right.harnessId
+    && left.backendProfileId === right.backendProfileId
+    && left.backendConfigurationRevision === right.backendConfigurationRevision
+    && left.modelId === right.modelId
+    && (left.reasoningEffort ?? null) === (right.reasoningEffort ?? null)
+    && Boolean(left.providerOptions.fastMode) === Boolean(right.providerOptions.fastMode);
+}
 
 type InstructionRoute = Parameters<typeof routeUsesTrustedHostBridge>[0];
 
@@ -82,7 +150,7 @@ export type PreparedActiveTurn = Omit<
 
 export interface PrepareTurnRequestDependencies {
   store: RuntimeStore;
-  providers: TurnProviderRuntime;
+  providers: TurnProviderRuntime & TurnContextProbes;
   hooks: TurnControllerHooks;
   instructionDeliveries?: PromptInstructionDeliveries;
   id(): string;
@@ -109,7 +177,7 @@ export function prepareTurnRequest(
   onAdoptionFailure?: (queued: QueuedTurn, error: unknown) => void,
 ): PreparedTurnRequest {
   const resolved = resolveTurnRequest(dependencies, request);
-  const queued = dependencies.store.beginAgentTurn(resolved.input);
+  const queued = dependencies.store.beginOrchestratedAgentTurn(resolved.input, request.orchestrationRequest);
   try {
     if (resolved.handoffFromTurnId) {
       retireUsageLimitSnooze(dependencies, queued.turn.conversationId, resolved.handoffFromTurnId);
@@ -249,6 +317,47 @@ function routeHostBridgeAttested(
     && routeUsesTrustedHostBridge(route);
 }
 
+/** A native session the turn replaces with a fresh one carrying the portable history; retired at adoption. */
+interface ReplacedBacking {
+  backing: ProviderBacking;
+  reason: "context-exhausted" | "rejected-native-history";
+}
+
+function replaceExhaustedSession(
+  dependencies: PrepareTurnRequestDependencies,
+  request: QueueTurnRequest,
+  backing: ProviderBacking,
+  exhaustion: PortableHistoryBudgetError,
+): ResolvedTurnRequest {
+  let replacement: ResolvedTurnRequest;
+  try {
+    replacement = resolveTurnRequest(dependencies, request, { backing, reason: "context-exhausted" });
+  } catch (error) {
+    throw error instanceof PortableHistoryBudgetError ? exhaustion : error;
+  }
+  if (providerBackgroundWork(dependencies.providers, exhaustedBackingSession(backing)) === "pending") {
+    throw new ContextHandoffBackgroundWorkError();
+  }
+  return replacement;
+}
+
+/**
+ * T3 `rejected_native_history` (b99333dc7): Codex rejected the encrypted history of the native session this
+ * turn would resume, on the latest run its provider accepted. The turn starts a fresh session with the full
+ * portable history instead, and the rejected session's backing is retired. A fresh session would orphan
+ * background work still running on the rejected one, so the turn is refused first while any is pending.
+ */
+function replaceRejectedHistorySession(
+  dependencies: PrepareTurnRequestDependencies,
+  request: QueueTurnRequest,
+  backing: ProviderBacking,
+): ResolvedTurnRequest {
+  if (providerBackgroundWork(dependencies.providers, exhaustedBackingSession(backing)) === "pending") {
+    throw new ContextHandoffBackgroundWorkError("rejected-native-history");
+  }
+  return resolveTurnRequest(dependencies, request, { backing, reason: "rejected-native-history" });
+}
+
 export function compactionSessionInstruction(
   dependencies: Pick<PrepareTurnRequestDependencies, "store" | "hooks">,
   conversation: Conversation,
@@ -322,31 +431,76 @@ export function claudeSpendLimitApplies(route: {
     );
 }
 
+const ACCESS_RANK: Record<Conversation["accessMode"], number> = {
+  supervised: 0,
+  "auto-edit": 1,
+  full: 2,
+};
+
+function applyScheduledModes(
+  conversation: Conversation,
+  scheduled: QueueTurnRequest["scheduledDelivery"],
+): Conversation {
+  if (!scheduled) return conversation;
+  const accessMode = ACCESS_RANK[scheduled.accessMode] < ACCESS_RANK[conversation.accessMode]
+    ? scheduled.accessMode
+    : conversation.accessMode;
+  const interactionMode = conversation.interactionMode === "plan" || scheduled.interactionMode === "plan"
+    ? "plan"
+    : "build";
+  return { ...conversation, accessMode, interactionMode };
+}
+
 export function resolveTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
+  replacedBacking?: ReplacedBacking,
 ): ResolvedTurnRequest {
-  const conversation = dependencies.store.conversation(request.conversationId);
+  const conversation = applyScheduledModes(
+    dependencies.store.conversation(request.conversationId),
+    request.scheduledDelivery,
+  );
   const attachments = [...(request.attachments ?? [])];
   const providerInfo = dependencies.hooks.providerInfo();
+  const hasSelectionOverride = request.modelSelectionOverride !== undefined
+    && request.modelSelectionOverride !== null;
+  const effectiveSelection = hasSelectionOverride
+    ? request.modelSelectionOverride!
+    : conversation.modelSelection;
+  const effectiveProviderId = providerIdForHarness(effectiveSelection.harnessId)
+    ?? conversation.providerId;
   const selectedProvider = providerInfo.find(
-    ({ id }) => id === conversation.providerId,
+    ({ id }) => id === effectiveProviderId,
   );
   const runId = dependencies.id();
   const turnId = dependencies.id();
-  const requestedModelId = conversation.modelSelection.modelId;
+  const requestedModelId = effectiveSelection.modelId;
   const selectedModel = requestedModelId !== "provider-default"
     ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
     : selectedProvider?.models.find(({ isDefault }) => isDefault)
       ?? selectedProvider?.models[0];
-  const parsedSelection = modelSelectionSchema.parse(conversation.modelSelection);
-  const routeSelection = dependencies.hooks.validateModelSelection?.(
-    parsedSelection,
-  ) ?? parsedSelection;
+  let parsedSelection: ModelSelection;
+  let routeSelection: ModelSelection;
+  let route: ReturnType<TurnProviderRuntime["resolveModelRoute"]>;
+  try {
+    parsedSelection = modelSelectionSchema.parse(effectiveSelection);
+    routeSelection = dependencies.hooks.validateModelSelection?.(
+      parsedSelection,
+    ) ?? parsedSelection;
+    route = dependencies.providers.resolveModelRoute(routeSelection);
+  } catch (error) {
+    if (hasSelectionOverride) {
+      const detail = error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : `The queued message's provider or backend for ${PROVIDER_INFO[effectiveProviderId].name} is disabled or unavailable.`;
+      throw new QueuedSelectionProviderUnavailableError(detail, effectiveProviderId, { cause: error });
+    }
+    throw error;
+  }
   const modelSelection = requestedModelId === "provider-default"
     && selectedModel
     ? providerNativeModelSelection({
-        providerId: conversation.providerId,
+        providerId: route.providerId,
         modelId: selectedModel.id,
         alias: selectedModel.label === selectedModel.id
           ? null
@@ -357,8 +511,17 @@ export function resolveTurnRequest(
         providerOptions: routeSelection.providerOptions,
       })
     : routeSelection;
-  const route = dependencies.providers.resolveModelRoute(routeSelection);
-  dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  if (!hasSelectionOverride) {
+    dependencies.store.assertConversationProvider(conversation.id, route.providerId);
+  }
+  const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
+  if (hasSelectionOverride && providerInfo.length > 0 && (!exactProvider || exactProvider.canRun === false)) {
+    throw new QueuedSelectionProviderUnavailableError(
+      exactProvider?.statusMessage
+        ?? `${PROVIDER_INFO[route.providerId].name} is disabled or unavailable for this queued message.`,
+      route.providerId,
+    );
+  }
   const watcherTurn = watcherTurnPolicy(dependencies.store, conversation, route.harnessId, request);
   const readOnlyWatcher = watcherTurn?.readOnly;
   const calledAgent = request.context?.calledAgent;
@@ -380,7 +543,6 @@ export function resolveTurnRequest(
       `${providerName} runs ${request.content.trim().split(/\s/u, 1)[0]} on its own. Remove the attached files and context, then send it again.`,
     );
   }
-  const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
   const hostToolBridgeAttested = routeHostBridgeAttested(providerInfo, route);
   // Read once: the prompt's instructions and the tools attached at provider
   // start must describe the same offer even if project settings change.
@@ -427,6 +589,20 @@ export function resolveTurnRequest(
       );
     }
   }
+  // Images of earlier runs on this provider instance that never reached it ride on this prompt, provider-only (T3).
+  // A goal start withholds its prompt, and a model or harness without image input takes none (Cursor SDK and
+  // Antigravity refuse any image); none of these refuses the send.
+  const missedImages = carriedMissedRunImages({
+    providerId: route.providerId,
+    candidates: request.goalStart === undefined && supportsImages && harnessDeclaresCapability(route.harnessId, "images")
+      && dependencies.hooks.missedRunImageCheck
+      ? dependencies.store.orchestration.missedRunImages({ threadId: conversation.id,
+        providerInstanceId: providerInstanceId(route.providerId, route.continuationIdentity) })
+      : [],
+    ownAttachments: attachments,
+    ownImagePaths: request.imagePaths,
+    openCheck: dependencies.hooks.missedRunImageCheck,
+  });
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
@@ -439,28 +615,69 @@ export function resolveTurnRequest(
       `Send a message first so ${PROVIDER_INFO[route.providerId].name} receives this chat's earlier messages.`,
     );
   }
+  const conversationMatchesRouteProvider = conversation.providerId === route.providerId;
+  const conversationSessionForRoute = conversationMatchesRouteProvider
+    ? conversation.providerSessionId
+    : null;
   const latestTurnOwnsProviderSession = latestTurn !== null
-    && conversation.providerSessionId !== null
-    && latestTurn.providerSessionAfter === conversation.providerSessionId;
-  const previousContinuationIdentity = latestTurn
-    ? latestTurnOwnsProviderSession
+    && conversationSessionForRoute !== null
+    && latestTurn.providerSessionAfter === conversationSessionForRoute;
+  const checkout = dependencies.store.conversationPath(conversation.id);
+  const backingLookup = { threadId: conversation.id, providerId: route.providerId, identity: route.continuationIdentity };
+  const localBacking = dependencies.store.orchestration.backings.find({ ...backingLookup, workspaceKey: checkout });
+  // The chat's current native conversation for this provider instance may live in a checkout it used
+  // before. A harness that resumes across checkouts continues it here (T3 restart_and_resume); any other
+  // harness keeps a live session of this checkout, or starts fresh with the portable history.
+  const mobility = sessionCwdMobility(route.harnessId);
+  const currentBacking = dependencies.store.orchestration.backings.current(backingLookup);
+  const movedBacking = currentBacking && currentBacking.workspaceKey !== checkout
+    && (mobility === "resume" || !localBacking || localBacking.status === "retired") ? currentBacking : null;
+  const candidateBacking = movedBacking ?? localBacking;
+  const usable = (backing: ProviderBacking | null) => backing?.status === "ready" && backing.coverageComplete
+    && backing.id !== replacedBacking?.backing.id ? backing : null;
+  const relocation = movedBacking && mobility === "resume" && usable(movedBacking)
+    && !dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
+      providerInstanceId: movedBacking.providerInstanceId, workspaceKey: movedBacking.workspaceKey,
+      nativeSessionId: movedBacking.nativeSessionId }) ? movedBacking : null;
+  const reusableBacking = movedBacking ? relocation : usable(localBacking);
+  const relocatedBackingId = relocation ? relocatedProviderBackingId(relocation, checkout) : null;
+  // A session without a backing (imported, recorded before backings, or a native fork before its first turn)
+  // is never resumed by a harness that cannot move when it is known to belong to another checkout. A session
+  // nothing records keeps resuming, as before backings existed.
+  const unbackedSessionRanHere = (sessionId: string): boolean => {
+    const known = importedSession(dependencies.store, conversation.id, sessionId)?.cwd
+      ?? dependencies.store.orchestration.backings.sessionWorkspaceKey(conversation.id, sessionId);
+    return known === null || sameCheckoutPath(known, checkout);
+  };
+  const requestedResumeSessionId = request.resumeSessionId ?? null;
+  const resumeSessionId = reusableBacking?.nativeSessionId ?? conversationSessionForRoute ?? requestedResumeSessionId;
+  const latestTurnOwnsResumeSession = latestTurn !== null
+    && resumeSessionId !== null
+    && latestTurn.providerId === route.providerId
+    && (latestTurn.providerSessionAfter === resumeSessionId || latestTurn.providerSessionBefore === resumeSessionId);
+  const previousContinuationIdentity = reusableBacking?.continuationIdentity ?? (candidateBacking ? null : latestTurn
+    ? (latestTurnOwnsProviderSession || latestTurnOwnsResumeSession)
       ? latestTurn.continuationIdentity
       : null
-    : conversation.continuationIdentity ?? null;
+    : conversationMatchesRouteProvider ? conversation.continuationIdentity ?? null : null);
   const previousContinuationModelId = previousContinuationIdentity
     ? routeSelection.modelId === "provider-default"
       ? "provider-default"
-      : latestTurn
+      : reusableBacking ? reusableBacking.selection.modelId : latestTurn
         ? latestTurn.modelSelection.modelId
         : routeSelection.modelId
     : null;
   const resolvedContinuation = resolveContinuationDecision({
-    ...(latestTurn ? { previousProviderId: latestTurn.providerId } : {}),
+    ...(reusableBacking ? { previousProviderId: route.providerId } : latestTurn ? { previousProviderId: latestTurn.providerId } : {}),
     previousIdentity: previousContinuationIdentity,
     nextIdentity: route.continuationIdentity,
     previousModelId: previousContinuationModelId,
     nextModelId: routeSelection.modelId,
-    hasProviderSession: conversation.providerSessionId !== null,
+    hasProviderSession: resumeSessionId !== null && (candidateBacking
+      ? reusableBacking !== null
+      // A session whose backing was retired (uncertain delivery, a retired relocation) stays retired anywhere.
+      : !dependencies.store.orchestration.backings.sessionRetired({ ...backingLookup, nativeSessionId: resumeSessionId })
+        && (mobility === "resume" || unbackedSessionRanHere(resumeSessionId))),
     hasTurns: latestTurn !== null,
     allowsModelSwitchWithinSession:
       officiallyAllowsModelSwitchWithinSession(route.compatibility),
@@ -470,21 +687,36 @@ export function resolveTurnRequest(
   });
   const continuation = resolvedContinuation.action === "resume-session"
     && latestTurn?.status === "failed"
-    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) === null
+    && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) === null
     && dependencies.store.turnLedgerRepository.savedSessionKeepsFailing(
       conversation.id,
-      conversation.providerSessionId!,
+      resumeSessionId!,
     )
     ? staleProviderSessionDecision()
     : resolvedContinuation;
-  const resumesImportedCodex = continuation.action === "resume-session" && route.providerId === "codex"
-    && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null;
-  const canResume = continuation.action === "resume-session";
+  const forceFreshContext = request.scheduledDelivery?.freshContext === true;
+  // Only a turn that would resume the backing's native session (T3 checks at the native resume). A goal start
+  // withholds its prompt and a fresh session gets no history without one, so it resumes, as with exhaustion.
+  if (!forceFreshContext && route.providerId === "codex" && continuation.action === "resume-session" && reusableBacking
+    && replacedBacking === undefined && request.goalStart === undefined
+    && resumeSessionId === reusableBacking.nativeSessionId
+    && dependencies.store.orchestration.rejectedNativeHistorySession(conversation.id, reusableBacking.providerInstanceId)
+      === reusableBacking.nativeSessionId) {
+    return replaceRejectedHistorySession(dependencies, request, reusableBacking);
+  }
+  const resumesImportedCodex = !forceFreshContext && continuation.action === "resume-session" && route.providerId === "codex"
+    && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) !== null;
+  const canResume = !forceFreshContext && continuation.action === "resume-session";
+  const sessionOrigin = canResume
+    ? dependencies.store.orchestration.backings.sessionOriginWorkspaceKey(conversation.id, resumeSessionId!) : null;
+  const nativeContinuation = canResume ? dependencies.store.orchestration.history.continuationFor({ threadId: conversation.id,
+    providerInstanceId: providerInstanceId(route.providerId, route.continuationIdentity),
+    workspaceKey: dependencies.store.conversationPath(conversation.id), nativeSessionId: resumeSessionId! }) : null;
   const effectiveCapabilityInstructions = capabilityOffer && !watcherTurn
     ? secretAwareCapabilityInstructions(
         dependencies.store,
         route,
-        canResume ? conversation.providerSessionId : null,
+        canResume ? resumeSessionId : null,
         capabilityInstructions,
       )
     : capabilityInstructions;
@@ -498,7 +730,7 @@ export function resolveTurnRequest(
       : hostToolBridgeAttested
         ? instructionPack(conversation.id, effectiveCapabilityInstructions)
         : effectiveCapabilityInstructions,
-    resumedSessionId: canResume ? conversation.providerSessionId : null,
+    resumedSessionId: canResume ? resumeSessionId : null,
     latestTurn,
     promptWithheld: request.goalStart !== undefined || providerCommand,
   });
@@ -540,7 +772,7 @@ export function resolveTurnRequest(
     visibleContent: request.content,
     ...(instructionDelivery.buildModeDue ? { interactionMode: conversation.interactionMode } : {}),
     attachments,
-    imagePaths: request.imagePaths,
+    imagePaths: missedImages.imagePaths ?? request.imagePaths,
     documentContexts: request.documentContexts,
     context: request.context,
     internalInstructions: [...instructionDelivery.promptPack, ...turnInstructions],
@@ -555,7 +787,7 @@ export function resolveTurnRequest(
     .ownConversationPacketId(conversation.id, contextPacketIds);
   const unattributedHistoryOnRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
-    const shell = conversation.continuationIdentity;
+    const shell = conversationMatchesRouteProvider ? conversation.continuationIdentity : null;
     const turns = dependencies.store.turnLedgerRepository.historyStayedOnEndpoint(
       conversation.id,
       backendProfileId,
@@ -568,9 +800,14 @@ export function resolveTurnRequest(
   // A provider handoff carries the chat's earlier messages to the new
   // provider. Later fresh sessions on that route keep what the handoff carried,
   // but messages produced afterwards on other routes stay withheld.
-  const providerHandoff = continuation.reasonCode === "harness-changed"
-    && latestTurn !== null
-    && latestTurn.providerId !== route.providerId;
+  // A turn whose context handoff never reached its provider did not move the
+  // conversation onto that route; the switch it attempted is still due.
+  const routeTurnId = latestTurn ? dependencies.store.orchestration.backings.deliveredRouteTurnId(conversation.id) : null;
+  const routeTurn = routeTurnId === null ? null : routeTurnId === latestTurn?.id ? latestTurn
+    : dependencies.store.agentTurn(routeTurnId);
+  // No turn ever reached a provider: whatever switch those turns attempted is still due.
+  const providerHandoff = latestTurn !== null
+    && (routeTurn === null || routeTurn.providerId !== route.providerId);
   const restoredHistoryRoute = () => {
     const { backendProfileId, endpointIdentity } = route.continuationIdentity;
     const handoffBefore = providerHandoff
@@ -592,13 +829,6 @@ export function resolveTurnRequest(
   const referencedCapacity = (capacityBytes: number) => usesNativeCatalog
     ? capacityBytes
     : Math.min(capacityBytes, CUSTOM_BACKEND_RESTORED_HISTORY_BYTES);
-  const nativeRestoredBytes = hostToolBridgeAttested
-    ? NATIVE_RESTORED_HISTORY_BYTES
-    : NATIVE_RESTORED_HISTORY_BYTES_WITHOUT_CONTEXT_TOOL;
-  const restoredCapacity = (capacityBytes: number) => Math.min(
-    capacityBytes,
-    usesNativeCatalog ? nativeRestoredBytes : CUSTOM_BACKEND_RESTORED_HISTORY_BYTES,
-  );
   const referencedHistory = (capacityBytes: number) => {
     const delivery = conversationContexts?.deliveries
       .find(({ packetId }) => packetId === ownChatPacketId);
@@ -612,26 +842,77 @@ export function resolveTurnRequest(
       },
     );
   };
-  const assembleOnFreshSession = (excludedMessageId?: string) => assembleTurnRequest({
+  let offeredHistory: OfferedRestoredHistory | null = null;
+  const offer = (history: RestoredChatHistory | null, targetBackingId: string | null) => {
+    offeredHistory = history ? { history, targetBackingId } : null;
+    return history;
+  };
+  const prepareHistory = (capacityBytes: number, currentPromptBytes: number,
+    options: { excludedMessageId?: string; target: ProviderBacking | null; skipEmpty?: boolean }) => {
+    const { target } = options;
+    // An adopted unread follow-up is already persisted, but it is this turn's prompt, never its history.
+    const excludedMessageId = options.excludedMessageId ?? request.adoptedFollowUp?.messageId;
+    const usage = target ? previousTurnBoundaryUsage(dependencies.store.agentTurn(target.lastTurnId), target.nativeSessionId) : null;
+    const history = dependencies.store.orchestration.portableHistory({
+      threadId: conversation.id, capacityBytes, currentPromptBytes,
+      ...portableHistoryBudgetInputs({
+        attachments, imageCount: (request.imagePaths?.length ?? 0) + missedImages.attachmentIds.length,
+        configuredWindow: routeSelection.contextWindowOverride,
+        limits: dependencies.providers.modelContextLimits?.({ providerId: route.providerId, harnessId: route.harnessId,
+          selection: routeSelection, cwd: dependencies.store.conversationPath(conversation.id) }) ?? null,
+        target: target ? { usage, sameSelection: sameContextSelection(target.selection, routeSelection) } : null,
+      }),
+      ...(excludedMessageId === undefined ? {} : { excludedMessageId }),
+      ...(target ? { coverage: target } : {}), route: restoredHistoryRoute(),
+      hostToolBridgeAttested,
+    });
+    if (!history || (options.skipEmpty && history.messageCount === 0 && history.omittedMessageCount === 0)) {
+      return offer(null, null);
+    }
+    return offer({ ...history, itemIds: history.selection.items.map(({ id }) => id),
+      omittedItemIds: history.selection.omittedItemIds,
+      injectionItems: portableHistoryResponseItems(history.selection.items, history.selection.context) },
+    target ? target.id === relocation?.id ? relocatedBackingId : target.id : null);
+  };
+  const assembleOnFreshSession = (excludedMessageId?: string) => {
+    offeredHistory = null;
+    const assembled = assembleTurnRequest({
     ...assemblyInput,
     interactionMode: conversation.interactionMode,
     internalInstructions: [...instructionDelivery.freshSessionPromptPack, ...turnInstructions],
     restoredHistory: ownChatPacketId === null
-      ? (capacityBytes: number) => dependencies.store.continuationHistory(
-          conversation.id,
-          restoredCapacity(capacityBytes),
-          requestedAt,
-          excludedMessageId,
-          restoredHistoryRoute(),
-        )
-      : referencedHistory,
-  });
+      ? (capacityBytes: number, currentPromptBytes: number) => prepareHistory(capacityBytes, currentPromptBytes,
+        { ...(excludedMessageId === undefined ? {} : { excludedMessageId }), target: null })
+      : (capacityBytes: number) => offer(referencedHistory(capacityBytes), null),
+    });
+    const contextHandoff = appendedContextHandoff(assembled, offeredHistory);
+    return { ...assembled, ...(contextHandoff ? { contextHandoff } : {}) };
+  };
   const importNote = latestTurn?.origin === "cli-import"
-    ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversation.providerSessionId) !== null)
+    ? importedFollowUpNote(dependencies.store.cliConversationImport(conversation.id), canResume && importedSession(dependencies.store, conversation.id, conversationSessionForRoute) !== null)
     : null;
   const startsFreshInEstablishedChat = !canResume
-    && continuation.reasonCode !== "first-turn"
+    && !forceFreshContext
+    && (continuation.reasonCode !== "first-turn"
+      || (dependencies.store.orchestration.forks.get(conversation.id)?.inheritedItems ?? 0) > 0)
     && request.goalStart === undefined;
+  const deltaTarget = canResume && reusableBacking && request.goalStart === undefined ? reusableBacking : null;
+  const deferredDeltaOnly = deltaTarget !== null && latestTurn?.id === deltaTarget.lastTurnId;
+  // The session's last turn may not have reached it: a withheld prompt (goal start), or a prompt whose
+  // turn never started after its history was injected (its message is then not covered).
+  const lastTurnForDelta = deltaTarget && deferredDeltaOnly ? dependencies.store.agentTurn(deltaTarget.lastTurnId) : null;
+  const lastTurnRunOrdinal = lastTurnForDelta
+    ? ((dependencies.store.orchestration.events.projection("run", lastTurnForDelta.runId)?.value as { ordinal?: number } | undefined)?.ordinal ?? null)
+    : null;
+  const pendingDelta = deltaTarget !== null
+    && (!deferredDeltaOnly || dependencies.store.turnLedgerRepository.promptWithheld(deltaTarget.lastTurnId)
+      || (lastTurnForDelta !== null && !isItemCovered(deltaTarget, lastTurnForDelta.userMessageId, lastTurnRunOrdinal)));
+  // A provider command is sent on its own. Turns its session missed on another route must reach it first; a delta
+  // deferred from the session's own last turn (a withheld prompt or instruction pack) waits for the next message.
+  if (providerCommand && pendingDelta && !deferredDeltaOnly) {
+    throw new RuntimeRequestError(`Send a message first so ${providerName} receives this chat's earlier messages.`);
+  }
+  const deliversDelta = pendingDelta && !providerCommand;
   if (providerCommand && startsFreshInEstablishedChat) {
     throw new RuntimeRequestError(
       `Send a message first so ${providerName} receives this chat's earlier messages.`,
@@ -647,19 +928,85 @@ export function resolveTurnRequest(
       `Send a message first so ${providerName} receives the chats you referenced.`,
     );
   }
-  const assembled = startsFreshInEstablishedChat
-    ? assembleOnFreshSession()
-    : assembleTurnRequest({
-        ...assemblyInput,
-        carriedConversationContexts,
-      });
-  const providerSessionInvalidation = !canResume && conversation.providerSessionId
-    ? { expectedSessionId: conversation.providerSessionId }
+  const assembleOnResumedSession = () => {
+    offeredHistory = null;
+    const assembled = assembleTurnRequest({
+      ...assemblyInput,
+      ...(deliversDelta
+        ? { restoredHistory: (capacity: number, promptBytes: number) => prepareHistory(capacity, promptBytes,
+          { target: deltaTarget, skipEmpty: deferredDeltaOnly }) } : {}),
+      carriedConversationContexts,
+    });
+    const contextHandoff = appendedContextHandoff(assembled, offeredHistory);
+    return { ...assembled, ...(contextHandoff ? { contextHandoff } : {}) };
+  };
+  // Never resume a native session that another live process may still be writing.
+  if (canResume && relocation
+    && providerBackgroundWork(dependencies.providers, exhaustedBackingSession(relocation)) === "pending") {
+    throw new CheckoutMoveBackgroundWorkError();
+  }
+  // H6: a queued per-item selection switch must not interrupt background work still running on the replaced session.
+  if (
+    hasSelectionOverride
+    && request.goalStart === undefined
+    && latestTurn !== null
+    && latestTurn.providerSessionAfter !== null
+    && (
+      !canResume
+      || resumeSessionId !== latestTurn.providerSessionAfter
+      || route.providerId !== latestTurn.providerId
+      || route.harnessId !== latestTurn.harnessId
+    )
+    && providerBackgroundWork(dependencies.providers, {
+      conversationId: conversation.id,
+      providerId: latestTurn.providerId,
+      harnessId: latestTurn.harnessId,
+      nativeSessionId: latestTurn.providerSessionAfter,
+    }) === "pending"
+  ) {
+    throw new ProviderSwitchBackgroundWorkError();
+  }
+  const applyScheduledSenderNote = (assembledTurn: ReturnType<typeof assembleOnFreshSession>) => {
+    const scheduled = request.scheduledDelivery;
+    if (!scheduled) return assembledTurn;
+    const source = { conversationId: scheduled.taskId, title: scheduled.title, kind: "scheduled" as const };
+    return {
+      ...assembledTurn,
+      executionPrompt: withAgentSenderNote(assembledTurn.executionPrompt, source),
+      ...(assembledTurn.nativeHistory
+        ? { nativeHistory: { ...assembledTurn.nativeHistory, prompt: withAgentSenderNote(assembledTurn.nativeHistory.prompt, source) } }
+        : {}),
+    };
+  };
+  let assembled: ReturnType<typeof assembleOnFreshSession>;
+  try {
+    assembled = applyScheduledSenderNote(startsFreshInEstablishedChat ? assembleOnFreshSession() : assembleOnResumedSession());
+  } catch (error) {
+    if (error instanceof PortableHistoryBudgetError && deliversDelta && !startsFreshInEstablishedChat
+      && replacedBacking === undefined) {
+      return replaceExhaustedSession(dependencies, request, deltaTarget!, error);
+    }
+    throw error;
+  }
+  const { contextHandoff } = assembled;
+  // The route's sessions this fresh start replaces (T3 d32df2d34): a fresh session reported under one of them is
+  // that session with the restored history added, so the turn fails instead of adopting it.
+  const replacedSessionIds = canResume ? [] : [...new Set([
+    replacedBacking?.backing.nativeSessionId,
+    movedBacking?.nativeSessionId,
+    localBacking?.status === "retired" ? localBacking.nativeSessionId : undefined,
+    continuation.reasonCode === "stale-provider-session" ? resumeSessionId : undefined,
+    forceFreshContext ? resumeSessionId : undefined,
+  ].filter((sessionId): sessionId is string => typeof sessionId === "string"))];
+  const providerSessionInvalidation = !canResume
+    && conversationSessionForRoute
+    && (!hasSelectionOverride || selectionsMatch(conversation.modelSelection, routeSelection))
+    ? { expectedSessionId: conversationSessionForRoute }
     : undefined;
   const goalContinuationExpected = request.goalStart !== undefined
     || (canResume && dependencies.store.agentGoals(conversation.id).some((goal) =>
       goal.source === "codex-native"
-      && goal.providerSessionId === conversation.providerSessionId
+      && goal.providerSessionId === resumeSessionId
       && goal.status === "active"));
   const maxBudgetUsd = claudeSpendLimitApplies(route)
     ? dependencies.store.project(conversation.projectId).preferences
@@ -674,6 +1021,9 @@ export function resolveTurnRequest(
       codexContextWindow(dependencies.store, conversation.id, modelSelection),
     )
     : null;
+  const providerCwd = canResume
+    ? importedResumeCwd(dependencies.store, conversation.id, resumeSessionId, dependencies.store.conversationPath(conversation.id))
+    : dependencies.store.conversationPath(conversation.id);
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -684,9 +1034,7 @@ export function resolveTurnRequest(
     conversationId: conversation.id,
     runId,
     turnId,
-    cwd: canResume
-      ? importedResumeCwd(dependencies.store, conversation.id, conversation.providerSessionId, dependencies.store.conversationPath(conversation.id))
-      : dependencies.store.conversationPath(conversation.id),
+    cwd: providerCwd,
     prompt: assembled.executionPrompt,
     model: routeSelection.modelId === "provider-default"
       ? undefined
@@ -694,7 +1042,9 @@ export function resolveTurnRequest(
     reasoningEffort: routeSelection.reasoningEffort || undefined,
     interactionMode: conversation.interactionMode,
     access: conversation.accessMode,
-    sessionId: canResume ? conversation.providerSessionId! : undefined,
+    sessionId: canResume ? resumeSessionId! : undefined,
+    ...(sessionOrigin !== null && sessionOrigin !== providerCwd ? { sessionOriginCwd: sessionOrigin } : {}),
+    ...(nativeContinuation ? { nativeContinuation: nativeContinuation.continuation } : {}),
     ...(supportedFastMode ? { supportedFastMode } : {}),
     ...(canResume
       && previousContinuationIdentity
@@ -709,7 +1059,7 @@ export function resolveTurnRequest(
     imagePaths: assembled.imagePaths,
     attachmentReadRoots: dependencies.hooks.attachmentReadRoots?.({
       conversationId: conversation.id,
-      attachmentIds: attachments.map(({ id }) => id),
+      attachmentIds: [...missedImages.attachmentIds, ...attachments.map(({ id }) => id)],
     }) ?? [],
     skills: request.skills,
     ...(customAgentCall ? customAgentCall.providerInput : {}),
@@ -738,6 +1088,7 @@ export function resolveTurnRequest(
   });
   const input: BeginAgentTurnInput = {
     queuedMessageId: request.queuedMessageId,
+    ...(request.adoptedFollowUp ? { adoptedFollowUp: request.adoptedFollowUp } : {}),
     limitResetPlanId: request.limitResetPlanId,
     restartContinuationPlanId: request.restartContinuationPlanId,
     id: turnId,
@@ -746,8 +1097,10 @@ export function resolveTurnRequest(
     content: assembled.visibleContent,
     attachments,
     activateConversation: request.activateConversation,
+    ...(hasSelectionOverride ? { allowProviderSelectionOverride: true } : {}),
     privateConnectDeviceId: request.privateConnectDeviceId,
     ...(request.watcherNote ? { watcherNote: request.watcherNote } : {}),
+    ...(request.delegatedCompletion ? { delegatedCompletion: request.delegatedCompletion } : {}),
     ...(customAgentCall ? { customAgentCall: customAgentCall.attribution } : {}),
     ...(request.duoComparison && request.duoComparison.launchId === request.authorizedDuoComparisonLaunchId
       ? { duoComparison: request.duoComparison }
@@ -765,6 +1118,10 @@ export function resolveTurnRequest(
     continuationIdentity: route.continuationIdentity,
     continuationReasonCode: continuation.reasonCode,
     sessionRecovery: assembled.sessionRecovery,
+    ...(contextHandoff ? { contextHandoff } : {}),
+    ...(canResume && relocation ? { backingRelocation: { fromBackingId: relocation.id } } : {}),
+    preparedWorkspaceKey: checkout,
+    ...(nativeContinuation ? { nativeContinuation } : {}),
     harnessId,
     backendProfileId: modelSelection.backendProfileId,
     model: modelSelection.modelId,
@@ -772,11 +1129,11 @@ export function resolveTurnRequest(
     reasoningEffort: modelSelection.reasoningEffort ?? "",
     interactionMode: conversation.interactionMode,
     accessMode: conversation.accessMode,
-    providerSessionBefore: canResume ? conversation.providerSessionId : null,
+    providerSessionBefore: canResume ? resumeSessionId : null,
     ...(providerSessionInvalidation ? { providerSessionInvalidation } : {}),
     requestedAt,
     usageAtStart: canResume
-      ? previousTurnBoundaryUsage(latestTurn, conversation.providerSessionId!)
+      ? previousTurnBoundaryUsage(reusableBacking ? dependencies.store.agentTurn(reusableBacking.lastTurnId) : latestTurn, resumeSessionId!)
       : null,
     configurationRevision: modelSelection.backendConfigurationRevision,
     association: "authoritative",
@@ -784,12 +1141,17 @@ export function resolveTurnRequest(
   return {
     input,
     importNote,
-    handoffFromTurnId: providerHandoff ? latestTurn.id : null,
+    handoffFromTurnId: latestTurn !== null && latestTurn.providerId !== route.providerId ? latestTurn.id : null,
     adopt: (queued) => {
+      const replaced = replacedBacking ? dependencies.store.orchestration.backings.get(replacedBacking.backing.id) : null;
+      if (replaced) dependencies.store.orchestration.backings.invalidate(replaced, replacedBacking!.reason);
       instructionDelivery.recordPromptPack(queued.turn.id);
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
-      const activeConversation = providerSessionInvalidation
+      const isolateOverrideSession = hasSelectionOverride
+        && !canResume
+        && !selectionsMatch(conversation.modelSelection, routeSelection);
+      const activeConversation = providerSessionInvalidation || isolateOverrideSession
         ? {
             ...conversation,
             providerSessionId: null,
@@ -835,10 +1197,12 @@ export function resolveTurnRequest(
           }),
           deferredSettlement: null,
           providerStopStarted: false,
-          sessionAfter: canResume ? conversation.providerSessionId : null,
+          sessionAfter: canResume ? resumeSessionId : null,
+          nativeHistory: contextHandoff ? assembled.nativeHistory ?? null : null,
           freshSessionRequest: canResume && request.goalStart === undefined && !providerCommand
-            ? assembleOnFreshSession
+            ? (excludedMessageId) => applyScheduledSenderNote(assembleOnFreshSession(excludedMessageId))
             : null,
+          ...(replacedSessionIds.length > 0 ? { replacedSessionIds } : {}),
           lastUsage: null,
           assistantText: "",
           assistantPendingHighSurrogate: "",

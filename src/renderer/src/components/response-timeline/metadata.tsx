@@ -1,3 +1,4 @@
+import { ForkTurnAction } from "../orchestration/fork-surface";
 import {
   useLayoutEffect,
   useRef,
@@ -245,6 +246,7 @@ export function TurnMetadata({
       data-run-details-expanded={detailsExpanded || undefined}
     >
       <div className="turn-meta-primary">
+        <ForkTurnAction turnId={agentTurn.id} turnIndex={turn.index} />
         {terminalAnswer && (
           <CopyAnswerButton content={terminalAnswer.content} answerId={terminalAnswer.id} ariaLabel="Copy final answer" />
         )}

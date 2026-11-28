@@ -4,20 +4,33 @@ import {
   query as claudeQuery,
   type Query,
   type SDKMessage,
-  type SDKStartupFailureReason,
   type SDKUserMessage,
-  type TerminalReason,
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
+import { clipCodeUnits } from "../../shared/code-units";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
-import { watcherCommandEnvironment } from "../runtime/watcher/read-only-commands";
 import { providerUnconfirmedCleanup } from "./provider-unconfirmed-cleanup";
 import {
   launchCredentialValues,
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   sanitizeProviderFailureDetail,
 } from "./activity-detail";
+import {
+  claudeEffort,
+  claudeFailure,
+  claudeLifecycleFailure,
+  claudeReadableRuntimeError,
+  claudeResultDetail,
+  claudeResultFailure,
+  claudeResultReason,
+  claudeRunEnvironment,
+  claudeRuntimeFailure,
+  claudeSupportsThinkingDisplay,
+  safeError,
+  stringValue,
+} from "./claude-agent-sdk-errors";
+export { claudeRunEnvironment, claudeSupportsThinkingDisplay };
 import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,
@@ -37,13 +50,13 @@ import {
   type AgentHarnessStartOptions,
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
+import type { ProviderSteerReadCallback } from "./types";
 import {
   providerRunTerminal,
   type ProviderRunFailure,
-  type ProviderRunInput,
   type ProviderRunResult,
 } from "./contracts";
-import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult, type ClaudeDelegateCompletion } from "./claude-delegate-lifecycle";
+import { ClaudeDelegateLifecycle, claudeMessageResumesParent, isClaudeNotificationResult, isClaudeQueuedCompletionAck, isClaudeUnansweredPromptResult } from "./claude-delegate-lifecycle";
 import { claudeCredentialCommandHooks } from "./claude-credential-commands";
 import { ClaudeLaunchRedactor } from "./claude-launch-redaction";
 import { ClaudeMessageProjector } from "./claude-message-projector";
@@ -51,7 +64,7 @@ import { ClaudePromptChannel } from "./claude-prompt-channel";
 import { CLAUDE_MESSAGE_DRAIN_TIMEOUT, nextClaudeMessage, claudeFastModeFailure } from "./claude-sdk-lifecycle-support";
 import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
 import { claudeCommandLifecycleMessage } from "./claude-message-projector-support";
-import { ClaudePermissionBroker } from "./claude-permission-broker";
+import { ClaudePermissionBroker, claudeSdkPermissionMode } from "./claude-permission-broker";
 import {
   claudePrompt,
   claudePromptReservationBytes,
@@ -64,7 +77,6 @@ import {
 } from "./claude-skill-plugin";
 import type { ClaudeSkillFilesystemTestSeam } from "./claude-skill-operation";
 import {
-  CLAUDE_IDENTITY_ENVIRONMENT,
   claudeIdentityOptions,
   prepareClaudeTurnIdentity,
 } from "./claude-identity";
@@ -72,9 +84,9 @@ import type { ClaudeQueryFactory } from "./claude-skill-query";
 import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import { createClaudeTaskControls } from "./claude-task-controls";
 import {
-  CLAUDE_STARTUP_FAILURE_RESULTS,
-  CLAUDE_TRANSCRIPT_FLUSH,
+  claudeSessionNotFound,
   claudeSessionUnavailable,
+  claudeStartupExitMessage,
   claudeStartupFailure,
 } from "./claude-startup-failure";
 import { claudeRouteFailureDetail, claudeRouteFailureMessage } from "./claude-custom-backend-failure";
@@ -84,6 +96,10 @@ import {
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
+import {
+  claudeNativeContinuationOptions, claudeSessionStoredElsewhere, createClaudeNativeConversationOperations, readClaudePersistedNativeHead,
+} from "./claude-native-conversation";
+import { trackNativeConversationRun } from "./native-conversation-run-tracking";
 
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
@@ -94,6 +110,13 @@ const MIN_CLAUDE_STOP_TASK_TIMEOUT_MS = 25;
 const CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 2_000;
 const MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS = 25;
 const CLAUDE_SKILL_FILESYSTEM_TIMEOUT_MS = 6_000;
+export const CLAUDE_RETRY_BUDGET_MS = 10 * 60 * 1_000;
+export const CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE =
+  "Claude exceeded the retry time limit without making progress.";
+export const CLAUDE_STARTUP_INIT_TIMEOUT_MS = 90_000;
+export const CLAUDE_STARTUP_INIT_TIMEOUT_MESSAGE =
+  "Claude Code timed out while starting up or connecting MCP servers. Try again.";
+const CLAUDE_STDERR_SESSION_NOT_FOUND = /No conversation found with session ID\b/u;
 
 export const CLAUDE_AGENT_SDK_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
@@ -127,6 +150,20 @@ export interface ClaudeAgentSdkHarnessOptions
    * result. Primarily useful for deterministic tests.
    */
   terminalSubagentDrainTimeoutMs?: number;
+  /**
+   * May shorten, but never extend, the 10-minute retry/unanswered budget (T3
+   * `943de8fe9`). Primarily useful for deterministic tests.
+   */
+  retryBudgetMs?: number;
+  /**
+   * May shorten, but never extend, the 90-second startup/MCP initialization
+   * deadline (`0072f66ec`). Primarily useful for deterministic tests.
+   */
+  startupInitTimeoutMs?: number;
+  /** Optional clock override for deterministic retry-budget tests. */
+  now?: () => number;
+  /** Optional default steer-read observer when not provided on start options. */
+  onSteerRead?: ProviderSteerReadCallback;
   skillFilesystem?: ClaudeSkillFilesystemTestSeam;
 }
 
@@ -138,58 +175,75 @@ export {
   readClaudeAgentSdkModels,
 } from "./claude-agent-sdk-metadata";
 
-function claudeStopTaskTimeout(value: number | undefined): number {
-  if (
-    typeof value !== "number"
-    || !Number.isSafeInteger(value)
-    || value < 1
-  ) {
-    return CLAUDE_STOP_TASK_TIMEOUT_MS;
+function boundedSafeIntTimeout(value: number | undefined, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) return max;
+  return Math.max(min, Math.min(value, max));
+}
+
+function boundedFiniteTimeout(value: number | undefined, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) return max;
+  return Math.max(1, Math.min(Math.floor(value), max));
+}
+
+async function closeClaudeIterator(iterator: AsyncIterator<SDKMessage> | undefined, timeoutMs: number): Promise<void> {
+  if (!iterator?.return) return;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      iterator.return(),
+      new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); timer.unref(); }),
+    ]);
+  } catch { /* Closing an already-exited SDK iterator is best-effort. */ } finally {
+    if (timer) clearTimeout(timer);
   }
-  return Math.max(
-    MIN_CLAUDE_STOP_TASK_TIMEOUT_MS,
-    Math.min(value, CLAUDE_STOP_TASK_TIMEOUT_MS),
+}
+
+function isClaudeRetryMessage(message: SDKMessage): boolean {
+  return message.type === "system" && (
+    message.subtype === "api_retry"
+    || (message.subtype === "control_request_progress" && message.status === "api_retry")
   );
 }
 
-function claudeTerminalSubagentDrainTimeout(
-  value: number | undefined,
-): number {
-  if (
-    typeof value !== "number"
-    || !Number.isSafeInteger(value)
-    || value < 1
-  ) {
-    return CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS;
+function isClaudeSubstantiveProgressMessage(message: SDKMessage): boolean {
+  if (message.type === "assistant" || message.type === "stream_event"
+    || message.type === "result" || message.type === "tool_progress"
+    || message.type === "tool_use_summary" || message.type === "user") {
+    return true;
   }
-  return Math.max(
-    MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS,
-    Math.min(value, CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS),
+  return message.type === "system" && (
+    message.subtype === "compact_boundary"
+    || message.subtype === "status"
+    || message.subtype === "model_refusal_fallback"
   );
 }
 
 export function createClaudeAgentSdkHarness(options: ClaudeAgentSdkHarnessOptions = {}): AgentHarness {
-  const stopTaskTimeoutMs = claudeStopTaskTimeout(
-    options.stopTaskTimeoutMs,
-  );
-  const terminalSubagentDrainTimeoutMs = claudeTerminalSubagentDrainTimeout(
-    options.terminalSubagentDrainTimeoutMs,
-  );
+  const stopTaskTimeoutMs = boundedSafeIntTimeout(options.stopTaskTimeoutMs, MIN_CLAUDE_STOP_TASK_TIMEOUT_MS, CLAUDE_STOP_TASK_TIMEOUT_MS);
+  const terminalSubagentDrainTimeoutMs = boundedSafeIntTimeout(options.terminalSubagentDrainTimeoutMs, MIN_CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS, CLAUDE_TERMINAL_SUBAGENT_DRAIN_TIMEOUT_MS);
+  const retryBudgetMs = boundedFiniteTimeout(options.retryBudgetMs, CLAUDE_RETRY_BUDGET_MS);
+  const startupInitTimeoutMs = boundedFiniteTimeout(options.startupInitTimeoutMs, CLAUDE_STARTUP_INIT_TIMEOUT_MS);
   const checklistSessions = new ClaudeChecklistSessions();
+  const activeNativeConversations = new Set<string>();
   return {
     id: "claude-agent-sdk",
     providerId: "claude",
     capabilities: CLAUDE_AGENT_SDK_CAPABILITIES,
+    nativeConversation: createClaudeNativeConversationOperations(activeNativeConversations),
     supports: (input) => input.providerId === "claude",
-    start: (startOptions) => startClaudeRun(
-      startOptions,
+    start: (startOptions) => trackNativeConversationRun(activeNativeConversations, startOptions, (tracked) => startClaudeRun(
+      tracked,
       options.createQuery ?? claudeQuery,
       options,
       stopTaskTimeoutMs,
       terminalSubagentDrainTimeoutMs,
+      retryBudgetMs,
+      startupInitTimeoutMs,
+      options.now ?? (() => performance.now()),
+      startOptions.onSteerRead ?? startOptions.callbacks?.onSteerRead ?? options.onSteerRead,
       options.skillFilesystem,
       checklistSessions,
-    ),
+    )),
   };
 }
 
@@ -199,6 +253,10 @@ function startClaudeRun(
   lifecycleDependencies: ClaudeOwnedQueryDependencies,
   stopTaskTimeoutMs: number,
   terminalSubagentDrainTimeoutMs: number,
+  retryBudgetMs: number,
+  startupInitTimeoutMs: number,
+  now: () => number,
+  harnessOnSteerRead: ProviderSteerReadCallback | undefined,
   skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
   checklistSessions: ClaudeChecklistSessions,
 ): AgentHarnessRun {
@@ -220,10 +278,10 @@ function startClaudeRun(
       MAX_RUN_EVENT_BYTES,
     ),
   );
-  const abortController = new AbortController();
+  let abortController = new AbortController();
   const preparationAbortController = new AbortController();
   const delegateLifecycle = new ClaudeDelegateLifecycle();
-  const promptChannel = new ClaudePromptChannel();
+  let promptChannel = new ClaudePromptChannel();
   const subagentTracker = new ClaudeSubagentTraceTracker(emitter.subagent);
   const taskControls = createClaudeTaskControls({
     query: () => query,
@@ -237,8 +295,16 @@ function startClaudeRun(
   let acceptingFollowUps = false;
   let acceptedFollowUp = false;
   const pendingFollowUpIds = new Set<string>();
-  let sessionId = options.input.sessionId;
-  let authoritativeSessionId = options.input.sessionId;
+  // Follow-ups Claude reported starting: read, though no result answers them yet.
+  const startedFollowUpIds = new Set<string>();
+  // Accepted follow-ups Claude cancelled, discarded or refused before reading them.
+  const droppedFollowUpIds: string[] = [];
+  const followUpSteerIds = new Map<string, string>();
+  // T3 `heldResult`: a completed result keeps the turn open while Claude still
+  // holds an unread follow-up, and settles it if Claude drops that follow-up.
+  let heldResult: { message: SDKMessage; sawOutputText: boolean; turnEnded: boolean } | null = null;
+  let sessionId = options.nativeContinuation?.nativeConversationId ?? options.input.sessionId;
+  let authoritativeSessionId = sessionId;
   let checklistTasks = checklistSessions.tasks(sessionId, true);
   let pendingSessionReset: { outgoingId: string; candidateId?: string } | undefined;
   let contextUsageGeneration = 0;
@@ -267,7 +333,12 @@ function startClaudeRun(
     ...(options.input.autoCompactWindow ? { autoCompactWindow: options.input.autoCompactWindow } : {}),
   };
   let sessionUnavailable = false;
-  const ownedProcess = createClaudeOwnedQueryProcess(
+  let sessionNotFound = false;
+  let claudeAnswered = false;
+  let sessionAttached = false;
+  let preAttachmentRefusal = false;
+  let startupInitCleanupFailed = false;
+  let ownedProcess = createClaudeOwnedQueryProcess(
     "Claude Code process tree",
     lifecycleDependencies,
   );
@@ -328,7 +399,7 @@ function startClaudeRun(
     emitter,
     text,
     usesNativeAnthropic,
-    usage: new ClaudeUsageLedger(Boolean(options.input.sessionId)),
+    usage: new ClaudeUsageLedger(Boolean(options.input.sessionId) && options.nativeContinuation?.kind !== "new-session"),
     selectedModelId: options.input.modelSelection.modelId,
     contextWindowOverride:
       options.input.modelSelection.contextWindowOverride,
@@ -343,14 +414,17 @@ function startClaudeRun(
   const providerResult = (async (): Promise<ProviderRunResult> => {
     let providerThrew = false;
     try {
+      const continuationOptions = claudeNativeContinuationOptions(options.input.sessionId, options.nativeContinuation);
+      if (options.nativeContinuation && options.input.operation) {
+        throw new Error("A Claude continuation must be applied to a normal turn.");
+      }
       const compactInstruction = options.input.operation?.instruction;
       const promptText = options.input.operation?.kind === "compact"
         ? `/compact${compactInstruction ? ` ${compactInstruction}` : ""}`
         : options.input.prompt;
       const initialImagePaths = options.input.imagePaths ?? [];
-      const promptReservation = promptChannel.reserve(
-        claudePromptReservationBytes(promptText, initialImagePaths.length > 0),
-      );
+      const initialReservationBytes = claudePromptReservationBytes(promptText, initialImagePaths.length > 0);
+      const promptReservation = promptChannel.reserve(initialReservationBytes);
       if (!promptReservation) return finishResult("cancelled");
       let prompt: SDKUserMessage;
       try {
@@ -375,81 +449,144 @@ function startClaudeRun(
       });
       stagedSkillPlugin = identity.skills;
       selectedSkillsVerified = !stagedSkillPlugin?.selectedSkillNames.length;
-      query = createQuery({
-        prompt: promptChannel,
-        options: {
-          abortController,
-          cwd: options.input.cwd,
-          env: claudeRunEnvironment(options.environment, options.input.readOnlyProfile),
-          pathToClaudeCodeExecutable: options.executable,
-          spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
-          includePartialMessages: true,
-          ...(options.input.maxBudgetUsd !== undefined
-            ? { maxBudgetUsd: options.input.maxBudgetUsd }
-            : {}),
-          // Claude Code omits thinking content by default, and in multi-step
-          // turns Claude often narrates between tools inside thinking. With
-          // it omitted, Inertia had nothing to show until the final answer.
-          // Summaries stream through the reasoning channel. Only the display
-          // flag is set, so each model keeps its own thinking mode, and only
-          // on Claude Code versions verified to accept it.
-          ...(usesNativeAnthropic
-            && claudeSupportsThinkingDisplay(options.installationVersion)
-            ? { extraArgs: { "thinking-display": "summarized" } }
-            : {}),
-          // Inertia owns the approval boundary. Loading filesystem settings
-          // here would let a repository's .claude/settings.json install hooks
-          // or allow rules that execute before canUseTool can ask the user.
-          settingSources: [],
-          ...claudeIdentityOptions(identity, options.input.systemInstruction, options.input.sessionInstruction),
-          managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
-          settings: launchSettings,
-          permissionMode: options.input.readOnlyProfile === "watcher"
-            ? "default"
-            : options.input.interactionMode === "plan"
-              ? "plan"
-              : options.input.access === "full"
-                ? "bypassPermissions"
-                : options.input.access === "auto-edit"
-                  ? "acceptEdits"
-                  : "default",
-          allowDangerouslySkipPermissions: options.input.access === "full",
-          canUseTool: permissions.canUseTool,
-          ...(launchRedaction ? { hooks: claudeCredentialCommandHooks() } : {}),
-          ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
-          strictMcpConfig: true,
-          ...(claudeHostTools
-            ? { mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config } }
-            : {}),
-          ...(options.input.sessionId ? { resume: options.input.sessionId } : {}),
-          ...(options.input.model ? { model: options.input.model } : {}),
-          // Custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL instead.
-          ...(usesNativeAnthropic && claudeEffort(options.input.reasoningEffort)
-            ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
-        },
-      });
-      acceptingFollowUps = true;
-      emitter.status("running");
-      if (usesNativeAnthropic) {
-        void emitClaudeModelMetadata(query, emitter.rich).catch(() => undefined);
-      }
-      const sdkIterator = query[Symbol.asyncIterator]();
-      messageIterator = launchRedaction ? launchRedaction.iterator(sdkIterator) : sdkIterator;
-      let terminalDrainDeadline: number | null = null;
-      let parentResumedAfterProvisional = false;
-      let announcedShortenedEvent = false;
-      while (true) {
-        const next = await nextClaudeMessage(
-          messageIterator,
-          terminalDrainDeadline === null ? null : terminalDrainDeadline - performance.now(),
-          abortController.signal,
-        );
-        if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT || next.done) break;
-        // One legitimately large update is shortened for Inertia's view
-        // instead of failing the turn (#338). Claude keeps the full content.
-        const observed = eventBudget.observe(next.value);
-        const message = observed.value as SDKMessage;
+      const canRetryStartupInit = !options.input.sessionId && !continuationOptions.resume;
+      for (let startupAttempt = 0; ; startupAttempt += 1) {
+        if (startupAttempt > 0) {
+          if (cancelRequested) return finishResult("cancelled");
+          abortController = new AbortController();
+          ownedProcess = createClaudeOwnedQueryProcess("Claude Code process tree", lifecycleDependencies);
+          promptChannel = new ClaudePromptChannel();
+          const retryReservation = promptChannel.reserve(initialReservationBytes);
+          if (!retryReservation || !promptChannel.push(prompt, retryReservation)) {
+            return finishResult("cancelled");
+          }
+          delegateLifecycle.dispose();
+          delegateLifecycle.expectPrompt(prompt.uuid);
+        }
+        query = createQuery({
+          prompt: promptChannel,
+          options: {
+            abortController,
+            cwd: options.input.cwd,
+            env: claudeRunEnvironment(options.environment, options.input.readOnlyProfile),
+            pathToClaudeCodeExecutable: options.executable,
+            spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
+            includePartialMessages: true,
+            ...(options.input.maxBudgetUsd !== undefined
+              ? { maxBudgetUsd: options.input.maxBudgetUsd }
+              : {}),
+            // Claude Code omits thinking content by default, and in multi-step
+            // turns Claude often narrates between tools inside thinking. With
+            // it omitted, Inertia had nothing to show until the final answer.
+            // Summaries stream through the reasoning channel. Only the display
+            // flag is set, so each model keeps its own thinking mode, and only
+            // on Claude Code versions verified to accept it.
+            ...(usesNativeAnthropic
+              && claudeSupportsThinkingDisplay(options.installationVersion)
+              ? { extraArgs: { "thinking-display": "summarized" } }
+              : {}),
+            // Inertia owns the approval boundary. Loading filesystem settings
+            // here would let a repository's .claude/settings.json install hooks
+            // or allow rules that execute before canUseTool can ask the user.
+            settingSources: [],
+            ...claudeIdentityOptions(identity, options.input.systemInstruction, options.input.sessionInstruction),
+            managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
+            settings: launchSettings,
+            permissionMode: claudeSdkPermissionMode(options.input),
+            allowDangerouslySkipPermissions: options.input.access === "full",
+            canUseTool: permissions.canUseTool,
+            ...(launchRedaction ? { hooks: claudeCredentialCommandHooks() } : {}),
+            ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
+            strictMcpConfig: true,
+            ...(claudeHostTools
+              ? { mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config } }
+              : {}),
+            ...continuationOptions,
+            ...(options.input.model ? { model: options.input.model } : {}),
+            // Custom backends map effort through CLAUDE_CODE_EFFORT_LEVEL instead.
+            ...(usesNativeAnthropic && claudeEffort(options.input.reasoningEffort)
+              ? { effort: claudeEffort(options.input.reasoningEffort) } : {}),
+          },
+        });
+        acceptingFollowUps = true;
+        if (startupAttempt === 0) emitter.status("running");
+        if (usesNativeAnthropic) {
+          void emitClaudeModelMetadata(query, emitter.rich).catch(() => undefined);
+        }
+        const sdkIterator = query[Symbol.asyncIterator]();
+        messageIterator = launchRedaction ? launchRedaction.iterator(sdkIterator) : sdkIterator;
+        let startupInitDeadline: number | null = now() + startupInitTimeoutMs;
+        let startupInitTimedOut = false;
+        let terminalDrainDeadline: number | null = null;
+        let retryBudgetDeadline: number | null = null;
+        let parentResumedAfterProvisional = false;
+        let announcedShortenedEvent = false;
+        while (true) {
+          const nextDeadline = [startupInitDeadline, terminalDrainDeadline, retryBudgetDeadline]
+            .filter((deadline): deadline is number => deadline !== null)
+            .reduce<number | null>((min, deadline) => (min === null ? deadline : Math.min(min, deadline)), null);
+          const next = await nextClaudeMessage(
+            messageIterator,
+            nextDeadline === null ? null : nextDeadline - now(),
+            abortController.signal,
+          );
+          if (next === CLAUDE_MESSAGE_DRAIN_TIMEOUT) {
+            if (
+              startupInitDeadline !== null
+              && (terminalDrainDeadline === null || startupInitDeadline <= terminalDrainDeadline)
+              && (retryBudgetDeadline === null || startupInitDeadline <= retryBudgetDeadline)
+            ) {
+              startupInitTimedOut = true;
+              break;
+            }
+            if (
+              retryBudgetDeadline !== null
+              && (terminalDrainDeadline === null || retryBudgetDeadline <= terminalDrainDeadline)
+            ) {
+              emitter.activity("system", "failed", CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE);
+              return finishResult(
+                "failed",
+                CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE,
+                claudeFailure(CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE, "system/retry-budget-exceeded"),
+              );
+            }
+            break;
+          }
+          if (next.done) break;
+          claudeAnswered = true;
+          startupInitDeadline = null;
+          // One legitimately large update is shortened for Inertia's view
+          // instead of failing the turn (#338). Claude keeps the full content.
+          const observed = eventBudget.observe(next.value);
+          const message = observed.value as SDKMessage;
+          if (
+            (message.type === "system" && message.subtype === "init")
+            || message.type === "assistant"
+            || message.type === "stream_event"
+            || message.type === "tool_progress"
+            || message.type === "user"
+            || (message.type === "result" && message.num_turns > 0)
+          ) {
+            sessionAttached = true;
+          }
+          if (!sessionAttached && message.type === "result" && message.subtype !== "success" && message.num_turns === 0 && claudeStartupFailure(message)) {
+            preAttachmentRefusal = true;
+          }
+        if (isClaudeRetryMessage(message)) {
+          retryBudgetDeadline ??= now() + retryBudgetMs;
+          if (now() >= retryBudgetDeadline) {
+            emitter.activity("system", "failed", CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE);
+            return finishResult(
+              "failed",
+              CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE,
+              claudeFailure(CLAUDE_RETRY_BUDGET_EXCEEDED_MESSAGE, "system/retry-budget-exceeded"),
+            );
+          }
+        } else if (isClaudeSubstantiveProgressMessage(message)) {
+          retryBudgetDeadline = null;
+        }
         sessionUnavailable ||= options.input.sessionId !== undefined && claudeSessionUnavailable(message);
+        sessionNotFound ||= options.input.sessionId !== undefined && claudeSessionNotFound(message);
         if (observed.shortened && !announcedShortenedEvent) {
           announcedShortenedEvent = true;
           emitter.activity("system", "info", "Shortened a large Claude update", {
@@ -505,6 +642,8 @@ function startClaudeRun(
           && messageSessionId === authoritativeSessionId;
         if (message.type === "system" && message.subtype === "init"
           && initAttestsRequestedSession) {
+          emitter.nativeBoundary({ nativeConversationId: messageSessionId, nativeSessionId: messageSessionId,
+            nativeTurnId: null, persistedHeadId: null, phase: "started" });
           if (requestedFastModeState === "on"
             && record.fast_mode_state !== requestedFastModeState
             && !(fastModeVerified && record.fast_mode_state === "cooldown")) {
@@ -561,6 +700,23 @@ function startClaudeRun(
           fastModeVerified = requestedFastModeState === null;
         }
         const commandLifecycle = !childOwned ? claudeCommandLifecycleMessage(message) : null;
+        if (commandLifecycle?.state === "started" && pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
+          const firstStart = !startedFollowUpIds.has(commandLifecycle.command_uuid);
+          startedFollowUpIds.add(commandLifecycle.command_uuid);
+          // Claude now answers this follow-up, and that answer's result ends the turn.
+          heldResult = null;
+          if (firstStart) {
+            const steerId = followUpSteerIds.get(commandLifecycle.command_uuid);
+            const onSteerRead = options.onSteerRead ?? options.callbacks?.onSteerRead ?? harnessOnSteerRead;
+            if (steerId && onSteerRead) {
+              try {
+                onSteerRead(steerId, new Date().toISOString());
+              } catch {
+                // A steer-read observer must not interrupt provider execution.
+              }
+            }
+          }
+        }
         if (commandLifecycle && (commandLifecycle.state === "refused"
           || commandLifecycle.state === "cancelled" || commandLifecycle.state === "discarded")) {
           if (pendingFollowUpIds.has(commandLifecycle.command_uuid)) {
@@ -571,7 +727,18 @@ function startClaudeRun(
                 ? { ...projectedFailure, message: error }
                 : claudeFailure(error, `lifecycle/follow-up-${commandLifecycle.state}`));
             }
-            throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
+            if (startedFollowUpIds.has(commandLifecycle.command_uuid)) {
+              throw new Error(`Claude ${commandLifecycle.state} an accepted follow-up before returning an answer.`);
+            }
+            // Claude removed the follow-up before reading it. It is not this
+            // turn's input: the runtime sends it as the next turn (T3 `e8c4824b7`).
+            pendingFollowUpIds.delete(commandLifecycle.command_uuid);
+            droppedFollowUpIds.push(commandLifecycle.command_uuid);
+            if (pendingFollowUpIds.size === 0 && heldResult?.turnEnded) {
+              if (!hasLiveTaskTrace) break;
+              terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
+            }
+            continue;
           }
           if (commandLifecycle.command_uuid === prompt.uuid) break;
         }
@@ -609,6 +776,7 @@ function startClaudeRun(
           terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
         }
         if (message.type === "result") {
+          if (!isClaudeQueuedCompletionAck(message)) heldResult = null;
           if (message.subtype === "success" && !message.is_error && pendingFollowUpIds.size > 0
             && !(isClaudeQueuedCompletionAck(message) && isClaudeNotificationResult(message))) {
             const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
@@ -622,6 +790,7 @@ function startClaudeRun(
               pendingFollowUpIds.delete(userMessageId);
             }
             if (pendingFollowUpIds.size > 0) {
+              heldResult = { message, sawOutputText: messageProjector.sawOutputText, turnEnded: lifecycle.turnEnded };
               // Each streaming-input result ends one SDK user turn. Parent
               // snapshots from the next turn must not be suppressed by text
               // that was emitted before the admitted follow-up was handled.
@@ -648,6 +817,36 @@ function startClaudeRun(
           if (lifecycle.turnEnded) terminalDrainDeadline ??= performance.now() + terminalSubagentDrainTimeoutMs;
           continue;
         }
+        }
+        if (startupInitTimedOut) {
+          acceptingFollowUps = false;
+          promptChannel.cancel();
+          permissions.cancelPending();
+          const cleanup = ownedProcess.terminate(true);
+          cleanup.catch(() => undefined);
+          abortController.abort();
+          try { query?.close(); } catch { /* Best-effort startup-timeout close. */ }
+          await closeClaudeIterator(messageIterator, Math.min(terminalSubagentDrainTimeoutMs, startupInitTimeoutMs));
+          query = undefined;
+          messageIterator = undefined;
+          if (cancelRequested) return finishResult("cancelled");
+          try {
+            await cleanup;
+            if (canRetryStartupInit && startupAttempt === 0) {
+              if (cancelRequested) return finishResult("cancelled");
+              continue;
+            }
+          } catch {
+            startupInitCleanupFailed = true;
+          }
+          preAttachmentRefusal = true;
+          emitter.activity("system", "failed", CLAUDE_STARTUP_INIT_TIMEOUT_MESSAGE);
+          return finishResult("failed", CLAUDE_STARTUP_INIT_TIMEOUT_MESSAGE, {
+            ...claudeFailure(CLAUDE_STARTUP_INIT_TIMEOUT_MESSAGE, "startup/init-timeout"),
+            notDelivered: true,
+          });
+        }
+        break;
       }
       if (ownedProcess.transportError()) throw ownedProcess.transportError();
       if (pendingSessionReset) {
@@ -679,6 +878,9 @@ function startClaudeRun(
       }
       const completion = delegateLifecycle.complete();
       if (completion.kind === "incomplete") {
+        if (!sessionAttached && (completion.reason === "prompt-refused" || completion.reason === "prompt-cancelled" || completion.reason === "prompt-discarded")) {
+          preAttachmentRefusal = true;
+        }
         const projectedFailure = messageProjector.preferredFailure();
         const lifecycleError = projectedFailure?.message
           ?? claudeLifecycleFailure(completion.reason);
@@ -735,16 +937,22 @@ function startClaudeRun(
               ),
         );
       }
-      if (pendingFollowUpIds.size > 0) {
+      // A follow-up Claude started but never answered is lost to this turn. One
+      // it never started stays unread, and the runtime sends it as the next
+      // turn (T3: a steer whose process exited stays pending).
+      if ([...pendingFollowUpIds].some((id) => startedFollowUpIds.has(id))) {
         throw new Error(
           "Claude Agent SDK exited before correlating every accepted follow-up.",
         );
       }
-      if (isClaudeUnansweredPromptResult(finalMessage, messageProjector.sawOutputText, options.input.operation?.kind === "compact", promptText)) {
+      // A held result already streamed its answer before the follow-up reset.
+      const sawOutputText = messageProjector.sawOutputText
+        || (heldResult?.message === finalMessage && heldResult.sawOutputText);
+      if (isClaudeUnansweredPromptResult(finalMessage, sawOutputText, options.input.operation?.kind === "compact", promptText)) {
         const error = routeFailure(claudeLifecycleFailure("prompt-unanswered"));
         return finishResult("failed", error, claudeFailure(error, "result/unanswered"));
       }
-      if (!messageProjector.sawOutputText && typeof finalMessage.result === "string") {
+      if (!sawOutputText && typeof finalMessage.result === "string") {
         messageProjector.emitTerminalText(finalMessage.result, finalMessage.uuid);
       }
       return finishResult(
@@ -758,8 +966,12 @@ function startClaudeRun(
     } catch (error) {
       providerThrew = true;
       if (cancelRequested || abortController.signal.aborted) return finishResult("cancelled");
+      const transportError = ownedProcess.transportError();
+      const startupExit = claudeAnswered || transportError
+        ? undefined
+        : claudeStartupExitMessage(error, ownedProcess.stderrTail());
       const rawError = redactLaunchText(claudeReadableRuntimeError(
-        safeError(ownedProcess.transportError() ?? error, "Claude Agent SDK stopped unexpectedly."),
+        startupExit ?? safeError(transportError ?? error, "Claude Agent SDK stopped unexpectedly."),
       ));
       const message = routeFailure(rawError);
       const technicalDetail = routeDetail(rawError, sanitizeProviderFailureDetail(
@@ -786,7 +998,7 @@ function startClaudeRun(
       // Start the owned shutdown while the SDK child is still an owned live
       // process. The public result below awaits this same memoized attempt
       // after protocol streams and selected-skill resources are closed.
-      if (!naturalClose) ownedProcess.requestTermination(true);
+      if (!naturalClose && !startupInitCleanupFailed) ownedProcess.requestTermination(true);
       // No consumer survives terminal query cleanup. Discard any admitted
       // input so retained base64 media and its reservations are released.
       promptChannel.cancel();
@@ -797,34 +1009,22 @@ function startClaudeRun(
         await ownedProcess.waitForNaturalClose(PROVIDER_NATURAL_CLOSE_MS);
         ownedProcess.requestTermination(true);
       }
-      if (messageIterator?.return) {
-        let timer: NodeJS.Timeout | undefined;
-        try {
-          const timeout = new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, terminalSubagentDrainTimeoutMs);
-            timer.unref();
-          });
-          await Promise.race([
-            messageIterator.return(),
-            timeout,
-          ]);
-        } catch {
-          // Closing an already-exited SDK iterator is best-effort.
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-      }
+      await closeClaudeIterator(messageIterator, terminalSubagentDrainTimeoutMs);
     }
   })();
 
   const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
     let terminal = outcome;
-    try {
-      // The SDK has delivered its terminal protocol result and the finally
-      // block above has closed its streams. No useful graceful window remains.
-      await ownedProcess.terminate(true);
-    } catch {
+    if (startupInitCleanupFailed) {
       terminal = { ...outcome, cleanupConfirmed: false };
+    } else {
+      try {
+        // The SDK has delivered its terminal protocol result and the finally
+        // block above has closed its streams. No useful graceful window remains.
+        await ownedProcess.terminate(true);
+      } catch {
+        terminal = { ...outcome, cleanupConfirmed: false };
+      }
     }
     const wireError = ownedProcess.transportError();
     if (wireError && outcome.status !== "cancelled") {
@@ -851,12 +1051,38 @@ function startClaudeRun(
       };
     }
     const child = ownedProcess.child();
+    const stderrSessionNotFound = !claudeAnswered
+      && options.input.sessionId !== undefined
+      && terminal.status === "failed"
+      && !ownedProcess.transportError()
+      && CLAUDE_STDERR_SESSION_NOT_FOUND.test(ownedProcess.stderrTail());
+    if (stderrSessionNotFound) {
+      sessionNotFound = true;
+      sessionUnavailable = true;
+    }
+    const notDelivered = preAttachmentRefusal
+      || (!claudeAnswered && !sessionUnavailable && terminal.status === "failed" && !ownedProcess.transportError());
+    // An older Claude Code finds a transcript only in the cwd's project folder; say when the session is still stored.
+    const storedElsewhere = sessionNotFound && terminal.failure && options.input.sessionId !== undefined
+      && await claudeSessionStoredElsewhere(options.input.sessionId, options.input.cwd, options.environment);
     terminal = {
       ...terminal,
       exitCode: child?.exitCode ?? null,
       signal: child?.signalCode ?? null,
-      ...(sessionUnavailable && terminal.failure ? { failure: { ...terminal.failure, sessionUnavailable: true as const } } : {}),
+      ...(terminal.failure && (sessionUnavailable || notDelivered) ? {
+        failure: {
+          ...terminal.failure,
+          ...(sessionUnavailable ? { sessionUnavailable: true as const } : {}),
+          ...(storedElsewhere ? { sessionStoredElsewhere: true as const } : {}),
+          ...(notDelivered ? { notDelivered: true as const } : {}),
+        },
+      } : {}),
     };
+    if (terminal.cleanupConfirmed && authoritativeSessionId && terminal.sessionId === authoritativeSessionId) {
+      const head = await readClaudePersistedNativeHead(authoritativeSessionId, options.input.cwd, options.environment);
+      emitter.nativeBoundary({ nativeConversationId: authoritativeSessionId, nativeSessionId: authoritativeSessionId,
+        nativeTurnId: head, persistedHeadId: head, phase: "settled" });
+    }
     emitter.status(terminal.status, terminal.error);
     const unconfirmedCleanup = !terminal.cleanupConfirmed && !hostToolsCleanupFailed && child
       ? providerUnconfirmedCleanup(child)
@@ -876,10 +1102,15 @@ function startClaudeRun(
   ): ProviderRunResult {
     const resultText = textOverride === undefined
       ? text.toString()
-      : textOverride.slice(0, MAX_RESULT_TEXT_CHARS);
+      : clipCodeUnits(textOverride, MAX_RESULT_TEXT_CHARS);
     const settledFailure = failure && status === "failed" && messageProjector.rateLimitRejected
       ? { ...failure, usageLimited: true as const }
       : failure;
+    // Stop drops unread follow-ups; every other ending hands them back.
+    const unreadFollowUps = status === "cancelled" ? [] : [
+      ...droppedFollowUpIds,
+      ...[...pendingFollowUpIds].filter((id) => !startedFollowUpIds.has(id)),
+    ].flatMap((id) => followUpSteerIds.get(id) ?? []);
     return {
       ...providerRunTerminal(options.input, status, settledFailure),
       ...(sessionId ? { sessionId } : {}),
@@ -892,6 +1123,7 @@ function startClaudeRun(
       cleanupConfirmed: true,
       ...(error ? { error } : {}),
       ...(settledFailure ? { failure: settledFailure } : {}),
+      ...(unreadFollowUps.length > 0 ? { unreadFollowUps } : {}),
     };
   }
 
@@ -913,6 +1145,7 @@ function startClaudeRun(
       return;
     }
     const runningQuery = query;
+    const runningAbort = abortController;
     if (!runningQuery) return;
     void runningQuery.interrupt().then((receipt) => {
       // The conservative local admission bit also covers SDK versions that do
@@ -923,9 +1156,9 @@ function startClaudeRun(
       // The SDK explicitly reports these messages WILL run after interrupt.
       // Close this per-turn Query rather than allowing a stopped run to drain
       // queued input, potentially with full-access tool permissions.
-      abortController.abort();
+      runningAbort.abort();
       try { runningQuery.close(); } catch { /* Best-effort queued-input stop. */ }
-    }).catch(() => abortController.abort());
+    }).catch(() => runningAbort.abort());
   };
 
   return {
@@ -958,12 +1191,16 @@ function startClaudeRun(
           return false;
         }
         followUp.uuid = randomUUID();
+        // "now" makes Claude Code cancel the tool calls in flight (T3 `e8c4824b7`).
+        followUp.priority = "next";
         pendingFollowUpIds.add(followUp.uuid);
+        if (input.steerId) followUpSteerIds.set(followUp.uuid, input.steerId);
         const accepted = promptChannel.push(followUp, reservation);
         if (accepted) {
           acceptedFollowUp = true;
         } else {
           pendingFollowUpIds.delete(followUp.uuid);
+          followUpSteerIds.delete(followUp.uuid);
         }
         return accepted;
       },
@@ -971,161 +1208,4 @@ function startClaudeRun(
       backgroundSubagent: taskControls.background,
     },
   };
-}
-
-function claudeLifecycleFailure(
-  reason: Extract<ClaudeDelegateCompletion, { kind: "incomplete" }>["reason"],
-): string {
-  switch (reason) {
-    case "prompt-refused":
-      return "Claude refused the request before returning an answer.";
-    case "prompt-cancelled":
-      return "Claude cancelled the request before returning an answer.";
-    case "prompt-discarded":
-      return "Claude discarded the request before returning an answer.";
-    case "delegates-abandoned":
-      return "Claude Agent SDK exited while delegated work was still running.";
-    case "parent-not-resumed":
-      return "Claude Agent SDK exited before the parent resumed after delegated work.";
-    case "missing-result":
-      return "Claude Agent SDK exited without a final result.";
-    case "prompt-unanswered":
-      return "Claude finished the request without returning an answer.";
-  }
-}
-
-function claudeResultReason(
-  result: Extract<SDKMessage, { type: "result" }>,
-): Parameters<typeof claudeResultFailure>[0] {
-  return result.subtype === "success"
-    ? result.terminal_reason ?? "api_error"
-    : claudeStartupFailure(result)?.reason ?? result.subtype;
-}
-
-function claudeResultDetail(
-  result: Extract<SDKMessage, { type: "result" }>,
-  credentials: readonly string[],
-  workspaceRoot: string,
-): string | null {
-  return sanitizeProviderFailureDetail(
-    (result.subtype === "success" ? [result.result] : result.errors)
-      .filter((value): value is string => typeof value === "string")
-      .join("\n"),
-    credentials,
-    { workspaceRoot, maxChars: MAX_PROVIDER_FAILURE_DETAIL_CHARS },
-  );
-}
-
-function claudeResultFailure(
-  reason:
-    | Exclude<Extract<SDKMessage, { type: "result" }>["subtype"], "success">
-    | TerminalReason
-    | SDKStartupFailureReason,
-): string {
-  switch (reason) {
-    case "prompt_too_long":
-      return "This chat is too long for Claude's context. Compact it or start a new chat.";
-    case "error_max_turns":
-      return "Claude reached the maximum number of agent turns.";
-    case "error_max_budget_usd":
-      return "Claude reached the configured spending limit.";
-    case "error_max_structured_output_retries":
-      return "Claude could not produce a valid structured response.";
-    default:
-      return "Claude could not complete the request.";
-  }
-}
-
-function claudeFailure(
-  message: string,
-  terminalEvent: string,
-  technicalDetail?: string,
-): ProviderRunFailure {
-  return {
-    reason: "provider-error",
-    message,
-    phase: "turn",
-    terminalEvent,
-    ...(technicalDetail ? { technicalDetail } : {}),
-  };
-}
-
-function claudeRuntimeFailure(
-  rawError: string,
-  message: string,
-): ProviderRunFailure {
-  const reason: ProviderRunFailure["reason"] = /oversized|(?:stream|text)-correlation|trace state|bounded(?: [\w-]+)* event (?:rate|budget)/iu.test(rawError)
-    ? "protocol-overflow"
-    : /unserializable|malformed|non-canonical/iu.test(rawError)
-      ? "malformed-protocol"
-      : "provider-error";
-  return {
-    reason,
-    message,
-    phase: "runtime",
-    terminalEvent: "sdk/exception",
-  };
-}
-
-function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
-}
-
-function claudeReadableRuntimeError(rawError: string): string {
-  // Keeps the "oversized" wording that classifies protocol overflow.
-  return rawError === "Claude sent an oversized event."
-    ? "Claude sent an oversized event that stayed above Inertia's 1 MB per-update limit even after its longest fields were shortened."
-    : rawError;
-}
-
-/**
- * Deliberate subagent fan-out ceilings (#339). They match the SDK defaults
- * but are pinned so an SDK default change cannot silently widen them. An
- * explicit value in the provider environment still wins.
- */
-const CLAUDE_SUBAGENT_LIMITS = {
-  CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "3",
-  CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: "20",
-} as const;
-
-/** Oldest Claude Code version verified to accept `--thinking-display`. */
-const CLAUDE_THINKING_DISPLAY_MIN_VERSION = [2, 1, 269] as const;
-
-export function claudeSupportsThinkingDisplay(
-  version: string | null | undefined,
-): boolean {
-  const match = version?.match(/(\d+)\.(\d+)\.(\d+)/u);
-  if (!match) return false;
-  const parts = match.slice(1, 4).map(Number);
-  for (let index = 0; index < 3; index += 1) {
-    const minimum = CLAUDE_THINKING_DISPLAY_MIN_VERSION[index]!;
-    if (parts[index] !== minimum) return parts[index]! > minimum;
-  }
-  return true;
-}
-
-export function claudeRunEnvironment(
-  environment: NodeJS.ProcessEnv | undefined,
-  readOnlyProfile?: ProviderRunInput["readOnlyProfile"],
-): NodeJS.ProcessEnv {
-  const run: NodeJS.ProcessEnv = {
-    ...CLAUDE_SUBAGENT_LIMITS,
-    ...CLAUDE_STARTUP_FAILURE_RESULTS,
-    ...CLAUDE_TRANSCRIPT_FLUSH,
-    ...(environment ?? process.env),
-    ...CLAUDE_IDENTITY_ENVIRONMENT,
-  };
-  return readOnlyProfile === "watcher" ? watcherCommandEnvironment(run) : run;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function safeError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? bounded(error.message) : fallback;
-}
-
-function claudeEffort(value: string | undefined): "low" | "medium" | "high" | "xhigh" | "max" | undefined {
-  return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max" ? value : undefined;
 }

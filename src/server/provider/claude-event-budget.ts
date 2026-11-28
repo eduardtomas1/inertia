@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import { ProviderRunEventBudget } from "./io";
 
 export const MAX_CLAUDE_EVENT_MEDIA_BYTES = 20 * 1024 * 1024;
@@ -329,9 +330,8 @@ function shortenEventStrings(
 ): unknown {
   if (typeof value === "string") {
     if (value.length <= maxChars) return value;
-    const last = value.charCodeAt(maxChars - 1);
-    const end = last >= 0xd800 && last <= 0xdbff ? maxChars - 1 : maxChars;
-    return `${value.slice(0, end)}\n[Inertia omitted ${value.length - end} characters of an oversized Claude update]`;
+    const kept = clipCodeUnits(value, maxChars);
+    return `${kept}\n[Inertia omitted ${value.length - kept.length} characters of an oversized Claude update]`;
   }
   if (depth >= MAX_SHORTENED_EVENT_DEPTH) return value;
   if (Array.isArray(value)) {

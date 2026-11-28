@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
 import type { ResponseTimelineProps } from "../../src/renderer/src/components/ResponseTimeline";
 import { LiveElapsed } from "../../src/renderer/src/components/response-timeline/activity";
+import { PROVIDER_STOP_NOTICE_TITLE } from "../../src/shared/activity-display";
 import type {
   AgentActivity,
   AgentApprovalRequest,
@@ -513,6 +514,34 @@ describe("finished-turn fold", () => {
 
     expect(document.querySelector("[data-response-row-id='handoff:turn-handed-off']")).not.toBeNull();
     expect(foldToggle("turn-handed-off")).toBeInTheDocument();
+  });
+
+  it("draws the provider stop notice as a visible warning, outside the folded work", () => {
+    const reason = "Stop hook (project): Tests are still failing.";
+    // Realistic times: the answer is written at 61 s and the notice with the settlement at 62 s.
+    render(<ResponseTimeline {...props([{ id: "turn-hook-stopped", answer: "Partial report.", activities: [
+      { id: "read-hook-stopped" },
+      { id: "stop-notice", kind: "status", title: PROVIDER_STOP_NOTICE_TITLE, detail: reason, status: "completed",
+        createdAt: at(62) },
+    ] }])} />);
+    const section = document.querySelector<HTMLElement>("[data-turn-id='turn-hook-stopped']")!;
+    expect(foldToggle("turn-hook-stopped")).toHaveAttribute("aria-expanded", "false");
+    const attention = section.querySelector<HTMLElement>("[data-activity-group='activity-group:attention:turn-hook-stopped']");
+    expect(attention).not.toBeNull();
+    // T3 shows the notice as a warning: drawn outside the fold, announced as one, its reason one disclosure away.
+    const row = attention!.querySelector<HTMLElement>(".agent-activity")!;
+    expect(row).toHaveAttribute("data-activity-severity", "warning");
+    expect(row.querySelector(".agent-activity-copy")).toHaveTextContent(`Warning: ${PROVIDER_STOP_NOTICE_TITLE}`);
+    expect(row.querySelector(".agent-activity-title")).toBeVisible();
+    const details = within(row).getByRole("button", { name: `Details: ${PROVIDER_STOP_NOTICE_TITLE}` });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(details);
+    expect(details).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(details.getAttribute("aria-controls")!)).toHaveTextContent(reason);
+    // Recorded difference from T3, which shows the notice after the answer: Inertia draws a turn's attention group
+    // with its work, above the final answer, and moving it below would restructure the timeline's rows.
+    const answer = within(section).getByText("Partial report.");
+    expect(row.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("labels the fold by how the turn ended and leaves the footer without a duration", () => {

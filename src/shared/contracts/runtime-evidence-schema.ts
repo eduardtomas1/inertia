@@ -14,6 +14,7 @@ const PROVIDER_HARNESS_IDS = {
   opencode: "opencode-sdk",
   antigravity: "antigravity-acp",
   grok: "grok-acp",
+  pi: "pi-rpc",
 } as const;
 
 const CAPABILITY_CONTRACT_KEYS = [

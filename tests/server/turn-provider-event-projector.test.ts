@@ -68,7 +68,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
     }));
     const broadcast = vi.fn();
     const projector = new TurnProviderEventProjector({
-      store: { upsertSubagentTrace } as unknown as RuntimeStore,
+      store: { orchestration: { acknowledge: vi.fn() }, upsertSubagentTrace } as unknown as RuntimeStore,
       hooks: {
         broadcast,
         broadcastSnapshot: vi.fn(),
@@ -81,6 +81,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -119,6 +120,28 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
     });
   });
 
+  it("records nothing for a session reported by an attempt that is no longer current", () => {
+    const stale = { reason: "attempt-superseded", runId: "run-1", observedAttemptId: "old", currentAttemptId: "new" };
+    const observeSession = vi.fn((_turn: unknown, sessionId: string) => sessionId === "late-session" ? stale : null);
+    const updateConversation = vi.fn();
+    const projector = new TurnProviderEventProjector({
+      store: { orchestration: { backings: { observeSession } }, updateConversation } as unknown as RuntimeStore,
+      hooks: { broadcast: vi.fn(), broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
+      agentPlans: new Map(), streams: {} as never, activities: {} as never, interactions: {} as never,
+      scheduler: defaultTurnScheduler(), now: () => "2030-01-01T00:00:01.000Z",
+      transition: () => false, observeSubagent: () => false, failReusedSession: () => undefined,
+    });
+    const active = { conversation: { id: "conversation-1" }, sessionAfter: null, lastUsage: null,
+      turn: { id: "turn-1", runId: "run-1", providerId: "codex", continuationIdentity: {} } } as unknown as ActiveTurn;
+    const identity = { providerId: "codex", conversationId: "conversation-1", runId: "run-1", turnId: "turn-1" } as const;
+    projector.project(active, { ...identity, type: "session", sessionId: "late-session" }, { attemptId: "old" });
+    expect(updateConversation).not.toHaveBeenCalled();
+    expect(active.sessionAfter).toBeNull();
+    projector.project(active, { ...identity, type: "session", sessionId: "current-session" }, { attemptId: "new" });
+    expect(updateConversation).toHaveBeenCalledWith("conversation-1", expect.objectContaining({ providerSessionId: "current-session" }));
+    expect(active.sessionAfter).toBe("current-session");
+  });
+
   it("does not feed a rejected late descendant revival into run state", () => {
     const terminalTrace = {
       ...event(2, "interrupted", "interrupted", false),
@@ -131,7 +154,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
     const observeSubagent = vi.fn();
     const broadcast = vi.fn();
     const projector = new TurnProviderEventProjector({
-      store: {
+      store: { orchestration: { acknowledge: vi.fn() },
         upsertSubagentTrace: vi.fn(() => ({
           changed: false,
           trace: terminalTrace,
@@ -149,6 +172,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       now: () => "2030-01-01T00:00:02.000Z",
       transition: () => false,
       observeSubagent,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -192,6 +216,7 @@ describe("TurnProviderEventProjector delegated-task timeline link", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     return { projector, upsertSubagentTrace };
   }
@@ -288,7 +313,7 @@ describe("TurnProviderEventProjector reasoning order", () => {
       activityId: `${kind}-activity`,
     });
     const projector = new TurnProviderEventProjector({
-      store: {
+      store: { orchestration: { acknowledge: vi.fn() },
         upsertAgentPlan: vi.fn(() => calls.push("persist-plan")),
       } as unknown as RuntimeStore,
       hooks: {
@@ -319,6 +344,7 @@ describe("TurnProviderEventProjector reasoning order", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -365,7 +391,7 @@ describe("TurnProviderEventProjector plan updates", () => {
     const broadcast = vi.fn();
     const agentPlans = new Map<string, AgentPlan>();
     const projector = new TurnProviderEventProjector({
-      store: { upsertAgentPlan } as unknown as RuntimeStore,
+      store: { orchestration: { acknowledge: vi.fn() }, upsertAgentPlan } as unknown as RuntimeStore,
       hooks: {
         broadcast,
         broadcastConversationShell: vi.fn(),
@@ -382,6 +408,7 @@ describe("TurnProviderEventProjector plan updates", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },
@@ -499,7 +526,7 @@ describe("TurnProviderEventProjector read-only watcher turns", () => {
     };
     const broadcast = vi.fn();
     const projector = new TurnProviderEventProjector({
-      store: {} as RuntimeStore,
+      store: { orchestration: { acknowledge: vi.fn() } } as unknown as RuntimeStore,
       hooks: { broadcast, broadcastSnapshot: vi.fn() } as unknown as TurnControllerHooks,
       agentPlans: new Map(),
       streams: { closeAssistantSegment: vi.fn(), flush: vi.fn() } as never,
@@ -512,6 +539,7 @@ describe("TurnProviderEventProjector read-only watcher turns", () => {
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
       observeSubagent: () => false,
+      failReusedSession: () => undefined,
     });
     const active = {
       conversation: { id: "conversation-1" },

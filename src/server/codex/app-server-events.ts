@@ -53,10 +53,12 @@ import {
 import { projectCodexSecurityNotification } from "./app-server-security-events";
 import { projectCodexRuntimeNotification } from "./app-server-runtime-notifications";
 import { projectCodexErrorNotification } from "./app-server-error-events";
+import { classifyCodexManagedError } from "./managed-errors";
 import { codexFailureKind, codexTurnInterruptionFailure, codexUsageLimited } from "./app-server-status";
 import type { CodexAppServerEventHost } from "./app-server-event-host";
 export type { CodexAppServerEventHost } from "./app-server-event-host";
 import { CodexApprovalAuthority } from "./app-server-approval-authority";
+import { CodexHookStopTracker } from "./app-server-hook-stop";
 import { parseCodexTokenUsage } from "./usage";
 import type { AgentGoalStatus } from "../../shared/contracts";
 import { parseCodexRateLimits } from "../codex-metadata";
@@ -114,6 +116,7 @@ export class CodexAppServerEvents {
   private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
   private readonly latestDiffs = new Map<string, string>();
+  readonly hookStop: CodexHookStopTracker;
   private readonly approvalAuthority: CodexApprovalAuthority;
   private readonly subagentProjection = new Map<
     string,
@@ -138,6 +141,7 @@ export class CodexAppServerEvents {
   private readonly hostTools: CodexHostToolRuntime;
 
   constructor(private readonly host: CodexAppServerEventHost) {
+    this.hookStop = new CodexHookStopTracker(host.options);
     this.subagentContinuation = new CodexSubagentContinuationGate(
       codexSubagentDrainTimeoutMs(host.options.subagentDrainTimeoutMs),
       () => this.completeSubagentContinuation(),
@@ -174,6 +178,14 @@ export class CodexAppServerEvents {
       handleNotification: (method, params) => this.handleNotification(method, params),
       writeMessage: host.writeMessage,
       failMalformedProtocol: (summary, message) => this.failMalformedProtocol(summary, message),
+      isStoppedTurn: (turnId) => host.orphanGoalTurns?.isStopped(turnId) === true,
+      discardedTurnStarts: (turns) => host.orphanGoalTurns?.discarded(turns),
+    });
+    host.orphanGoalTurns?.attach({
+      phase: host.phase,
+      goalActive: () => this.nativeGoalStatus === "active",
+      completedTurnIds: this.completedTurnIds,
+      emitActivity: (label, activityId) => this.emitActivity("system", "info", label, { activityId }),
     });
     this.hostTools = new CodexHostToolRuntime({
       options: host.options,
@@ -234,6 +246,12 @@ export class CodexAppServerEvents {
     return this.host.activeTurnId() === turnId
       || this.completedTurnIds.has(turnId);
   }
+
+  /** Whether a turn Codex started on its own waits for turn/start's response. */
+  heldTurnStarted(): boolean { return this.approvalAuthority.holdsTurnStart(); }
+
+  /** An explicit goal start owns the goal turn Codex continued while the thread resumed. */
+  adoptHeldGoalTurn(): void { this.approvalAuthority.replayHeldTurnStart(); }
 
   /** Replays the held notifications of the turn that turn/start returned. */
   replayPreResponseTurnNotifications(turnId: string): void {
@@ -631,6 +649,7 @@ export class CodexAppServerEvents {
         )
       ) return;
       handleCodexHook(this.host, method, params);
+      if (method === "hook/completed") this.hookStop.observe(params, notificationTurnId, this.host.activeTurnId());
       return;
     }
 
@@ -644,6 +663,7 @@ export class CodexAppServerEvents {
       return;
     }
 
+    if (this.host.orphanGoalTurns?.observe(method, notificationThreadId, notificationTurnId)) return;
     if (this.approvalAuthority.holdNotification(
       method, notificationThreadId, notificationTurnId, params,
     )) return;
@@ -687,6 +707,7 @@ export class CodexAppServerEvents {
         this.subagentContinuation.discard();
       }
       this.host.setActiveTurnId(notificationTurnId);
+      this.host.options.onNativeBoundary?.(notificationThreadId!, notificationTurnId, "started");
       this.host.setPhase("running");
       this.host.options.onStatus?.("running");
       this.emitActivity("turn", "started", "Turn started", {
@@ -863,6 +884,7 @@ export class CodexAppServerEvents {
     }
     if (method === "turn/completed") {
       if (!notificationTurnId) return;
+      this.host.options.onNativeBoundary?.(notificationThreadId!, notificationTurnId, "settled");
       this.completedTurnIds.add(notificationTurnId);
       this.hostTools.retireTurn(notificationTurnId);
       this.latestDiffs.delete(notificationTurnId);
@@ -873,8 +895,14 @@ export class CodexAppServerEvents {
         status, turnError, this.host.cancelRequested(),
       );
       const providerInterrupted = interruptionFailure !== undefined;
-      const lastError =
-        boundedText(turnError?.message, 4_000) ?? this.host.lastError();
+      const interrupted = status === "interrupted" && !providerInterrupted;
+      // A hook-stopped turn ends completed or interrupted (T3 `c440fd19d`); its notice is added at settlement.
+      this.hookStop.settle(notificationTurnId, !this.host.cancelRequested() && (status === "completed" || interrupted));
+      // T3 classifies a failed turn's own error message (`turn.error.message`) only. A classified error keeps
+      // only its code and safe summary (T3 stores no raw text).
+      const managed = status === "failed" ? classifyCodexManagedError(stringValue(turnError?.message)) : undefined;
+      const lastError = managed?.message
+        ?? boundedText(turnError?.message, 4_000) ?? this.host.lastError();
       if (lastError) this.host.setLastError(lastError);
       this.host.setTerminalEvent("turn/completed");
       const hasLiveDelegatedWork = this.liveSubagentIds.size > 0;
@@ -900,15 +928,18 @@ export class CodexAppServerEvents {
           activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
         },
       );
-      if (this.host.cancelRequested() || (status === "interrupted" && !providerInterrupted)) {
+      if (this.host.cancelRequested() || interrupted) {
         this.completeParentTurn("cancelled", null);
       } else if (status === "failed" || providerInterrupted) {
         this.host.rememberFailure(
           "codex-error",
-          interruptionFailure?.message ?? boundedText(turnError?.message, 4_000) ?? "Codex could not complete the turn.",
-          interruptionFailure ? interruptionFailure.technicalDetail : lastError,
+          interruptionFailure?.message ?? managed?.message
+            ?? boundedText(turnError?.message, 4_000) ?? "Codex could not complete the turn.",
+          interruptionFailure ? interruptionFailure.technicalDetail
+            : managed ? `Codex error: ${managed.code}` : lastError,
           codexUsageLimited(turnError?.codexErrorInfo),
           codexFailureKind(turnError?.codexErrorInfo),
+          managed?.code,
         );
         this.completeParentTurn("failed", 1);
       } else if (status === "completed") {

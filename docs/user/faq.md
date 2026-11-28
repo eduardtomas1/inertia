@@ -26,7 +26,7 @@ Yes. The Kimi Code card has a built-in Kimi key route: choose **Add key** on its
 
 ## Is Full Access safe?
 
-It lets the agent act without asking, so choose it only for a workspace and task you trust. **Supervised** keeps the provider's approvals, and **Auto-edit** allows supported file edits only.
+It runs commands and edits without approval prompts, so choose it only for a workspace and task you trust. Claude Code can still ask when its settings require approval for an action or its own safety checks protect it, and it refuses a removal its dangerous-removal check flags, passing its warning to the agent. **Supervised** keeps the provider's approvals, and **Auto-edit** allows supported file edits only.
 
 ## Can I work on several chats at once?
 

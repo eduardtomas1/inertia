@@ -120,7 +120,7 @@ function failingTermination(close: () => void) {
   });
 }
 
-const drivers: Record<Exclude<ProviderId, "cursor">, (root: string) => {
+const drivers: Record<Exclude<ProviderId, "cursor" | "pi">, (root: string) => {
   harness: AgentHarness;
   command: string;
   sessionId?: string;

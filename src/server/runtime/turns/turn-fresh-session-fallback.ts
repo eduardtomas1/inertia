@@ -3,10 +3,42 @@ import { importedSession } from "../../cli-import/resume-cwd";
 import type { RuntimeStore } from "../../database";
 import type {
   ProviderFreshSessionFallback,
+  ProviderEvent,
+  ProviderFreshSessionPrior,
+  ProviderRunFailure,
   ProviderRunResult,
 } from "../../provider/contracts";
 import { broadcastTurnConversationShell } from "./turn-controller-support";
 import type { ActiveTurn, TurnControllerHooks } from "./turn-controller-types";
+import { turnHistoryInjection } from "./turn-history-injection";
+
+/**
+ * An imported non-Claude session fails closed when its native session is gone,
+ * keeping its link. Imported Claude sessions fall back cleanly to a fresh
+ * session with the full portable summary (T3 `2c4622efb`, N20).
+ */
+function importedSessionFailingClosed(store: RuntimeStore, active: ActiveTurn) {
+  const imported = importedSession(store, active.conversation.id, active.providerInput.sessionId);
+  return imported && imported.providerId !== "claude" ? imported : null;
+}
+
+/** T3 d32df2d34 (`ProviderTurnStartService`): the provider's session reuse, said honestly. */
+export const REUSED_PROVIDER_SESSION_MESSAGE = "The provider returned its existing session when asked for a fresh one, so the conversation context could not be moved to a new session.";
+
+/**
+ * Whether a session the harness reports is one this turn's fresh start replaced. Never adopted: it holds the old
+ * history and has just received the restored history again. The turn fails without a retry, and the replaced
+ * session stays retired, so the next turn starts fresh again (and fails the same way if the provider still reuses).
+ */
+export function reportsReplacedSession(active: Pick<ActiveTurn, "providerInput" | "replacedSessionIds">,
+  sessionId: string): boolean {
+  return (active.replacedSessionIds?.includes(sessionId) ?? false) && active.providerInput.sessionId === undefined;
+}
+
+export function reusedProviderSessionFailure(active: Pick<ActiveTurn, "turn">): ProviderRunFailure {
+  return { reason: "malformed-protocol", message: REUSED_PROVIDER_SESSION_MESSAGE, phase: active.turn.status,
+    terminalEvent: "session/replaced-session-reused" };
+}
 
 export function providerSessionUnavailable(result: ProviderRunResult): boolean {
   return result.status === "failed" && result.failure?.sessionUnavailable === true;
@@ -30,15 +62,23 @@ export function importedSessionUnavailableMessage(
   active: ActiveTurn,
   result: ProviderRunResult,
 ): string | null {
-  const provider = providerSessionUnavailable(result) ? importedSession(store, active.conversation.id, active.providerInput.sessionId)?.providerId : null;
+  const provider = providerSessionUnavailable(result)
+    ? importedSessionFailingClosed(store, active)?.providerId : null;
   return provider ? `The original ${cliProviderLabel(provider)} session for this imported chat is no longer available.` : null;
 }
 
 export function releaseUnavailableProviderSession(
   store: RuntimeStore,
   active: ActiveTurn,
+  _result: ProviderRunResult,
 ): void {
-  if (importedSession(store, active.conversation.id, active.providerInput.sessionId)) return;
+  const sessionId = active.providerInput.sessionId;
+  if (importedSessionFailingClosed(store, active)) return;
+  // Without a session id the lookup would match any backing of the route.
+  const backing = sessionId ? store.orchestration.backings.find({ threadId: active.conversation.id,
+    providerId: active.turn.providerId, workspaceKey: store.conversationPath(active.conversation.id),
+    identity: active.turn.continuationIdentity, nativeSessionId: sessionId }) : null;
+  if (backing) store.orchestration.backings.invalidate(backing, "native-resume-failed");
   active.sessionAfter = null;
   store.updateConversation(active.conversation.id, {
     providerSessionId: null,
@@ -51,6 +91,8 @@ export function applyFreshSessionFallback(
   hooks: TurnControllerHooks,
   active: ActiveTurn,
   restartedAt: string,
+  prior: ProviderFreshSessionPrior,
+  route: (attemptId: string | null) => (event: ProviderEvent) => void,
 ): ProviderFreshSessionFallback | null {
   const expectedSessionId = active.providerInput.sessionId;
   if (
@@ -58,29 +100,45 @@ export function applyFreshSessionFallback(
     || !active.freshSessionRequest
     || active.runState.isTerminal()
     || active.deferredSettlement !== null
+    // A Stop records its interrupt before it cancels; that run is being stopped, not recovered (T3 recovers only a
+    // run still `starting`).
+    || store.orchestration.runControl.target(active.turn.runId)?.interruptRequested === true
     || active.assistantText !== ""
     || active.latestAssistantMessageId !== null
     || active.reasoningText !== ""
     || active.reasoningId !== null
     || active.approvalIds.size > 0
     || active.inputIds.size > 0
-    || importedSession(store, active.conversation.id, expectedSessionId) !== null
+    || importedSessionFailingClosed(store, active) !== null
     || store.turnLedgerRepository.turnHasProviderActivity(
       active.conversation.id,
       active.turn.id,
+      active.turn.harnessId,
     )
   ) return null;
   const request = active.freshSessionRequest(active.turn.userMessageId);
-  active.turn = store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {
+  // The restart and the provider_recovery attempt replacement commit together;
+  // a stale expected attempt refuses both and the rejected resume stands.
+  const restarted = store.orchestration.restartOnFreshSession({
+    turn: active.turn,
+    expectedSessionId,
+    expectedAttemptId: active.attemptId ?? null,
+    prepared: request.contextHandoff,
+    priorCleanup: prior.priorCleanup,
+  }, () => store.turnLedgerRepository.restartOnFreshSession(active.turn.id, {
     expectedSessionId,
     executionContext: request.persistence,
     sessionRecovery: request.sessionRecovery,
     restartedAt,
-  });
+  }));
+  active.turn = restarted.result;
+  active.attemptId = restarted.attemptId;
   const {
     sessionId: _sessionId,
+    sessionOriginCwd: _sessionOriginCwd,
     performanceModeTransition: _performanceModeTransition,
     goalContinuationExpected: _goalContinuationExpected,
+    nativeContinuation: _nativeContinuation,
     ...providerInput
   } = active.providerInput;
   active.providerInput = {
@@ -96,10 +154,22 @@ export function applyFreshSessionFallback(
   active.sessionAfter = null;
   active.lastUsage = null;
   active.freshSessionRequest = null;
-  hooks.broadcast({
-    type: "conversation.detail.invalidated",
-    conversationId: active.conversation.id,
-  });
-  broadcastTurnConversationShell(hooks, active);
-  return { prompt: request.executionPrompt };
+  active.replacedSessionIds = [...new Set([...active.replacedSessionIds ?? [], expectedSessionId])];
+  // The replacement's restored history, prepared and dispatching under the replacement attempt (T3 injects into the
+  // fresh thread too); the rejected attempt's authority can no longer write.
+  active.nativeHistory = request.contextHandoff ? request.nativeHistory ?? null : null;
+  // The restart is committed. A failed broadcast must not make the wrapper keep
+  // the rejected attempt's result for a turn that already moved on.
+  try {
+    hooks.broadcast({
+      type: "conversation.detail.invalidated",
+      conversationId: active.conversation.id,
+    });
+    broadcastTurnConversationShell(hooks, active);
+  } catch {
+    // Clients reconcile from the next snapshot.
+  }
+  // The fresh harness reports under the replacement attempt.
+  const historyInjection = turnHistoryInjection(store, active, active.attemptId);
+  return { prompt: request.executionPrompt, onEvent: route(active.attemptId), ...(historyInjection ? { historyInjection } : {}) };
 }

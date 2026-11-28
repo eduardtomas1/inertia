@@ -409,6 +409,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "snapshot.updated":
     case "conversation.shell.updated":
     case "todos.updated":
+    case "scheduled-tasks.changed":
     case "library.updated":
     case "workspace.git.invalidated":
     case "provider.maintenance.updated":
@@ -418,6 +419,7 @@ function mutationConversationId(event: RuntimeMutationEvent): string | null {
     case "watcher.live":
       return null;
     case "conversation.detail.invalidated":
+    case "conversation.queue.changed":
     case "agent.started":
     case "agent.text":
     case "agent.text.replaced":

@@ -234,41 +234,20 @@ export function readComposerQueue(
   }
 }
 
-export function composerQueueHasCapacity(conversationId: string): boolean {
-  return readComposerQueue(conversationId).length
-    < MAX_COMPOSER_QUEUED_PROMPTS;
+export function composerQueueHasCapacity(_conversationId: string): boolean {
+  return false;
 }
 
+/**
+ * Legacy local queue storage is read/delete-only in Phase 5 (Decision 4.5).
+ * New drafts must go through the durable runtime queue; never write to localStorage.
+ */
 export function enqueueComposerPrompt(
-  conversationId: string,
-  content: string,
-  attachments: readonly ChatAttachment[] = [],
+  _conversationId: string,
+  _content: string,
+  _attachments: readonly ChatAttachment[] = [],
 ): boolean {
-  try {
-    const current = readComposerQueue(conversationId);
-    if (current.length >= MAX_COMPOSER_QUEUED_PROMPTS) return false;
-    const createdAtMs = Math.max(
-      Date.now(),
-      ...current.map(({ createdAt }) => Date.parse(createdAt) + 1),
-    );
-    const candidate = queuedPrompt({
-      id: window.crypto.randomUUID(),
-      content,
-      createdAt: new Date(createdAtMs).toISOString(),
-      attachments,
-    }, attachments.length > 0 ? "media" : "text");
-    if (!candidate) return false;
-    const attachmentIds = new Set(
-      current.flatMap((prompt) => prompt.attachments.map(({ id }) => id)),
-    );
-    if (candidate.attachments.some(({ id }) => attachmentIds.has(id))) {
-      return false;
-    }
-    storeQueue(conversationId, [...current, candidate], true);
-    return true;
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /**

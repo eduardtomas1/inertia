@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
 
-import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, PermissionMode, PermissionResult } from "@anthropic-ai/claude-agent-sdk";
 
+import { clipCodeUnits } from "../../shared/code-units";
 import type { AgentHarnessEmitter } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
 import { claudeAttachmentReadAllowed, claudePermissionAccess } from "./attachment-read-grant";
@@ -116,10 +118,14 @@ export class ClaudePermissionBroker {
       return { behavior: "allow", updatedInput: { questions: toolInput.questions, answers: sdkAnswers } };
     }
 
-    if (
-      (input.access === "full" && input.interactionMode !== "plan")
-      || claudeAttachmentReadAllowed(toolName, toolInput, callbackOptions.blockedPath, input.attachmentReadRoots)
-    ) return { behavior: "allow", updatedInput: toolInput };
+    const removalSafetyDenial = claudeRemovalSafetyDenial(input, toolName, callbackOptions);
+    if (removalSafetyDenial) return removalSafetyDenial;
+    // Full access runs Claude Code in bypassPermissions, which auto-allows
+    // everything it can. A request it still forwards (an ask rule, a safety
+    // check bypass cannot waive, a tool that needs a person) needs the user.
+    if (claudeAttachmentReadAllowed(toolName, toolInput, callbackOptions.blockedPath, input.attachmentReadRoots)) {
+      return { behavior: "allow", updatedInput: toolInput };
+    }
     const decision = await this.requestApproval(toolName, toolInput, callbackOptions);
     if ("behavior" in decision) return decision;
     if (decision.decision === "approve") {
@@ -161,22 +167,25 @@ export class ClaudePermissionBroker {
     kind?: "command" | "file-change" | "permissions",
   ): Promise<PermissionResult | { decision: AgentApprovalDecision }> {
     const { emitter, input } = this.options;
-    const approvalTitle = callbackOptions.title
+    // Claude Code colours its own wording with terminal escapes. Strip them
+    // from the descriptive text only; the command and path stay exact.
+    const approvalTitle = claudeDescriptiveText(callbackOptions.title)
       ?? `Claude wants to use ${toolName}`;
-    const approvalDetail = callbackOptions.description
+    const approvalDetail = claudeDescriptiveText(callbackOptions.description)
       ?? summarizeInput(toolInput);
     const approvalCommand = CLAUDE_SHELL_COMMAND_TOOLS.has(toolName)
       && typeof toolInput.command === "string"
       ? toolInput.command
       : undefined;
-    const approvalReason = callbackOptions.decisionReason;
+    const approvalReason = claudeDescriptiveText(callbackOptions.decisionReason);
     const approvalBlockedPath = callbackOptions.blockedPath;
     if (
       !isSafeApprovalDisplayText(approvalTitle)
       || !isSafeApprovalDisplayText(approvalDetail, true)
       || (
         approvalCommand !== undefined
-        && !isSafeApprovalDisplayText(approvalCommand, true)
+        // A tab is visible whitespace; the command is shown as it will run.
+        && !isSafeApprovalDisplayText(approvalCommand.replaceAll("\t", " "), true)
       )
       || (
         approvalReason !== undefined
@@ -257,13 +266,55 @@ export class ClaudePermissionBroker {
   }
 }
 
+/** The permission mode Inertia launches Claude Code with for a run. */
+export function claudeSdkPermissionMode(
+  input: Pick<ProviderRunInput, "access" | "interactionMode" | "readOnlyProfile">,
+): PermissionMode {
+  if (input.readOnlyProfile === "watcher") return "default";
+  if (input.interactionMode === "plan") return "plan";
+  if (input.access === "full") return "bypassPermissions";
+  return input.access === "auto-edit" ? "acceptEdits" : "default";
+}
+
+/**
+ * Full access must not approve a Bash removal that Claude Code's own removal
+ * safety check refused to auto-allow under bypass. The SDK omits the CLI's
+ * dangerousRemoval discriminator, so match its removal warnings. A matched
+ * ask rule means the user asked to be prompted, so it goes to the approval.
+ */
+function claudeRemovalSafetyDenial(
+  input: ProviderRunInput,
+  toolName: string,
+  callbackOptions: ClaudeToolOptions,
+): PermissionResult | null {
+  if (
+    toolName !== "Bash"
+    // T3 reads the live mode; this is the launch mode, so a mid-run switch to plan errs toward refusing a flagged removal.
+    || claudeSdkPermissionMode(input) !== "bypassPermissions"
+    || callbackOptions.matchedAskRule !== undefined
+  ) return null;
+  const safetyReason = stripVTControlCharacters(callbackOptions.decisionReason ?? "").trim();
+  if (
+    !/^Dangerous rm(?:dir)?\b/i.test(safetyReason)
+    && !/\bdangerous removal\b/i.test(safetyReason)
+    && safetyReason !== "This shell -c script runs rm and could not be checked"
+    && safetyReason !== "A permission rule denies a command in this shell -c script"
+  ) return null;
+  return deny(`Claude Code's removal safety check denied this command; the user did not reject it. The command did not run. Do not bypass the check by splitting the removal, putting it in a script, or using another tool or shell. If the warning below supplies a safe rewrite, use it and let the same check evaluate it. Otherwise continue the rest of the task without the removal and tell the user what you needed to delete and why. Warning: ${safetyReason}`);
+}
+
+function claudeDescriptiveText(value: string | undefined): string | undefined {
+  const text = value === undefined ? "" : stripVTControlCharacters(value).trim();
+  return text === "" ? undefined : text;
+}
+
 function planSteps(markdown: string): AgentPlanStep[] {
   const steps = markdown.split("\n").map((line) => line.match(/^\s*(?:[-*]|\d+[.)])\s+(.+)/u)?.[1]?.trim()).filter((value): value is string => Boolean(value));
   return (steps.length > 0 ? steps : [markdown]).slice(0, 100).map((step) => ({ step: bounded(step), status: "pending" }));
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function summarizeInput(input: Record<string, unknown>): string {

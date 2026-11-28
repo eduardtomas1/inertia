@@ -1,1 +1,1 @@
-export const FULL_ACCESS_CAUTION = "Full access lets the agent act without asking. Choose it only for a workspace and task you trust.";
+export const FULL_ACCESS_CAUTION = "Full access runs commands and edits without approval prompts, though Claude Code still asks about a few actions its safety checks protect. Choose it only for a workspace and task you trust.";

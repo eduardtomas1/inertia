@@ -101,6 +101,7 @@ const BACKEND_PROVIDER_IDS = [
   "opencode",
   "antigravity",
   "grok",
+  "pi",
 ] as const satisfies readonly ProviderId[];
 
 export const CLAUDE_BACKEND_TIER_IDS = [

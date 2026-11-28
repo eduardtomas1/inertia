@@ -1,4 +1,7 @@
 import { LIBRARY_SCHEMA_VERSION } from "./migrations/library";
+import { ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION } from "./migrations/orchestration-v2-receipt-status";
+import { QUEUE_ITEMS_SCHEMA_VERSION } from "./migrations/queue-items";
+import { SCHEDULED_TASKS_SCHEMA_VERSION } from "./migrations/scheduled-tasks";
 import { TURN_SCOPED_INDEXES_SCHEMA_VERSION } from "./migrations/turn-scoped-indexes";
 import { CUSTOM_AGENTS_SCHEMA_VERSION } from "./migrations/custom-agents";
 import { CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS } from "./custom-agents-schema";
@@ -206,6 +209,91 @@ const REQUIRED_COLUMNS_BY_SCHEMA_VERSION: DatabaseSchemaRequirements["columns"] 
     "expires_at",
   ]],
   [SENT_TO_USER_MESSAGES_SCHEMA_VERSION, "messages", ["sent_to_user"]],
+  [128, "agent_thread_operations", ["client_request_key"]],
+  [128, "queued_messages", ["delegated_completion_json"]],
+  [128, "messages", ["delegated_completion_json"]],
+  [128, "delegated_tasks", [
+    "task_id",
+    "parent_conversation_id",
+    "source_turn_id",
+    "source_run_id",
+    "child_conversation_id",
+    "operation_id",
+    "kind",
+    "original_task_id",
+    "status",
+    "completion_wake",
+    "wake_armed",
+    "delivery_state",
+    "delivery_generation",
+    "result_turn_id",
+    "created_at",
+    "updated_at",
+  ]],
+  [128, "delegated_task_turns", ["child_turn_id", "task_id"]],
+  [129, "app_state", ["delegation_automatic_wakes"]],
+  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_receipts", ["status", "error", "command_type"]],
+  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, "orchestration_v2_projection_metadata", [
+    "projection_name",
+    "schema_version",
+    "last_sequence",
+    "updated_at",
+  ]],
+  [QUEUE_ITEMS_SCHEMA_VERSION, "queued_messages", [
+    "queue_position",
+    "queue_held",
+    "kind",
+    "created_by",
+    "creation_source",
+    "device_id",
+    "steer_follow_up_of_run_id",
+    "edit_revision",
+    "edited_at",
+    "creation_digest",
+    "dispatch_ordinal",
+    "run_id",
+    "delivery_mode",
+    "steer_when_ready_run_id",
+    "selection_json",
+    "follows_thread_selection",
+  ]],
+  [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_tasks", [
+    "id",
+    "project_id",
+    "title",
+    "prompt",
+    "schedule_json",
+    "bound_conversation_id",
+    "fresh_session",
+    "model_selection_json",
+    "interaction_mode",
+    "access_mode",
+    "enabled",
+    "next_run_at",
+    "last_run_at",
+    "last_run_status",
+    "last_conversation_id",
+    "last_turn_id",
+    "last_error",
+    "consecutive_failures",
+    "created_by",
+    "created_at",
+    "updated_at",
+  ]],
+  [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_task_runs", [
+    "id",
+    "task_id",
+    "claim_key",
+    "trigger",
+    "scheduled_for",
+    "state",
+    "conversation_id",
+    "turn_id",
+    "queue_item_id",
+    "error",
+    "claimed_at",
+    "finished_at",
+  ]],
 ];
 
 export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
@@ -256,6 +344,9 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [CODEX_THREAD_TOOL_PACKS_SCHEMA_VERSION, ["codex_thread_tool_packs"]],
   [CUSTOM_AGENTS_SCHEMA_VERSION, ["custom_agents"]],
   [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, ["agent_secret_requests"]],
+  [128, ["delegated_tasks", "delegated_task_turns"]],
+  [ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION, ["orchestration_v2_projection_metadata"]],
+  [SCHEDULED_TASKS_SCHEMA_VERSION, ["scheduled_tasks", "scheduled_task_runs"]],
 ];
 
 export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
@@ -292,6 +383,17 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
     [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_position_idx"],
     [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_status_expiry_idx"],
     [AGENT_SECRET_REQUESTS_SCHEMA_VERSION, "agent_secret_requests_conversation_idx"],
+    [128, "agent_thread_operations_client_request_idx"],
+    [128, "queued_messages_delegated_delivery_idx"],
+    [128, "delegated_tasks_parent_delivery_idx"],
+    [128, "delegated_tasks_child_status_idx"],
+    [128, "delegated_tasks_source_turn_idx"],
+    [128, "delegated_task_turns_task_idx"],
+    [QUEUE_ITEMS_SCHEMA_VERSION, "queued_messages_conversation_state_position_idx"],
+    [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_tasks_project_idx"],
+    [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_tasks_due_idx"],
+    [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_task_runs_task_idx"],
+    [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_task_runs_turn_idx"],
   ],
   triggers: [
     [99, "watcher_links_active_limit", [
@@ -329,5 +431,10 @@ export const DATABASE_SCHEMA_REQUIREMENTS: DatabaseSchemaRequirements = {
       "raise(abort,",
     ]],
     [CUSTOM_AGENTS_SCHEMA_VERSION, "custom_agents_count_limit", CUSTOM_AGENTS_COUNT_LIMIT_TRIGGER_FRAGMENTS],
+    [SCHEDULED_TASKS_SCHEMA_VERSION, "scheduled_tasks_project_limit", [
+      "before insert on scheduled_tasks",
+      "(select count(*) from scheduled_tasks where project_id = new.project_id) >= 100",
+      "raise(abort,",
+    ]],
   ],
 };

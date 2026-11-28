@@ -104,15 +104,25 @@ export function composerCheckoutStrip({
 export function composerCheckoutBranch(
   conversation: Pick<Conversation, "branch" | "worktreePath">,
   checkoutBranch: string | null | undefined,
-): string {
+): string | null {
+  const liveBranch = checkoutBranch === null ? "Detached HEAD" : checkoutBranch;
   return (conversation.worktreePath
-    ? conversation.branch ?? checkoutBranch
-    : checkoutBranch ?? conversation.branch) ?? "Detached HEAD";
+    ? conversation.branch ?? liveBranch
+    : liveBranch ?? conversation.branch) ?? null;
 }
 
 export interface ComposerToolbarProps {
   onQueueCommand?: QueueCommandRunner;
   queueEdit?: QueuedMessageEdit;
+  queueHost?: HTMLElement | null;
+  editBannerHost?: HTMLElement | null;
+  canSteer?: boolean;
+  canInterrupt?: boolean;
+  providerSwitchWaitsForTurn?: boolean;
+  hasPendingQuestionOrApproval?: boolean;
+  resuming?: boolean;
+  onResume?: () => Promise<unknown>;
+  providers?: readonly ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
   running: boolean;
@@ -266,13 +276,22 @@ export const ComposerToolbar = memo(function ComposerToolbar({
   onSendQueued,
   onQueueCommand,
   queueEdit,
+  queueHost,
+  editBannerHost,
+  canSteer,
+  canInterrupt,
+  providerSwitchWaitsForTurn,
+  hasPendingQuestionOrApproval,
+  resuming,
+  onResume,
+  providers,
   onReleaseAttachment,
   onSubmit,
   onStop,
   onFocusInput,
   awaitingInput = false,
 }: ComposerToolbarProps): React.JSX.Element {
-  const canSendAttachmentWhileRunning = supportsActiveParentFollowUp(
+  const canSendAttachmentWhileRunning = canSteer ?? supportsActiveParentFollowUp(
     latestTurn?.harnessId ?? null,
   );
   const visibleCheckoutBranch = composerCheckoutBranch(
@@ -301,7 +320,7 @@ export const ComposerToolbar = memo(function ComposerToolbar({
   });
   const railRef = useRef<HTMLDivElement>(null);
   const branchMenuRef = useRef<CheckoutBranchMenuOpener | null>(null);
-  const showBranch = checkoutStrip !== "hidden" && !scratchWorkspace;
+  const showBranch = checkoutStrip !== "hidden" && !scratchWorkspace && visibleCheckoutBranch !== null;
   const worktree = Boolean(conversation.worktreePath);
   const branchChip = showBranch
     ? checkoutBranchChip(
@@ -370,7 +389,7 @@ export const ComposerToolbar = memo(function ComposerToolbar({
             routes={modelRoutes}
             selectedRoute={selectedModelRoute}
             configuration={modelChooserConfiguration}
-            disabled={disabled || running}
+            disabled={disabled || conversationUpdatePending}
             closeSignal={menu}
             onOpenChange={handleModelChooserOpenChange}
             onSelect={onChooseModelRoute}
@@ -657,6 +676,15 @@ export const ComposerToolbar = memo(function ComposerToolbar({
             primaryAction={primaryAction}
             canSendQueuedNow={canSendQueuedNow}
             running={running}
+            canSteer={canSteer}
+            canInterrupt={canInterrupt}
+            providerSwitchWaitsForTurn={providerSwitchWaitsForTurn}
+            hasPendingQuestionOrApproval={hasPendingQuestionOrApproval}
+            resuming={resuming}
+            onResume={onResume}
+            providers={providers}
+            queueHost={queueHost}
+            editBannerHost={editBannerHost}
             latestTurnId={queuedTurnId}
             latestTurnStatus={queuedTurnStatus}
             latestTurnAuthoritative={queuedTurnAuthoritative}

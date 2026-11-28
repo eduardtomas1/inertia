@@ -15,9 +15,11 @@ import type {
   ProviderMetadataEvent,
   ProviderRunInput,
   ProviderRunResult,
+  ProviderHistoryInjection,
   ProviderHostToolBridge,
   ProviderSteerInput,
   ProviderSessionEvent,
+  ProviderNativeBoundaryEvent,
   ProviderSessionTitleEvent,
   ProviderStatusEvent,
   ProviderSubagentEvent,
@@ -31,6 +33,8 @@ import type {
 import type { ProviderCapabilityId } from "./capability-manifest";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { contractActivityPhase } from "./activity-lifecycle";
+import type { NativeConversationContinuation, NativeConversationOperations } from "./native-conversation-operations";
+import { clipCodeUnits } from "../../shared/code-units";
 
 /** @deprecated Prefer the shared harness identity contract. */
 export type AgentHarnessId = KnownHarnessId;
@@ -233,7 +237,29 @@ export interface AntigravityAcpHarnessCapabilities extends AgentHarnessCoreCapab
   extension: AntigravityAcpHarnessExtensionCapabilities;
 }
 
+export interface PiRpcHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "pi-rpc";
+    protocol: "pi-jsonl-rpc-v1";
+    approvals: "managed-extension";
+    questions: "extension-ui";
+    plans: "unavailable";
+    reasoning: "native";
+    usage: "native";
+    images: "structured-base64-input";
+    authentication: "pi-native";
+    modelMetadata: "rpc";
+  };
+}
+
+export interface CursorSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: { kind: "cursor-sdk"; protocol: "owned-sdk-worker"; approvals: "host-only"; questions: "unavailable";
+    plans: "unavailable"; reasoning: "native"; usage: "unavailable"; images: "unavailable"; authentication: "vault"; modelMetadata: "sdk" };
+}
+
 export type AgentHarnessCapabilities =
+  | CursorSdkHarnessCapabilities
+  | PiRpcHarnessCapabilities
   | CodexAppServerHarnessCapabilities
   | CodexCliHarnessCapabilities
   | ClaudeCliHarnessCapabilities
@@ -253,6 +279,7 @@ export type AgentHarnessCoreEvent =
   | ProviderActivityEvent
   | ProviderStatusEvent
   | ProviderSessionEvent
+  | ProviderNativeBoundaryEvent
   | ProviderSessionTitleEvent
   | ProviderGoalUpdatedEvent
   | ProviderGoalClearedEvent
@@ -264,7 +291,7 @@ export type AgentInteractiveHarnessEvent =
   | { type: "input"; request: AgentInputRequest }
   | { type: "input-resolved"; requestId: string }
   | { type: "plan"; explanation: string | null; steps: AgentPlanStep[]; handoff?: true }
-  | { type: "reasoning-summary"; text: string }
+  | { type: "reasoning-summary"; text: string; replace?: true }
   | { type: "usage"; usage: ProviderUsageEvent["usage"] }
   | Omit<ProviderMetadataEvent, "providerId" | "conversationId" | "runId" | "turnId">;
 
@@ -304,11 +331,12 @@ interface ProviderInteractiveHarnessExtensionEventBase {
 
 export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" | "cursor-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "grok"; extension: "grok-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" })
-  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-acp" });
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "antigravity"; extension: "antigravity-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "pi"; extension: "pi-rpc" });
 
 export type AgentHarnessEvent =
   | AgentHarnessCoreEvent
@@ -321,7 +349,9 @@ export interface AgentHarnessCallbacks {
 }
 
 export interface AgentHarnessStartOptions {
+  cursorSdk?: import("./cursor-sdk-service").CursorSdkConfiguration;
   input: ProviderRunInput;
+  nativeContinuation?: NativeConversationContinuation;
   executable: string;
   environment: NodeJS.ProcessEnv;
   /**
@@ -338,6 +368,12 @@ export interface AgentHarnessStartOptions {
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
   hostTools?: ProviderHostToolBridge;
+  /**
+   * Exact-attempt authority to deliver the restored history natively. Passed
+   * only where the run can negotiate `history-injection`; a harness that does
+   * not use it sends `input.prompt`, which keeps the history inline.
+   */
+  historyInjection?: ProviderHistoryInjection;
 }
 
 export interface CodexAppServerRunExtension {
@@ -351,7 +387,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "grok-acp" | "opencode-sdk" | "antigravity-acp";
+  kind: "claude-agent-sdk" | "cursor-sdk" | "cursor-acp" | "kimi-acp" | "grok-acp" | "opencode-sdk" | "antigravity-acp" | "pi-rpc";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -399,6 +435,7 @@ export interface AgentHarness {
   id: AgentHarnessId;
   providerId: ProviderId;
   capabilities: AgentHarnessCapabilities;
+  nativeConversation?: NativeConversationOperations;
   supports: (input: ProviderRunInput) => boolean;
   start: (options: AgentHarnessStartOptions) => AgentHarnessRun;
 }
@@ -409,7 +446,8 @@ export interface AgentHarnessEmitter {
     available: boolean,
   ) => void;
   text: (text: string, itemId?: string) => void;
-  textSnapshot: (itemId: string, text: string) => void;
+  /** `scope`: see `ProviderTextSnapshotEvent.scope`. */
+  textSnapshot: (itemId: string, text: string, scope?: "segment") => void;
   textBoundary: () => void;
   activity: (
     kind: ProviderActivityEvent["kind"],
@@ -417,12 +455,16 @@ export interface AgentHarnessEmitter {
     label: string,
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail" | "outputDelta" | "fileMutation">,
   ) => void;
+  /** `promptDropped`: see `ProviderStatusEvent.promptDropped`; kept only on a failed or cancelled status. */
   status: (
     status: ProviderStatusEvent["status"],
     message?: string,
     providerState?: string,
+    promptDropped?: boolean,
   ) => void;
-  session: (sessionId: string) => void;
+  /** `forkedFrom`: the resumed session this one copies into the run's checkout (see `ProviderSessionEvent`). */
+  session: (sessionId: string, forkedFrom?: string) => void;
+  nativeBoundary: (boundary: Omit<ProviderNativeBoundaryEvent, keyof ProviderEventBase | "type">) => void;
   sessionTitle: (sessionId: string, title: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
   goalCleared: (sessionId: string) => void;
@@ -438,6 +480,7 @@ export function createAgentHarnessEmitter(
   runId: string,
   turnId: string,
   workspaceRoot?: string,
+  cursorExtension: "cursor-acp" | "cursor-sdk" = "cursor-acp",
 ): AgentHarnessEmitter {
   const emit = (event: AgentHarnessEvent): void => {
     try {
@@ -460,19 +503,22 @@ export function createAgentHarnessEmitter(
       text,
       ...(itemId ? { itemId } : {}),
     }),
-    textSnapshot: (itemId, text) => emit({
+    textSnapshot: (itemId, text, scope) => emit({
       ...base,
       type: "text-snapshot",
       itemId,
       text,
+      ...(scope ? { scope } : {}),
     }),
     textBoundary: () => emit({ ...base, type: "text-boundary" }),
     activity: (kind, phase, label, detail = {}) => {
-      const safeLabel = label
-        .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
-        .replace(/\s+/gu, " ")
-        .trim()
-        .slice(0, 240) || "Activity";
+      const safeLabel = clipCodeUnits(
+        label
+          .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
+          .replace(/\s+/gu, " ")
+          .trim(),
+        240,
+      ) || "Activity";
       const activityId = detail.activityId
         ?.replace(/\0/gu, "")
         .trim()
@@ -497,14 +543,21 @@ export function createAgentHarnessEmitter(
         ...(detail.fileMutation === true ? { fileMutation: true as const } : {}),
       });
     },
-    status: (status, message, providerState) => emit({
+    status: (status, message, providerState, promptDropped) => emit({
       ...base,
       type: "status",
       status,
       ...(message ? { message } : {}),
       ...(providerState ? { providerState } : {}),
+      ...(promptDropped === true && (status === "failed" || status === "cancelled") ? { promptDropped: true as const } : {}),
     }),
-    session: (sessionId) => emit({ ...base, type: "session", sessionId }),
+    session: (sessionId, forkedFrom) => emit({ ...base, type: "session", sessionId,
+      ...(forkedFrom !== undefined && forkedFrom !== sessionId ? { forkedFrom } : {}) }),
+    nativeBoundary: (boundary) => {
+      const valid = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 512 && !/[\u0000-\u0020\u007f]/u.test(id);
+      if (!valid(boundary.nativeConversationId) || ![boundary.nativeSessionId, boundary.nativeTurnId, boundary.persistedHeadId].every((id) => id === null || valid(id))) return;
+      emit({ ...boundary, ...base, type: "native-boundary" });
+    },
     sessionTitle: (sessionId, title) => emit({
       ...base,
       type: "session-title",
@@ -537,11 +590,12 @@ export function createAgentHarnessEmitter(
     },
     rich: (event) => {
       if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
-      else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
+      else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: cursorExtension, event });
       else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
       else if (providerId === "grok") emit({ ...base, providerId, type: "extension", extension: "grok-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
       else if (providerId === "antigravity") emit({ ...base, providerId, type: "extension", extension: "antigravity-acp", event });
+      else if (providerId === "pi") emit({ ...base, providerId, type: "extension", extension: "pi-rpc", event });
     },
   };
 }

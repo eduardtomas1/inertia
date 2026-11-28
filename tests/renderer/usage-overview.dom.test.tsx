@@ -620,7 +620,7 @@ describe("UsageOverview", () => {
     ).get("transition-delay")).toBe("150ms");
     expect(declarationsFor(rules, ".usage-overview-error .secondary-button").get("margin-left")).toBe("auto");
     expect(css).toMatch(/var\(--usage-provider-series, var\(--text-muted\)\)/u);
-    for (const provider of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok"]) {
+    for (const provider of ["codex", "claude", "cursor", "kimi", "opencode", "antigravity", "grok", "pi"]) {
       expect(css).toContain(`.usage-overview [data-provider="${provider}"] { --usage-provider-series: var(--usage-series-${provider}); }`);
     }
   });

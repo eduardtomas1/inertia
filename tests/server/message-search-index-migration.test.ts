@@ -18,6 +18,7 @@ import {
   migrateRuntimeDatabase,
   runtimeMigrationCatalog,
 } from "../../src/server/persistence/migrations/runtime-catalog";
+import { removeOrchestratorV2FromFixture } from "../support/legacy-project-settings-schema";
 
 const directories: string[] = [];
 
@@ -78,6 +79,8 @@ describe("message search index migration", () => {
     previous.appendMessageContent(streamed.id, "dle tail");
     previous.close();
     const legacy = new Database(path);
+    // Strip post-122 Orchestrator V2 schema so this fixture is a genuine schema-121 database.
+    removeOrchestratorV2FromFixture(legacy);
     legacy.exec(`
       DROP TRIGGER message_search_message_inserted;
       DROP TRIGGER message_search_message_changed;

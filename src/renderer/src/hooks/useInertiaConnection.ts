@@ -45,6 +45,7 @@ type EventListener = (event: ServerEvent) => void;
 
 export interface InertiaConnection {
   snapshot: AppSnapshot | null;
+  scheduledTasksRevision?: number;
   runtimeGeneration: string | null;
   status: ConnectionStatus;
   error: string | null;
@@ -67,6 +68,7 @@ export function useInertiaConnection(
   const detailSubscriptionsRef = useRef(new RuntimeDetailSubscriptions());
   const reconnectRef = useRef<(() => void) | null>(null);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
+  const [scheduledTasksRevision, setScheduledTasksRevision] = useState(0);
   const [runtimeGeneration, setRuntimeGeneration] = useState<string | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -251,6 +253,8 @@ export function useInertiaConnection(
                   setSnapshot((current) => current
                     ? applyTodosEvent(current, todosEvent)
                     : current);
+                } else if (event.type === "scheduled-tasks.changed") {
+                  setScheduledTasksRevision((current) => current + 1);
                 } else if (event.type === "library.updated") {
                   const libraryEvent = event;
                   setSnapshot((current) => current
@@ -294,6 +298,8 @@ export function useInertiaConnection(
                 setSnapshot((current) => current
                   ? applyTodosEvent(current, todosEvent)
                   : current);
+              } else if (event.type === "scheduled-tasks.changed") {
+                setScheduledTasksRevision((current) => current + 1);
               } else if (event.type === "library.updated") {
                 const libraryEvent = event;
                 setSnapshot((current) => current
@@ -492,6 +498,7 @@ export function useInertiaConnection(
 
   return {
     snapshot,
+    scheduledTasksRevision,
     runtimeGeneration,
     status,
     error,

@@ -44,6 +44,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const threadId = message.params.threadId || "library-thread-" + process.pid;
     return send({ id: message.id, result: { thread: { id: threadId }, model: "fixture", cwd: process.cwd(), serviceTier: null, initialTurnsPage: null } });
   }
+  if (message.method === "thread/inject_items") return send({ id: message.id, error: { code: -32601, message: "Method not found" } });
   if (message.method !== "turn/start") return;
   sequence += 1;
   const threadId = message.params.threadId;

@@ -1,5 +1,12 @@
 // @inertia-test-suite portable
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as cursorSdkInstallation from "../../src/server/provider/cursor-sdk-installation";
+import * as cursorSdkService from "../../src/server/provider/cursor-sdk-service";
+import { CursorSdkController } from "../../src/server/provider/cursor-sdk-controller";
+import { providerCapabilityManifest } from "../../src/server/provider/capability-manifest";
+import { providerInstallationIdentity } from "../../src/server/provider/installation-lease";
+
+afterEach(() => vi.restoreAllMocks());
 
 import {
   AgentHarnessRegistry,
@@ -111,16 +118,18 @@ function inactiveExtension(
   }
   if (
     harnessId === "claude-agent-sdk"
+    || harnessId === "cursor-sdk"
     || harnessId === "cursor-acp"
     || harnessId === "kimi-acp"
     || harnessId === "grok-acp"
     || harnessId === "opencode-sdk"
     || harnessId === "antigravity-acp"
+    || harnessId === "pi-rpc"
   ) {
     return {
       kind: harnessId,
       respondToApproval,
-      respondToInput,
+      respondToInput: harnessId === "cursor-sdk" ? () => false : respondToInput,
       steer,
     };
   }
@@ -145,6 +154,24 @@ function controlledManager(
   resolveBackendLaunchOptions?: ProviderManagerOptions["resolveBackendLaunchOptions"],
   additionalOptions: ProviderManagerOptions = {},
 ) {
+  let sdkRevision = 0;
+  let manager!: ProviderManager;
+  if (route.harnessId === "cursor-sdk") {
+    const installation = () => {
+      const identity = providerInstallationIdentity({ providerId: "cursor", executable: "/synthetic/node", installationRootIdentity: null,
+        packageIdentity: "@cursor/sdk", version: "1.0.38", directFileIdentity: String(sdkRevision), replacementBoundaryIdentity: "sdk-fixture" });
+      return { node: "/synthetic/node", fingerprint: identity.fingerprint, identity,
+        evidence: { executable: "/synthetic/node", version: "1.0.38", harnessId: "cursor-sdk" as const,
+          manifestDigest: providerCapabilityManifest("cursor-sdk")!.digest, installationFingerprint: identity.fingerprint } };
+    };
+    vi.spyOn(cursorSdkInstallation, "inspectCursorSdkInstallation").mockImplementation(installation);
+    vi.spyOn(cursorSdkService, "cursorSdkStatus").mockResolvedValue({ available: true, hasCredential: true, sdkVersion: "1.0.38" });
+    vi.spyOn(cursorSdkService, "cursorSdkModels").mockResolvedValue([{ id: "provider-default", displayName: "Controlled fixture model" }]);
+    if (!attestInstallation) vi.spyOn(CursorSdkController.prototype, "currentInstallation").mockImplementation(installation);
+    additionalOptions = { ...additionalOptions, cursorSdk: { stateRoot: "/synthetic/state", credentials: {
+      resolve: async () => "synthetic-test-token", status: async () => ({ hasSecret: true, credentialGeneration: "generation" }),
+    } } };
+  }
   let emit!: NonNullable<Parameters<AgentHarness["start"]>[0]["callbacks"]>["onEvent"];
   let resolve!: (result: ProviderRunResult) => void;
   let reject!: (error: Error) => void;
@@ -180,7 +207,7 @@ function controlledManager(
     starts,
     observations,
     emit: (event: Parameters<NonNullable<typeof emit>>[0]) => emit?.(event),
-    manager: ProviderManager.createForTests(
+    manager: manager = ProviderManager.createForTests(
       {
         ...additionalOptions,
         cancelGraceMs: 30_000,
@@ -211,6 +238,12 @@ function controlledManager(
       },
       new AgentHarnessRegistry([harness]),
     ),
+    detect: async () => {
+      if (route.harnessId !== "cursor-sdk") { await manager.detect(route.providerId); return; }
+      await manager.cursorSdkStatus(new AbortController().signal);
+      await manager.cursorSdkModels(new AbortController().signal);
+    },
+    replaceInstallation: () => { sdkRevision += 1; },
     reject: (error: Error) => reject(error),
     resolve: (result: ProviderRunResult) => resolve(result),
   };
@@ -259,10 +292,12 @@ describe("production provider lifecycle conformance", () => {
       "codex-app-server",
       "claude-agent-sdk",
       "cursor-acp",
+      "cursor-sdk",
       "kimi-acp",
       "opencode-sdk",
       "antigravity-acp",
       "grok-acp",
+      "pi-rpc",
     ]);
     expect(PRODUCTION_HARNESSES.some(({ harnessId }) =>
       ["codex-cli", "claude-cli", "cursor-cli", "opencode-cli", "antigravity-cli"].includes(harnessId)))
@@ -390,7 +425,7 @@ describe("production provider lifecycle conformance", () => {
         backendProbeNow: () => new Date(checkedAt),
       },
     );
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     bindProbeToDetectedInstallation(controlled.manager, route.providerId, probe);
     const resolved = controlled.manager.resolveModelRoute(modelSelection);
     const input: ProviderRunInput = {
@@ -654,7 +689,7 @@ describe("production provider lifecycle conformance", () => {
         backendProbeNow: () => new Date(checkedAt),
       },
     );
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     bindProbeToDetectedInstallation(controlled.manager, route.providerId, probe);
     const resolved = controlled.manager.resolveModelRoute(modelSelection);
     const input: ProviderRunInput = {
@@ -802,10 +837,10 @@ describe("production provider lifecycle conformance", () => {
         "input-1",
         { answer: ["yes"] },
         exact,
-      )).toBe(true);
+      )).toBe(route.harnessId !== "cursor-sdk");
       expect(controlled.observations).toMatchObject({
         approvals: ["approval-1"],
-        inputs: ["input-1"],
+        inputs: route.harnessId === "cursor-sdk" ? [] : ["input-1"],
       });
       expect(controlled.manager.cancel(input.conversationId)).toBe(true);
       expect(controlled.manager.respondToInput(
@@ -831,13 +866,15 @@ describe("production provider lifecycle conformance", () => {
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);
       const input = inputFor(route);
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       const running = controlled.manager.run(input);
       const followUp = { content: "continue", imagePaths: [] };
       const supportsFollowUp = [
         "codex-app-server",
         "claude-agent-sdk",
         "opencode-sdk",
+        "pi-rpc",
+        "cursor-sdk",
       ].includes(route.harnessId);
 
       await expect(controlled.manager.steer(
@@ -875,12 +912,13 @@ describe("production provider lifecycle conformance", () => {
         input,
         capability,
       )).toBe(false);
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       expect(controlled.manager.providerCapabilityAvailable(
         input,
         capability,
       )).toBe(true);
-      controlled.manager.setCommand(
+      if (route.harnessId === "cursor-sdk") controlled.replaceInstallation();
+      else controlled.manager.setCommand(
         route.providerId,
         `/tools/${route.providerId}-replacement`,
       );
@@ -901,7 +939,7 @@ describe("production provider lifecycle conformance", () => {
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);
       const input = inputFor(route);
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       expect(controlled.manager.providerCapabilityAdmissible(
         input,
         "compaction",
@@ -925,7 +963,7 @@ describe("production provider lifecycle conformance", () => {
         input,
         "compaction",
       )).toBe(false);
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       expect(controlled.manager.providerCapabilityAvailable(
         input,
         "compaction",
@@ -962,7 +1000,7 @@ describe("production provider lifecycle conformance", () => {
           },
           supportedFastMode: providerValue,
         };
-        await controlled.manager.detect(route.providerId);
+        await controlled.detect();
         const running = controlled.manager.run(input);
         controlled.resolve({
           ...providerRunTerminal(input, "completed"),
@@ -988,7 +1026,7 @@ describe("production provider lifecycle conformance", () => {
     const controlled = controlledManager(route, route.providerId, true);
     const input = inputFor(route);
     const requests: string[] = [];
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     const running = controlled.manager.run(input, {
       onInput: ({ request }) => requests.push(request.requestId),
     });
@@ -1043,7 +1081,7 @@ describe("production provider lifecycle conformance", () => {
     const controlled = controlledManager(route, route.providerId, true);
     const input = inputFor(route);
     const rateLimits: string[] = [];
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     const running = controlled.manager.run(input, {
       onMetadata: (event) => rateLimits.push(
         ...(event.metadata.rateLimits ?? []).map(({ id }) => id),
@@ -1104,7 +1142,7 @@ describe("production provider lifecycle conformance", () => {
     )!;
     const controlled = controlledManager(route, route.providerId, true);
     const input = inputFor(route);
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     const running = controlled.manager.run(input);
     const base = {
       providerId: "cursor" as const,
@@ -1154,7 +1192,7 @@ describe("production provider lifecycle conformance", () => {
       ...inputFor(route),
       sessionId: "cursor-session",
     };
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     const running = controlled.manager.run(input);
     controlled.resolve({
       ...providerRunTerminal(input, "completed"),
@@ -1181,7 +1219,7 @@ describe("production provider lifecycle conformance", () => {
       ...inputFor(route),
       imagePaths: ["/workspace/reference.png"],
     };
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     const running = controlled.manager.run(input);
     controlled.resolve({
       ...providerRunTerminal(input, "completed"),
@@ -1213,7 +1251,7 @@ describe("production provider lifecycle conformance", () => {
           : "fast" as const,
         performanceModeTransition: "to-standard" as const,
       };
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       const running = controlled.manager.run(input);
       controlled.resolve({
         ...providerRunTerminal(input, "completed"),
@@ -1278,7 +1316,7 @@ describe("production provider lifecycle conformance", () => {
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);
       const input = inputFor(route);
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       const running = controlled.manager.run(input);
       const base = {
         providerId: input.providerId,
@@ -1342,7 +1380,7 @@ describe("production provider lifecycle conformance", () => {
     const controlled = controlledManager(route, route.providerId, true);
     const input = inputFor(route);
     const subagents: string[] = [];
-    await controlled.manager.detect(route.providerId);
+    await controlled.detect();
     const running = controlled.manager.run(input, {
       onSubagent: ({ providerAgentId }) => {
         if (providerAgentId) subagents.push(providerAgentId);
@@ -1482,12 +1520,12 @@ describe("production provider lifecycle conformance", () => {
     "$harnessId retains admitted interaction authority after installation evidence is refreshed",
     async (route) => {
       const controlled = controlledManager(route, route.providerId, true);
-      await controlled.manager.detect(route.providerId);
+      await controlled.detect();
       const input = inputFor(route);
       const running = controlled.manager.run(input);
       try {
         const exact = { runId: input.runId, turnId: input.turnId };
-        if (route.providerId === "cursor") {
+        if (route.harnessId === "cursor-acp") {
           expect(controlled.manager.respondToInput(
             input.conversationId, "input-1", { answer: ["yes"] }, exact,
           )).toBe(false);
@@ -1519,8 +1557,8 @@ describe("production provider lifecycle conformance", () => {
         )).toBe(true);
         expect(controlled.manager.respondToInput(
           input.conversationId, "input-1", { answer: ["yes"] }, exact,
-        )).toBe(true);
-        const canSteer = ["codex", "claude", "opencode"].includes(input.providerId);
+        )).toBe(route.harnessId !== "cursor-sdk");
+        const canSteer = route.harnessId === "cursor-sdk" || ["codex", "claude", "opencode", "pi"].includes(input.providerId);
         await expect(controlled.manager.steer(
           input.conversationId, { content: "Continue this run.", imagePaths: [] }, exact,
         )).resolves.toBe(canSteer);

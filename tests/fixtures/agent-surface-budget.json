@@ -170,6 +170,12 @@
       "cursorKimi": 519,
       "opencode": 518
     },
+    "inertia_fork_history": {
+      "claude": 586,
+      "codex": 482,
+      "cursorKimi": 586,
+      "opencode": 586
+    },
     "inertia_list_conversations": {
       "claude": 477,
       "codex": 373,
@@ -183,10 +189,10 @@
       "opencode": 410
     },
     "inertia_request_context": {
-      "claude": 933,
-      "codex": 827,
-      "cursorKimi": 933,
-      "opencode": 933
+      "claude": 1021,
+      "codex": 915,
+      "cursorKimi": 1021,
+      "opencode": 1021
     },
     "inertia_list_models": {
       "claude": 536,
@@ -195,16 +201,22 @@
       "opencode": 536
     },
     "inertia_create_conversation": {
-      "claude": 1454,
-      "codex": 1348,
-      "cursorKimi": 1454,
-      "opencode": 1454
+      "claude": 1459,
+      "codex": 1353,
+      "cursorKimi": 1459,
+      "opencode": 1459
     },
     "inertia_send_message": {
-      "claude": 718,
-      "codex": 612,
-      "cursorKimi": 718,
-      "opencode": 718
+      "claude": 796,
+      "codex": 690,
+      "cursorKimi": 796,
+      "opencode": 796
+    },
+    "inertia_queue": {
+      "claude": 963,
+      "codex": 857,
+      "cursorKimi": 963,
+      "opencode": 963
     },
     "inertia_get_conversation_status": {
       "claude": 480,
@@ -241,6 +253,84 @@
       "codex": 378,
       "cursorKimi": 484,
       "opencode": 484
+    },
+    "inertia_delegate_task": {
+      "claude": 1824,
+      "codex": 1718,
+      "cursorKimi": 1824,
+      "opencode": 1824
+    },
+    "inertia_get_task_status": {
+      "claude": 421,
+      "codex": 317,
+      "cursorKimi": 421,
+      "opencode": 421
+    },
+    "inertia_wait_for_task": {
+      "claude": 492,
+      "codex": 388,
+      "cursorKimi": 492,
+      "opencode": 492
+    },
+    "inertia_cancel_task": {
+      "claude": 599,
+      "codex": 494,
+      "cursorKimi": 600,
+      "opencode": 599
+    },
+    "inertia_fork_conversation": {
+      "claude": 836,
+      "codex": 730,
+      "cursorKimi": 836,
+      "opencode": 836
+    },
+    "inertia_merge_back_fork": {
+      "claude": 530,
+      "codex": 424,
+      "cursorKimi": 530,
+      "opencode": 530
+    },
+    "inertia_configure_conversation": {
+      "claude": 1177,
+      "codex": 1071,
+      "cursorKimi": 1177,
+      "opencode": 1177
+    },
+    "inertia_search_messages": {
+      "claude": 673,
+      "codex": 569,
+      "cursorKimi": 673,
+      "opencode": 673
+    },
+    "inertia_read_conversation": {
+      "claude": 591,
+      "codex": 487,
+      "cursorKimi": 591,
+      "opencode": 591
+    },
+    "inertia_list_scheduled_tasks": {
+      "claude": 452,
+      "codex": 348,
+      "cursorKimi": 452,
+      "opencode": 452
+    },
+    "inertia_schedule_task": {
+      "claude": 1713,
+      "codex": 1607,
+      "cursorKimi": 1713,
+      "opencode": 1713
+    },
+    "inertia_delete_scheduled_task": {
+      "claude": 413,
+      "codex": 308,
+      "cursorKimi": 414,
+      "opencode": 413
+    },
+    "inertia_run_scheduled_task_now": {
+      "claude": 493,
+      "codex": 387,
+      "cursorKimi": 493,
+      "opencode": 493
     },
     "inertia_request_secret": {
       "claude": 1428,
@@ -306,7 +396,7 @@
   "instructions": {
     "inertia-cad": 433,
     "inertia-frontend-workbench": 541,
-    "inertia-orchestration": 748,
+    "inertia-orchestration": 900,
     "inertia-secrets": 318,
     "inertia-workspace": 509,
     "mcp-initialize:claude": 0,
@@ -314,24 +404,24 @@
   },
   "totals": {
     "claude": {
-      "withBrowser": 29793,
-      "withoutBrowser": 16796,
-      "withCad": 52157
+      "withBrowser": 41879,
+      "withoutBrowser": 28882,
+      "withCad": 64243
     },
     "codex": {
-      "withBrowser": 25632,
-      "withoutBrowser": 14417,
-      "withCad": 46847
+      "withBrowser": 36142,
+      "withoutBrowser": 24927,
+      "withCad": 57357
     },
     "cursorKimi": {
-      "withBrowser": 29727,
-      "withoutBrowser": 16720,
-      "withCad": 52092
+      "withBrowser": 41815,
+      "withoutBrowser": 28808,
+      "withCad": 64180
     },
     "opencode": {
-      "withBrowser": 29717,
-      "withoutBrowser": 16720,
-      "withCad": 52081
+      "withBrowser": 41803,
+      "withoutBrowser": 28806,
+      "withCad": 64167
     }
   }
 }

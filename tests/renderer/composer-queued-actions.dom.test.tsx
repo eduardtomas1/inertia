@@ -1,146 +1,177 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
+import type { ChatAttachment } from "../../src/shared/contracts";
+import type { MessageQueueResult } from "../../src/shared/queued-messages";
 import { ComposerQueuedActions } from "../../src/renderer/src/components/composer/ComposerQueuedActions";
 import {
+  composerMediaQueueKey,
   composerQueueKey,
-  enqueueComposerPrompt,
-  markComposerQueuedPromptDispatched,
   readComposerQueue,
 } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
-import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
+import type { QueueCommandRunner } from "../../src/renderer/src/components/composer/runtimeQueueClient";
 
 const conversationId = "40404040-4040-4040-8040-404040404040";
+const attachment: ChatAttachment = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "saved.png",
+  path: "11111111-1111-4111-8111-111111111111",
+  mimeType: "image/png",
+  size: 128,
+};
 
-type SendQueued = (content: string, attachments: unknown[]) => Promise<unknown>;
-
-function deferred(): { promise: Promise<unknown>; resolve: () => void; reject: (error: unknown) => void } {
-  let resolve!: () => void;
-  let reject!: (error: unknown) => void;
-  const promise = new Promise<unknown>((settle, fail) => {
-    resolve = () => settle(undefined);
-    reject = fail;
-  });
-  return { promise, resolve, reject };
-}
-
-function view(onSendQueued: SendQueued, overrides: Partial<Parameters<typeof ComposerQueuedActions>[0]> = {}) {
-  return (
-    <ComposerQueuedActions
-      conversationId={conversationId}
-      canSendQueuedNow
-      running={false}
-      latestTurnId="turn-1"
-      latestTurnStatus="completed"
-      latestTurnAuthoritative
-      queueHost={null}
-      onSendQueued={onSendQueued}
-      onReleaseAttachment={vi.fn(async () => undefined)}
-      {...overrides}
-    />
+function seedLegacyEntries(): void {
+  window.localStorage.setItem(
+    composerQueueKey(conversationId),
+    JSON.stringify([
+      {
+        id: "legacy-1",
+        content: "First legacy draft",
+        createdAt: "2026-08-21T10:00:00.000Z",
+        attachments: [],
+      },
+      {
+        id: "legacy-2",
+        content: "Second legacy draft",
+        createdAt: "2026-08-21T10:01:00.000Z",
+        attachments: [],
+      },
+    ]),
+  );
+  window.sessionStorage.setItem(
+    composerMediaQueueKey(conversationId),
+    JSON.stringify([
+      {
+        id: "legacy-media",
+        content: "Legacy draft with image",
+        createdAt: "2026-08-21T10:02:00.000Z",
+        attachments: [attachment],
+      },
+    ]),
   );
 }
 
-describe("ComposerQueuedActions dispatch bookkeeping", () => {
+describe("LegacySavedQueueSection explicit migration (Decision 4.5)", () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();
-    expect(enqueueComposerPrompt(conversationId, "Continue with the plan")).toBe(true);
+    seedLegacyEntries();
   });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("records the dispatch durably before the send crosses the boundary and removes it on success", async () => {
-    const pending = deferred();
-    const onSendQueued = vi.fn<SendQueued>(() => pending.promise);
-    render(view(onSendQueued));
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
-    // The reply is still pending: the persisted entry already carries the marker.
-    expect(readComposerQueue(conversationId)[0]?.dispatchedAt).toEqual(expect.any(String));
-    expect(screen.getByRole("button", { name: "Send queued message now" })).toBeDisabled();
-    expect(screen.getByRole("listitem")).toHaveTextContent(/Sending…$/u);
-    await act(async () => {
-      pending.resolve();
-      await pending.promise;
-    });
-    await waitFor(() => expect(readComposerQueue(conversationId)).toEqual([]));
-    expect(screen.queryByRole("list", { name: "Queued messages" })).toBeNull();
-  });
+  it("shows all legacy drafts under Saved from an earlier version and never sends automatically", async () => {
+    const onSendQueued = vi.fn(async () => undefined);
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async () => ({
+      kind: "message.queue",
+      conversationId,
+      entries: [],
+      receipt: null,
+    }));
 
-  it("restores automatic eligibility only when the runtime is known not to have accepted the send", async () => {
-    const onSendQueued = vi.fn<SendQueued>()
-      .mockRejectedValueOnce(new RuntimeCommandError("Rejected.", "rejected"))
-      .mockRejectedValueOnce(new RuntimeCommandError("Lost.", "ambiguous"));
-    const { rerender } = render(view(onSendQueued));
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
-    await waitFor(() => expect(readComposerQueue(conversationId)[0]?.dispatchedAt).toBeUndefined());
-    expect(screen.getByText("Queued")).toBeInTheDocument();
+    render(
+      <ComposerQueuedActions
+        conversationId={conversationId}
+        canSendQueuedNow
+        running={false}
+        latestTurnId="turn-1"
+        latestTurnStatus="completed"
+        latestTurnAuthoritative
+        queueHost={null}
+        onSendQueued={onSendQueued}
+        onQueueCommand={onQueueCommand}
+        onReleaseAttachment={vi.fn(async () => undefined)}
+      />,
+    );
 
-    // The next completed turn may send it again, and this time delivery is unknown.
-    rerender(view(onSendQueued, { latestTurnId: "turn-2" }));
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByText("Send unconfirmed")).toBeInTheDocument());
-    expect(readComposerQueue(conversationId)[0]?.dispatchedAt).toEqual(expect.any(String));
+    expect(screen.getByRole("region", { name: "Saved from an earlier version" })).toBeInTheDocument();
+    expect(screen.getByText("First legacy draft")).toBeInTheDocument();
+    expect(screen.getByText("Second legacy draft")).toBeInTheDocument();
+    expect(screen.getByText("Legacy draft with image")).toBeInTheDocument();
 
-    // Later completed turns never send an unconfirmed prompt automatically.
-    rerender(view(onSendQueued, { latestTurnId: "turn-3" }));
-    await act(async () => { await Promise.resolve(); });
-    expect(onSendQueued).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not automatically resend a prompt whose dispatch was interrupted before the reply", async () => {
-    // The previous renderer marked the prompt and was destroyed before the
-    // runtime replied; this renderer starts from storage alone.
-    const prompt = readComposerQueue(conversationId)[0]!;
-    expect(markComposerQueuedPromptDispatched(conversationId, prompt.id)).toBe(true);
-    const onSendQueued = vi.fn<SendQueued>(async () => undefined);
-    render(view(onSendQueued));
     await act(async () => { await Promise.resolve(); });
     expect(onSendQueued).not.toHaveBeenCalled();
-    expect(screen.getByText("Send unconfirmed")).toBeInTheDocument();
-    expect(screen.getByText("Send unconfirmed")).not.toHaveAttribute("title");
-    expect(screen.getByText("A previous send did not confirm. Check the transcript before sending again.")).toHaveClass("visually-hidden");
-    vi.useFakeTimers();
-    fireEvent.pointerEnter(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
-    act(() => { vi.advanceTimersByTime(500); });
-    expect(document.querySelector('[role="tooltip"]')).toHaveTextContent("A previous send did not confirm");
-    fireEvent.pointerLeave(screen.getByText("Send unconfirmed"), { pointerType: "mouse" });
-    act(() => { vi.advanceTimersByTime(500); });
-    vi.useRealTimers();
-
-    // An explicit send is the reconciliation the label asks for.
-    fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
-    await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
-    await waitFor(() => expect(readComposerQueue(conversationId)).toEqual([]));
+    expect(onQueueCommand.mock.calls.filter(([cmd]) => cmd.type !== "message.queue.get")).toHaveLength(0);
   });
 
-  it("does not send at all when the dispatch record cannot be persisted", async () => {
-    // A full or blocked storage: reads still see the queued prompt, writes fail.
-    const original = window.localStorage;
-    const key = composerQueueKey(conversationId);
-    const stored = original.getItem(key);
-    const quotaExceeded = (): never => { throw new Error("QuotaExceededError"); };
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      value: {
-        length: 0,
-        key: () => null,
-        getItem: (name: string) => (name === key ? stored : null),
-        setItem: quotaExceeded,
-        removeItem: quotaExceeded,
-        clear: () => undefined,
-      },
+  it("moves a legacy item to the runtime queue with a fresh UUID, removes it only after confirmed receipt, and keeps its attachments", async () => {
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.enqueue") {
+        return {
+          kind: "message.queue",
+          conversationId,
+          entries: [],
+          receipt: {
+            id: command.payload.id,
+            conversationId,
+            content: command.payload.content,
+            attachments: command.payload.attachments,
+            state: "waiting",
+            createdAt: "2026-11-26T00:00:00.000Z",
+            error: null,
+            turnId: null,
+            userMessageId: null,
+          },
+        };
+      }
+      return { kind: "message.queue", conversationId, entries: [], receipt: null };
     });
-    try {
-      const onSendQueued = vi.fn<SendQueued>(async () => undefined);
-      render(view(onSendQueued));
-      await act(async () => { await Promise.resolve(); });
-      expect(onSendQueued).not.toHaveBeenCalled();
-      expect(screen.getByRole("button", { name: "Send queued message now" })).toBeEnabled();
-      expect(screen.getByText("Queued")).toBeInTheDocument();
-    } finally {
-      Object.defineProperty(window, "localStorage", { configurable: true, value: original });
-    }
+
+    render(
+      <ComposerQueuedActions
+        conversationId={conversationId}
+        canSendQueuedNow
+        running={false}
+        latestTurnId="turn-1"
+        latestTurnStatus="completed"
+        queueHost={null}
+        onQueueCommand={onQueueCommand}
+        onReleaseAttachment={onReleaseAttachment}
+      />,
+    );
+
+    const moveMedia = screen.getByRole("button", { name: "Move saved draft 3 of 3 to queue" });
+    await act(async () => { fireEvent.click(moveMedia); });
+
+    await waitFor(() => expect(screen.queryByText("Legacy draft with image")).toBeNull());
+    const enqueueCall = onQueueCommand.mock.calls.find(([cmd]) => cmd.type === "message.queue.enqueue")?.[0];
+    expect(enqueueCall).toBeDefined();
+    expect((enqueueCall!.payload as { id: string }).id).not.toBe("legacy-media");
+    expect((enqueueCall!.payload as { attachments: ChatAttachment[] }).attachments).toEqual([attachment]);
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
+    expect(readComposerQueue(conversationId).map(({ id }) => id)).toEqual(["legacy-1", "legacy-2"]);
+  });
+
+  it("keeps the local entry when Move to queue fails and releases attachments on Discard", async () => {
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const onQueueCommand = vi.fn<QueueCommandRunner>(async (command) => {
+      if (command.type === "message.queue.enqueue") throw new Error("Queue is full.");
+      return { kind: "message.queue", conversationId, entries: [], receipt: null };
+    });
+
+    render(
+      <ComposerQueuedActions
+        conversationId={conversationId}
+        canSendQueuedNow
+        running={false}
+        latestTurnId="turn-1"
+        latestTurnStatus="completed"
+        queueHost={null}
+        onQueueCommand={onQueueCommand}
+        onReleaseAttachment={onReleaseAttachment}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Move saved draft 3 of 3 to queue" }));
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Queue is full.");
+    expect(readComposerQueue(conversationId)).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole("button", { name: "Discard saved draft 3 of 3" }));
+    await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledExactlyOnceWith(attachment.id));
+    expect(readComposerQueue(conversationId).map(({ id }) => id)).toEqual(["legacy-1", "legacy-2"]);
   });
 });

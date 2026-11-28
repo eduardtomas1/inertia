@@ -266,6 +266,7 @@ describe("runtime boundary helpers", () => {
       "opencode",
       "antigravity",
       "grok",
+      "pi",
     ]);
     expect(providers.every(({ canRun, installState, authState }) => !canRun && installState === "checking" && authState === "checking")).toBe(true);
     expect(providers.every(

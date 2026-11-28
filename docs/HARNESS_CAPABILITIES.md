@@ -105,6 +105,29 @@ does not use the allowance. Arguments that fail validation return
 tools. A Codex thread registers it from its next new provider
 thread.
 
+OpenCode cancels a host tool call at its MCP server's `timeout` with
+`notifications/cancelled`, and the host call is then cancelled too. The chat
+tools that wait for the user's approval or for another chat
+(`inertia_create_conversation`, `inertia_send_message`,
+`inertia_stop_conversation`, `inertia_archive_conversation`,
+`inertia_answer_question`, `inertia_delegate_task`, `inertia_wait_for_task`,
+`inertia_cancel_task` and `inertia_request_context`) are therefore served to OpenCode from a second
+server, `inertia-chat-waits`. Its timeout, 16 minutes, covers a five-minute
+approval followed by up to ten minutes of work (creating an isolated
+worktree, the five-minute context chooser, or a delegated wait), plus one
+minute. A 45-second delegated wait alone already outlasts the 30-second
+server. A delegated wait on OpenCode returns within 375 seconds of the call's
+start (the approval's five minutes, the 45-second wait and 30 seconds), so a
+slow approval or chat creation shortens the wait instead of losing the call.
+Every other tool keeps
+the 30-second server, and the secret request keeps its own server.
+`inertia_delegate_task` in wait mode that is cancelled after it created the
+child chat leaves no handle with the agent. If the agent then sends the same
+request again in the same turn, Inertia reuses that chat instead of creating a
+second one. A request with a `clientRequestId` replays through its key, as it
+does on every provider. The wait-for-chat tool above stays on the 30-second
+server and keeps its 20-second cap.
+
 ### Choosing a route
 
 `inertia_list_models` (pack revision 5) tells an agent which `route` values
@@ -202,7 +225,7 @@ provider call with the same identity finds the question answered and answers
 nothing again.
 
 The operation log's tool-name check gains `inertia_answer_question` in
-database schema 118, which rebuilds `agent_thread_operations` with every
+database schema 119, which rebuilds `agent_thread_operations` with every
 column, row and index unchanged.
 
 ### Send modes
@@ -241,6 +264,25 @@ running turn" or "Stop and restart a managed chat". A Codex thread registers
 `inertia_answer_question` and the `mode` field from its next new provider
 thread; a resumed thread keeps calling `inertia_send_message` without `mode`,
 which still means `auto`.
+
+The modes compose with the queue rows only the orchestrator keeps. Unread
+follow-ups (ones the child's provider accepted but never read, queued by
+reference when their turn settled) and a waiting delegated result count
+neither toward the limit of three for `queue` nor before its approval. `auto`
+on an idle child and `restart` start their turn directly, as on main: the turn
+is the operation's dispatch, linked to the child's delegated task and
+cancelled with a parent turn that fails, and the queue sends a waiting unread
+follow-up after it. Only the user's own direct send to an idle chat waits
+behind such a row. Until Phase 5 this differs from T3 Code, which puts an
+unread steer before a racing start. `restart` stops the turn through the same
+receipted agent Stop as `inertia_stop_conversation`, never cancels the queue's
+rows, and is refused before its approval, and again before the stop, while a
+checkout restore or a resumed provider terminal would keep the new turn from
+starting. Rolling back the turn that dropped a follow-up cancels only that
+follow-up's row. A queued send is not linked to a delegated task, since the
+queue owns the turn it starts.
+Pack revision 7 is revision 6 with these handler changes and the
+orchestrator's `inertia_fork_history` and delegated-task tools.
 
 ### Reading chat context
 
@@ -744,13 +786,13 @@ own compaction.
 
 Discovery refuses a Claude Code or OpenCode installation older than its
 security floor. The floors, the reason each one exists, Antigravity's ACP
-floor and the OpenCode 2 ceiling are defined together in
+floor and the OpenCode major-version ceiling are defined together in
 `src/server/provider/provider-version-floors.ts`.
 
 | Provider | Supported | Why |
 | --- | --- | --- |
 | Claude Code | 2.1.309 or newer | Inertia passes `managedSettings` with `disableAllHooks`, `disableSkillShellExecution` and `useAutoModeDuringPlan: false`, so plan-mode commands reach Inertia's approval instead of the auto mode classifier, which reviews them by default whenever auto mode is available; Claude Code before 2.1.309 dropped host-supplied managed settings, so those hook and skill-shell restrictions silently did not apply. 2.1.309 also carries the fixes for GHSA-5j29-h97v-84ch (a symlink race lets writes escape the project; fixed in 2.1.129) and GHSA-pq7j-f95f-qfcv (a plugin pinned-commit bypass; fixed in 2.1.179). |
-| OpenCode | 1.18.22 or newer, below 2 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 2 is not supported yet. |
+| OpenCode | 1.18.22 or newer, below 3 | GHSA-632h-h47v-g4x4: a cross-site request to `/global/upgrade` on `opencode serve` installs arbitrary packages (fixed in 1.18.22). The random basic-auth password Inertia gives its owned server reduces this risk but does not remove it. OpenCode 3 is not supported yet. |
 | Antigravity | 1.5.17 or newer | Built-in `agy acp` with project-cwd shell execution, specific turn errors, subagent approval and cleanup fixes, `session/load` replay fixes, proactive 1-hour OAuth refresh, and Enterprise non-workspace sensitive-file protection. |
 
 Below a security floor, discovery runs only the version probe. It never runs

@@ -14,6 +14,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "claude-agent-sdk": "Claude",
   "claude-cli": "Claude",
   "cursor-acp": "Cursor",
+  "cursor-sdk": "Cursor",
   "cursor-cli": "Cursor",
   "kimi-acp": "Kimi Code",
   "opencode-sdk": "OpenCode",
@@ -21,6 +22,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "antigravity-acp": "Antigravity",
   "antigravity-cli": "Antigravity",
   "grok-acp": "Grok",
+  "pi-rpc": "Pi",
 };
 
 const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {

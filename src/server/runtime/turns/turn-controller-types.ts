@@ -34,6 +34,13 @@ import type {
   ProviderRunResult,
   ProviderSteerInput,
 } from "../../provider/contracts";
+import type { ProviderSteerReadCallback } from "../../provider/types";
+
+declare module "../../provider/contracts" {
+  interface ProviderRunCallbacks {
+    onSteerRead?: ProviderSteerReadCallback;
+  }
+}
 import type { SubagentBackgroundResult, SubagentStopOutcome } from "../../provider/agent-harness";
 import type { AssembledTurnRequest, HiddenProviderInstruction, SanitizedTurnExecutionManifest } from "./request-context";
 import type { HarnessCapabilityTurnOffer } from "../harness-capabilities";
@@ -48,6 +55,7 @@ import type { TurnSecretOutputFilter } from "./turn-secret-output";
 import type { AuthoritativeRunStateEngine } from "../run-state-engine";
 import type { WatcherNoteAttribution } from "../../../shared/watcher";
 import type { DuoComparisonBrief } from "../../../shared/duo-comparison-brief";
+import type { CommandSource } from "../../orchestration-v2/types";
 
 export interface TurnTimerScheduler extends DeltaTimerScheduler {}
 
@@ -71,6 +79,7 @@ export interface TurnProviderRuntime {
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs?: number,
+    hooks?: { escalated?(): void },
   ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
   ownsRun(
@@ -222,6 +231,12 @@ export interface TurnControllerHooks {
     conversationId: string;
     attachmentIds: readonly string[];
   }): readonly string[];
+  /**
+   * Opens a synchronous check of missed runs' retained images for one turn, before its prompt carries them to the
+   * provider again (containment in the retained folder, a regular non-symlink file within the image limit). The
+   * check returns null to skip an image. Without this hook, or when it returns null, no missed image is carried.
+   */
+  missedRunImageCheck?(): ((input: { attachment: ChatAttachment }) => { path: string; size: number } | null) | null;
   releaseGeneratedAttachments?(paths: readonly string[]): void | Promise<void>;
   /**
    * Required orchestration. Durable owners provide recovery; the controller
@@ -260,6 +275,7 @@ export interface ReadOnlyWatcherTurn {
 export interface FollowUpSteerOptions {
   providerContent?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   queuedMessageId?: string;
 }
 
@@ -268,7 +284,14 @@ export interface TurnSettledEvidence {
 }
 
 export interface QueueTurnRequest {
+  /** Original validated ingress command for durable acknowledgement replay. */
+  orchestrationRequest?: CommandSource;
   queuedMessageId?: string;
+  /**
+   * Start the turn on this unread follow-up's persisted message instead of a new one (the queue row that names
+   * it is `queuedMessageId`).
+   */
+  adoptedFollowUp?: { messageId: string };
   limitResetPlanId?: string;
   restartContinuationPlanId?: string;
   conversationId: string;
@@ -279,6 +302,7 @@ export interface QueueTurnRequest {
   duoComparison?: DuoComparisonBrief;
   authorizedWatcherWakeId?: string;
   watcherNote?: WatcherNoteAttribution;
+  delegatedCompletion?: import("../../../shared/orchestration-delegation").DelegatedCompletionAttribution;
   content: string;
   attachments?: readonly ChatAttachment[];
   imagePaths?: readonly string[];
@@ -308,6 +332,27 @@ export interface QueueTurnRequest {
   goalStart?: {
     objective?: string;
     tokenBudget?: number | null;
+  };
+  /**
+   * Explicit per-item model selection carried by a queued message (Phase 5 Pkg 3).
+   * Resolved for this turn without mutating the user's live composer selection on
+   * `conversations`.
+   */
+  modelSelectionOverride?: ModelSelection | null;
+  /**
+   * Explicit stopped-turn native session ID carried by Resume (Phase 5 N7) so
+   * turn preparation validates and resumes the exact stopped session even after
+   * a mid-chat provider switch without an existing backing row.
+   */
+  resumeSessionId?: string | null;
+  /** Server-only scheduled task attribution, ceilings, and fresh-session flag. */
+  scheduledDelivery?: {
+    taskId: string;
+    runId: string;
+    title: string;
+    accessMode: Conversation["accessMode"];
+    interactionMode: Conversation["interactionMode"];
+    freshContext?: boolean;
   };
 }
 
@@ -360,6 +405,13 @@ export interface NativeGoalStartAcknowledgement {
 export interface ActiveTurn {
   diagnosticFailureCode?: "turn.inactivity-timeout" | "turn.lifetime-timeout";
   turn: AgentTurn;
+  /**
+   * The run's current V2 attempt, read when the provider starts and replaced
+   * by the in-run fresh-session fallback. Provider observations carry the
+   * attempt they were started under and write nothing once it is replaced.
+   * Null or absent for a run V2 never admitted.
+   */
+  attemptId?: string | null;
   conversation: Conversation;
   providerInput: ProviderRunInput;
   /**
@@ -388,6 +440,15 @@ export interface ActiveTurn {
   /** FIFO admission tail for parent follow-ups on this exact active turn. */
   followUpAdmissionTail: Promise<void>;
   supportsFollowUpImages: boolean;
+  /** Persisted follow-up message by the steer id its provider was given. */
+  followUpMessagesBySteerId?: Map<string, string>;
+  /**
+   * Follow-ups the provider accepted but never read (`ProviderRunResult.unreadFollowUps`). Settlement leaves
+   * them out of this run's coverage and queues each one by reference.
+   */
+  unreadFollowUpMessageIds?: readonly string[];
+  /** Why the provider itself stopped this turn without failing it (`ProviderRunResult.providerStopReason`). */
+  providerStopReason?: string;
   runState: AuthoritativeRunStateEngine;
   deferredSettlement: {
     status: AgentTurnTerminalStatus;
@@ -396,13 +457,31 @@ export interface ActiveTurn {
     failure?: ProviderRunFailure;
   } | null;
   providerStopStarted: boolean;
+  /**
+   * The provider reported, on its terminal status, that it dropped this turn's prompt before keeping it in its
+   * native history (`ProviderStatusEvent.promptDropped`). Settlement records the turn as not delivered.
+   */
+  providerPromptDropped?: true;
   sessionAfter: string | null;
   providerSessionTitle?: string;
+  /** This turn's restored history for native delivery; absent or null when it has none to deliver. */
+  nativeHistory?: AssembledTurnRequest["nativeHistory"] | null;
   freshSessionRequest?: ((excludedMessageId: string) => AssembledTurnRequest) | null;
+  /**
+   * The native sessions this turn's fresh start replaced (a rejected resume, an exhausted or rejected-history
+   * session, a session left in another checkout, a retired session). A fresh session that comes back under one of
+   * them is the old session with the restored history added: the turn fails and never adopts it (T3 d32df2d34).
+   */
+  replacedSessionIds?: readonly string[];
   lastUsage: AgentTurnUsageSnapshot | null;
   assistantText: string;
   assistantPendingHighSurrogate: string;
   assistantSegmentText: string;
+  /**
+   * Where each closed assistant segment ends in `assistantText`, in order. The final result maps onto them, so a
+   * harness that joins its messages with blank lines (Pi, Grok, OpenCode) corrects only the open segment.
+   */
+  closedAssistantSegmentEnds?: number[];
   assistantMessageId: string | null;
   latestAssistantMessageId: string | null;
   latestSecretCardAt?: string | null;

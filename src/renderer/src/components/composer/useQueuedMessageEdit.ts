@@ -170,7 +170,7 @@ export function useQueuedMessageEdit({
 
   const blockedReason = hasPendingQuestionOrApproval
     ? QUEUE_EDIT_PENDING_REQUEST_BLOCKED
-    : disabled || submitting || sending || conversationUpdatePending
+    : disabled || submitting || sending || conversationUpdatePending || saving
       ? QUEUE_EDIT_BUSY
       : null;
 

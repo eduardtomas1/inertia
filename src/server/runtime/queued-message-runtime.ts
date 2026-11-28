@@ -1092,8 +1092,7 @@ export function createQueuedMessageRuntime(
     const items = listQueueEntries(store, conversationId)
       .filter((entry) => entry.state === "waiting" && !entry.queueHeld && entry.steerWhenReadyRunId === runId);
     for (const item of items) {
-      db.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE id = ? AND conversation_id = ?")
-        .run(item.id, conversationId);
+      queue.clearSteerWhenReady({ conversationId, itemId: item.id });
       if (!turns.isActive(conversationId)) break;
       try {
         await sendDuringTurn(conversationId, item.id, queueDeferredSteerCommandId(item.id, runId, attemptId), { releaseHeld: false });
@@ -1173,6 +1172,9 @@ export function createQueuedMessageRuntime(
       sendOptions?: { textOnly?: boolean },
     ): Promise<void> => {
       await running.get(conversationId)?.catch(() => undefined);
+      if (isHeld()) throw new RuntimeRequestError(UPDATE_HOLD_MESSAGE);
+      if (store.conversationWork.restoreBlocksConversation(conversationId)) throw new RuntimeRequestError(CHECKOUT_RESTORE_IN_PROGRESS);
+      validateManualSendOperation(operationsContext, conversationId, id, QUEUED_DOCUMENTS_WAIT_FOR_TURN_END);
       if (turns.isActive(conversationId)) {
         await sendDuringTurn(conversationId, id, requestId, { releaseHeld: true, textOnly: sendOptions?.textOnly });
       } else {

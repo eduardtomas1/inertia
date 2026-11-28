@@ -249,10 +249,12 @@ export class SecretOutputRedactor {
    */
   private replaceTextSegment(event: ProviderTextSnapshotEvent): readonly ProviderEvent[] {
     const turn = this.turnStreams(event.turnId);
+    turn.text?.stripper.discard();
     turn.text?.boundary.discard();
     const { providerId, conversationId, runId, turnId } = event;
     const stream = turn.text = this.open<ProviderTextEvent>({ providerId, conversationId, runId, turnId, type: "text", text: "" });
-    return [{ ...event, text: stream.boundary.push(event.text) }];
+    const cleaned = stream.stripper.push(event.text);
+    return [{ ...event, text: cleaned ? stream.boundary.push(cleaned) : "" }];
   }
 
   private streamReasoning(event: ProviderReasoningEvent): readonly ProviderEvent[] {

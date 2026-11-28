@@ -750,6 +750,41 @@ export class OrchestrationQueueRepository {
     }).immediate();
   }
 
+  clearSteerWhenReady(input: { conversationId: string; runId?: string; itemId?: string }): string[] {
+    return this.database.transaction((): string[] => {
+      const conversation = this.access.conversation(input.conversationId);
+      const itemIds = this.listActive(conversation.id).filter((item) => item.steerWhenReadyRunId !== undefined
+        && (input.runId === undefined || item.steerWhenReadyRunId === input.runId)
+        && (input.itemId === undefined || item.id === input.itemId)).map(({ id }) => id);
+      const clearRows = () => {
+        if (input.itemId !== undefined) {
+          this.database.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE id = ? AND conversation_id = ?")
+            .run(input.itemId, conversation.id);
+        } else if (input.runId !== undefined) {
+          this.database.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE conversation_id = ? AND steer_when_ready_run_id = ?")
+            .run(conversation.id, input.runId);
+        } else {
+          this.database.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE conversation_id = ? AND steer_when_ready_run_id IS NOT NULL")
+            .run(conversation.id);
+        }
+      };
+      if (itemIds.length === 0) {
+        clearRows();
+        return [];
+      }
+      const commandType = "queue.clear-steer-when-ready";
+      const { identity, command } = this.commandContext(conversation, undefined,
+        `queue-clear-steer-when-ready:${this.events.revision(conversation.id)}`,
+        { type: commandType, conversationId: conversation.id, itemIds });
+      this.events.commit({
+        ...identity, command, commandType, expectedRevision: this.events.revision(conversation.id),
+        events: [{ type: "queue.steer-when-ready-cleared", payload: { itemIds } }],
+        result: { itemIds },
+      }, clearRows);
+      return itemIds;
+    }).immediate();
+  }
+
   block(input: QueueBlockInput): QueueMutationResult<QueueItemProjection> {
     return this.database.transaction((): QueueMutationResult<QueueItemProjection> => {
       const conversation = this.access.conversation(input.conversationId);

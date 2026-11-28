@@ -837,8 +837,7 @@ export function onTurnSettledOperation(
   const queue = store.orchestration.queue;
   const runControl = store.orchestration.runControl;
   const conversationId = turn.conversationId;
-  db.prepare("UPDATE queued_messages SET steer_when_ready_run_id = NULL WHERE conversation_id = ? AND steer_when_ready_run_id = ?")
-    .run(conversationId, turn.runId);
+  queue.clearSteerWhenReady({ conversationId, runId: turn.runId });
   let queueMutated = false;
 
   const target = runControl.target(turn.runId);

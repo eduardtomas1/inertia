@@ -120,14 +120,14 @@ export class LaunchSecretMatcher {
         return changed ? next : current;
       }
       let changed = false;
-      const next: Record<string, unknown> = {};
+      const next: [string, unknown][] = [];
       for (const [key, entry] of Object.entries(current)) {
         const maskedKey = this.mask(key);
         const visited = visit(entry, depth + 1);
         if (maskedKey !== key || visited !== entry) changed = true;
-        next[maskedKey] = visited;
+        next.push([maskedKey, visited]);
       }
-      return changed ? next : current;
+      return changed ? Object.fromEntries(next) : current;
     };
     return visit(value, 0) as T;
   }

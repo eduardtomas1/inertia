@@ -17,7 +17,10 @@ import {
 } from "../../src/server/orchestration-v2/types";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { orchestrationV2Migration } from "../../src/server/persistence/migrations/orchestration-v2";
-import { orchestrationV2ReceiptStatusMigration } from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
+import {
+  ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION,
+  orchestrationV2ReceiptStatusMigration,
+} from "../../src/server/persistence/migrations/orchestration-v2-receipt-status";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import { orchestrationAttemptSchema, orchestrationRunSchema, orchestrationThreadSchema } from "../../src/shared/orchestration-v2";
 import { RuntimeStartupBlockerError } from "../../src/shared/runtime-startup-diagnostics";
@@ -472,7 +475,7 @@ describe("Orchestrator V2 receipt status migration", () => {
     }
   });
 
-  it("is a no-op when migration 129 runs again", async () => {
+  it("is a no-op when the receipt status migration runs again", async () => {
     const runtime = await completedRuntime();
     const path = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
@@ -484,8 +487,13 @@ describe("Orchestrator V2 receipt status migration", () => {
     const beforeMetadata = metadata(db);
     const beforeReceipts = db.prepare("SELECT * FROM orchestration_v2_receipts ORDER BY actor_id, command_id").all();
     migrateReceiptStatus(db);
-    db.prepare("DELETE FROM schema_migrations WHERE version = 129").run();
+    const appliedAt = () => db.prepare("SELECT applied_at FROM schema_migrations WHERE version = ?")
+      .pluck().get(ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION);
+    const firstAppliedAt = appliedAt();
+    db.prepare("DELETE FROM schema_migrations WHERE version = ?").run(ORCHESTRATION_V2_RECEIPT_STATUS_SCHEMA_VERSION);
     migrateRuntimeDatabase(db);
+    expect(appliedAt()).toEqual(expect.any(String));
+    expect(appliedAt()).not.toBe(firstAppliedAt);
     expect(schema()).toEqual(beforeSchema);
     expect(metadata(db)).toEqual(beforeMetadata);
     expect(db.prepare("SELECT * FROM orchestration_v2_receipts ORDER BY actor_id, command_id").all()).toEqual(beforeReceipts);

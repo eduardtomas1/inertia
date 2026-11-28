@@ -234,6 +234,71 @@ describe("in-place queued message editing in Composer", () => {
     view.unmount();
   });
 
+  it("does not start another queued edit while a save is in flight, so the edit banner never stays stuck saving", async () => {
+    const current = conversation("80808080-8080-4080-8080-808080808086");
+    const first = makeEntry(current.id, 1, { content: "First queued" });
+    const second = makeEntry(current.id, 2, { content: "Second queued" });
+    let resolveEdit: (() => void) | null = null;
+    const run = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => {
+      if (command.type === "message.queue.edit") {
+        await new Promise<void>((resolve) => { resolveEdit = resolve; });
+      }
+      return { kind: "message.queue", conversationId: current.id, entries: [first, second], receipt: null };
+    });
+
+    render(<Composer {...composerProps(current, { running: true, latestTurn: runningTurn, onQueueCommand: run })} />);
+    const editFirst = await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
+    fireEvent.click(editFirst);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.change(input, { target: { value: "First edited" } });
+    const banner = screen.getByRole("region", { name: "Editing queued message" });
+    await act(async () => { fireEvent.click(within(banner).getByRole("button", { name: "Save" })); });
+    await waitFor(() => expect(resolveEdit).not.toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message 2 of 2" }));
+    expect(input).toHaveValue("First edited");
+
+    await act(async () => { resolveEdit!(); });
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Editing queued message" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Edit queued message 2 of 2" }));
+    const secondBanner = await screen.findByRole("region", { name: "Editing queued message" });
+    expect(input).toHaveValue("Second queued");
+    expect(within(secondBanner).getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
+
+  it("does not restore a released staged upload into the draft after switching conversations mid-edit", async () => {
+    const first = conversation("80808080-8080-4080-8080-808080808087");
+    const second = conversation("80808080-8080-4080-8080-808080808088");
+    const stagedImg = makeAttachment("82828282-8282-4282-8282-828282828287", "staged.png");
+    const item = makeEntry(first.id, 1, { content: "Queued with upload" });
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    const run = vi.fn<QueueCommandRunner>(async (command): Promise<MessageQueueResult> => ({
+      kind: "message.queue",
+      conversationId: (command.payload as { conversationId: string }).conversationId,
+      entries: (command.payload as { conversationId: string }).conversationId === first.id ? [item] : [],
+      receipt: null,
+    }));
+    const props = (current: typeof first) => composerProps(current, {
+      running: true,
+      latestTurn: runningTurn,
+      onQueueCommand: run,
+      onReleaseAttachment,
+      onImportAttachments: async () => makeLease([stagedImg]),
+    });
+
+    const view = render(<Composer {...props(first)} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 }));
+    fireEvent.paste(input, { clipboardData: { files: [new File(["png"], "staged.png", { type: "image/png" })] } });
+    await screen.findByRole("button", { name: "Remove attachment staged.png" });
+
+    view.rerender(<Composer {...props(second)} />);
+    await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledWith(stagedImg.id));
+    view.rerender(<Composer {...props(first)} />);
+    await screen.findByRole("button", { name: "Edit queued message" }, { timeout: 5_000 });
+    expect(screen.queryByRole("button", { name: "Remove attachment staged.png" })).toBeNull();
+  });
+
   it("routes prefill into the active edit without clobbering localStorage and enforces the N11 pending-request gate while allowing compaction", async () => {
     const current = conversation("80808080-8080-4080-8080-808080808085");
     const item = makeEntry(current.id, 1, { content: "Base edit" });

@@ -25,6 +25,7 @@ const MAX_DEVICE_CONNECTIONS = 2;
 const MAX_HTTP_CONNECTIONS = 128;
 const MAX_PAIRING_BODY_BYTES = 4 * 1024;
 const MAX_ADMISSION_BUCKETS = 128;
+const PAIRING_FAILURE_CALLER_SHARES = 2;
 const REQUEST_TIMEOUT_MS = 15_000;
 const RATE_WINDOW_MS = 60_000;
 const SERVICE_WORKER_PATH = "/service-worker.js";
@@ -58,6 +59,7 @@ export type PrivateConnectPairStatus =
 
 export interface PrivateConnectGatewayHost {
   pairingAllowed(stage: "start" | "status"): boolean;
+  pairingCapabilityLive(stage: "start" | "status", id: string): boolean;
   validHost?(host: string | undefined): boolean;
   pairStart(request: PrivateConnectPairStartRequest, networkLabel: string | null): Promise<{ requestId: string; expiresAt: string; comparisonCode: string }>;
   pairStatus(requestId: string, browserNonce: string): Promise<PrivateConnectPairStatus>;
@@ -98,7 +100,7 @@ export class PrivateConnectGatewayServer {
   private readonly socketSessions = new Map<WebSocket, PrivateConnectSession>();
   private readonly sessionAdmissions = new Map<string, number[]>();
   private readonly pairingAdmissions = new Map<string, number[]>();
-  private readonly pairingFailureAdmissions = new Map<string, Array<{ at: number; token: symbol }>>();
+  private readonly pairingFailureAdmissions = new Map<string, Array<{ at: number; caller: string; token: symbol }>>();
   private readonly inFlightBySession = new Map<string, number>();
 
   constructor(options: PrivateConnectGatewayServerOptions) {
@@ -375,7 +377,7 @@ export class PrivateConnectGatewayServer {
       this.writePairingRateLimited(response);
       return;
     }
-    const releaseFailureSlot = this.reserveFailedPairingSlot("start", caller);
+    const releaseFailureSlot = this.reserveFailedPairingSlot("start", invitation.data.invitationId, caller);
     if (!releaseFailureSlot) {
       this.writePairingRateLimited(response);
       return;
@@ -408,7 +410,7 @@ export class PrivateConnectGatewayServer {
       this.writePairingRateLimited(response);
       return;
     }
-    const releaseFailureSlot = this.reserveFailedPairingSlot("status", caller);
+    const releaseFailureSlot = this.reserveFailedPairingSlot("status", body.requestId, caller);
     if (!releaseFailureSlot) {
       this.writePairingRateLimited(response);
       return;
@@ -614,18 +616,6 @@ export class PrivateConnectGatewayServer {
     return address ? `ip:${address}` : "ip:unknown";
   }
 
-  private failedPairingBucketKey(stage: "start" | "status", caller: string, now: number): string {
-    const key = `pair-failed-${stage}:${caller}`;
-    if (this.pairingFailureAdmissions.has(key)) return key;
-    if (this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS - 2) {
-      this.pruneFailureAdmissions(now - RATE_WINDOW_MS);
-      if (this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS - 2) {
-        return `pair-failed-overflow:${stage}`;
-      }
-    }
-    return key;
-  }
-
   private pruneFailureAdmissions(cutoff: number): void {
     for (const [key, entries] of this.pairingFailureAdmissions) {
       const active = entries.filter((entry) => entry.at > cutoff);
@@ -655,18 +645,15 @@ export class PrivateConnectGatewayServer {
     );
   }
 
-  /**
-   * Synchronously reserves a caller failure slot before awaiting host verification
-   * so overlapping floods cannot exceed the verification limit; call the returned
-   * releaser once verification succeeds so valid requests spend zero failure quota.
-   */
-  private reserveFailedPairingSlot(stage: "start" | "status", caller: string): (() => void) | null {
+  private reserveFailedPairingSlot(stage: "start" | "status", id: string, caller: string): (() => void) | null {
+    if (!this.host.pairingCapabilityLive(stage, id)) return () => undefined;
     const now = this.now().getTime();
     const cutoff = now - RATE_WINDOW_MS;
-    const key = this.failedPairingBucketKey(stage, caller, now);
+    const key = `pair-failed-${stage}:${id}`;
     const limit = this.pairingLimitFor(stage);
     const active = (this.pairingFailureAdmissions.get(key) ?? []).filter((entry) => entry.at > cutoff);
-    if (active.length >= limit) {
+    if (active.length >= limit * PAIRING_FAILURE_CALLER_SHARES
+      || active.filter((entry) => entry.caller === caller).length >= limit) {
       if (active.length > 0) this.pairingFailureAdmissions.set(key, active);
       else this.pairingFailureAdmissions.delete(key);
       return null;
@@ -676,7 +663,7 @@ export class PrivateConnectGatewayServer {
       if (this.pairingFailureAdmissions.size >= MAX_ADMISSION_BUCKETS) return null;
     }
     const token = Symbol("pair-failure-slot");
-    active.push({ at: now, token });
+    active.push({ at: now, caller, token });
     this.pairingFailureAdmissions.set(key, active);
     let released = false;
     return () => {

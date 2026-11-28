@@ -1,6 +1,6 @@
-import { lstat, mkdtemp, rm, unlink } from "node:fs/promises";
+import { lstat, mkdtemp, realpath, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { AgentTurn, CheckpointSummary } from "../../shared/contracts";
 import type { RollbackFiles } from "../../shared/orchestration-history";
@@ -132,7 +132,7 @@ function sharedElsewhere(store: RuntimeStore, conversationId: string, scope: Rec
 
 async function withSnapshot<T>(repositoryPath: string, conversationId: string, storage: string, deadlineAt: number,
   inspect: (ref: string) => Promise<T>): Promise<T> {
-  const current = await createCheckpoint(repositoryPath, storage, conversationId, { deadlineAt });
+  const current = await createCheckpoint(repositoryPath, storage, conversationId, { deadlineAt, phase: "other" });
   try { return await inspect(current.ref); }
   finally { await deleteCheckpoint(repositoryPath, current.ref, conversationId).catch(() => undefined); }
 }
@@ -249,9 +249,11 @@ async function removeCreated(repositoryPath: string, paths: readonly string[], d
   const removed: string[] = [];
   for (const path of paths) {
     try {
-      const [entry] = await validatedEntryPaths(root, [path], options);
-      const target = resolve(root, entry!);
+      const [entry] = await validatedEntryPaths(workspace, [path], options);
+      const target = resolve(workspace, entry!);
       if (!isContained(root, target) || !isContained(workspace, target) || target === workspace) continue;
+      const canonicalParent = await realpath(dirname(target));
+      if (!isContained(root, canonicalParent) || !isContained(workspace, canonicalParent)) continue;
       if (!(await lstat(target)).isFile()) continue;
       await unlink(target);
       removed.push(path);

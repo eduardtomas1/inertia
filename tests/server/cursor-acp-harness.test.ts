@@ -1895,4 +1895,114 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }))).resolves.toMatchObject({ status: "failed" });
     expect(manager.activeConversationIds()).toEqual([]);
   });
+
+  it("fails closed with protocol-overflow when approval, question or plan budgets are exceeded", async () => {
+    for (const mode of ["approval", "question", "plan"] as const) {
+      const root = portableFixtureRoot(`cursor ACP ${mode} overflow`);
+      roots.push(root);
+      const command = portableNodeExecutable(root, "cursor-agent");
+      const flood = mode === "approval"
+        ? `
+    for (let i = 1; i <= 65; i += 1) {
+      send({
+        jsonrpc: "2.0",
+        id: 1000 + i,
+        method: "session/request_permission",
+        params: {
+          sessionId: "cursor-flood",
+          toolCall: { toolCallId: "call_" + i, title: "Request " + i, kind: "execute" },
+          options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+        },
+      });
+    }`
+        : mode === "question"
+        ? `
+    for (let i = 1; i <= 65; i += 1) {
+      send({
+        jsonrpc: "2.0",
+        id: 1000 + i,
+        method: "cursor/ask_question",
+        params: {
+          toolCallId: "qcall_" + i,
+          questions: [{ id: "q_" + i, prompt: "Choose " + i, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }],
+        },
+      });
+    }`
+        : `
+    for (let i = 1; i <= 65; i += 1) {
+      send({
+        jsonrpc: "2.0",
+        id: 1000 + i,
+        method: "cursor/create_plan",
+        params: { toolCallId: "plan_" + i, plan: "Plan " + i, todos: [] },
+      });
+    }`;
+      writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-flood", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {${flood}
+    setTimeout(() => {
+      send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "cursor-flood", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Completed despite overflow" } } } });
+      send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+    }, 100);
+  }
+});
+`);
+      const manager = ProviderManager.createForTests(
+        { commands: { cursor: command } },
+        new AgentHarnessRegistry([createCursorAcpHarness()]),
+      );
+      await expect(manager.run(nativeProviderRunInput({
+        providerId: "cursor",
+        conversationId: `cursor-flood-${mode}`,
+        cwd: root,
+        prompt: "Flood",
+        interactionMode: "build",
+        access: "supervised",
+      }))).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "protocol-overflow" },
+      });
+    }
+  });
+
+  it("rejects empty or control-character session IDs from session/new before emitting session events", async () => {
+    for (const badId of ["", "bad\u0000id"]) {
+      const root = portableFixtureRoot(`cursor ACP invalid session id ${badId.length}`);
+      roots.push(root);
+      const command = portableNodeExecutable(root, "cursor-agent");
+      writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Cursor", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: ${JSON.stringify(badId)}, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+});
+`);
+      const manager = ProviderManager.createForTests(
+        { commands: { cursor: command } },
+        new AgentHarnessRegistry([createCursorAcpHarness()]),
+      );
+      const events: string[] = [];
+      await expect(manager.run(nativeProviderRunInput({
+        providerId: "cursor",
+        conversationId: `cursor-bad-session-${badId.length}`,
+        cwd: root,
+        prompt: "Hello",
+        interactionMode: "build",
+        access: "supervised",
+      }), { onEvent: (event) => events.push(event.type) })).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "malformed-protocol" },
+      });
+      expect(events).not.toContain("session");
+    }
+  });
 });

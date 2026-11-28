@@ -178,6 +178,9 @@ export class MergeBackRepository {
       if (merge.turnIds.some((turnId) => this.history.rolledBack(turnId)) || this.history.rolledBack(merge.forkSourceTurnId)) {
         throw new MergeBackError("This merge-back includes fork work that was rolled back. Remove it and merge back again.");
       }
+      if (merge.baseTurnId !== (this.lastDelivered(merge.forkThreadId, merge.parentThreadId)?.throughTurnId ?? null)) {
+        throw new MergeBackError("This merge-back no longer follows the fork's last delivered findings. Remove it and merge back again.");
+      }
     }
   }
 

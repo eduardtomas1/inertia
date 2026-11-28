@@ -1541,4 +1541,88 @@ setInterval(() => {}, 1000);
     expect(captured.some(({ method }) => method === "session/cancel")).toBe(false);
     expect(captured.some(({ method }) => method === "session/prompt")).toBe(false);
   });
+
+  it("fails closed with protocol-overflow when approval budgets are exceeded", async () => {
+    const root = portableFixtureRoot("kimi ACP approval overflow");
+    roots.push(root);
+    const command = portableNodeExecutable(root, "kimi");
+    writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "kimi-flood", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    for (let i = 1; i <= 65; i += 1) {
+      send({
+        jsonrpc: "2.0",
+        id: 1000 + i,
+        method: "session/request_permission",
+        params: {
+          sessionId: "kimi-flood",
+          toolCall: { toolCallId: "call_" + i, title: "Request " + i, kind: "execute" },
+          options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+        },
+      });
+    }
+    setTimeout(() => {
+      send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "kimi-flood", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Completed despite overflow" } } } });
+      send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+    }, 100);
+  }
+});
+`);
+    const manager = ProviderManager.createForTests(
+      { commands: { kimi: command } },
+      new AgentHarnessRegistry([createKimiAcpHarness()]),
+    );
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "kimi",
+      conversationId: "kimi-flood",
+      cwd: root,
+      prompt: "Flood",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: true,
+      failure: { reason: "protocol-overflow", terminalEvent: "transport/frame" },
+    });
+  });
+
+  it("rejects empty or control-character session IDs from session/new before emitting session events", async () => {
+    for (const badId of ["", "bad\u0000id"]) {
+      const root = portableFixtureRoot(`kimi ACP invalid session id ${badId.length}`);
+      roots.push(root);
+      const command = portableNodeExecutable(root, "kimi");
+      writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: ${JSON.stringify(badId)}, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+});
+`);
+      const manager = ProviderManager.createForTests(
+        { commands: { kimi: command } },
+        new AgentHarnessRegistry([createKimiAcpHarness()]),
+      );
+      const events: string[] = [];
+      await expect(manager.run(nativeProviderRunInput({
+        providerId: "kimi",
+        conversationId: `kimi-bad-session-${badId.length}`,
+        cwd: root,
+        prompt: "Hello",
+        interactionMode: "build",
+        access: "supervised",
+      }), { onEvent: (event) => events.push(event.type) })).resolves.toMatchObject({
+        status: "failed",
+        cleanupConfirmed: true,
+        failure: { reason: "malformed-protocol" },
+      });
+      expect(events).not.toContain("session");
+    }
+  });
 });

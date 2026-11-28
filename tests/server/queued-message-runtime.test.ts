@@ -33,7 +33,8 @@ import {
 import { hold, release } from "../../src/server/runtime/update-hold";
 import { createTurnInteractionCommandHandler } from "../../src/server/runtime/commands/turn-interaction-commands";
 import { requestAgentStop } from "../../src/server/runtime/commands/agent-stop-command";
-import { NATIVE_RESUME_TEXT, PROMPTED_RESUME_TEXT } from "../../src/server/runtime/queued-message-runtime-helpers";
+import { listQueueEntries, NATIVE_RESUME_TEXT, PROMPTED_RESUME_TEXT } from "../../src/server/runtime/queued-message-runtime-helpers";
+import { reconcileQueueOnBoot } from "../../src/server/runtime/queue-boot-reconciliation";
 import { watcherNoteDelivery } from "../../src/server/runtime/watcher/watcher-note-instruction";
 import { MAX_UNREAD_FOLLOW_UP_ROWS, messageQueueResultSchema } from "../../src/shared/queued-messages";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
@@ -387,6 +388,38 @@ describe("Send now while the agent works", () => {
 });
 
 describe("durable runtime message queue", () => {
+  const steerWhenReady = (f: Awaited<ReturnType<typeof fixture>>, id: string) => ({
+    projected: f.store.orchestration.queue.getItem(id)?.steerWhenReadyRunId,
+    listed: listQueueEntries(f.store, f.conversationId).find((entry) => entry.id === id)?.steerWhenReadyRunId,
+  });
+
+  it("clears a deferred steer's run from the queue projection when that run settles", async () => {
+    const f = await fixture();
+    try {
+      const [initial, id] = [startRunning(f), randomUUID()];
+      f.store.orchestration.queue.enqueue({ conversationId: f.conversationId, itemId: id, content: "Steer when ready",
+        steerWhenReadyRunId: initial.turn.runId, queueHeld: true });
+      expect(steerWhenReady(f, id)).toEqual({ projected: initial.turn.runId, listed: initial.turn.runId });
+      f.provider.resolve({ status: "failed" });
+      await f.drain();
+      expect(steerWhenReady(f, id)).toEqual({ projected: undefined, listed: null });
+    } finally { await f.close(); }
+  });
+
+  it("clears deferred steers from the queue projection on promotion and at boot", async () => {
+    const f = await fixture();
+    try {
+      const [promoted, stale, runId] = [randomUUID(), randomUUID(), randomUUID()];
+      for (const [id, steerWhenReadyRunId] of [[promoted, runId], [stale, randomUUID()]] as const) {
+        f.store.orchestration.queue.enqueue({ conversationId: f.conversationId, itemId: id, content: "Steer when ready", steerWhenReadyRunId });
+      }
+      await f.queue.promoteDeferredSteers(f.conversationId, runId, randomUUID());
+      expect([steerWhenReady(f, promoted), steerWhenReady(f, stale).listed]).toEqual([{ projected: undefined, listed: null }, expect.any(String)]);
+      await reconcileQueueOnBoot(f.store);
+      expect(steerWhenReady(f, stale)).toEqual({ projected: undefined, listed: null });
+    } finally { await f.close(); }
+  });
+
   it("keeps queued messages waiting while the chat compacts and sends them when compaction ends", async () => {
     const f = await fixture();
     try {

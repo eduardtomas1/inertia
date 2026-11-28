@@ -1,5 +1,6 @@
 import type { Stats } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
+import { inflateRawSync } from "node:zlib";
 
 import { MAX_DOCUMENT_ARCHIVE_EXPANDED_BYTES } from "../node/document-text-errors.js";
 import { readBoundedDocumentArchive } from "../node/document-text-zip.js";
@@ -430,6 +431,7 @@ function validateCentralDirectoryExpandedBudget(bytes: Buffer): void {
   const directoryOffset = bytes.readUInt32LE(eocdOffset + 16);
   let cursor = directoryOffset;
   let totalUncompressedBytes = 0;
+  const entries: { method: number; compressedSize: number; uncompressedSize: number; localOffset: number }[] = [];
   for (let index = 0; index < totalEntries; index += 1) {
     if (cursor + 46 > eocdOffset || bytes.readUInt32LE(cursor) !== CENTRAL_HEADER_SIGNATURE) {
       throw new Error("The workspace spreadsheet archive is malformed.");
@@ -442,7 +444,45 @@ function validateCentralDirectoryExpandedBudget(bytes: Buffer): void {
     if (totalUncompressedBytes > MAX_DOCUMENT_ARCHIVE_EXPANDED_BYTES) {
       throw new Error("The workspace spreadsheet archive exceeds expanded size limits.");
     }
+    entries.push({
+      method: bytes.readUInt16LE(cursor + 10),
+      compressedSize: bytes.readUInt32LE(cursor + 20),
+      uncompressedSize,
+      localOffset: bytes.readUInt32LE(cursor + 42),
+    });
     cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  for (const entry of entries) {
+    if (
+      entry.localOffset + 30 > directoryOffset
+      || bytes.readUInt32LE(entry.localOffset) !== ZIP_LOCAL_HEADER_SIGNATURE.readUInt32LE(0)
+    ) {
+      throw new Error("The workspace spreadsheet archive is malformed.");
+    }
+    const dataStart = entry.localOffset + 30
+      + bytes.readUInt16LE(entry.localOffset + 26)
+      + bytes.readUInt16LE(entry.localOffset + 28);
+    const dataEnd = dataStart + entry.compressedSize;
+    if (dataEnd > directoryOffset) {
+      throw new Error("The workspace spreadsheet archive is malformed.");
+    }
+    let expandedSize: number;
+    if (entry.method === 0) {
+      expandedSize = entry.compressedSize;
+    } else if (entry.method === 8) {
+      try {
+        expandedSize = inflateRawSync(bytes.subarray(dataStart, dataEnd), {
+          maxOutputLength: entry.uncompressedSize + 1,
+        }).byteLength;
+      } catch {
+        throw new Error("The workspace spreadsheet archive is malformed.");
+      }
+    } else {
+      throw new Error("The workspace spreadsheet archive is malformed.");
+    }
+    if (expandedSize !== entry.uncompressedSize) {
+      throw new Error("The workspace spreadsheet archive is malformed.");
+    }
   }
 }
 

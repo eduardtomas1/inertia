@@ -119,6 +119,7 @@ export function detachedChatCommandRejection(
     case "message.queue.edit":
     case "message.queue.reconfirm":
     case "message.queue.stop-and-send":
+    case "message.queue.resume":
     case "conversation.background-tasks.get":
     case "activity.detail.read":
     case "conversation.settle":

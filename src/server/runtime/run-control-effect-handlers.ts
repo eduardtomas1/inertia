@@ -9,15 +9,27 @@ interface PendingSteerTask {
   reject: (error: unknown) => void;
 }
 
-const pendingSteers = new Map<string, PendingSteerTask>();
+interface RunControlState {
+  pendingSteers: Map<string, PendingSteerTask>;
+  pendingSteerWaiters: Map<string, (task: PendingSteerTask | null) => void>;
+}
+
+const STEER_ATTACH_WAIT_MS = 50;
+const stateByStore = new WeakMap<RuntimeStore, RunControlState>();
 const interruptOutcomes = new Map<string, "cancelled" | "ended">();
 
-/**
- * Hands an in-process steer invocation to the `provider.steer` effect handler so
- * raw prompt text and attachments never enter the V2 event log or effect payload (N17),
- * while execution still flows through `OrchestrationEffectDispatcher` in per-thread order.
- * When no `provider.steer` effect runtime is active (e.g. direct unit tests), runs `work` directly.
- */
+function stateForStore(store: RuntimeStore): RunControlState {
+  let state = stateByStore.get(store);
+  if (!state) {
+    state = {
+      pendingSteers: new Map(),
+      pendingSteerWaiters: new Map(),
+    };
+    stateByStore.set(store, state);
+  }
+  return state;
+}
+
 export async function executeSteerViaEffectRuntime<T>(
   store: RuntimeStore,
   effectId: string | null,
@@ -26,12 +38,28 @@ export async function executeSteerViaEffectRuntime<T>(
   if (!effectId || !store.orchestration.runControl.dispatchesViaEffectRuntime("provider.steer")) {
     return await work();
   }
+  const steer = store.orchestration.runControl.steer(effectId);
+  const effect = store.orchestration.effects.get(effectId);
+  if (
+    steer?.state === "settled"
+    || (effect !== null && effect.state !== "pending" && effect.state !== "running")
+  ) {
+    throw new Error("The steer effect was already settled before execution attached.");
+  }
+  const state = stateForStore(store);
   return await new Promise<T>((resolve, reject) => {
-    pendingSteers.set(effectId, {
+    const task: PendingSteerTask = {
       run: () => work(),
       resolve: (value) => resolve(value as T),
       reject,
-    });
+    };
+    const waiter = state.pendingSteerWaiters.get(effectId);
+    if (waiter) {
+      state.pendingSteerWaiters.delete(effectId);
+      waiter(task);
+      return;
+    }
+    state.pendingSteers.set(effectId, task);
   });
 }
 
@@ -52,6 +80,8 @@ export function registerRunControlEffectHandlers(
 ): () => void {
   const { effects, store, turns } = dependencies;
   const runControl = store.orchestration.runControl;
+  const state = stateForStore(store);
+  const recordedInterruptEffects = new Set<string>();
   runControl.attachEffectRuntime(effects);
 
   const unregisterInterrupt = effects.register("provider.interrupt", async (payload, context) => {
@@ -70,24 +100,40 @@ export function registerRunControlEffectHandlers(
       throw error;
     }
     interruptOutcomes.set(context.effectId, cancelled ? "cancelled" : "ended");
+    recordedInterruptEffects.add(context.effectId);
     if (!cancelled) {
       runControl.settleInterrupt(payload.runId, "settled");
     }
   });
 
   const unregisterSteer = effects.register("provider.steer", async (_payload, context) => {
-    let task = pendingSteers.get(context.effectId);
-    if (!task) {
-      // Allow a caller that committed `requestSteer` and registered its task synchronously on the next turn to attach.
-      await new Promise<void>((resolve) => queueMicrotask(resolve));
-      task = pendingSteers.get(context.effectId);
+    let task = state.pendingSteers.get(context.effectId);
+    if (task) {
+      state.pendingSteers.delete(context.effectId);
+    } else if (!context.signal.aborted) {
+      task = await new Promise<PendingSteerTask | undefined>((resolve) => {
+        let done = false;
+        const finish = (attached: PendingSteerTask | null): void => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          context.signal.removeEventListener("abort", onAbort);
+          if (state.pendingSteerWaiters.get(context.effectId) === finish) {
+            state.pendingSteerWaiters.delete(context.effectId);
+          }
+          resolve(attached ?? undefined);
+        };
+        const onAbort = (): void => finish(null);
+        const timer = setTimeout(() => finish(null), STEER_ATTACH_WAIT_MS);
+        timer.unref?.();
+        context.signal.addEventListener("abort", onAbort, { once: true });
+        state.pendingSteerWaiters.set(context.effectId, finish);
+      });
     }
     if (!task) {
-      // Process-bound steer with no live caller (e.g. interrupted by restart): never replay.
       runControl.settleSteer(context.effectId, "unconfirmed");
       return;
     }
-    pendingSteers.delete(context.effectId);
     try {
       const value = await task.run();
       task.resolve(value);
@@ -100,5 +146,12 @@ export function registerRunControlEffectHandlers(
     unregisterInterrupt();
     unregisterSteer();
     runControl.attachEffectRuntime(null);
+    for (const waiter of state.pendingSteerWaiters.values()) waiter(null);
+    state.pendingSteerWaiters.clear();
+    const stopped = new Error("The orchestration effect runtime was stopped before the steer executed.");
+    for (const pending of state.pendingSteers.values()) pending.reject(stopped);
+    state.pendingSteers.clear();
+    for (const effectId of recordedInterruptEffects) interruptOutcomes.delete(effectId);
+    recordedInterruptEffects.clear();
   };
 }

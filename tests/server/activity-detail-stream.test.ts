@@ -88,6 +88,9 @@ describe("history previews", () => {
         { id: "non-ascii", kind: "command", detail: `${"é".repeat(1_500)}😀${"z".repeat(4_000)}\nError:\nutf8` },
         { id: "surrogate-cut", kind: "command", detail: `${"a".repeat(ACTIVITY_DETAIL_PREVIEW_CHARS - 1)}😀${"b".repeat(3_000)}` },
         { id: "nul-before-error", kind: "command", detail: `${"a".repeat(3_000)}\0\nError:\nkept after nul` },
+        { id: "short-multibyte-at-byte-boundary", kind: "status", detail: `${"s".repeat(ACTIVITY_DETAIL_PREVIEW_CHARS - 2)}€` },
+        { id: "nul-after-multibyte-prefix", kind: "status", detail: `${"€".repeat(683)}\0kept after nul` },
+        { id: "nul-after-multibyte-prefix-long", kind: "status", detail: `${"€".repeat(683)}\0${"t".repeat(3_000)}` },
       ];
       const insert = db.prepare(`
         INSERT INTO activities (id, conversation_id, run_id, turn_id, kind, title, detail, status, created_at)

@@ -157,6 +157,22 @@ describe("deferred native history rollback", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("reports the next run's settled head once it settles after the rollback cursor", async () => {
+    const runtime = await createTurnControllerTestRuntime();
+    try {
+      const first = await finish(runtime, "first");
+      await finish(runtime, "second");
+      const deps = dependencies(runtime, async (request) => completed(request, "resume-cursor",
+        { nativeConversationId: "source-native", headId: "first", persistedHeadId: "second", continuation: cursor }));
+      await expect(rollback(runtime, deps, first.id)).resolves.toMatchObject({ transfer: "native" });
+      const third = await finish(runtime, "third");
+      const state = runtime.store.orchestration.history.cursor(runtime.conversationId)!;
+      expect(state).toMatchObject({ continuationState: "consumed", runId: third.runId });
+      expect(runtime.store.orchestration.history.physicalHead({ threadId: runtime.conversationId,
+        providerInstanceId: state.providerInstanceId!, nativeConversationId: "source-native" })).toBe("third");
+    } finally { runtime.store.close(); }
+  });
+
   it("treats an unacknowledged dispatched cursor as uncertain and continues from portable retained history", async () => {
     const runtime = await createTurnControllerTestRuntime();
     try {

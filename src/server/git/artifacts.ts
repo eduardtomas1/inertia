@@ -317,7 +317,7 @@ export async function compareGitSnapshots(
   const beforeRef = validateArtifactRef(beforeReference);
   const afterRef = validateArtifactRef(afterReference);
   const paths = options.paths
-    ? await validatedPaths(root, options.paths, {
+    ? await validatedPaths(await canonicalDirectoryPath(repositoryPath, options), options.paths, {
         deadlineAt: options.deadlineAt,
         signal: options.signal,
       })
@@ -448,16 +448,17 @@ export async function listIndexedGitPaths(
 ): Promise<Set<string>> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return new Set();
-  const root = await repositoryRoot(repositoryPath, options);
+  await repositoryRoot(repositoryPath, options);
+  const workspace = await canonicalDirectoryPath(repositoryPath, options);
   const indexed = new Set<string>();
   for (let offset = 0; offset < unique.length; offset += MAX_DIFF_FILES) {
     const batch = await validatedEntryPaths(
-      root,
+      workspace,
       unique.slice(offset, offset + MAX_DIFF_FILES),
       options,
     );
     const listed = await runGitInspection(
-      root,
+      workspace,
       ["ls-files", "-z", "--", ...literalPathspecs(batch)],
       {
         deadlineAt: options.deadlineAt,

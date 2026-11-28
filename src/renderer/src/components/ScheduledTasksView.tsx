@@ -216,6 +216,9 @@ export function ScheduledTasksView({
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement | null>());
   const restoreDeleteFocusIdRef = useRef<string | null>(null);
+  const formReturnFocusRef = useRef<HTMLElement | null>(null);
+  const newScheduleButtonRef = useRef<HTMLButtonElement>(null);
+  const focusAfterDeleteRef = useRef(false);
   const loadSeqRef = useRef(0);
 
   const [summaries, setSummaries] = useState<ScheduledTaskSummary[]>([]);
@@ -288,7 +291,24 @@ export function ScheduledTasksView({
     }
   }, [confirmDeleteId]);
 
+  useEffect(() => {
+    if (formOpen) return;
+    const target = formReturnFocusRef.current;
+    formReturnFocusRef.current = null;
+    const active = document.activeElement;
+    if (target?.isConnected && (active === null || active === document.body)) target.focus();
+  }, [formOpen]);
+
+  useEffect(() => {
+    if (!focusAfterDeleteRef.current) return;
+    focusAfterDeleteRef.current = false;
+    const active = document.activeElement;
+    if (active === null || active === document.body) newScheduleButtonRef.current?.focus();
+  }, [summaries]);
+
   const openForm = useCallback((nextDraft: FormDraft): void => {
+    const active = document.activeElement;
+    formReturnFocusRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
     setDraft(nextDraft);
     setFormError(null);
     setFormOpen(true);
@@ -410,6 +430,7 @@ export function ScheduledTasksView({
       if (res.type === "request.error") throw new Error(res.message);
       setSummaries((cur) => cur.filter((entry) => entry.task.id !== task.id));
       setConfirmDeleteId((cur) => (cur === task.id ? null : cur));
+      focusAfterDeleteRef.current = true;
       setAnnouncement(`Deleted schedule ${task.title}.`);
     });
   }, [request, runTaskAction]);
@@ -437,7 +458,7 @@ export function ScheduledTasksView({
           <IconButton label="Refresh" disabled={offline || loading} onClick={() => { void loadTasks(); }}>
             <RefreshCw size={16} aria-hidden="true" />
           </IconButton>
-          <button type="button" className="secondary-button" disabled={offline || projects.length === 0} onClick={openCreateForm}>
+          <button ref={newScheduleButtonRef} type="button" className="secondary-button" disabled={offline || projects.length === 0} onClick={openCreateForm}>
             <Plus size={16} aria-hidden="true" />New schedule
           </button>
         </header>

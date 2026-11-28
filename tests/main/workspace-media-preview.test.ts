@@ -1028,6 +1028,24 @@ describe("workspace media preview protocol handler", () => {
     await expect(
       resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest("bad.xlsx"), webRequest("bad.xlsx")),
     ).rejects.toThrow("ZIP signature");
+    const understatedBinaryBomb = createZipArchive([
+      { name: "[Content_Types].xml", data: Buffer.from("<Types/>", "utf8"), compress: true },
+      { name: "xl/workbook.xml", data: Buffer.from("<workbook/>", "utf8"), compress: true },
+      {
+        name: "xl/media/image1.png",
+        data: Buffer.alloc(8 * 1024 * 1024),
+        compress: true,
+        overrideUncompressedSize: 1_024,
+      },
+    ]);
+    await writeFile(join(directory, "understated-bomb.xlsx"), understatedBinaryBomb);
+    await expect(
+      resolveWorkspaceMediaPreviewResponse(
+        resolver,
+        mediaRequest("understated-bomb.xlsx"),
+        webRequest("understated-bomb.xlsx"),
+      ),
+    ).rejects.toThrow("malformed");
     await expect(
       resolveWorkspaceMediaPreviewResponse(resolver, mediaRequest("bad.xls"), webRequest("bad.xls")),
     ).rejects.toThrow("OLE2 header");

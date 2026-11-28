@@ -10,6 +10,7 @@ import type {
   ContentBlock,
   InitializeResponse,
   RequestPermissionRequest,
+  RequestPermissionResponse,
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
@@ -326,15 +327,21 @@ function startCursorRun(
       if (!ownsActivePrompt() || params.sessionId !== sessionId) {
         return { outcome: { outcome: "cancelled" } };
       }
-      return await cursorPermission(
-        params,
-        redactHostMcpPayload(params),
-        signal,
-        options,
-        emitter.rich,
-        approvals,
-        hostMcpToolNames,
-      );
+      try {
+        return await cursorPermission(
+          params,
+          redactHostMcpPayload(params),
+          signal,
+          options,
+          emitter.rich,
+          approvals,
+          hostMcpToolNames,
+        );
+      } catch (error) {
+        providerEventError ??= error instanceof Error ? error : new Error("Cursor ACP failed a permission request.");
+        requestProcessTermination(true);
+        throw providerEventError;
+      }
     })
     .onNotification(acp.methods.client.session.update, (value) =>
       handleCursorProviderEvent(
@@ -391,15 +398,23 @@ function startCursorRun(
       );
       const requestId = randomUUID();
       const request = cursorQuestions(requestId, params);
-      const answers = await new Promise<Record<string, string[]>>((resolve) => {
-        if (inputs.size >= MAX_PENDING_CURSOR_INTERACTIONS) {
-          throw new Error("Cursor exceeded the bounded question budget.");
-        }
-        inputs.set(requestId, { resolve, settled: false });
-        signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
-        emitter.capability("structured-input", true);
-        emitter.rich({ type: "input", request });
-      });
+      if (signal.aborted) return { outcome: { outcome: "cancelled" } };
+      let answers: Record<string, string[]>;
+      try {
+        answers = await new Promise<Record<string, string[]>>((resolve) => {
+          if (inputs.size >= MAX_PENDING_CURSOR_INTERACTIONS) {
+            throw new Error("Cursor exceeded the bounded question budget.");
+          }
+          inputs.set(requestId, { resolve, settled: false });
+          signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
+          emitter.capability("structured-input", true);
+          emitter.rich({ type: "input", request });
+        });
+      } catch (error) {
+        providerEventError ??= error instanceof Error ? error : new Error("Cursor ACP failed a question request.");
+        requestProcessTermination(true);
+        throw providerEventError;
+      }
       if (signal.aborted || !ownsActivePrompt()) return { outcome: { outcome: "cancelled" } };
       return {
         outcome: {
@@ -444,9 +459,16 @@ function startCursorRun(
           { optionId: "reject-plan", name: "Deny", kind: "reject_once" },
         ],
       };
-      const decision = await (options.input.interactionMode === "plan" ? askCursorPermission : cursorPermission)(
-        permission, permission, signal, options, emitter.rich, approvals,
-      );
+      let decision: RequestPermissionResponse;
+      try {
+        decision = await (options.input.interactionMode === "plan" ? askCursorPermission : cursorPermission)(
+          permission, permission, signal, options, emitter.rich, approvals,
+        );
+      } catch (error) {
+        providerEventError ??= error instanceof Error ? error : new Error("Cursor ACP failed a plan request.");
+        requestProcessTermination(true);
+        throw providerEventError;
+      }
       if (!ownsActivePrompt() || signal.aborted || decision.outcome.outcome !== "selected") {
         return { outcome: { outcome: "cancelled" } };
       }
@@ -613,7 +635,7 @@ function startCursorRun(
         cwd: options.input.cwd,
         mcpServers: hostMcpServers,
       }), "session/new");
-      sessionId = created.sessionId;
+      sessionId = boundedSessionId(created.sessionId);
       todoSessions.reset(sessionId);
       emitter.session(sessionId);
       commandAdvertisements.establish(sessionId);
@@ -1199,6 +1221,12 @@ function failedCursorRun(
 
 function bounded(value: string): string { return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS); }
 function boundedToolStateText(value: string): string { return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS); }
+function boundedSessionId(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.length > 1_000) {
+    throw new Error("Cursor ACP sent an invalid session identity.");
+  }
+  return value;
+}
 function boundedToolActivityId(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.includes("\0") || value.length > MAX_TOOL_ACTIVITY_ID_CHARS) {
     throw new Error("Cursor ACP sent an invalid tool call identity.");

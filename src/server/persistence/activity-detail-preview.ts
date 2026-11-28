@@ -22,6 +22,7 @@ const ASCII_PREVIEW_INNER_SQL = `
       AND activities.kind NOT IN ('error', 'command', 'tool', 'file')
       AND octet_length(activities.detail) > ${ACTIVITY_DETAIL_PREVIEW_CHARS}
       AND octet_length(substr(activities.detail, 1, ${ACTIVITY_DETAIL_PREVIEW_CHARS + 1})) = ${ACTIVITY_DETAIL_PREVIEW_CHARS + 1}
+      AND length(substr(activities.detail, 1, ${ACTIVITY_DETAIL_PREVIEW_CHARS + 1})) = ${ACTIVITY_DETAIL_PREVIEW_CHARS + 1}
       THEN 1
     ELSE 0
   END AS detail_projected

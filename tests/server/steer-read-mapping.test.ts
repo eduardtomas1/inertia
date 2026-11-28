@@ -33,6 +33,8 @@ import type {
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { bindSteerEffectId } from "../../src/server/runtime/turns/turn-follow-up-coordinator";
+import { adoptSettledUnreadFollowUps } from "../../src/server/runtime/queued-message-operations";
+import { reconcileQueueOnBoot } from "../../src/server/runtime/queue-boot-reconciliation";
 import {
   ContextHandoffBackgroundWorkError,
   ProviderSwitchBackgroundWorkError,
@@ -452,6 +454,53 @@ describe("S4: steerId -> effectId mapping and early onSteerRead preservation", (
     // Unread follow-up MUST be requeued by reference on normal completion.
     const requeued = store.queuedMessages.list(conversation.id);
     expect(requeued.some((entry) => entry.userMessageId === steered.message.id)).toBe(true);
+  });
+
+  async function interruptedWithUnreadFollowUp() {
+    const harness = createHarness({ onSteer: async () => true });
+    const { store, conversation, controller } = harness;
+    const queued = controller.queue({ conversationId: conversation.id, content: "Start Claude turn" });
+    expect(controller.start(queued.turn.id)).toBe(true);
+    await vi.waitFor(() => expect(harness.getCallbacks()).not.toBeNull());
+    harness.getCallbacks()!.onEvent?.({ type: "status", providerId: "claude", conversationId: conversation.id,
+      runId: queued.turn.runId, turnId: queued.turn.id, status: "running" });
+    const lease = controller.acquireFollowUpAdmission(conversation.id)!;
+    const effectId = await harness.requestDurableSteer(queued.turn.runId, queued.turn.id);
+    bindSteerEffectId(lease, effectId);
+    const steered = await controller.steer(lease, { content: "Unread follow-up", imagePaths: [] });
+    lease.release();
+    if (steered.kind !== "accepted") throw new Error("expected accepted");
+    store.orchestration.runControl.settleSteer(effectId, "accepted", { messageId: steered.message.id });
+    await harness.completeActiveTurn("claude-sess-removed");
+    const database = (store as unknown as { database: { prepare(sql: string): { run(...values: unknown[]): unknown } } }).database;
+    return { store, conversation, turn: queued.turn, message: steered.message,
+      interrupt: () => database.prepare("UPDATE agent_turns SET status = 'interrupted' WHERE id = ?").run(queued.turn.id),
+      dropQueueRow: () => database.prepare("DELETE FROM queued_messages WHERE user_message_id = ?").run(steered.message.id) };
+  }
+
+  it("requeues an interrupted run's unread follow-up at boot, held", async () => {
+    const { store, conversation, message, interrupt, dropQueueRow } = await interruptedWithUnreadFollowUp();
+    dropQueueRow();
+    interrupt();
+    const report = await reconcileQueueOnBoot(store);
+    expect(report.requeuedUnreadSteers).toHaveLength(1);
+    expect(store.orchestration.queue.listActive(conversation.id).find((item) => item.userMessageId === message.id))
+      .toMatchObject({ id: report.requeuedUnreadSteers[0], state: "waiting", queueHeld: true });
+  });
+
+  it("boots without requeueing an unread follow-up the user removed after settlement requeued it", async () => {
+    const { store, conversation, turn, message, interrupt } = await interruptedWithUnreadFollowUp();
+    expect(adoptSettledUnreadFollowUps(store, store.agentTurn(turn.id))).toBe(true);
+    const requeued = store.orchestration.queue.listActive(conversation.id)
+      .find((item) => item.userMessageId === message.id)!;
+    store.orchestration.queue.cancel({ conversationId: conversation.id, itemId: requeued.id, reason: "user" });
+    interrupt();
+
+    const report = await reconcileQueueOnBoot(store);
+    expect(report.requeuedUnreadSteers).toEqual([]);
+    expect(store.orchestration.queue.listActive(conversation.id).some((item) => item.userMessageId === message.id))
+      .toBe(false);
+    await expect(reconcileQueueOnBoot(store)).resolves.toMatchObject({ requeuedUnreadSteers: [] });
   });
 });
 

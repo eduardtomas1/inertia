@@ -54,9 +54,22 @@ every request fail closed.
 
 Session and CSRF authority are checked before reading authenticated mutation
 bodies and rechecked afterward. Pairing bodies are limited to 4 KiB and refused
-before parsing unless an invitation or pending pairing exists. Pairing retry
-quotas are keyed by hashed invitation or nonce capabilities, since Serve peers
-share the loopback address. Connection and transport bounds still apply;
+before parsing unless an invitation or pending pairing exists. Pairing quotas
+are keyed by the presented invitation or pairing-request identifier, since
+Serve peers share the loopback address. Each identifier admits 10 verified
+starts and 120 verified status checks per minute. Failed checks count only
+against the current invitation or a pending pairing; any other identifier
+reaches no secret comparison and spends no quota. Within one minute a single
+caller may fail 10 start checks or 120 status checks against one identifier,
+and all callers together twice that. A correct secret or nonce from another
+caller therefore still passes after one caller spends its share, and rotating
+callers cannot raise an identifier's total. The caller is the
+`Tailscale-User-Login` value, which Serve strips from incoming requests and sets
+only for untagged tailnet users, or the socket address when it is absent, so
+all header-less callers behind Serve count as one caller. A local process that
+connects to the loopback port directly can choose the header: it can spend an
+identifier's whole total and delay that pairing until the minute passes, but it
+cannot add checks. Connection and transport bounds still apply;
 application pairing does not prevent an ACL-authorized peer from flooding the
 underlying network service.
 

@@ -56,9 +56,9 @@ export function startOpenCode2Run(options: AgentHarnessStartOptions, dependencie
         await Promise.race([(async () => {
           // Cancel only inputs admitted by this run before interrupting execution.
           if (!sessionId || !ownedInputs.size) return;
-          await Promise.all([...ownedInputs.keys()].map((id) => server!.client.request("DELETE", `${openCode2SessionPath(sessionId!)}/inbox/${id}`)));
+          await Promise.allSettled([...ownedInputs.keys()].map((id) => server!.client.request("DELETE", `${openCode2SessionPath(sessionId!)}/inbox/${id}`)));
           await server.client.request("POST", `${openCode2SessionPath(sessionId)}/interrupt?resume=false`);
-        })(), new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("OpenCode interrupt timed out.")), 2_000); timer.unref(); })]);
+        })(), new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("OpenCode interrupt timed out.")), 2_000); timer.unref(); })]).catch(() => undefined);
       } finally { clearTimeout(timer); controller.abort(); await server.close(); }
     })();
     void stopping.catch(() => undefined); return stopping;

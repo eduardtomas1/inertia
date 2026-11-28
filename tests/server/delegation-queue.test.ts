@@ -321,4 +321,63 @@ describe("delegated result deliveries in the parent queue", () => {
       expect(events.at(-1)).toMatchObject({ result: { kind: "delegation.task", task: { taskId: task.taskId } } });
     } finally { await f.close(); }
   });
+
+  it("never emits an unhandled rejection when a pending offer retry runs after the store closes", async () => {
+    const f = await createDelegationQueueFixture();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
+    process.on("unhandledRejection", onUnhandled);
+    const warn = vi.spyOn(console, "warn");
+    try {
+      const parentTurn = f.startParent();
+      f.provider.steerSupported = false;
+      const { childTurn } = await f.delegate(parentTurn);
+      const originalOffer = f.queue.offerDelegated.bind(f.queue);
+      let offerCalls = 0;
+      f.queue.offerDelegated = async (conversationId: string) => {
+        offerCalls += 1;
+        if (offerCalls === 1) throw new Error("transient offer failure");
+        return await originalOffer(conversationId);
+      };
+      (f.delegation.service as unknown as { dependencies: { offerRetryDelayMs?: () => number } }).dependencies.offerRetryDelayMs = () => 25;
+
+      await f.completeChild(childTurn, "Result needing retry.");
+      expect(offerCalls).toBe(1);
+
+      f.store.close();
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(unhandled).toEqual([]);
+      expect(warn).toHaveBeenCalledWith("Delegated delivery offer retry did not finish.", expect.any(String));
+    } finally {
+      warn.mockRestore();
+      process.off("unhandledRejection", onUnhandled);
+      await f.close().catch(() => undefined);
+    }
+  });
+
+  it("cancels a pending offer retry on dispose", async () => {
+    const f = await createDelegationQueueFixture();
+    try {
+      const parentTurn = f.startParent();
+      f.provider.steerSupported = false;
+      const { childTurn } = await f.delegate(parentTurn);
+      const originalOffer = f.queue.offerDelegated.bind(f.queue);
+      let offerCalls = 0;
+      f.queue.offerDelegated = async (conversationId: string) => {
+        offerCalls += 1;
+        if (offerCalls === 1) throw new Error("transient offer failure");
+        return await originalOffer(conversationId);
+      };
+      (f.delegation.service as unknown as { dependencies: { offerRetryDelayMs?: () => number } }).dependencies.offerRetryDelayMs = () => 25;
+
+      await f.completeChild(childTurn, "Result needing retry.");
+      expect(offerCalls).toBe(1);
+
+      f.delegation.dispose();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(offerCalls).toBe(1);
+    } finally {
+      await f.close();
+    }
+  });
 });

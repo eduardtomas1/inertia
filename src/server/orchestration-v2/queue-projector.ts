@@ -251,6 +251,15 @@ export function projectQueueEvent(
       ];
     }
 
+    case "queue.steer-when-ready-cleared": {
+      const writes: ProjectionWrite[] = [];
+      for (const itemId of event.payload.itemIds) {
+        const { steerWhenReadyRunId: _cleared, ...item } = readItem(read, envelope, itemId);
+        writes.push({ kind: QUEUE_ITEM_PROJECTION, id: itemId, value: queueItemProjectionSchema.parse(item) });
+      }
+      return [...writes, stateWrite(state, envelope)];
+    }
+
     case "queue.reordered": {
       const { movedItemId, orderedItemIds } = event.payload;
       if (orderedItemIds.length !== state.activeItemIds.length) {

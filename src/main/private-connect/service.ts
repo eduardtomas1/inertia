@@ -227,6 +227,8 @@ export class PrivateConnectService implements PrivateConnectGatewayHost {
       && Date.parse(this.invitation.expiresAt) > this.now().getTime());
   }
 
+  pairingCapabilityLive(stage: "start" | "status", id: string): boolean { return stage === "status" ? this.pending.has(id) : [this.invitation, ...this.pending.values()].some((entry) => entry?.invitationId === id); }
+
   async setEnabled(enabled: boolean): Promise<PrivateConnectStateView> {
     return await this.runLocalMutation(async () => {
       return await this.enqueueLifecycle(async () => {

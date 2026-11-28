@@ -792,7 +792,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     prepareForkSession: enableProviders ? (id, signal) => prepareForkSession({ store, providers, turns, providerTerminalResumes, broadcast }, id, AbortSignal.any([signal, runtimeLifetimeAbort.signal])) : undefined,
     broadcast, broadcastSnapshot, send,
   };
-  registerRunControlEffectHandlers({ effects: orchestrationEffects, store, turns });
+  const unregisterRunControlEffects = registerRunControlEffectHandlers({ effects: orchestrationEffects, store, turns });
   let usageRuntime: ReturnType<typeof usageLimitsRuntime> | undefined;
   queuedMessages = createQueuedMessageRuntime(turnInteractionDependencies, {
     signal: runtimeLifetimeAbort.signal, track: admitBackgroundWork,
@@ -1175,6 +1175,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         mascotStatus.close();
         watchers?.dispose();
         scheduledTasks?.dispose();
+        delegation?.dispose();
         secureFileAuthorities.clear();
         try {
           await runRuntimeShutdownPhases({
@@ -1182,6 +1183,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
               turnGitArtifacts.beginShutdown(deadlineAt);
               providers.beginShutdown(deadlineAt);
               await store.orchestration.lanes.close();
+              unregisterRunControlEffects();
               await orchestrationEffects.stop();
               await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
                 await gitScanCoordinator.cancelAndDrainWhile(async () => {

@@ -64,7 +64,7 @@ export function classifyCodexManagedError(value: unknown): CodexManagedFailure |
 }
 
 /** A response header map's key in a serialized service error: JSON, JSON inside a JSON string, or Rust debug text. */
-const HEADER_MAP_KEY = /(\\"headers\\"|"headers"|\bheaders)\s*[:=]\s*\{/giu;
+const HEADER_MAP_KEY = /((?<!\\)(\\*)"headers\2"|\bheaders)\s*[:=]\s*\{/giu;
 
 /**
  * Codex serializes a failed service response, response headers included (`x-codex-turn-state` and the like),
@@ -78,16 +78,26 @@ export function redactCodexErrorHeaders(text: string): string {
   for (let match = HEADER_MAP_KEY.exec(text); match; match = HEADER_MAP_KEY.exec(text)) {
     const key = match[1]!;
     let end = match.index + match[0].length;
+    let unit = match[2] === undefined ? 0 : match[2].length + 1;
     let depth = 1;
     let inString = false;
     for (; end < text.length && depth > 0; end += 1) {
       const character = text[end];
-      if (character === "\\") end += 1;
-      else if (character === "\"") inString = !inString;
-      else if (!inString && character === "{") depth += 1;
+      if (character === "\\" || character === "\"") {
+        let backslashes = 0;
+        while (text[end + backslashes] === "\\") backslashes += 1;
+        if (text[end + backslashes] !== "\"") {
+          end += backslashes - 1;
+          continue;
+        }
+        unit ||= backslashes + 1;
+        if ((backslashes + 1) % unit !== 0) break;
+        if (((backslashes + 1) / unit) % 2 === 1) inString = !inString;
+        end += backslashes;
+      } else if (!inString && character === "{") depth += 1;
       else if (!inString && character === "}") depth -= 1;
     }
-    const marker = key.startsWith("\\") ? "\\\"[redacted]\\\"" : key.startsWith("\"") ? "\"[redacted]\"" : "[redacted]";
+    const marker = match[2] === undefined ? "[redacted]" : `${match[2]}"[redacted]${match[2]}"`;
     result += `${text.slice(index, match.index)}${key}:${marker}`;
     index = Math.min(end, text.length);
     HEADER_MAP_KEY.lastIndex = index;

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { orchestrationIdSchema as id } from "./orchestration-identities";
 
 export const MAX_DELEGATED_TASK_TURN_IDS = 64;
-export const MAX_DELEGATED_DELIVERY_TASKS = 16;
+export const MAX_DELEGATED_DELIVERY_TASKS = 13;
 export const MAX_DELEGATED_EVENT_TASKS = 256;
 export const MAX_DELEGATED_RESULT_BYTES = 8_000;
 export const MAX_DELEGATED_WAKE_BYTES = 16_000;

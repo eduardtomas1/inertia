@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { delegatedDeliveryId, queuedIntentDigest } from "../../src/server/persistence/queued-message-repository";
 import { delegatedWakeSummary, delegatedWakeText } from "../../src/server/orchestration-v2/delegation-text";
 import { completionSummary } from "../../src/renderer/src/components/orchestration/delegation-model";
-import { MAX_DELEGATED_DELIVERY_TASKS, MAX_DELEGATED_WAKE_BYTES } from "../../src/shared/orchestration-delegation";
+import {
+  MAX_DELEGATED_DELIVERY_TASKS,
+  MAX_DELEGATED_WAKE_BYTES,
+  delegatedCompletionAttributionSchema,
+} from "../../src/shared/orchestration-delegation";
 import { messageQueueResultSchema } from "../../src/shared/queued-messages";
 import { cleanupTurnControllerTestDirectories } from "../support/turn-controller-runtime";
 import { createDelegationFixture, queuedDeliveries, type DelegationFixture } from "../support/delegation-fixture";
@@ -279,7 +283,31 @@ describe("delegated result delivery", () => {
     expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(MAX_DELEGATED_WAKE_BYTES);
     for (const entry of entries) expect(text).toMatch(new RegExp(`^Delegated task ${entry.taskId} \\(.*\\) \\[${entry.status}\\]:$`, "mu"));
     expect(completionSummary(entries.map(({ taskId }) => taskId), undefined, text).headline)
-      .toBe(`${MAX_DELEGATED_DELIVERY_TASKS} delegated tasks (8 failed, 8 finished)`);
+      .toBe(`${MAX_DELEGATED_DELIVERY_TASKS} delegated tasks (${Math.floor(MAX_DELEGATED_DELIVERY_TASKS / 2)} failed, ${Math.ceil(MAX_DELEGATED_DELIVERY_TASKS / 2)} finished)`);
+  });
+
+  it("fits a full delivery's attribution within its stored bound at the largest generation", () => {
+    const taskIds = Array.from({ length: MAX_DELEGATED_DELIVERY_TASKS }, (_value, index) => index.toString(16).padStart(64, "f"));
+    expect(delegatedCompletionAttributionSchema.safeParse({ parentConversationId: randomUUID(), generation: 1_000_000_000,
+      taskIds }).success).toBe(true);
+  });
+
+  it("delivers a fan-out larger than one delivery and leaves the rest pending", async () => {
+    const fixture = await createDelegationFixture();
+    try {
+      const source = fixture.queue(fixture.parentId, "Fan out");
+      const delegated = Array.from({ length: MAX_DELEGATED_DELIVERY_TASKS + 1 }, (_value, index) =>
+        fixture.delegate(source, { title: `Task ${index}`, wake: "settled_only" }));
+      for (const task of delegated) await complete(fixture, task);
+      await fixture.finish(source);
+      fixture.delegation.planDelivery(fixture.parentId);
+      const [delivery] = queuedDeliveries(fixture);
+      expect(delivery!.delegatedCompletion!.taskIds).toEqual(delegated.slice(0, MAX_DELEGATED_DELIVERY_TASKS)
+        .map(({ task }) => task.taskId));
+      expect(fixture.delegation.get(delegated.at(-1)!.task.taskId)!.delivery.state).toBe("pending");
+    } finally {
+      fixture.close();
+    }
   });
 
   it("names this delivery's tasks against the source-turn cohort and groups their outcomes", () => {

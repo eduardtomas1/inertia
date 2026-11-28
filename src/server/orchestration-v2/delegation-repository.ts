@@ -358,7 +358,8 @@ export class DelegationRepository {
     }
     return this.transaction(() => {
       const scoped = input.scope === "source-turn" ? "AND source_turn_id = ?" : "";
-      const matching = this.reads.tasks(`parent_conversation_id = ? ${scoped}`, input.parentConversationId,
+      const matching = this.reads.tasks(`parent_conversation_id = ? ${scoped}
+        AND (delivery_state IS NULL OR delivery_state NOT IN ('delivered','acknowledged','disposed'))`, input.parentConversationId,
         ...(input.sourceTurnId ? [input.sourceTurnId] : [])).filter((task) => !isTerminalDelegatedDeliveryState(task.delivery.state)
         && (task.wakeArmed || input.reason !== "setting-off"));
       const taskIds = matching.map(({ taskId }) => taskId);

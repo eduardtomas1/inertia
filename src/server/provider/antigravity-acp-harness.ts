@@ -20,6 +20,7 @@ import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
+import { clipCodeUnits } from "../../shared/code-units";
 import { INERTIA_VERSION } from "../../shared/version";
 import {
   createOwnedProcessTreeTermination,
@@ -340,16 +341,15 @@ function startAntigravityRun(
       acp.methods.client.session.requestPermission,
       async ({ params, signal }) => {
         if (!ownsActivePrompt(params.sessionId)) return { outcome: { outcome: "cancelled" } };
-        return antigravityPermission(
-          params,
-          redactHostMcpPayload(params),
-          signal,
-          options,
-          emitter.rich,
-          approvals,
-          inputs,
-          emitter.activity,
-        );
+        try {
+          return await antigravityPermission(
+            params, redactHostMcpPayload(params), signal, options, emitter.rich, approvals, inputs, emitter.activity,
+          );
+        } catch (error) {
+          wireError ??= error instanceof Error ? error : new Error("Antigravity ACP failed a permission request.");
+          requestProcessTermination(true);
+          throw wireError;
+        }
       },
     )
     .onNotification(acp.methods.client.session.update, (value): ParsedSessionUpdateFrame | null => {
@@ -456,7 +456,7 @@ function startAntigravityRun(
     ),
   );
   wireGuard.once("error", (error: Error) => {
-    wireError = error;
+    wireError ??= error;
   });
   child.stdout.pipe(wireGuard);
   const stream = promptFrames.wrap(acp.ndJsonStream(
@@ -575,7 +575,7 @@ function startAntigravityRun(
           }),
           "session/new",
         );
-        sessionId = created.sessionId;
+        sessionId = boundedId(created.sessionId, "session");
         emitter.session(sessionId);
         commandAdvertisements.establish(sessionId);
         modes = created.modes;
@@ -864,7 +864,7 @@ async function antigravityPermission(
         : { outcome: { outcome: "cancelled" } };
     }
   }
-  if (!permissionDisplayIsSafe(displayParams)) {
+  if (!permissionDisplayIsSafe(displayParams) || signal.aborted) {
     return { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
@@ -916,6 +916,7 @@ async function antigravityInputPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   inputs: Map<string, PendingInput>,
 ): Promise<RequestPermissionResponse> {
+  if (signal.aborted) return { outcome: { outcome: "cancelled" } };
   const requestId = randomUUID();
   const request = antigravityInputRequest(requestId, input);
   const answers = await new Promise<Record<string, string[]>>((resolve) => {
@@ -1215,15 +1216,15 @@ function failedAntigravityRun(
 }
 
 function bounded(value: string): string {
-  return value.slice(0, MAX_EVENT_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_EVENT_TEXT_CHARS);
 }
 
 function boundedToolStateText(value: string): string {
-  return value.slice(0, MAX_TOOL_STATE_TEXT_CHARS);
+  return clipCodeUnits(value, MAX_TOOL_STATE_TEXT_CHARS);
 }
 
 function boundedId(value: string, label: string): string {
-  if (!value || value.length > 1_000 || value.includes("\0")) {
+  if (!value || value.length > 1_000 || /[\u0000-\u001F\u007F-\u009F]/u.test(value)) {
     throw new Error(`Antigravity ACP sent an invalid ${label} identity.`);
   }
   return value;

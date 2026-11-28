@@ -258,6 +258,12 @@ export const queueEventSchema = z.discriminatedUnion("type", [
     }),
   }),
   z.strictObject({
+    type: z.literal("queue.steer-when-ready-cleared"),
+    payload: z.strictObject({
+      itemIds: uniqueIdList(1, MAX_QUEUED_ACTIVE_ITEMS),
+    }),
+  }),
+  z.strictObject({
     type: z.literal("queue.reordered"),
     payload: z.strictObject({
       movedItemId: id,

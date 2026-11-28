@@ -302,6 +302,23 @@ describe("Private Connect service lifecycle", () => {
     await expect(service.pairStart(request, "example")).resolves.toEqual(started);
   });
 
+  it("reports only the current invitation and pending pairing as live pairing capabilities", async () => {
+    const service = await createService();
+    await service.setEnabled(true);
+    const unrelated = "99999999-9999-4999-8999-999999999999";
+    const invitation = parsePrivateConnectPairingFragment(new URL((await service.createInvitation()).url).hash)!;
+    expect(service.pairingCapabilityLive("start", invitation.invitationId)).toBe(true);
+    expect(service.pairingCapabilityLive("start", unrelated)).toBe(false);
+    const started = await service.pairStart({ invitation, deviceId, deviceLabel: "Browser", browserNonce: "a".repeat(43) }, "example");
+    expect(service.pairingCapabilityLive("start", invitation.invitationId)).toBe(true);
+    expect(service.pairingCapabilityLive("status", started.requestId)).toBe(true);
+    expect(service.pairingCapabilityLive("status", unrelated)).toBe(false);
+    await service.denyPairing(started.requestId);
+    await expect(service.pairStatus(started.requestId, "a".repeat(43))).resolves.toMatchObject({ status: "denied" });
+    expect(service.pairingCapabilityLive("start", invitation.invitationId)).toBe(false);
+    expect(service.pairingCapabilityLive("status", started.requestId)).toBe(false);
+  });
+
   it("requires the original browser nonce before collecting an approved session", async () => {
     const service = await createService();
     await service.setEnabled(true);

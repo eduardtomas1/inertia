@@ -237,6 +237,29 @@ describe("fork context merge-back", () => {
     } finally { runtime.store.close(); }
   });
 
+  it("refuses a draft prepared on findings whose delivering turn the parent later rolled back", async () => {
+    const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
+    try {
+      const first = await finish(runtime, "parent-first");
+      const child = fork(runtime, first.turn.id);
+      await finish(runtime, "fork-one", child.id);
+      const delivered = mergeBack(runtime, child.id);
+      await finish(runtime, "parent-delivers", runtime.conversationId, "completed", [delivered.packetId]);
+      expect(runtime.store.orchestration.mergeBacks.get(delivered.mergeBackId)?.state).toBe("delivered");
+      await finish(runtime, "fork-two", child.id);
+      const stale = mergeBack(runtime, child.id);
+      expect(stale).toMatchObject({ turnCount: 1 });
+      await expect(portableRollback(runtime, runtime.conversationId, first.turn.id)).resolves.toMatchObject({ rolledBackTurns: 1 });
+      expect(() => runtime.controller.queue({ conversationId: runtime.conversationId, content: "parent-sends-stale request",
+        context: { conversationContextPacketIds: [stale.packetId] }, contextRequestId: requestId() }))
+        .toThrow("no longer follows");
+      expect(runtime.store.orchestration.mergeBacks.get(stale.mergeBackId)?.state).toBe("prepared");
+      const next = mergeBack(runtime, child.id);
+      expect(next).toMatchObject({ turnCount: 2 });
+      expect(runtime.store.orchestration.mergeBacks.get(next.mergeBackId)?.baseTurnId).toBeNull();
+    } finally { runtime.store.close(); }
+  });
+
   it("keeps findings undelivered when Codex never accepted the turn that carried them", async () => {
     const runtime = await createTurnControllerTestRuntime({}, { id: randomUUID });
     try {

@@ -37,6 +37,7 @@ export interface DelegationRuntime {
   onTurnSettled(turn: AgentTurn): Promise<void>;
   automaticWakesTurnedOff(trigger: string): Promise<void>;
   recover(): Promise<void>;
+  dispose(): void;
 }
 
 const WAIT_SIGNAL_EVENTS = new Set<RuntimeMutationEvent["type"]>([
@@ -137,5 +138,6 @@ export function createDelegationRuntime(dependencies: DelegationRuntimeDependenc
         console.warn("Delegated task recovery did not finish.", error instanceof Error ? error.message : "unknown error");
       });
     },
+    dispose: () => service.dispose(),
   };
 }

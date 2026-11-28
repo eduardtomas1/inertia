@@ -308,17 +308,23 @@ function startKimiRun(
           || !promptInFlight
           || params.sessionId !== sessionId
         ) return { outcome: { outcome: "cancelled" } };
-        return kimiPermission(
-          params,
-          redactHostMcpPayload(params),
-          signal,
-          options,
-          emitter.rich,
-          approvals,
-          inputs,
-          emitter.activity,
-          hostMcpToolNames,
-        );
+        try {
+          return await kimiPermission(
+            params,
+            redactHostMcpPayload(params),
+            signal,
+            options,
+            emitter.rich,
+            approvals,
+            inputs,
+            emitter.activity,
+            hostMcpToolNames,
+          );
+        } catch (error) {
+          wireError ??= error instanceof Error ? error : new Error("Kimi ACP failed a permission request.");
+          requestProcessTermination(true);
+          throw wireError;
+        }
       },
     )
     .onNotification(acp.methods.client.session.update, (value) => {
@@ -419,7 +425,7 @@ function startKimiRun(
     ),
   );
   wireGuard.once("error", (error: Error) => {
-    wireError = error;
+    wireError ??= error;
   });
   child.stdout.pipe(wireGuard);
   const stream = acp.ndJsonStream(
@@ -547,7 +553,7 @@ function startKimiRun(
           }),
           "session/new",
         );
-        sessionId = created.sessionId;
+        sessionId = boundedId(created.sessionId, "session");
         emitter.session(sessionId);
         commandAdvertisements.establish(sessionId);
         modes = created.modes;
@@ -830,7 +836,7 @@ async function kimiPermission(
       ? { outcome: { outcome: "selected", optionId: allow.optionId } }
       : { outcome: { outcome: "cancelled" } };
   }
-  if (!permissionDisplayIsSafe(displayParams)) {
+  if (!permissionDisplayIsSafe(displayParams) || signal.aborted) {
     return { outcome: { outcome: "cancelled" } };
   }
   const requestId = randomUUID();
@@ -883,6 +889,7 @@ async function kimiInputPermission(
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
   inputs: Map<string, PendingInput>,
 ): Promise<RequestPermissionResponse> {
+  if (signal.aborted) return { outcome: { outcome: "cancelled" } };
   const requestId = randomUUID();
   const request = kimiInputRequest(requestId, input);
   const answers = await new Promise<Record<string, string[]>>((resolve) => {

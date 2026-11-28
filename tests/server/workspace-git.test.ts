@@ -468,6 +468,25 @@ describe("workspace Git repository discovery", () => {
     });
   });
 
+  it("reports a nested Git marker that Git does not accept as an error, not as the parent repository", async () => {
+    const root = temporaryRoot("invalid-head-marker");
+    initializeRepository(root, "tracked.txt");
+    writeFileSync(join(root, "tracked.txt"), "parent change\n");
+    const nested = join(root, "modules", "corrupt");
+    mkdirSync(join(nested, ".git", "objects"), { recursive: true });
+    mkdirSync(join(nested, ".git", "refs"), { recursive: true });
+    writeFileSync(join(nested, ".git", "HEAD"), "");
+    expect(git(nested, "rev-parse", "--show-toplevel")).toBe(realpathSync(root));
+
+    const snapshot = await discoverWorkspaceGitRepositories(root);
+
+    expect(snapshot.repositories.find(({ repositoryPath }) => repositoryPath === "modules/corrupt"))
+      .toMatchObject({ state: "error" });
+    await expect(repositoryMetadataMarkerIdentity(nested)).resolves.toBe(
+      await repositoryMetadataMarkerIdentity(root),
+    );
+  });
+
   it("changes identity when an ordinary Git marker target is replaced", async () => {
     const first = temporaryRoot("marker-first");
     const second = temporaryRoot("marker-second");

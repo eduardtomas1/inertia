@@ -97,6 +97,13 @@ function followUpTitle(title: string): string {
 export class DelegationTaskService {
   readonly signals = new DelegatedTaskSignals();
   readonly #offerRetries = new Map<string, { attempt: number; timer: ReturnType<typeof setTimeout> }>();
+  #disposed = false;
+
+  dispose(): void {
+    this.#disposed = true;
+    for (const pending of this.#offerRetries.values()) clearTimeout(pending.timer);
+    this.#offerRetries.clear();
+  }
 
   constructor(private readonly dependencies: DelegationTaskServiceDependencies) {
     onScheduledPlanSettled(dependencies.store, (settlement) => {
@@ -409,9 +416,11 @@ export class DelegationTaskService {
   }
 
   private async offer(conversationIds: readonly string[]): Promise<void> {
+    if (this.#disposed) return;
     const queue = this.dependencies.queue();
     if (!queue) return;
     for (const conversationId of new Set(conversationIds)) {
+      if (this.#disposed) return;
       if (!this.hasActiveDelegatedDelivery(conversationId)) {
         this.clearOfferRetry(conversationId);
         continue;
@@ -439,6 +448,7 @@ export class DelegationTaskService {
   }
 
   private scheduleOfferRetry(conversationId: string, error: unknown): void {
+    if (this.#disposed) return;
     const previous = this.#offerRetries.get(conversationId);
     const attempt = (previous?.attempt ?? 0) + 1;
     if (previous) clearTimeout(previous.timer);
@@ -451,8 +461,10 @@ export class DelegationTaskService {
     console.warn(`Delegated delivery offer failed (attempt ${attempt}/${MAX_OFFER_RETRIES}); scheduling retry.`, detail);
     const delayMs = Math.max(0, (this.dependencies.offerRetryDelayMs ?? DEFAULT_OFFER_RETRY_DELAY_MS)(attempt));
     const timer = setTimeout(() => {
-      if (this.#offerRetries.get(conversationId)?.timer !== timer) return;
-      void this.offer([conversationId]);
+      if (this.#disposed || this.#offerRetries.get(conversationId)?.timer !== timer) return;
+      void this.offer([conversationId]).catch((error: unknown) => {
+        console.warn("Delegated delivery offer retry did not finish.", error instanceof Error ? error.message : "unknown error");
+      });
     }, delayMs);
     timer.unref?.();
     this.#offerRetries.set(conversationId, { attempt, timer });

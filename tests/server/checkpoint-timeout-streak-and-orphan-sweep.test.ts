@@ -55,6 +55,7 @@ import {
   pruneOrphanedCheckpointRefs,
   resetCheckpointWorkspaceState,
 } from "../../src/server/checkpoints";
+import { restoreConversationCheckpoint } from "../../src/server/runtime/checkpoint-restoration";
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -387,10 +388,54 @@ describe("checkpoint timeout streak, shared-folder contention, and orphaned ref 
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
     expect(gitControls.calls.length).toBe(callsWhileABlocked);
 
-    // Once A finishes, C proceeds sequentially and succeeds.
     releaseFirst();
     const [resultA, resultC] = await Promise.all([captureA, captureC]);
     expect(refExists(root, resultA.ref)).toBe(true);
     expect(refExists(root, resultC.ref)).toBe(true);
+  });
+
+  it("does not apply the shortened pre-turn timeout budget to checkpoint-restore recovery checkpoints", async () => {
+    const { root, indexes } = createRepo();
+    const conversationId = randomUUID();
+    const target = await createCheckpoint(root, indexes, conversationId, { phase: "pre-turn" });
+
+    gitControls.failWithTimeout = true;
+    await expect(createCheckpoint(root, indexes, conversationId, { phase: "pre-turn" })).rejects.toBeInstanceOf(CheckpointError);
+    await expect(createCheckpoint(root, indexes, conversationId, { phase: "pre-turn" })).rejects.toBeInstanceOf(CheckpointError);
+    expect((await getWorkspaceCheckpointTimeoutState(root)).streak).toBe(2);
+
+    gitControls.failWithTimeout = false;
+    gitControls.calls.splice(0);
+    const saved: Array<{ id: string; ref: string }> = [];
+    const store = {
+      conversationPath: () => root,
+      checkpointCount: () => 1,
+      addCheckpoint: (entry: { ref: string; conversationId: string; turnId: string | null; label: string; turnIndex: number; filesChanged: number; insertions: number; deletions: number }) => ({
+        id: randomUUID(),
+        ...entry,
+        createdAt: new Date().toISOString(),
+      }),
+    };
+    await restoreConversationCheckpoint(
+      store,
+      {
+        id: target.id,
+        conversationId,
+        turnId: null,
+        ref: target.ref,
+        label: "Before turn",
+        turnIndex: 1,
+        filesChanged: 0,
+        insertions: 0,
+        deletions: 0,
+        createdAt: new Date().toISOString(),
+      },
+      (recovery) => { saved.push(recovery); },
+    );
+    expect(saved).toHaveLength(1);
+    const shortenedCalls = gitControls.calls.filter(
+      (call) => call.timeoutMs === CHECKPOINT_SHORTENED_PRE_TURN_TIMEOUT_MS,
+    );
+    expect(shortenedCalls).toEqual([]);
   });
 });

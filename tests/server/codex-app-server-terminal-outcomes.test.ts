@@ -779,7 +779,13 @@ describe("Codex rejecting the native thread's encrypted history", () => {
       '"{\\"headers\\":\\"[redacted]\\",\\"status\\":400}"'],
     ["JSON inside a JSON string with braces and escaped quotes in values", '"{\\"headers\\":{\\"a\\":\\"}\\\\\\"{\\",\\"x-codex-turn-state\\":\\"dummy-sensitive\\"},\\"status\\":400}"',
       '"{\\"headers\\":\\"[redacted]\\",\\"status\\":400}"'],
+    ["double-escaped JSON with braces and escaped quotes in values",
+      JSON.stringify(JSON.stringify(JSON.stringify({ headers: { a: "}\\\"{", "x-codex-turn-state": "dummy-sensitive" }, status: 400 }))),
+      JSON.stringify(JSON.stringify(JSON.stringify({ headers: "[redacted]", status: 400 })))],
     ["Rust debug text", 'status: 400, headers: {"a": "dummy-sensitive"}, body: x', 'status: 400, headers:[redacted], body: x'],
+    ["Rust debug text inside a JSON string with a brace in a value",
+      JSON.stringify('status: 400, headers: {"a": "}", "x-codex-turn-state": "dummy-sensitive"}, body: x'),
+      JSON.stringify("status: 400, headers:[redacted], body: x")],
     ["a map cut off by a bound", '{"headers":{"a":"dummy-sensitive', '{"headers":"[redacted]"'],
     ["text without headers", "Codex could not continue.", "Codex could not continue."],
   ] as const)("redacts Codex header maps in %s", (_label, text, expected) => {
